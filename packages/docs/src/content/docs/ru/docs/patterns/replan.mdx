@@ -31,10 +31,26 @@ flowchart TD
 ```json
 {
   "variableRegistry": {
-    "validation_round": { "type": "number", "description": "Re-validation pass counter", "default": 0 },
-    "max_validation_rounds": { "type": "number", "description": "Re-validation bound", "default": 5 },
-    "requirements_gaps_count": { "type": "number", "description": "Unmet requirements at coverage check", "default": 0 },
-    "plan_change_target": { "type": "string", "description": "Dispatcher: refine | extend | update", "default": "" }
+    "validation_round": {
+      "type": "number",
+      "description": "Re-validation pass counter",
+      "default": 0
+    },
+    "max_validation_rounds": {
+      "type": "number",
+      "description": "Re-validation bound",
+      "default": 5
+    },
+    "requirements_gaps_count": {
+      "type": "number",
+      "description": "Unmet requirements at coverage check",
+      "default": 0
+    },
+    "plan_change_target": {
+      "type": "string",
+      "description": "Dispatcher: refine | extend | update",
+      "default": ""
+    }
   }
 }
 ```

@@ -117,8 +117,16 @@ import { Aside } from "@astrojs/starlight/components";
 ```json
 {
   "variableRegistry": {
-    "validation_round": { "type": "number", "description": "Re-validation pass counter", "default": 0 },
-    "max_validation_rounds": { "type": "number", "description": "Re-validation bound", "default": 5 }
+    "validation_round": {
+      "type": "number",
+      "description": "Re-validation pass counter",
+      "default": 0
+    },
+    "max_validation_rounds": {
+      "type": "number",
+      "description": "Re-validation bound",
+      "default": 5
+    }
   }
 }
 ```
