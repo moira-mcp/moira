@@ -64,8 +64,8 @@ Then open:
 - **MCP endpoint**: http://localhost:8080/mcp
 
 The image is pulled from the public registry by default. Data (SQLite + execution
-storage) persists in `./data`. See [Self-Hosting](https://github.com/moira-mcp/moira#self-hosting)
-or the in-app docs at `/docs/` for the full reference.
+storage) persists in `./data`. See [Self-Hosting](#self-host-recommended) or the in-app docs
+at `/docs/` for the full reference.
 
 ### Local Development (from source)
 
