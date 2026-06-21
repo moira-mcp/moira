@@ -171,10 +171,12 @@ test.describe("Context Variable Editor (tree)", () => {
     // disabled (not-dirty) state — i.e. the input now reflects the PERSISTED value, not the draft.
     // Gating on this (instead of toHaveValue, which passes immediately off the optimistic draft)
     // guarantees the write is durable before we read it back from the DB.
-    await expect(
-      page.getByTestId("context-var-save-ask.review_findings.blocking"),
-    ).toBeDisabled({ timeout: 10000 });
-    await expect(page.getByTestId("context-var-input-ask.review_findings.blocking")).toHaveValue("5");
+    await expect(page.getByTestId("context-var-save-ask.review_findings.blocking")).toBeDisabled({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("context-var-input-ask.review_findings.blocking")).toHaveValue(
+      "5",
+    );
     const row = execSqliteInDocker(
       `SELECT context FROM workflowExecution WHERE executionId = '${seededExecutionId}';`,
     );
