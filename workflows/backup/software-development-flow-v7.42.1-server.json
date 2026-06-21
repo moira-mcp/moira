@@ -1,0 +1,3827 @@
+{
+  "slug": "software-development-flow",
+  "metadata": {
+    "name": "Software Development Flow",
+    "version": "7.42.1",
+    "description": "Complete feature development cycle with planning, iterative implementation, numerical checks and validation",
+    "author": "mcp-moira-team",
+    "tags": [
+      "development",
+      "validation"
+    ]
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {
+          "workflow_version": {
+            "description": "Stores workflow version",
+            "value": "7.39.0"
+          },
+          "current_iteration": {
+            "description": "Stores current iteration",
+            "value": 1
+          },
+          "current_step_index": {
+            "description": "Index of the current step in the plan",
+            "value": 1
+          },
+          "test_quality_standards": {
+            "description": "Stores test quality standards",
+            "value": "QUALITY TESTING STANDARDS: Test reality: DO NOT write tests for the sake of tests, verify real use cases and user scenarios, avoid synthetic tests without practical value. Project structure: place tests in folders according to project architecture, follow naming patterns adopted in the project, use existing test utilities and helpers, follow test environment configuration. Reality coverage: cover ALL new functionality without gaps, test edge cases and error handling, cover integration points with other components. Isolation and independence: tests are independent of each other, do not affect execution order, use proper setup/teardown, clean up state after themselves. Readability and maintenance: clear test names describing what is being tested, clear test structure with arrange/act/assert, meaningful assertion messages, easy to update when code changes. Efficiency: tests run quickly without performance regression, optimized for CI/CD pipeline, use functional snapshots if framework supports for easier maintenance and updates. Project integration: use test run commands adopted in the project, follow project conventions, do not duplicate existing tests."
+          },
+          "fix_requirements": {
+            "description": "Product requirements",
+            "value": "FIX REQUIREMENTS: ROOT CAUSE ANALYSIS - find the root cause of the problem, do not fix symptoms, understand why the problem occurred. COMPLETE FIX - fix ALL problems completely without exceptions, superficial fixes DO NOT work and will be detected by the next check, do not leave unfinished work for later. MANDATORY SELF-CHECK BEFORE COMPLETION - VERIFY that the fix works through actual execution, RUN tests to validate the fix, ENSURE nothing is broken in existing functionality, TEST all affected areas, DO NOT proceed to execute_step without verifying the fix works. NO SHORTCUTS - do not look for workarounds and quick solutions, if major changes or global refactoring are needed - do them without hesitation, rewriting significant portions of code may be required - this is normal and correct. CYCLE ESCAPE STRATEGY - workflow checks will be executed anyway and will detect problems, the only way to escape the fix cycle is to do it right the first time, self-validation BEFORE submitting to workflow saves time and iterations, validate through running tests BEFORE claiming fixed."
+          },
+          "planning_requirements": {
+            "description": "Product requirements",
+            "value": "# PLANNING REQUIREMENTS\n\n## CRITICAL RULES (READ FIRST)\n\n### FORBIDDEN STEP TYPES - REJECT PLAN IF CONTAINS:\n- \"Testing\" / \"Write tests\" / \"Add tests\" as separate step\n- \"Final validation\" / \"Final check\" / \"Verification\"\n- \"E2E testing\" / \"Integration testing\" as separate step\n- \"Production deployment\" / \"Deploy and verify\"\n- \"Documentation\" as separate step (unless task IS documentation)\n- \"Cleanup\" / \"Code cleanup\" as separate step (unless task IS cleanup/refactoring)\n- ANY step that ONLY tests/validates without implementing NEW functionality or refactoring\n\n### WHY TESTS MUST BE BUILT-IN (NOT SEPARATE):\n- Separate test step = admission that previous step is incomplete\n- Gate validation requires working tests to verify step completion\n- \"Write tests\" as step means agent shipped untested code\n- Test proves step is complete - without tests, step is unverified\n\n### EACH STEP MUST:\n- Implement new functionality OR refactor existing code\n- Include tests for that functionality (built-in, not separate)\n- Include self-verification (built-in, not separate)\n- Leave code clean (no separate cleanup step needed)\n\n### BAD EXAMPLE (FORBIDDEN):\n```\nStep 1: Implement feature X\nStep 2: Write tests for feature X    ← FORBIDDEN: testing-only\nStep 3: Final validation             ← FORBIDDEN: validation-only\n```\n\n### BAD PLAN (REAL EXAMPLE - DO NOT COPY):\n```\nStep 1: Database layer for user isolation\nStep 2: API endpoints for workflows\nStep 3: E2E и Production             ← FORBIDDEN: testing-only step\nStep 4: Documentation и cleanup      ← FORBIDDEN: doc-only step\n```\n\n### GOOD EXAMPLE (CORRECT):\n```\nStep 1: Implement feature X with unit tests\n        Verify: feature works, tests pass\n\nStep 2: Implement feature Y with integration tests\n        Verify: X+Y work together, all tests pass\n```\n\n### CORRECT VERSION OF BAD PLAN:\n```\nStep 1: Database layer with unit tests\n        Verify: queries isolated per user, tests pass\n\nStep 2: API endpoints with integration tests\n        Verify: auth works, E2E passing, all tests pass\n```\n\n---\n\n## STEP SIZE - FUNCTIONAL BLOCKS\n\nStep = completed functional block with verifiable result.\n\nNOT too small: \"create a file\", \"add import\"\nNOT too large: \"implement entire frontend\"\n\nCORRECT granularity:\n- Database layer with user isolation\n- MCP integration with authentication\n- Web UI for workflow management\n\nWHY: Workflow has gate validation after each step - expensive in time.\n- Too small steps = dozens of checks instead of 3-5\n- Too large steps = agent gets lost\n\n---\n\n## STEP FEASIBILITY CHECK\n\nEach step must be:\n- Absolutely executable by agent\n- Maximally specific in functionality\n- Have clear completion criterion\n\n**HUGE STEP = RED FLAG** of task misunderstanding.\nActions: STOP → study project → ask user → web search → delegate analysis.\n\n**LARGE STEP = PLANNING FAILURE** - split it.\n\n---\n\n## ARCHITECTURE AT PLAN START\n\nMANDATORY Architecture section after Goal:\n- Overall solution architecture\n- Key components and interaction\n- Architectural decisions (technologies, approaches)\n- Diagrams if applicable (ASCII, Mermaid, text)\n\nNot too much - conceptual understanding is enough.\n\nPlan undergoes mandatory validation - user confirms architecture before execution.\n\n---\n\n## FORBIDDEN IN PLAN - SPECIFIC FILES AND CODE\n\nFORBIDDEN:\n- Specific file paths\n- Function/method names\n- Line numbers\n- Code examples (TypeScript, SQL, React)\n- \"Files Created/Modified\" lists\n\nCORRECT:\n- \"Implement authentication layer\"\n- \"Update database schema for user isolation\"\n- \"Create UI components for workflow display\"\n\nWHY: Agent must ITSELF analyze code and find where to implement.\nPlan with files creates false sense of completeness - agent forgets critical details.\n\n---\n\n## WHAT TO WRITE IN STEPS\n\nINCLUDE:\n- Functionality and behavior description\n- Integration points (conceptually)\n- Expected result after step\n- Verification criteria (what should work + tests pass)\n\nEXAMPLE:\n```\n## Step 2: API layer for user workflows\n\nImplement REST endpoints for workflow CRUD operations with integration tests covering auth scenarios.\nEndpoints use authenticated context from Step 1.\nInclude request validation and error handling.\n\nVerify: API returns user's workflows only, rejects unauthorized access. All integration tests pass.\n```\n\n---\n\n## PLAN FOR REVIEWER WITHOUT CONTEXT\n\nPlan must be detailed enough that reviewer WITHOUT conversation history can:\n- Fully understand what each step accomplishes\n- Verify work is complete\n\nBUT: Detail ≠ code and files. Detail = clear FUNCTIONALITY and RESULT description.\n\nReviewer runs WITHOUT CONTEXT - this is architectural system decision.\n\n---\n\n## GRADUAL BUILDUP (LAYER ORDER)\n\n1) Base layer: data models, core logic, services + unit tests\n2) Integration layer: API endpoints, MCP tools + integration tests\n3) UI layer: Web interface, forms + browser tests (Playwright)\n\nFROM CORE TO INTERFACE. Never start with UI.\n\n---\n\n## PLAN FORMAT\n\nStructure:\n```\n# Title\n## Goal (one sentence)\n## Architecture (components, decisions)\n## Step 1: [name] with [test type] tests. Verify: [criteria], tests pass.\n## Step 2: [name] with [test type] tests. Verify: [criteria], tests pass.\n...\n```\n\nFORBIDDEN sections:\n- Overview, Summary\n- Acceptance Criteria (separate)\n- Validation blocks with bash commands\n- Files Created/Modified\n- UPDATED REQUIREMENTS\n- Testing (as separate section)\n- Final validation\n\n---\n\n## PLAN VOLUME\n\n- Tiny task: 1 step is NORMAL and CORRECT\n- Simple task: 50-100 lines, 2-4 steps\n- Medium task: 100-200 lines, 5-7 steps\n- Complex task: 200-300 lines, 8-12 steps\n\n**ONE STEP IS OK**: If task is small - plan with 1 step is correct.\nDO NOT artificially inflate plan to have more steps.\nDO NOT split simple task into multiple steps just to \"look thorough\".\n\nIf >400 lines - you are writing code instead of plan.\n\n---\n\n## NO SUBITEMS\n\nPlan = simple list of steps: 1, 2, 3, 4\n\nFORBIDDEN: 5.1, 5.2, 5.3 subitems\n\nSubitems = sign that step is too large → split into separate steps.\n\n---\n\n## USER APPROVAL STEPS\n\nSome steps require user confirmation:\n- UI changes (visual)\n- Breaking changes\n- Architectural decisions\n- API changes\n\nMark in plan: `[USER APPROVAL]` before continuing.\n\n---\n\n## PLANNING PRINCIPLES\n\n- CODE RESEARCH for existing patterns\n- WEB RESEARCH for best practices\n- LIBRARY DOCUMENTATION for APIs\n- DO NOT ASSUME - only verified facts\n- CURRENT library versions\n\nGood plan = result of deep analysis, not guess.\n\n---\n\n## FORMULA\n\n```\nPlan = Architecture + Functional blocks (1-12 steps) + Verification criteria\nEach step: functionality + tests + verification (ALL BUILT-IN)\nWITHOUT: code, files, validation blocks, subitems, testing-only steps, cleanup steps\n```\n\nGood plan reads in 2 minutes and gives complete understanding."
+          },
+          "code_quality_principles": {
+            "description": "Stores code quality principles",
+            "value": "=== AGENT IDENTITY PROTOCOL === YOU ARE AN AI AGENT, NOT A HUMAN: You have NO fatigue, no time constraints, no desire to avoid difficulties. DO NOT IMITATE human weaknesses and limitations. TAKE THE BEST ENGINEER PATTERNS: full responsibility, deep understanding, completion without compromises. You can work with ANY complexity without limitations. SOLVE AT THE ROOT, do not work around problems due to perceived complexity. === WORKFLOW BLOCKING PROTOCOL === CRITICALLY IMPORTANT: DO NOT proceed to execute_step until ALL tasks are 100% COMPLETE. Workflow is BLOCKED until full completion. Any attempt to proceed with incomplete work - PROTOCOL VIOLATION. === TASK COMPLETION REQUIREMENTS === ANTI-AVOIDANCE RULES: FORBIDDEN to claim main goal achieved without 100% completion, use significant improvement to mask incompleteness, say comprehensive work ongoing instead of completing tasks, move to next task with current incomplete, avoid difficult parts of task. MANDATORY to complete ALL subtasks before claiming completion, provide specific numerical evidence for each claim, honestly report remaining problems with exact numbers, fix ALL identified problems before continuing, fulfill all requirements with tool-based verification. === BIG TASK PROTOCOL === DO NOT FEAR BIG TASKS! If task seems huge - this is NORMAL and EXPECTED: Break into subtasks but COMPLETE ALL without exceptions. DO NOT SKIP difficult parts for speed. DO NOT look for shortcuts and workarounds. Large changes and refactoring are NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. Complexity is NOT an excuse for incompleteness. === EVIDENCE PROTOCOL === COMPLETION EVIDENCE IS MANDATORY: Every completed must have tool-based verification. Every works correctly must have actual test execution. Every significantly improved must have exact before/after numbers. Every transition to execute_step must have completion verification. === QUALITY STANDARDS === TECHNICAL REQUIREMENTS: RESPONSIBILITY: You are experienced engineer - full responsibility for result. EVERYTHING depends on your work. QUALITY: Code must be clean, without issues, with proper typing. QUALITY CODE: No hacks, workarounds, temporary solutions - do it right immediately. PROBLEMS: Solve problems completely, do not work around them. ERRORS: Analyze causes, fix root of problem, not symptoms. SIMPLICITY: First look for simple solutions, then complicate if needed. CHECKS: After every significant change - testing and validation. DEAD CODE: Remove all unused, maintain cleanliness. RESULT: Focus on working solution, not on process for process sake. BIG CHANGES: DO NOT fear big changes and refactoring - this is NORMAL and NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. DO NOT SLACK: DO NOT try to quickly do something instead of proper solution. Flow checks are help, NOT replacement for your responsibility. ADDITIONAL DEVELOPMENT PRINCIPLES: CODE STUDY: DO NOT hesitate to study existing code for understanding patterns and integration points. WEB RESEARCH: Use internet to study best practices and solve problems. CURRENT VERSIONS: Use latest stable library versions, read their documentation. DO NOT ASSUME: If something does not work - read documentation, do not invent solutions. DOCUMENTATION: For library problems - official documentation first, then search. === CODEBASE MAINTENANCE PROTOCOL === RESPONSIBILITY FOR ENTIRE CODEBASE: CANNOT PASS BY PROBLEMS: If you see non-compliance with standards, issues, hacks, lints, warnings in EXISTING code you touch - FIX immediately. BROKEN TESTS: See failing tests, .skip, .only in project - FIX or delete, DO NOT write new tests leaving old ones broken. FIX ON TOUCH: TODO, FIXME, console.log, commented code in files you edit - remove immediately. IMPROVE CODE: DO NOT leave code worse than you found - improve quality on every touch. FULL RESPONSIBILITY: You are responsible for ENTIRE project, not just new code - maintain entire codebase at high level, you will be working with it. === SELF-MONITORING PROTOCOL === CRITICAL QUESTIONS BEFORE EACH execute_step: Can I prove this claim with tool output? Would this pass code review by human without access to my work? Am I avoiding something difficult here? Is this really finished or am I just tired of working on it? Do I have specific evidence for each claim? Are ALL requirements 100% fulfilled or am I masking incompleteness?"
+          },
+          "startup_check_directive": {
+            "description": "Stores startup check directive",
+            "value": "Use project startup instructions:\n---\n{{startup_info}}\n---"
+          },
+          "run_tests_directive": {
+            "description": "Stores run tests directive",
+            "value": "Use testing information:\n---\n{{test_info}}\n---\nRun all tests. Wait for ALL tests to complete. Count how many tests passed and how many failed."
+          },
+          "max_fix_iterations": {
+            "description": "No description",
+            "value": 10
+          },
+          "fix_iteration_count": {
+            "description": "No description",
+            "value": 0
+          },
+          "plan_fix_counter": {
+            "description": "Counter for plan review fix loop",
+            "value": 0
+          },
+          "max_plan_fixes": {
+            "description": "Max iterations for plan review fix loop",
+            "value": 10
+          },
+          "refine_fix_counter": {
+            "description": "Counter for refine review fix loop",
+            "value": 0
+          },
+          "max_refine_fixes": {
+            "description": "Max iterations for refine review fix loop",
+            "value": 10
+          },
+          "extend_fix_counter": {
+            "description": "Counter for extend review fix loop",
+            "value": 0
+          },
+          "max_extend_fixes": {
+            "description": "Max iterations for extend review fix loop",
+            "value": 10
+          },
+          "update_fix_counter": {
+            "description": "Counter for update review fix loop",
+            "value": 0
+          },
+          "max_update_fixes": {
+            "description": "Max iterations for update review fix loop",
+            "value": 10
+          },
+          "plan_iteration": {
+            "description": "Tracks plan iteration for versioned plan files",
+            "value": 0
+          },
+          "documentation_standards_path": {
+            "description": "Path to documentation standards file",
+            "value": ""
+          },
+          "screenshot_guide_path": {
+            "description": "Path to screenshot guide file",
+            "value": ""
+          },
+          "plan_change_target": {
+            "description": "Target for plan change routing: refine, extend, or update",
+            "value": ""
+          },
+          "validation_attempt_count": {
+            "description": "Counter for validation/report attempts (v1, v2, etc.)",
+            "value": 1
+          }
+        }
+      },
+      "connections": {
+        "default": "get-initial-requirements"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-initial-requirements",
+      "directive": "Study the project and EXTRACT information for development (Information Extraction Pattern).\n\nFor EACH category:\n- If information EXISTS → extract and return THE INFORMATION ITSELF\n- If information DOES NOT EXIST → ASK the user (do not skip silently!)\n\n1) TESTING (test_info):\n   - Look for tests: tests/, __tests__, *.test.ts\n   - Find run command: package.json scripts.test\n   - Find testing guide: tests/TESTING-GUIDE.md, TESTING.md\n   - RESULT: command + rules\n   - IF NONE → ask: \"No tests found. Create starter tests? (yes/no)\"\n     - \"yes\" → return \"user_requested: create starter tests\"\n     - \"no\" → return 'skip'\n\n2) STARTUP (startup_info):\n   - Look for: docs/DEVELOPMENT.md, SYSTEM-RESTART.md, README.md Development section\n   - Find instructions how to run system for development\n   - RESULT: startup command + readiness check\n   - If none → return 'skip'\n\n3) PROJECT CHECKLIST (project_checklist):\n   - Look for: docs/PROJECT_CHECKLIST.md, CHECKLIST.md\n   - If found → READ and return CHECKLIST CONTENT\n   - If none → return 'skip'\n\n4) AGENT ONBOARDING (agent_onboarding_info):\n   - Look for: CLAUDE.md, docs/AGENT-ONBOARDING.md\n   - If found → READ and return KEY RULES for agent\n   - If none → return 'skip'\n\n5) DOCUMENTATION STANDARDS (documentation_standards_path):\n   - Search project for documentation standards file: DOCUMENTATION-STYLE-GUIDE.md, DOCS-STYLE.md, docs/DOCUMENTATION-STYLE-GUIDE.md, docs/DOCS-STYLE.md\n   - If found → save the FILE PATH to documentation_standards_path (e.g., \"./docs/DOCUMENTATION-STYLE-GUIDE.md\")\n   - Return 'exists' as documentation_standards\n   - IF NONE → ask user: \"Documentation standards file not found. Create one? (in project docs/ or workspace?)\"\n     - If yes → create the file, save path to documentation_standards_path, return 'exists' as documentation_standards\n     - If no → set documentation_standards_path = '', documentation_standards = 'skip'\n\n6) BROWSER UI (browser_ui_info):\n   - Check if React, Vue, HTML pages exist\n   - If exists → describe what UI and where located\n   - IF NONE → ask: \"UI not found. Is Web UI planned for this task? (yes/no)\"\n     - \"yes\" → return \"user_requested: {UI description from user}\"\n     - \"no\" → return 'skip'\n\n7) PROJECT SUMMARY: brief description of project architecture\n\nDO NOT create branches and folders - this will be later.",
+      "completionCondition": "Project studied: all information extracted or marked as skip",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_info": {
+            "type": "string",
+            "description": "Testing information (command + rules) OR skip if no tests"
+          },
+          "startup_info": {
+            "type": "string",
+            "description": "System startup instructions for development OR skip if none"
+          },
+          "project_checklist": {
+            "type": "string",
+            "description": "Project checklist CONTENT OR skip if none"
+          },
+          "agent_onboarding_info": {
+            "type": "string",
+            "description": "Key rules for agent from onboarding document OR skip if none"
+          },
+          "documentation_standards": {
+            "type": "string",
+            "description": "Whether documentation standards exist: exists or skip",
+            "enum": [
+              "exists",
+              "skip"
+            ]
+          },
+          "browser_ui_info": {
+            "type": "string",
+            "description": "Browser UI information (type, location) OR skip if none"
+          },
+          "project_summary": {
+            "type": "string",
+            "description": "Brief description of project architecture"
+          },
+          "documentation_standards_path": {
+            "type": "string",
+            "description": "Path to documentation standards file OR empty string if none"
+          }
+        },
+        "required": [
+          "test_info",
+          "startup_info",
+          "project_checklist",
+          "agent_onboarding_info",
+          "documentation_standards",
+          "browser_ui_info",
+          "project_summary"
+        ]
+      },
+      "connections": {
+        "success": "get-task-requirements"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-foundation",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "agent_onboarding_info"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "study-project-foundation",
+        "false": "study-implementation-details"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "study-project-foundation",
+      "directive": "Study project foundations independently.\n\n1) Use agent rules:\n---\n{{agent_onboarding_info}}\n---\n2) Understand how project starts (commands, environment, dependencies) but DO NOT start\n3) Do not assume - read files",
+      "completionCondition": "Project foundation studied: rules found, architecture understood, build system studied",
+      "connections": {
+        "success": "study-implementation-details"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "study-implementation-details",
+      "directive": "Study implementation details independently. 1) Source code - src/, backend/, frontend/, types/ in detail 2) Tests - study test structure, understand what is tested 3) Architecture - understand patterns, component interaction, data flow 4) Do not assume - read code",
+      "completionCondition": "Implementation details studied: core architecture understood, key components identified, patterns determined",
+      "connections": {
+        "success": "analyze-and-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-task-requirements",
+      "directive": "Get specific task requirements. Now need to understand what exactly needs to be done.\n\n1) Ask for clear task description considering architecture\n2) Clarify scope and constraints\n3) Get specific requirements\n4) Evaluate complexity - analyze task complexity (scale 1-10)\n5) Remember GitHub issue numbers IF user mentioned them\n\nDO NOT create files - workspace will be created later after feature name confirmation.",
+      "completionCondition": "Task defined, scope clarified, complexity evaluated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_task_description": {
+            "type": "string",
+            "minLength": 20,
+            "description": "Detailed task description from user"
+          },
+          "task_complexity_in_context": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Task complexity (1-4: express mode, 5-10: full development)"
+          },
+          "github_issues": {
+            "type": "string",
+            "description": "GitHub issue numbers if mentioned (e.g.: #123, #456)"
+          }
+        },
+        "required": [
+          "user_task_description",
+          "task_complexity_in_context"
+        ]
+      },
+      "connections": {
+        "success": "create-feature-workspace"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-feature-workspace",
+      "directive": "Create workspace for developing feature.\n\n1) AUTO-GENERATE feature name from task description:\n   - Convert to kebab-case (lowercase, hyphens instead of spaces)\n   - Maximum 30 characters\n   - Remove special characters\n   - Example: \"Fix authentication bug\" → \"fix-authentication-bug\"\n\n2) CHECK FOR CONFLICTS:\n   - git branch --list \"feature/{generated_name}*\"\n   - ls -d ./moira-ws/{generated_name}-*/\n   - If conflict found: add suffix (-2, -3, etc.) to the name\n   - DO NOT ask user for confirmation - use generated name directly\n\n3) Generate workspace path with current date/time:\n   Format: ./moira-ws/{feature_name}-{YYYYMMDD}-{HHMM}/\n   Example: ./moira-ws/fix-auth-bug-20251225-1430/\n\n4) Create workspace folder at generated path\n\n5) CHECK GIT STATUS AND ASK USER:\n\n   A) If NO .git directory exists:\n      - ASK USER: \"No git repository found. Create one? (yes/no)\"\n      - If user says YES:\n        * Run: git init\n        * Run: git add -A && git commit -m \"Initial commit\"\n        * Set git_enabled=true\n        * Create branch feature/{feature_name}\n      - If user says NO:\n        * Set git_enabled=false\n        * SKIP all git operations\n\n   B) If .git exists but has UNCOMMITTED CHANGES (dirty state):\n      - ASK USER: \"Git has uncommitted changes. What to do? (commit/stash/continue)\"\n      - If user says COMMIT:\n        * Run: git add -A && git commit -m \"WIP: save changes before feature work\"\n        * Set git_enabled=true\n        * Create branch feature/{feature_name}\n      - If user says STASH:\n        * Run: git stash push -m \"Stashed before feature: {feature_name}\"\n        * Set git_enabled=true\n        * Create branch feature/{feature_name}\n      - If user says CONTINUE:\n        * Set git_enabled=false\n        * SKIP branch creation (work on current branch with dirty state)\n\n   C) If .git exists and is CLEAN:\n      - Set git_enabled=true\n      - Create branch feature/{feature_name}\n\n6) Save process ID to file {generated_path}/process-id.txt for recovery after archiving\n\n7) Create file {generated_path}/task-requirements.md with:\n   - RAW user request: {{user_task_description}}\n   - GitHub issues: {{#if github_issues}}{{github_issues}}{{else}}not specified{{/if}}\n   - Complexity: {{task_complexity_in_context}}/10\n\n8) FETCH FULL ISSUE TEXT (if GitHub issues specified):\n   - If github_issues contains issue references (e.g. #123, #456):\n   - For EACH issue number: run `gh issue view <number> --json title,body,labels,state`\n   - Append \"## Full Issue Details\" section to task-requirements.md\n   - Format for each issue: \"### Issue #N: <title>\\n<body>\\nLabels: <labels>\\nState: <state>\"\n   - If gh command fails: note \"Could not fetch issue details\" and continue\n\nIMPORTANT: Return workspace_path, feature_name, git_enabled, and git_action_taken in response - they will be SET as context variables for all subsequent nodes.\n\n9) Save planning standards to file:\n   - Create file {generated_path}/planning-standards.md\n   - Write EXACTLY this content WITHOUT any modifications: {{planning_requirements}}\n   - This file will be used by plan reviewers for validation",
+      "completionCondition": "Workspace folder created, process ID saved, requirements documented. Git branch created IF git available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace_path": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
+            "description": "Generated workspace path that will be SET as context variable"
+          },
+          "feature_name": {
+            "type": "string",
+            "description": "Auto-generated feature name (kebab-case, max 30 chars)"
+          },
+          "git_branch": {
+            "type": "string",
+            "description": "Name of created git branch feature/feature-name (only if git available)"
+          },
+          "git_enabled": {
+            "type": "boolean",
+            "description": "Whether git operations are enabled (false if user chose to skip)"
+          },
+          "git_action_taken": {
+            "type": "string",
+            "enum": [
+              "init",
+              "commit",
+              "stash",
+              "skip",
+              "none"
+            ],
+            "description": "What git action was taken: init (created repo), commit (committed dirty), stash (stashed changes), skip (user skipped git), none (git was clean)"
+          },
+          "process_id_file_created": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that process-id.txt file was created"
+          }
+        },
+        "required": [
+          "workspace_path",
+          "feature_name",
+          "git_enabled",
+          "git_action_taken",
+          "process_id_file_created"
+        ]
+      },
+      "connections": {
+        "success": "present-requirements-confirmation"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-requirements-confirmation",
+      "directive": "Present the saved task requirements to the user for confirmation.\n\n1) Read the file {{workspace_path}}task-requirements.md\n2) Present the COMPLETE TEXT to the user without any modifications or summarization\n3) After presenting, ask the user: \"Did I understand your requirements correctly? Please confirm or tell me what needs to be changed.\"\n\nDo NOT proceed until the user explicitly confirms or requests changes.",
+      "completionCondition": "Full requirements text presented to user. User responded with either confirmation or requested changes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requirements_confirmed": {
+            "type": "boolean",
+            "description": "true if user confirmed requirements are correct, false if changes requested"
+          },
+          "user_feedback": {
+            "type": "string",
+            "description": "User's feedback - 'confirmed' if approved, or description of what needs to change"
+          }
+        },
+        "required": [
+          "requirements_confirmed",
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-requirements-confirmed"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-requirements-confirmed",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "requirements_confirmed"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "ask-screenshot-validation",
+        "false": "clarify-requirements"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "clarify-requirements",
+      "directive": "The user indicated the requirements need changes.\n\nUser feedback: {{user_feedback}}\n\n1) Discuss with the user what exactly needs to be amended\n2) Get the corrected/additional requirements\n3) Update the file {{workspace_path}}task-requirements.md with the corrected requirements\n4) Make sure ALL original requirements that were NOT changed are preserved\n\nAfter updating the file, the requirements will be presented to the user again for re-confirmation.",
+      "completionCondition": "Requirements file updated with user's corrections. Ready for re-confirmation.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changes_made": {
+            "type": "string",
+            "description": "Summary of what was changed in the requirements"
+          }
+        },
+        "required": [
+          "changes_made"
+        ]
+      },
+      "connections": {
+        "success": "present-requirements-confirmation"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-and-plan",
+      "directive": "Create iterative development plan where each step delivers working functionality. Need to create detailed and executable plan based on deep requirements analysis.\n\nMANDATORY PLAN SECTIONS:\n\n## Problem Statement\nWhat task/problem are we solving? What is not working or what is missing?\n\n## Business Value\nWhy is this important? What value will this bring?\n\n## Expected Outcome\nExpected result. What will work after completion?\n\n## Architecture\nKey components and their interaction.\n\n## Steps\n(then plan steps)\n\nPLAN CREATION PROCESS:\n1) Analyze requirements from task-requirements.md in detail (in context)\n2) Study project architecture to understand integration points\n3) Analyze task complexity and determine optimal step breakdown\n4) Determine dependencies between steps and correct sequence\n5) Create plan in {{workspace_path}}development-plan.md\n6) Follow planning requirements: {{planning_requirements}}\n\nIMPORTANT - GitHub Issues:\nIF task-requirements.md has GitHub issue numbers:\n- For each plan step specify related_issue if step relates to specific issue\n- Format in plan: ## Step N: name [related_issue: #123]\n\nIn response indicate structured array of plan steps with detailed tasks, path to plan file for reference, and brief summary of entire plan for notifications.",
+      "completionCondition": "Technical plan created with implementation details worked out, integration points, testing strategy",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "development_plan": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 20,
+              "description": "Plan step: name + tasks + result"
+            },
+            "minItems": 1,
+            "description": "List of development steps"
+          },
+          "development_plan_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/development-plan\\.md$",
+            "description": "Path to plan file: {{workspace_path}}development-plan.md"
+          },
+          "plan_summary": {
+            "type": "string",
+            "minLength": 50,
+            "description": "Brief description of full development plan for notifications"
+          },
+          "acceptance_criteria": {
+            "type": "string",
+            "minLength": 100,
+            "description": "ACCEPTANCE CRITERIA: what final result is expected, what should work, which use cases are solved, how to verify (commands, UI actions, tests)"
+          }
+        },
+        "required": [
+          "development_plan",
+          "development_plan_file",
+          "plan_summary",
+          "acceptance_criteria"
+        ]
+      },
+      "connections": {
+        "success": "agent-review-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "agent-review-plan",
+      "directive": "Delegate plan review to subagent via Task tool (subagent-review pattern).\n\nIMPORTANT: DO NOT do self-review - your assessment of own work is biased.\n\n1) Launch subagent with prompt:\n   YOU ARE plan validator. Your assessment determines if development plan proceeds.\n\n   READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}development-plan.md\n   - Requirements: {{workspace_path}}task-requirements.md\n   - Planning standards: {{workspace_path}}planning-standards.md\n\n   VALIDATION CRITERIA:\n   1) Step size: not too small (< 1 hour), not too large (> 1 day)\n   2) Criteria clarity: each step has verifiable result\n   3) Dependencies: steps are in correct order, no circular dependencies\n   4) REQUIREMENTS COVERAGE: every requirement from task-requirements.md must be addressed in the plan\n   5) Testing: each step includes verification\n   6) Architecture: section present and understandable\n   7) STANDARDS COMPLIANCE: plan follows rules from planning-standards.md\n\n   RETURN: review_issues_count (number) and issues_found (array of {issue, affected_step, suggested_fix})\n\n2) Honestly pass subagent result:\n   - review_issues_count = EXACTLY what subagent found\n   - issues_found = EXACT list from subagent\n   - DO NOT filter or re-evaluate results\n\n3) Save issues to file:\n   - Write ALL issues to {{workspace_path}}plan-review-issues-{{plan_iteration}}.md\n   - Format:\n     # Plan Review Issues\n\n     Total issues: [count]\n\n     ## Issue 1: [issue description]\n     - Affected step: [step]\n     - Suggested fix: [fix]\n\n     ## Issue 2: ...\n   - This file will be used by fix step to address EACH issue",
+      "completionCondition": "Plan reviewed, all issues found and described (or confirmed no issues)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of issues found in plan (0 if no issues)"
+          },
+          "issues_found": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "issue": {
+                  "type": "string",
+                  "description": "Issue description"
+                },
+                "affected_step": {
+                  "type": "string",
+                  "description": "Which step is affected"
+                },
+                "suggested_fix": {
+                  "type": "string",
+                  "description": "Suggested fix"
+                }
+              },
+              "required": [
+                "issue",
+                "affected_step",
+                "suggested_fix"
+              ]
+            },
+            "description": "List of found issues (empty if no issues)"
+          }
+        },
+        "required": [
+          "review_issues_count",
+          "issues_found"
+        ]
+      },
+      "connections": {
+        "success": "check-agent-review-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-agent-review-issues",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "expr-inc-plan-review-fix",
+        "false": "notify-plan-ready"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-plan-issues",
+      "directive": "FIX found issues in plan.\n\nREAD issues from {{workspace_path}}plan-review-issues-{{plan_iteration}}.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{development_plan_file}}\n3. Apply the fix according to suggested_fix\n4. Mark issue as addressed\n\nDO NOT skip any issue. ALL issues from the file must be resolved.\n\nAfter fixing ALL issues, save updated plan.\nPlan will be reviewed again to verify fixes.",
+      "completionCondition": "All issues fixed, plan updated",
+      "connections": {
+        "success": "agent-review-plan"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-plan-ready",
+      "message": "📋 *Plan Created*\n\n🎯 **Task:** {{user_task_description}}\n📊 **Plan Steps:** {{development_plan.length}} stages\n\n**📋 Plan:**\n{{plan_summary}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "present-plan-to-user"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-plan-to-user",
+      "directive": "Show plan to user for approval.\n\n1) Explain step breakdown logic\n2) Show validation strategy for each step\n3) Explain why some steps may temporarily break system\n4) Ask: \"Do you approve the plan for execution? (yes/no)\"\n5) Get clear yes or no answer\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → plan_approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → plan_approval = \"no\"\n- DO NOT fix plan yourself!\n- Reply plan_approval = \"no\" and write user_feedback_on_plan with feedback\n- Workflow will direct to plan fix branch itself\n- All fixes are done only through workflow, not independently\n\n**SAVE FEEDBACK TO FILE:**\nIf plan_approval = \"no\", save the user feedback to {{workspace_path}}user-plan-feedback-{{plan_iteration}}.md before responding. This file will be read by the refinement step.",
+      "completionCondition": "Plan presented to user, clear yes or no answer received on plan approval question",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_approval": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "User plan approval: yes to approve, no for refinement"
+          },
+          "user_feedback_on_plan": {
+            "type": "string",
+            "description": "User feedback on plan (especially important for no)"
+          }
+        },
+        "required": [
+          "plan_approval"
+        ]
+      },
+      "connections": {
+        "success": "check-plan-approval"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-plan-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan_approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "initialize-plan-tracking",
+        "false": "expr-set-plan-target-refine"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "refine-development-plan",
+      "directive": "Refine plan - user did not approve it.\n\nCRITICAL: File synchronization is MANDATORY!\n\n1) READ plan change reasons from {{workspace_path}}plan-change-reasons-{{plan_iteration}}.md\n2) Analyze what exactly user is not satisfied with in plan based on the file content\n3) FIRST update the file {{workspace_path}}development-plan.md with refined plan\n4) THEN update development_plan variable in context with same data\n5) Create summary of changes for re-presentation\n\nFollow planning requirements: {{planning_requirements}}\n\nIn response:\n- Confirm file was updated FIRST (plan_file_updated = \"yes\")\n- Provide updated array of plan steps\n- Brief summary of updated plan\n- Description of changes made",
+      "completionCondition": "Plan refined based on user feedback, development_plan in context updated, ready for re-presentation",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_file_updated": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that development-plan.md file was updated BEFORE filling this response"
+          },
+          "development_plan": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 20,
+              "description": "Plan step: name + tasks + result"
+            },
+            "minItems": 1,
+            "description": "Updated list of steps (must match file content)"
+          },
+          "plan_summary": {
+            "type": "string",
+            "minLength": 50,
+            "description": "Brief description of updated plan"
+          },
+          "refinement_summary": {
+            "type": "string",
+            "description": "What changed in plan"
+          }
+        },
+        "required": [
+          "plan_file_updated",
+          "development_plan",
+          "plan_summary",
+          "refinement_summary"
+        ]
+      },
+      "connections": {
+        "success": "review-refined-plan"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-plan-refined",
+      "message": "🔧 *Plan Refined*\n\n📋 **Changes:** {{refinement_summary}}\n\n**📊 Updated Plan:**\n{{plan_summary}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "confirm-plan-refinement"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "confirm-plan-refinement",
+      "directive": "Present refined plan to user and get confirmation. 1) Show user updated plan 2) Explain what changes were made and why 3) Ask user: \"Do you approve the refined plan for execution? (yes)\" 4) Get EXPLICIT confirmation.\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently\n\n**SAVE FEEDBACK TO FILE:**\nIf refinement_approval = \"no\", save the user feedback to {{workspace_path}}user-plan-feedback-{{plan_iteration}}.md before responding. This file will be read by the refinement step.",
+      "completionCondition": "Refined plan confirmation received from user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "refinement_approval": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "refinement_feedback": {
+            "type": "string",
+            "description": "User feedback if no"
+          }
+        },
+        "required": [
+          "refinement_approval"
+        ]
+      },
+      "connections": {
+        "success": "check-refinement-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "initialize-plan-tracking",
+      "directive": "Prepare progress tracking system for development plan.\n\n1) Count total_steps from development-plan.md (plan is already in context)\n2) Determine current_step_name - name of first plan step\n\nCounters current_step_index=1 and current_iteration=1 are already set automatically.\n\nIn response indicate: first step name for templates, total number of steps in plan.",
+      "completionCondition": "Tracking system initialized, can start plan steps",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "current_step_name": {
+            "type": "string",
+            "description": "First plan step name for use in templates"
+          },
+          "total_steps": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Total number of steps in development plan"
+          }
+        },
+        "required": [
+          "current_step_name",
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "route-skip-startup"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-startup",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "startup_info"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "initial-system-startup",
+        "false": "notify-step-start"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-initial-iteration-workspace",
+      "directive": "Create workspace for current step iteration.\n\n1) Create folder {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/\n2) Confirm folder created.\n\nThis prepares the workspace BEFORE implementation begins so all artifacts can be stored in the correct location from the start.",
+      "completionCondition": "Iteration workspace folder created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "iteration_directory": {
+            "type": "string",
+            "pattern": "^\\.\\/moira-ws\\/[a-z0-9-]+-\\d{8}-\\d{4}\\/step-\\d+\\/iteration-\\d+\\/$",
+            "description": "Path to created iteration folder: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/"
+          }
+        },
+        "required": [
+          "iteration_directory"
+        ]
+      },
+      "connections": {
+        "success": "implement-step"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "implement-step",
+      "directive": "Implement current plan step completely and with quality. This is key moment - do not proceed further until everything planned is fully completed and system is working. Further checks will help, but main responsibility is on you. Everything depends on quality of your work: 1) Take step from {{workspace_path}}development-plan.md by index {{current_step_index}} (1-based) 2) Implement all technical tasks from plan without exceptions 3) Do not fear big changes and refactoring - this is normal and necessary 4) If need to rewrite lots of code for proper solution - do it 5) Do not try to quickly work around difficulties - solve them completely 6) Create or modify necessary files 7) Test functionality of new features 8) Ensure system works after your changes. {{code_quality_principles}} In response indicate brief description of implemented functionality. If screenshot_validation_enabled is 'yes': also write or extend Playwright screenshot scripts according to {{screenshot_guide_path}}. Scripts should capture key UI states for the current step. Scripts are accumulative — each step adds new captures without removing previous ones. Save scripts in the screenshots/ directory within the workspace.",
+      "completionCondition": "Step implemented, working functionality created and tested, results documented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "implemented_functionality": {
+            "type": "string",
+            "description": "Description of implemented working functionality and its test results"
+          }
+        },
+        "required": [
+          "implemented_functionality"
+        ]
+      },
+      "connections": {
+        "success": "analyze-implementation-changes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-iteration-workspace",
+      "directive": "Create workspace for current step iteration. Prepare structure for documenting current state of work on step. 1) Create folder {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/ 2) CRITICALLY IMPORTANT: Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/step-results.md with FULL description of ALL work done on this plan step to date. This file is snapshot of current step state to prevent context loss in fix cycles. In response indicate path to created iteration folder and path to step-results.md file.",
+      "completionCondition": "Iteration workspace created, step state file created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "iteration_directory": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/$",
+            "description": "Path to created iteration folder: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/"
+          },
+          "step_results_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/step-results\\.md$",
+            "description": "Path to step state file: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/step-results.md"
+          }
+        },
+        "required": [
+          "iteration_directory",
+          "step_results_file"
+        ]
+      },
+      "connections": {
+        "success": "analyze-implementation-changes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "restart-and-rebuild",
+      "directive": "CRITICALLY IMPORTANT: DO NOT FIX startup problems - ONLY CHECK if system can start. IN CASE OF ERRORS - ONLY REPORT.\n\nRestart system and check startup correctness.\n\n{{startup_check_directive}}\n\nIF system DID NOT start - DO NOT FIX, just return system_startup_ok: no\n\nIn response indicate: did system start correctly?",
+      "completionCondition": "System restarted and startup correctness verified",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "system_startup_ok": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "System restarted and started correctly without errors?"
+          }
+        },
+        "required": [
+          "system_startup_ok"
+        ]
+      },
+      "connections": {
+        "success": "route-startup-check"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-startup-check",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "startup_info"
+            },
+            "right": "skip"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "system_startup_ok"
+            },
+            "right": "yes"
+          }
+        ]
+      },
+      "connections": {
+        "true": "analyze-code-changes",
+        "false": "fix-startup-issues-action"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-implementation-changes",
+      "directive": "Determine CHANGE TYPE across entire plan step and pass it EXACTLY. Analyze ALL work on plan step.\n\nSTRICT TYPE DETERMINATION RULES:\n\ncode = ANY changes in application code (src/, backend/, frontend/, packages/, lib/, services/, components/, utils/ etc.). EXAMPLES code: created/modified functions, classes, components, API endpoints, services, models, controllers, routes, middleware, hooks, utilities. EVEN ONE modified code file = code. Code refactoring = code. Bug fixes in code = code.\n\ntests_only = ONLY changes in test files (tests/, spec/, __tests__/, *.test.*, *.spec.*) AND application code NOT changed. EXAMPLES tests_only: added unit tests, updated integration tests, fixed assertions, added test cases. IF changed BOTH code AND tests = code (not tests_only!).\n\ndocumentation_only = Changes in content that system processes, but which does NOT affect system operation itself. Code NOT changed, tests NOT changed, plan step has NO test coverage requirement. EXAMPLES documentation_only: updated README, wrote API docs, added comments to code WITHOUT changing logic, editing workflow JSON files (content for workflow engine, not system code), i18n files with translations, email/notification templates, any content that system only reads/interprets without compilation. IF changed code together with documentation = code. IF plan step has E2E test requirement = code.\n\nresearch_only = NO changes to project files, only research and analysis. EXAMPLES research_only: studied problem, analyzed architecture, researched approaches without changing files.\n\n1) Analyze {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/step-results.md - WHAT EXACTLY changed\n2) STRICTLY determine type by rules above\n3) IF IN DOUBT between code and other - choose code (safer).\n\nAlso determine if changes affect UI components (has_ui_changes = \"yes\" or \"no\").\n\nIn response pass type and has_ui_changes.",
+      "completionCondition": "Specific system changes determined and verification plan created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "change_type": {
+            "type": "string",
+            "enum": [
+              "code",
+              "tests_only",
+              "documentation_only",
+              "research_only"
+            ],
+            "description": "Change type for plan step"
+          },
+          "has_ui_changes": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether changes affect UI components (for screenshot validation routing)"
+          }
+        },
+        "required": [
+          "change_type",
+          "has_ui_changes"
+        ]
+      },
+      "connections": {
+        "success": "route-by-change-type"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-by-change-type",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "change_type"
+        },
+        "right": "code"
+      },
+      "connections": {
+        "true": "route-skip-restart",
+        "false": "route-non-code-changes"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-restart",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "startup_info"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "restart-and-rebuild",
+        "false": "route-skip-run-tests"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-code-changes",
+      "directive": "Analyze what changed and what might break. 1) Identify functions you added or modified 2) CRITICAL: Find existing functions that DEPEND on the changed ones (call them, use the same data, rely on their results) 3) Create a COMPLETE list: new + modified + dependent. Return array of all functions to verify.",
+      "completionCondition": "CODE ANALYSIS COMPLETED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "functionality_list": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "List of functions to verify: new + modified + affected"
+          }
+        },
+        "required": [
+          "functionality_list"
+        ]
+      },
+      "connections": {
+        "success": "check-implementation-completeness"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-non-code-changes",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "change_type"
+        },
+        "right": "tests_only"
+      },
+      "connections": {
+        "true": "assess-testing-needs",
+        "false": "route-documentation-or-research"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-documentation-or-research",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "change_type"
+        },
+        "right": "documentation_only"
+      },
+      "connections": {
+        "true": "route-has-docs-standards",
+        "false": "route-skip-git-commit"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validate-documentation",
+      "directive": "Delegate documentation validation to subagent via Task tool.\n\n**CONTEXT:**\n- Documentation standards: Read file at {{documentation_standards_path}} for documentation standards\n- Workspace: {{workspace_path}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE a documentation validator.\n\nTASK: Verify documentation quality against standards.\n\nREAD documentation files in workspace and check against standards from file at {{documentation_standards_path}}\n\nCHECK:\n1. Compliance with documentation standards\n2. Technical accuracy - no errors\n3. Information correctness\n4. No marketing terms or change history\n5. Complete and clear\n\nOUTPUT:\n- List of standards violations (if any)\n- List of technical errors (if any)\n- List of accuracy issues (if any)\n- issues_count: total number of issues found\n\nReturn issues_count = 0 if documentation is valid.\"\n\n**IMPORTANT:** Pass subagent result honestly to output.\n\nSave issues to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/documentation-issues.md:\n# Documentation Issues\n\nTotal issues: [count]\n\n## Issue 1: [description]\n- Standard violated: [which standard]\n- Location: [file and section]\n- What needs to be fixed: [specific fix]\n\n## Issue 2: ...",
+      "completionCondition": "Documentation verified against standards",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentation_valid": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Does documentation comply with project standards?"
+          },
+          "documentation_issues": {
+            "type": "string",
+            "description": "Description of documentation issues if any"
+          }
+        },
+        "required": [
+          "documentation_valid"
+        ]
+      },
+      "connections": {
+        "success": "check-documentation-result"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-documentation-result",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "documentation_valid"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "agent-validate-step",
+        "false": "fix-documentation-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-documentation-issues",
+      "directive": "CRITICAL: FIX AND REDO WHAT WAS INDICATED IN THE CHECK. DON'T REPORT ON WORK - DO THE WORK!\n\nREAD issues from {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/documentation-issues.md\n\nFor EACH issue in the file:\n1. Find the documentation that needs fixing (see Location field)\n2. Understand what standard was violated\n3. Apply the fix according to \"What needs to be fixed\"\n4. Verify fix complies with standard\n5. Mark issue as resolved\n\nDO NOT skip any issue. ALL documentation issues must be fixed.\n\nIndicate what was fixed.",
+      "completionCondition": "Documentation issues fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentation_fixes": {
+            "type": "string",
+            "description": "Description of documentation fixes"
+          }
+        },
+        "required": [
+          "documentation_fixes"
+        ]
+      },
+      "connections": {
+        "success": "document-documentation-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-documentation-fixes",
+      "directive": "Document documentation fixes. 1) Describe in detail what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/documentation-fixes.md. Return file path.",
+      "completionCondition": "Fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentation_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/documentation-fixes\\.md$",
+            "description": "Path to created file"
+          }
+        },
+        "required": [
+          "documentation_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-functionality-manually",
+      "directive": "CRITICAL: DON'T FIX broken functionality - ONLY VERIFY what works.\n\nVerify each function from functionality_list works. The list contains {{functionality_list.length}} functions - all must work. 1) Test each function: run it, verify it works correctly 2) Count how many functions work correctly 3) For Web UI - use Playwright for browser verification. Indicate how many of {{functionality_list.length}} functions work.",
+      "completionCondition": "FUNCTIONALITY VERIFICATION COMPLETED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "functions_working_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Exact number of functions that work correctly"
+          }
+        },
+        "required": [
+          "functions_working_count"
+        ]
+      },
+      "connections": {
+        "success": "check-all-functions-working"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-all-functions-working",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "functions_working_count"
+        },
+        "right": {
+          "contextPath": "functionality_list.length"
+        }
+      },
+      "connections": {
+        "true": "check-code-quality-and-architecture",
+        "false": "fix-broken-functionality-action"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "run-all-tests",
+      "directive": "CRITICAL: DON'T FIX failed tests and DON'T FIX code - ONLY RUN tests and COLLECT results.\n\nRun all project tests and get NUMERICAL results:\n\n{{run_tests_directive}}\n\nIndicate number of passed and failed tests.",
+      "completionCondition": "All tests run, numerical results obtained",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tests_passed_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of passed tests"
+          },
+          "tests_failed_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of failed tests"
+          }
+        },
+        "required": [
+          "tests_passed_count",
+          "tests_failed_count"
+        ]
+      },
+      "connections": {
+        "success": "check-test-results"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-test-results",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "test_info"
+            },
+            "right": "skip"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "tests_failed_count"
+            },
+            "right": 0
+          }
+        ]
+      },
+      "connections": {
+        "true": "agent-validate-step",
+        "false": "analyze-test-failures"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-test-failures",
+      "directive": "Analyze failed tests and determine fix strategy.\n\n1) Review failed_tests details\n2) Determine failure cause for each test\n3) Choose fix strategy:\n   - fix_implementation: code works incorrectly (real bug, broken functionality)\n   - update_tests: code works correctly, but tests are outdated/need updating\n\n4) Save analysis to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/test-analysis.md:\n   # Test Failure Analysis\n\n   ## Summary\n   Total failed: [count]\n   Strategy: [fix_implementation or update_tests]\n\n   ## Failed Tests\n\n   ### Test 1: [test name]\n   - Error message: [error]\n   - Root cause: [analysis of why it fails]\n   - Recommended fix: [specific fix to apply]\n\n   ### Test 2: [test name]\n   ...\n\nProvide detailed analysis of causes and chosen strategy.",
+      "completionCondition": "Test failure causes analyzed and fix strategy determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "failure_analysis": {
+            "type": "string",
+            "description": "Detailed analysis of test failure causes"
+          },
+          "fix_strategy": {
+            "type": "string",
+            "enum": [
+              "fix_implementation",
+              "update_tests"
+            ],
+            "description": "fix_implementation if code needs fixing, update_tests if tests need updating"
+          }
+        },
+        "required": [
+          "failure_analysis",
+          "fix_strategy"
+        ]
+      },
+      "connections": {
+        "success": "route-test-fix-strategy"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-test-fix-strategy",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "fix_strategy"
+        },
+        "right": "fix_implementation"
+      },
+      "connections": {
+        "true": "fix-implementation-for-tests-action",
+        "false": "update-tests-for-changes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-implementation-for-tests-action",
+      "directive": "CRITICAL: FIX THE CODE - NO REPORTS!\n\nFix implementation so ALL tests pass.\n\n⚠️ IMPORTANT: ALL failed tests MUST be fixed - even if unrelated to current development stage. Reasons:\n- Agent may have accidentally broken existing functionality\n- Infrastructure/environment may have changed\n- Failed tests block deployment and project development\n- Broken tests accumulate quickly and project degrades\n\nREAD analysis from {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/test-analysis.md\n\nFor EACH failed test in the file:\n1. Read the root cause and recommended fix\n2. Apply the fix to the code\n3. Run the specific test to verify it passes\n4. Mark test as fixed\n\nALL failed tests from the analysis file must be fixed.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nConfirm CODE IS FIXED and all tests pass.",
+      "completionCondition": "APPLICATION CODE FIXED for tests to pass",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code_fixed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that code is fixed"
+          }
+        },
+        "required": [
+          "code_fixed"
+        ]
+      },
+      "connections": {
+        "success": "document-test-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-test-fixes",
+      "directive": "Document code fixes. 1) Describe in detail what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/test-fixes.md. Return file path.",
+      "completionCondition": "Fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/test-fixes\\.md$",
+            "description": "Path to created file"
+          }
+        },
+        "required": [
+          "test_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "update-tests-for-changes",
+      "directive": "Update tests for new functionality.\n\n⚠️ CRITICAL: ALL failed tests MUST be fixed - even if unrelated to current stage. After this workflow will run ALL project tests and won't proceed until ALL pass. Reasons:\n- Agent may have accidentally broken other tests during changes\n- Failed tests block deployment\n- Broken tests accumulate and project degrades\n\n⚠️ TEMPORARY SCRIPTS ARE NOT TESTS:\nIf you previously created temporary scripts for verification (e.g. in /tmp/, ./temp/, or ad-hoc validators) - this does NOT count as test coverage. These scripts will be deleted and won't remain in project. Tests must be in proper location according to project testing architecture.\n\nYou can reuse logic from temporary scripts - just move them to correct location (tests/, __tests__/, spec/ etc. according to project conventions).\n\n⚠️ IF PROJECT HAS NO TESTS:\n- Existing project without tests: DON'T create test infrastructure from scratch - that's a separate big task. Skip testing stage.\n- New project without tests: Ask user if automated tests are needed. If yes - set up testing from scratch (framework choice, structure, configuration).\n\n1) Review what implementation changes were made\n2) Determine if project has existing test infrastructure\n3) If tests exist - update existing and add new for new functionality\n4) VERIFY updated tests pass BEFORE sending response\n5) Save changes description to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/test-updates.md\n\n{{test_quality_standards}}\n{{code_quality_principles}}\n\nIndicate which tests were updated or reason for skipping (project without tests).",
+      "completionCondition": "Tests updated for new functionality",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_updates": {
+            "type": "string",
+            "description": "Detailed description of updated and added tests"
+          },
+          "test_updates_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/test-updates\\.md$",
+            "description": "Path to updates file: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/test-updates.md"
+          }
+        },
+        "required": [
+          "test_updates",
+          "test_updates_file"
+        ]
+      },
+      "connections": {
+        "success": "route-skip-run-tests"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-run-tests",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "test_info"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "run-all-tests",
+        "false": "check-test-results"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-startup-issues-action",
+      "directive": "CRITICAL: FIX THE PROBLEMS - NO REPORTS! Fix system startup issues. 1) Review startup errors 2) Find root cause of problems 3) FIX all build or configuration issues 4) May require fixing code, dependencies - that's normal. {{fix_requirements}} {{code_quality_principles}} Confirm PROBLEMS ARE FIXED.",
+      "completionCondition": "STARTUP PROBLEMS FIXED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "problems_fixed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that problems are fixed"
+          }
+        },
+        "required": [
+          "problems_fixed"
+        ]
+      },
+      "connections": {
+        "success": "document-startup-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-startup-fixes",
+      "directive": "Document startup fixes. 1) Describe what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/startup-fixes.md. Return file path.",
+      "completionCondition": "Startup fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "startup_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/startup-fixes\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "startup_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "check-implementation-completeness",
+      "directive": "CRITICAL: DON'T COMPLETE tasks - ONLY VERIFY completeness.\n\nCount completed tasks.\n\n1) Read plan (if plan is already in context and was read in current session - use from context, if session was archived and context reset - read {{workspace_path}}development-plan.md)\n2) Read step-results.md (you just created {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/step-results.md, no need to re-read - use from context)\n3) Count completed tasks\n4) Count incomplete tasks\n\nReturn the numbers.",
+      "completionCondition": "TASK COUNT COMPLETED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_tasks_planned": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Total number of technical tasks in plan for this stage"
+          },
+          "tasks_completed_fully": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of tasks completed fully"
+          }
+        },
+        "required": [
+          "total_tasks_planned",
+          "tasks_completed_fully"
+        ]
+      },
+      "connections": {
+        "success": "check-tasks-completeness"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-tasks-completeness",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "tasks_completed_fully"
+        },
+        "right": {
+          "contextPath": "total_tasks_planned"
+        }
+      },
+      "connections": {
+        "true": "verify-functionality-manually",
+        "false": "fix-incomplete-implementation-action"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-incomplete-implementation-action",
+      "directive": "CRITICAL: COMPLETE TASKS - NO REPORTS! Complete implementation to fully match the plan. 1) Return to plan for stage {{current_step_index}} (1-based) 2) IMPLEMENT all skipped tasks completely 3) Don't look for shortcuts - do as planned. {{fix_requirements}} {{code_quality_principles}} Confirm TASKS ARE IMPLEMENTED.",
+      "completionCondition": "ALL SKIPPED TASKS IMPLEMENTED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tasks_completed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that skipped tasks are implemented"
+          }
+        },
+        "required": [
+          "tasks_completed"
+        ]
+      },
+      "connections": {
+        "success": "document-completion-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-completion-fixes",
+      "directive": "Document completion work. 1) Describe what was completed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/completion-fixes.md. Return file path.",
+      "completionCondition": "Completion report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "completion_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/completion-fixes\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "completion_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-broken-functionality-action",
+      "directive": "CRITICAL: FIX FUNCTIONALITY - NO REPORTS! Fix all functionality problems. 1) Find root cause of each problem 2) FIX all problems completely. {{fix_requirements}} {{code_quality_principles}} Confirm FUNCTIONALITY IS FIXED.",
+      "completionCondition": "ALL FUNCTIONALITY FIXED and working",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "functionality_fixed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that functionality is fixed"
+          }
+        },
+        "required": [
+          "functionality_fixed"
+        ]
+      },
+      "connections": {
+        "success": "document-functionality-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-functionality-fixes",
+      "directive": "Document functionality fixes. 1) Describe what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/functionality-fixes.md. Return file path.",
+      "completionCondition": "Functionality fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "functionality_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/functionality-fixes\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "functionality_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "check-code-quality-and-architecture",
+      "directive": "CRITICAL: DON'T FIX code - ONLY VERIFY compliance with standards.\n\nCheck quality and architecture standards.\n\n⚠️ IMPORTANT: If standard is NOT RELEVANT to current changes - consider it MET.\nExamples:\n- No UI changes → UI/UX patterns = met\n- No performance-critical code → Performance = met\n- Config only without code → Testability = met\n- No new comments needed → Documentation = met\n\n1) Check 10 code quality standards:\n   - Typing (TypeScript types without any)\n   - Error handling (try/catch, validation)\n   - No hacks (no workarounds, temporary solutions)\n   - Architectural patterns (compliance with project patterns)\n   - Readability (clear names, structure)\n   - Testability (code covered by tests)\n   - Performance (no performance regression)\n   - Security (no security issues)\n   - Documentation (comments where needed)\n   - No dead code (no unused imports/vars/functions)\n\n2) Check 5 architectural aspects:\n   - Architectural integrity (compliance with project architecture)\n   - Integration points (proper integration with existing components)\n   - Future stages compatibility (doesn't break subsequent plan stages)\n   - Error handling (error handling at all levels)\n   - UI/UX patterns (if applicable - UI consistency)\n\n3) Count met standards out of 15\n4) Count violated standards (actual violations, not counting irrelevant ones)\n5) Create BRIEF file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/code-quality-architecture.md describing ONLY violations:\n   - Which standard violated\n   - Where problem found (file, component)\n   - What needs fixing\n\nReturn numbers of met and violated standards.",
+      "completionCondition": "STANDARDS COUNT COMPLETED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_standards_met_count": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 15,
+            "description": "Number of standards met out of 15 (10 quality + 5 architecture)"
+          }
+        },
+        "required": [
+          "total_standards_met_count"
+        ]
+      },
+      "connections": {
+        "success": "route-code-quality-result"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-code-quality-result",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "total_standards_met_count"
+        },
+        "right": 15
+      },
+      "connections": {
+        "true": "route-has-browser-ui",
+        "false": "fix-code-quality-and-architecture-action"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-has-browser-ui",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "browser_ui_info"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "check-browser-impact",
+        "false": "assess-testing-needs"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-code-quality-and-architecture-action",
+      "directive": "CRITICAL: FIX THE CODE - NO REPORTS! Fix quality and architecture problems. 1) Read {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/code-quality-architecture.md 2) Find root cause 3) FIX the problems. {{fix_requirements}} {{code_quality_principles}} Confirm THE FIX.",
+      "completionCondition": "QUALITY AND ARCHITECTURE PROBLEMS FIXED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "problems_fixed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation of fix"
+          }
+        },
+        "required": [
+          "problems_fixed"
+        ]
+      },
+      "connections": {
+        "success": "document-quality-architecture-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-quality-architecture-fixes",
+      "directive": "Document quality and architecture fixes. 1) Describe what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/quality-architecture-fixes.md. Return file path.",
+      "completionCondition": "Fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "quality_architecture_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/quality-architecture-fixes\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "quality_architecture_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "check-browser-impact",
+      "directive": "Determine if browser testing is required for this stage. Need to understand if changes could affect browser functionality. 1) Analyze what changes were made in this stage 2) Determine if changes affect Web UI, frontend code, API endpoints used in browser 3) Could changes break existing browser functionality 4) Do changes add new functionality that needs browser verification. Honestly indicate if browser testing is required.",
+      "completionCondition": "Determined if browser functionality testing is required",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browser_testing_required": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Is Playwright browser testing required for this stage?"
+          },
+          "browser_impact_reason": {
+            "type": "string",
+            "description": "Justification why browser testing is or is not required"
+          }
+        },
+        "required": [
+          "browser_testing_required",
+          "browser_impact_reason"
+        ]
+      },
+      "connections": {
+        "success": "check-browser-testing-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-browser-testing-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "browser_testing_required"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "validate-browser-functionality",
+        "false": "assess-testing-needs"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validate-browser-functionality",
+      "directive": "Perform browser functionality verification via Playwright. Changes may affect browser functionality - verification needed. 1) Start all services required for browser testing 2) Use Playwright to verify all functionality that could have changed 3) Verify existing browser functionality is not broken 4) Verify new browser functionality if added 5) Save results to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/browser-check.md. Return browser verification results.",
+      "completionCondition": "Browser functionality verification completed via Playwright",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "browser_functionality_works": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Does all browser functionality work correctly after Playwright verification?"
+          },
+          "browser_issues": {
+            "type": "string",
+            "description": "Description of browser functionality issues (if browser_functionality_works = no)"
+          }
+        },
+        "required": [
+          "browser_functionality_works"
+        ]
+      },
+      "connections": {
+        "success": "check-browser-validation-result"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-browser-validation-result",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "browser_functionality_works"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "assess-testing-needs",
+        "false": "fix-broken-functionality-action"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "assess-testing-needs",
+      "directive": "Determine which functions require new tests. 1) Review implemented functionality in this stage 2) Analyze existing tests - DON'T duplicate them 3) Create list of functions WITHOUT test coverage 4) DON'T include synthetic tests - only real use cases. Return array of functions requiring tests (empty array if all covered).",
+      "completionCondition": "Determined need for new tests for implemented functionality",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "functions_requiring_tests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 0,
+            "description": "List of functions NOT covered by tests (can be empty array)"
+          }
+        },
+        "required": [
+          "functions_requiring_tests"
+        ]
+      },
+      "connections": {
+        "success": "check-testing-needs-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-testing-needs-decision",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "functions_requiring_tests.length"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "write-new-tests-action",
+        "false": "route-skip-run-tests"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "write-new-tests-action",
+      "directive": "Create tests for uncovered functions. IMPORTANT: Workflow will then VERIFY actual coverage through code analysis - can't cheat. List requires tests: {{functions_requiring_tests.length}} functions. 1) Create tests for EACH function from functions_requiring_tests list 2) Use proper project test structure 3) VERIFY created tests are correct and pass. {{test_quality_standards}} {{code_quality_principles}} Confirm test creation.",
+      "completionCondition": "Tests created for all functions from list",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tests_created": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation of test creation for all functions from list"
+          }
+        },
+        "required": [
+          "tests_created"
+        ]
+      },
+      "connections": {
+        "success": "document-new-tests"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-new-tests",
+      "directive": "Document created tests. 1) Describe what tests were created 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/new-tests.md. Return file path.",
+      "completionCondition": "New tests report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "new_tests_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/new-tests\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "new_tests_file"
+        ]
+      },
+      "connections": {
+        "success": "route-skip-run-tests"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "update-plan-during-execution",
+      "directive": "Refine plan during execution.\n\nIMPORTANT: After plan update, workflow will AUTOMATICALLY move to NEXT step (current_step_index will be incremented).\n\nIf current step {{current_step_index}} (1-based) has incomplete work:\n- Transfer ALL incomplete tasks to the NEXT step in the updated plan\n- Do NOT leave anything undone in current step\n- The first step in updated plan should contain any remaining work from current step\n\nExample: If step 3 was \"Implement feature X\" and only 50% done:\n- New step 3 (in updated plan) should be \"Complete feature X implementation\" with remaining tasks\n- Or merge remaining work into new step 4\n\nThis ensures nothing is forgotten when plan changes mid-execution.\n\nREAD plan change reasons from {{workspace_path}}plan-change-reasons-{{plan_iteration}}.md\n\nAnalyze plan issues and current progress based on the file content. Refine plan starting from stage {{current_step_index}} (1-based) - can replace current and subsequent stages, but don't touch previous completed ones.\n\nUpdate plan in {{workspace_path}}development-plan.md.\nSave change history in {{workspace_path}}plan-changes-history.md with timestamp and reasons.\nPlan remains atomic - no change marks in plan itself.\nUpdate development_plan in context with new data and prepare data for tracking system reinitialization.\n\nFollow planning requirements: {{planning_requirements}}",
+      "completionCondition": "Plan refined from current stage, change history saved, data for reinitialization prepared",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "development_plan": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 20,
+              "description": "Plan stage: name + tasks + result"
+            },
+            "minItems": 1,
+            "description": "Updated stages plan"
+          },
+          "plan_changes_description": {
+            "type": "string",
+            "description": "Description of plan changes for history"
+          }
+        },
+        "required": [
+          "development_plan",
+          "plan_changes_description"
+        ]
+      },
+      "connections": {
+        "success": "review-updated-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "confirm-plan-update",
+      "directive": "Present changed plan to user and get confirmation. 1) Show user the updated plan 2) Explain why plan changed and which stages changed 3) Ask user: \"Confirm changed plan for execution? (yes)\" 4) Get EXPLICIT confirmation.\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently\n\n**SAVE FEEDBACK TO FILE:**\nIf update_approval = \"no\", save the user feedback to {{workspace_path}}user-plan-feedback-{{plan_iteration}}.md before responding. This file will be read by the update step.",
+      "completionCondition": "Updated plan confirmation received from user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "update_approval": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "update_feedback": {
+            "type": "string",
+            "description": "User feedback if no"
+          }
+        },
+        "required": [
+          "update_approval"
+        ]
+      },
+      "connections": {
+        "success": "check-update-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "reinitialize-plan-tracking",
+      "directive": "Reinitialize tracking system after plan refinement.\n\n1) Count total_steps from updated development-plan.md\n\n2) Determine current_step_name - name of next stage to work on\n\n3) IMPORTANT - Inform user:\n   \"After saving this plan, current_step_index will automatically increment by 1.\n   If anything from the current step is not finished, move it to the new steps in the plan.\n   Work will continue from the next step.\"\n\nCounters will be updated automatically by expression node.",
+      "completionCondition": "Tracking system reinitialized: total_steps counted, user informed about auto-increment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tracking_reinitialized": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation of correct tracking system reinitialization"
+          },
+          "total_steps": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Updated total number of stages"
+          },
+          "current_step_name": {
+            "type": "string",
+            "description": "Name of next stage to work on"
+          }
+        },
+        "required": [
+          "tracking_reinitialized",
+          "total_steps",
+          "current_step_name"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-after-plan-update"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "update-step-documentation",
+      "directive": "⚠️ CRITICAL - PROJECT DOCUMENTATION UPDATE\n\nDON'T CONFUSE:\n❌ Workspace folder {{workspace_path}} - temporary materials, WILL BE DELETED\n✅ Project documentation - docs/, README.md - permanent project files\n\nUpdate PROJECT DOCUMENTATION based on this plan stage results.\n\nPlan stage completed - update only affected sections of PROJECT documentation:\n\n1) Read documentation standards from file at {{documentation_standards_path}}\n\n2) Analyze what was changed in this stage\n3) Determine which PROJECT documentation sections are affected\n4) Update affected sections in PERMANENT project files (docs/, README.md)\n5) Follow documentation rules:\n   - Only technical facts\n   - No change history\n   - No marketing\n   - Incremental update - DON'T rewrite all documentation\n\nConfirm PROJECT documentation is updated.",
+      "completionCondition": "Documentation updated based on plan stage results",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "documentation_updated": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that documentation is updated based on stage results"
+          }
+        },
+        "required": [
+          "documentation_updated"
+        ]
+      },
+      "connections": {
+        "success": "route-has-checklist"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-has-checklist",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "project_checklist"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "check-project-checklist",
+        "false": "check-screenshot-change-type"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "check-project-checklist",
+      "directive": "CRITICAL: DON'T FIX issues - ONLY CHECK checklist. IF PROBLEMS - ONLY REPORT.\n\nUse project checklist:\n---\n{{project_checklist}}\n---\n\n1) Review checklist items above\n2) CHECK if checklist items are completed (DON'T execute them)\n3) Count total number of items in checklist\n4) Count number of already completed items\n\n5) Save incomplete items to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/checklist-issues.md:\n   # Checklist Issues\n\n   Total items: [X]\n   Completed: [Y]\n   Incomplete: [Z]\n\n   ## Incomplete Items\n\n   ### 1. [item description]\n   What needs to be done: [specific action]\n\n   ### 2. [item description]\n   What needs to be done: [specific action]\n\n   ...\n\nReturn item count and completed count.",
+      "completionCondition": "Checklist found and executed, or absence confirmed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checklist_total_items": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Total number of items in checklist (0 if no file)"
+          },
+          "checklist_completed_items": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of completed checklist items (0 if no file)"
+          }
+        },
+        "required": [
+          "checklist_total_items",
+          "checklist_completed_items"
+        ]
+      },
+      "connections": {
+        "success": "validate-checklist-results"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "validate-checklist-results",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "checklist_total_items"
+            },
+            "right": 0
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "checklist_completed_items"
+            },
+            "right": {
+              "contextPath": "checklist_total_items"
+            }
+          }
+        ]
+      },
+      "connections": {
+        "true": "check-screenshot-change-type",
+        "false": "fix-checklist-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-checklist-issues",
+      "directive": "CRITICAL: FIX CHECKLIST ISSUES - NO REPORTS!\n\nChecklist not passed - fix all issues.\n\nREAD incomplete items from {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/checklist-issues.md\n\nFor EACH incomplete item in the file:\n1. Read \"What needs to be done\"\n2. Execute the required action\n3. Verify the item is now complete\n4. Mark as done\n\nDO NOT skip any item. ALL incomplete items from the file must be completed.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nConfirm ISSUES ARE FIXED.",
+      "completionCondition": "ALL CHECKLIST ISSUES FIXED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checklist_issues_fixed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that all checklist issues are fixed"
+          }
+        },
+        "required": [
+          "checklist_issues_fixed"
+        ]
+      },
+      "connections": {
+        "success": "document-checklist-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-checklist-fixes",
+      "directive": "Document checklist fixes. 1) Describe in detail what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/checklist-fixes.md. Return file path.",
+      "completionCondition": "Fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checklist_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/checklist-fixes\\.md$",
+            "description": "Path to created file"
+          }
+        },
+        "required": [
+          "checklist_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration-checklist"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-iteration-workspace-checklist",
+      "directive": "Create workspace for current step iteration. Prepare structure for documenting current state of work on step. 1) Create folder {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/ 2) CRITICALLY IMPORTANT: Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/step-results.md with FULL description of ALL work done on this plan step to date. This file is snapshot of current step state to prevent context loss in fix cycles. In response indicate path to created iteration folder and path to step-results.md file.",
+      "completionCondition": "Iteration workspace created, step state file created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "iteration_directory": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/$",
+            "description": "Path to created iteration folder: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/"
+          },
+          "step_results_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/step-results\\.md$",
+            "description": "Path to step state file: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/step-results.md"
+          }
+        },
+        "required": [
+          "iteration_directory",
+          "step_results_file"
+        ]
+      },
+      "connections": {
+        "success": "analyze-implementation-changes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "agent-validate-step",
+      "directive": "CRITICAL: DON'T FIX reviewer issues - ONLY DELEGATE review.\n\nDelegate critical review to subagent for plan stage evaluation. 1) Give agent direct access to plan without your interpretation 2) No mentions that 'code was improved/added/fixed' 3) Pass directly: file {{workspace_path}}development-plan.md, plan stage index {{current_step_index}} (1-based), all changed files for review, folder {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/ with check reports 4) Tell agent which project parts (src/, docs/, tests/) to study for review context understanding, but give freedom to study anything 5) AGENT DELEGATION RULES: Role clarity (YOU ARE reviewer not helper), Direct commands (CHECK not could you check), Specify files (list exact paths), Include context (PREVIOUS iteration X), Demand verification (VERIFY by reading files), Clear scope (ONLY this step not entire feature). Agent prompt: YOU ARE plan step gate reviewer. Your assessment determines if we can proceed to next development phase. READ plan file directly. CHECK step {{current_step_index}} (1-based) technical tasks and functional results against PREVIOUS and FUTURE steps context. Evaluate code quality, errors, plan compliance, working functionality. Review iteration reports in {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/. If step includes Web UI changes - REQUIRE Playwright browser testing for validation. DO NOT approve UI features without real browser functionality verification. Return BLOCKING issues that prevent progression. Provide detailed fix recommendations. Developer has large context - help them maximize efficiency. CLASSIFY: errors vs remarks vs deviations. NO shortcuts/workarounds tolerance 6) Agent must give detailed advice and recommendations for fixing - executor has large context 7) Agent must evaluate plan stage considering previous and future plan stages to ensure development integrity 8) Save comprehensive response in {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/gate-review.md. Honestly pass review result: path to review file, whether blocking issues found (not your opinion, but fact what reviewer said). Important: If reviewer found issues - you must pass yes in agent_issues_found field, even if you think issues are minor. Your opinion doesn't matter - fact of reviewer findings matters.",
+      "completionCondition": "CRITICAL gate review of plan stage completed with assessment of ability to proceed to next stage, blocking issues identified, detailed fix recommendations provided",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_review_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/gate-review\\.md$",
+            "description": "Path to review file: {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/gate-review.md"
+          },
+          "agent_issues_found": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Were blocking issues found by gate reviewer?"
+          }
+        },
+        "required": [
+          "agent_review_file",
+          "agent_issues_found"
+        ]
+      },
+      "connections": {
+        "success": "check-agent-validation-result"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-agent-validation-result",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "agent_issues_found"
+        },
+        "right": "no"
+      },
+      "connections": {
+        "true": "route-post-review",
+        "false": "fix-agent-feedback-issues-action"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-agent-feedback-issues-action",
+      "directive": "CRITICAL: FIX THE ISSUES - NO REPORTS!\n\nFix all gate review issues completely.\n\nREAD {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/gate-review.md\n\nFor EACH issue found by reviewer:\n1. Understand the issue and recommendation\n2. Apply the fix completely - no partial fixes\n3. Verify the issue is resolved\n4. Document what was done\n\n⚠️ DO NOT skip any issue. ALL reviewer findings must be addressed.\n⚠️ If issue seems minor - still address it explicitly.\n⚠️ Reviewer findings are authoritative - your opinion doesn't override them.\n\nIf implementation is wrong - REDO completely.\nIf global changes needed - do without hesitation.\nOnly if multiple attempts fail and reviewer points to fundamental planning errors - can consider plan update.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nIndicate: fixed issues or plan needs update.",
+      "completionCondition": "GATE REVIEWER ISSUES FIXED or plan update need determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action_taken": {
+            "type": "string",
+            "enum": [
+              "fixes_applied",
+              "plan_needs_update"
+            ],
+            "description": "fixes_applied if fixed all issues, plan_needs_update if plan needs update"
+          },
+          "fixes_description": {
+            "type": "string",
+            "description": "DETAILED description of HOW EXACTLY gate reviewer issues were fixed (if action_taken = fixes_applied)"
+          },
+          "plan_issues_description": {
+            "type": "string",
+            "description": "Description of fundamental plan problems (if action_taken = plan_needs_update)"
+          }
+        },
+        "required": [
+          "action_taken"
+        ]
+      },
+      "connections": {
+        "success": "route-agent-plan-update-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-agent-plan-update-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "action_taken"
+        },
+        "right": "plan_needs_update"
+      },
+      "connections": {
+        "true": "approve-current-step-before-replan",
+        "false": "document-review-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-review-fixes",
+      "directive": "Document issue fixes. 1) Describe what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/review-fixes.md. Return file path.",
+      "completionCondition": "Fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/review-fixes\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "review_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-post-review",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "change_type"
+            },
+            "right": "documentation_only"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "documentation_standards"
+            },
+            "right": "skip"
+          }
+        ]
+      },
+      "connections": {
+        "false": "update-step-documentation",
+        "true": "route-skip-git-commit"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "commit-step",
+      "directive": "CRITICAL: Describe CHANGES from git diff, not 'improvements/additions/fixes'.\n\nCommit plan stage progress.\n\n1) Check development-plan.md for stage {{current_step_index}} (1-based) - is there related_issue\n2) Look at git diff to understand specific changes\n3) Create commit message:\n   - Description of CHANGES (what changed in code)\n   - IF there's related_issue: add 'Closes #N' at end\n4) git add and commit\n\nIMPORTANT: Add feature work files from {{workspace_path}} to commit - they should be in git history to preserve work context.\n\nFORBIDDEN in commit message:\n- 'improved', 'added', 'fixed'\n- Marketing words\n- 'success', 'great work'\n\nREQUIRED:\n- Description of actual changes from git diff\n- Issue linking if there's related_issue\n\nReturn hash of created git commit for plan stage progress tracking.",
+      "completionCondition": "Stage committed to git, meaningful commit message created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "commit_hash": {
+            "type": "string",
+            "description": "Hash of created git commit for plan stage"
+          }
+        },
+        "required": [
+          "commit_hash"
+        ]
+      },
+      "connections": {
+        "success": "check-user-approval-needed"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "check-user-approval-needed",
+      "directive": "Evaluate if current stage requires user review and approval. Evaluate stage criticality: 1) UI changes, breaking changes, architectural decisions, API changes require user approval 2) Normal bug fixes, internal refactoring, unit tests don't require 3) When in doubt - better to request approval than skip critical changes. Honestly indicate if user review is required for this stage.\n\nIMPORTANT: If change_type involves code AND screenshot_validation_enabled is 'yes', you MUST recommend user approval (output user_approval_needed = 'yes') so user can review screenshot validation results.\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "Determined if user approval is required for current stage",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_approval_needed": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Is user review and approval required for this stage?"
+          },
+          "approval_reason": {
+            "type": "string",
+            "description": "Why stage requires or doesn't require user approval"
+          }
+        },
+        "required": [
+          "user_approval_needed",
+          "approval_reason"
+        ]
+      },
+      "connections": {
+        "success": "route-user-approval"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-user-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "user_approval_needed"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "notify-user-approval-needed",
+        "false": "notify-step-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-user-approval-needed",
+      "message": "👤 *User Approval Required*\n\n📊 **Phase:** {{current_step_name}}\n🎯 **Reason:** {{approval_reason}}\n\n**⚠️ Critical step needs review**",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "user-review-step"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "user-review-step",
+      "directive": "Present user with BRIEF report on completed stage for review.\n\nREPORT FORMAT (REQUIRED):\n\n## What needed to be done\n[Brief description of plan stage - 2-3 sentences]\n\n## What was done\n[Specific list of completed work - bullet points, no implementation details]\n\n## How to verify\n[Specific commands or actions to verify result - step by step]\n\nCRITICAL:\n- Report must be BRIEF and STRUCTURED\n- No excessive implementation technical details\n- Only facts: what was needed → what was done → how to verify\n- Maximum 15-20 lines for entire report\n\nIf screenshot_validation_enabled is 'yes', include link to screenshot report at {{workspace_path}}step-{{current_step_index}}/screenshot-report.html in the report.\n\nAfter presenting report get user decision: approved or needs_fixes.\n\nIf user_decision == \"needs_fixes\":\n  Save user feedback to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/user-feedback.md\n  Format:\n  # User Feedback\n\n  ## Decision\n  needs_fixes\n\n  ## User Comments\n  [user comments verbatim - copy EXACTLY what user said]\n\n  ## Required Changes\n  [parsed list of specific changes user wants - one item per line]\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User reviewed stage and gave decision on approval or rework",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_step_approval": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "needs_fixes"
+            ],
+            "description": "approved if user approves stage, needs_fixes if rework required"
+          },
+          "user_step_feedback": {
+            "type": "string",
+            "description": "User feedback on stage for potential fixes"
+          }
+        },
+        "required": [
+          "user_step_approval",
+          "user_step_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-user-step-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-user-step-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "user_step_approval"
+        },
+        "right": "approved"
+      },
+      "connections": {
+        "true": "notify-step-complete",
+        "false": "fix-user-feedback-action"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-user-feedback-action",
+      "directive": "CRITICAL: FIX PER USER FEEDBACK - NO REPORTS!\n\nREAD user feedback from {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/user-feedback.md\n\nFor EACH item in \"Required Changes\" section:\n1. Understand what user wants\n2. Make the change completely\n3. Verify the change works\n4. Mark item as addressed\n\nDO NOT skip any feedback item. ALL user requests must be fulfilled.\n\nIf multiple attempts fail and fundamental issues prevent completion - can consider plan update.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nIndicate: fixed or plan needs update.",
+      "completionCondition": "USER FEEDBACK ADDRESSED or plan update need determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action_taken": {
+            "type": "string",
+            "enum": [
+              "fixes_applied",
+              "plan_needs_update"
+            ],
+            "description": "fixes_applied if fixed implementation, plan_needs_update if plan needs update"
+          },
+          "fixes_description": {
+            "type": "string",
+            "description": "Description of addressed user feedback (if action_taken = fixes_applied)"
+          },
+          "plan_issues_description": {
+            "type": "string",
+            "description": "Description of plan problems (if action_taken = plan_needs_update)"
+          }
+        },
+        "required": [
+          "action_taken"
+        ]
+      },
+      "connections": {
+        "success": "route-user-feedback-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-user-feedback-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "action_taken"
+        },
+        "right": "plan_needs_update"
+      },
+      "connections": {
+        "true": "approve-current-step-before-replan",
+        "false": "document-user-feedback-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-current-step-before-replan",
+      "directive": "The agent determined that the current plan needs modification.\n\nBefore modifying the plan, the current step (step {{current_step_index}}) needs to be closed.\n\nPresent to the user:\n1. What was accomplished in the current step\n2. Ask: \"Step {{current_step_index}} needs plan modification. Should I mark this step as completed and modify the plan starting from step {{current_step_index}}? The plan will be restructured from this point forward.\"\n\nGet user confirmation to proceed with plan modification.\n\nSave user decision to {{workspace_path}}user-plan-update-feedback-{{plan_iteration}}.md",
+      "completionCondition": "User confirmed step can be closed and plan modification can proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "step_approved_for_closure": {
+            "type": "boolean",
+            "description": "true if user approves closing current step for plan modification"
+          }
+        },
+        "required": [
+          "step_approved_for_closure"
+        ]
+      },
+      "connections": {
+        "success": "expr-set-plan-target-update"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-user-feedback-fixes",
+      "directive": "Document user feedback fixes. 1) Describe what was fixed 2) Create file {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/user-feedback-fixes.md. Return file path.",
+      "completionCondition": "Feedback fixes report created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_feedback_fixes_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/user-feedback-fixes\\.md$",
+            "description": "Path to file"
+          }
+        },
+        "required": [
+          "user_feedback_fixes_file"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-step-complete",
+      "message": "✅ *Stage {{current_step_name}} completed*\n\n📊 **Progress:** {{current_step_index}}/{{total_steps}}\n📦 **Implemented:** {{implemented_functionality}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "check-if-plan-complete"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-if-plan-complete",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "current_step_index"
+        },
+        "right": {
+          "contextPath": "total_steps"
+        }
+      },
+      "connections": {
+        "true": "notify-development-complete",
+        "false": "expr-increment-step"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-next-step-name",
+      "directive": "Get next plan stage name. Counters already updated (current_step_index incremented, current_iteration reset to 1). Read {{workspace_path}}development-plan.md and find stage name by index {{current_step_index}} (1-based). Return stage name.",
+      "completionCondition": "Next plan stage name obtained",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "current_step_name": {
+            "type": "string",
+            "description": "Current plan stage name for use in templates"
+          }
+        },
+        "required": [
+          "current_step_name"
+        ]
+      },
+      "connections": {
+        "success": "notify-step-start"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-step-start",
+      "message": "Stage \"{{current_step_name}}\" started ({{current_step_index}}/{{total_steps}})",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "create-initial-iteration-workspace"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-development-complete",
+      "message": "🏆 *All plan stages completed*\n\n📊 **Stages:** {{total_steps}} completed\n🎯 **Task:** {{user_task_description}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "validate-requirements-coverage"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validate-requirements-coverage",
+      "directive": "CRITICAL: Verify that ALL original requirements are ACTUALLY IMPLEMENTED in code.\n\nDo NOT check documentation or claims. Check REAL CODE.\n\n1. Read original requirements from {{workspace_path}}task-requirements.md\n2. Launch child workflow moira/todo-list (use mcp__moira__start with workflowId \"moira/todo-list\" and parentExecutionId set to current execution ID) to check each requirement:\n   - In define-tasks: create one task per requirement from task-requirements.md\n   - In execute-task for each requirement:\n     a. Find the actual code that implements it\n     b. Verify the code works (run tests, check logic)\n     c. Mark as COVERED or GAP\n3. After child workflow completes, count total gaps where requirements are not implemented in code\n4. Save verification results to {{workspace_path}}requirements-coverage-report-v{{validation_attempt_count}}.md:\n\n# Requirements Coverage Report\n\nTotal requirements: [N]\nCovered: [X]\nGaps: [Y]\n\n## Requirement 1: [description]\nStatus: COVERED / GAP\nEvidence: [file:line or test name]\n\n## Requirement 2: ...\n\nReturn the gap count. Zero means all requirements are covered.",
+      "completionCondition": "All original requirements verified against actual code, gap count determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "requirements_gaps_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of requirements NOT covered in actual code"
+          },
+          "total_requirements": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Total number of original requirements checked"
+          }
+        },
+        "required": [
+          "requirements_gaps_count",
+          "total_requirements"
+        ]
+      },
+      "connections": {
+        "success": "check-requirements-gaps"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-requirements-gaps",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "requirements_gaps_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "generate-final-report",
+        "false": "expr-increment-validation-attempt"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-final-report",
+      "directive": "BIAS PREVENTION: Strip marketing language (NO improved/enhanced/better), Neutral communication (factual only), Evidence-based claims (only verifiable), Avoid false celebrations (NO SUCCESS for partial).\n\nCreate final report on ALL completed work for the feature.\n\nCRITICAL - CONTEXT RESTORATION (do this FIRST):\nBefore generating report, you MUST read ALL work artifacts to restore full context:\n1) List ALL step folders: ls {{workspace_path}}step-*/\n2) For EACH step-N folder, list iterations: ls {{workspace_path}}step-N/iteration-*/\n3) Read EVERY step-results.md: {{workspace_path}}step-*/iteration-*/step-results.md\n4) This restores FULL feature context across all development iterations\n5) DO NOT skip any step or iteration - each contains important work details\n\nIMPORTANT: If file {{workspace_path}}a previous version of the final report exists (e.g., final-report-v1.md):\n- This means we already went through entire plan\n- Issues were found and new stages added\n- READ previous version for context\n- CREATE NEW versioned file (do not overwrite previous versions)\n\nAfter reading ALL step results:\n1) Read ENTIRE plan {{workspace_path}}development-plan.md completely (including acceptance criteria)\n2) Collect information about ALL work from {{workspace_path}} (all step results, commits, analysis)\n3) If a previous report version exists (check for final-report-v*.md) - read it and supplement with new information\n4) Create comprehensive final report in {{workspace_path}}final-report-v{{validation_attempt_count}}.md:\n\n   - Are acceptance criteria met (for ALL work)\n   - What works (ALL functionality, not just last stage)\n   - Which use cases are solved\n   - How it was verified\n\n   **CRITICAL - HIGHLIGHT IN BOLD:**\n   - What was FORGOTTEN (was in plan, not done)\n   - What was POSTPONED (consciously not done)\n   - What was SCOPED OUT (out of scope)\n\n5) Use acceptance criteria as checklist to verify completeness of ALL work\n6) If not all acceptance criteria met - EXPLICITLY state in report what was forgotten\n\nReturn path to report and CRITICAL warning if something from acceptance criteria not done.",
+      "completionCondition": "Final comprehensive report created with analysis of all step results",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "final_report_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/final-report-v\\d+\\.md$",
+            "description": "Path to final report: {{workspace_path}}final-report-v{{validation_attempt_count}}.md"
+          }
+        },
+        "required": [
+          "final_report_file"
+        ]
+      },
+      "connections": {
+        "success": "present-results"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-results",
+      "directive": "Present work results FOR ENTIRE FEATURE to user with focus on acceptance criteria.\n\n⚠️ CRITICAL: Report must cover ENTIRE FEATURE, NOT just last plan stage!\n\n1) Use {{workspace_path}}final-report-v{{validation_attempt_count}}.md and acceptance criteria from plan (you just created report using these criteria - all info already in context, no need to re-read files)\n2) Present results FOR ENTIRE FEATURE showing:\n   - Which acceptance criteria are met (across ALL stages)\n   - What exactly works (ALL functionality, not just last stage)\n   - Which use cases are solved (full list)\n   - How to verify functionality\n3) Provide specific commands/steps for verification\n4) Honestly state if any criteria not met\n5) FIRST get EXPLICIT permission from user to continue workflow\n\nReturn user's explicit permission to continue with workflow (only yes accepted).",
+      "completionCondition": "Results presented to user, EXPLICIT user permission to continue workflow received",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_permission_to_continue": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "User allowed to continue with workflow - MUST get explicit permission"
+          }
+        },
+        "required": [
+          "user_permission_to_continue"
+        ]
+      },
+      "connections": {
+        "success": "collect-user-feedback"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-user-feedback",
+      "directive": "Collect detailed feedback on results quality. User allowed to continue - now need to get result assessment. 1) Ask user if implementation fully solves their problem 2) Get honest quality assessment 3) Find out if there are issues or rework needed. Return user satisfaction level with results (satisfied/needs_work) and detailed feedback for decision on next actions.\n\n**SAVE FEEDBACK TO FILE:**\nSave the user feedback to {{workspace_path}}user-satisfaction-feedback-v{{validation_attempt_count}}.md before responding. This file will be read by the next step if rework is needed.",
+      "completionCondition": "Honest quality assessment received from user, feedback collected for decision on completion or rework",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_satisfaction": {
+            "type": "string",
+            "enum": [
+              "satisfied",
+              "needs_work"
+            ],
+            "description": "satisfied if result fully solves problem, needs_work if rework required"
+          },
+          "user_feedback": {
+            "type": "string",
+            "description": "Detailed user feedback on results"
+          }
+        },
+        "required": [
+          "user_satisfaction",
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-user-satisfaction"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-user-satisfaction",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "user_satisfaction"
+        },
+        "right": "satisfied"
+      },
+      "connections": {
+        "true": "update-documentation",
+        "false": "expr-increment-report-attempt"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-additional-steps",
+      "directive": "Supplement plan with new stages to address user feedback.\n\nIMPORTANT: Current stage {{current_step_index}} is COMPLETED. You are writing NEW stages that will be executed AFTER the current one.\nWhen you finish here, Moira will automatically increment current_step_index to {{current_step_index}} + 1 and begin executing from that step.\nTherefore, the FIRST new stage you write must be numbered {{current_step_index}} + 1 (i.e., if current_step_index is 8, your first new step is Step 9).\n\nDO NOT rewrite or modify step {{current_step_index}} — it is already done. Only ADD new steps after it.\n\n1) READ plan change reasons from {{workspace_path}}plan-change-reasons-{{plan_iteration}}.md\n2) Analyze user feedback - what are the problems?\n3) Determine root cause of each problem\n4) Add new stages AT END of plan starting from step {{current_step_index}} + 1\n5) Update {{workspace_path}}development-plan.md\n6) Count new total_steps (including all existing + new steps)\n\nFollow requirements: {{planning_requirements}}",
+      "completionCondition": "Development plan supplemented with new stages to address user concerns, user feedback will be addressed through main development cycle",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "additional_steps_created": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 30
+            },
+            "minItems": 1,
+            "description": "New stages to address user concerns"
+          },
+          "plan_changes_summary": {
+            "type": "string",
+            "description": "Brief summary of added stages"
+          }
+        },
+        "required": [
+          "additional_steps_created",
+          "plan_changes_summary"
+        ]
+      },
+      "connections": {
+        "success": "review-extended-plan"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-plan-extended",
+      "message": "📋 *Plan Extended*\n\n🔄 **Additional Steps:** {{additional_steps_created.length}} added\n\n**Changes:**\n{{plan_changes_summary}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "confirm-plan-extension"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "confirm-plan-extension",
+      "directive": "Present the extended plan to user and get confirmation. 1) Show user the plan with added stages 2) Explain what was added to address concerns and how new stages solve problems 3) Ask user: \"Do you confirm the extended plan for execution? (yes)\" 4) Get EXPLICIT confirmation.\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently\n\n**SAVE FEEDBACK TO FILE:**\nIf extension_approval = \"no\", save the user feedback to {{workspace_path}}user-plan-feedback-{{plan_iteration}}.md before responding. This file will be read by the extension step.",
+      "completionCondition": "Extended plan confirmation received from user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "extension_approval": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "extension_feedback": {
+            "type": "string",
+            "description": "User feedback if no"
+          }
+        },
+        "required": [
+          "extension_approval"
+        ]
+      },
+      "connections": {
+        "success": "check-extension-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "update-documentation",
+      "directive": "⚠️ CRITICALLY IMPORTANT - FINAL PROJECT DOCUMENTATION UPDATE\n\nDO NOT CONFUSE:\n❌ Working folder {{workspace_path}} - WILL BE COMPLETELY DELETED after completion\n✅ Project documentation - docs/, README.md - PERMANENT project files\n\n⚠️ UPDATE DOCUMENTATION FOR ALL PLAN STAGES, STARTING FROM THE FIRST!\nNOT just the last stage - for the ENTIRE feature!\nIf you forget something or mess up - all work will be lost!\n\nUpdate PROJECT DOCUMENTATION for the entire completed feature.\n\n1) Read documentation standards from file at {{documentation_standards_path}}\n\n2) Analyze ALL project changes across ALL plan stages\n3) Update PERMANENT project documentation files (README.md, docs/, etc.)\n4) Follow documentation rules:\n   - Technical facts only\n   - No change history\n   - No marketing\n   - DO NOT create new documents without necessity\n\nIn your response indicate:\n- Which PERMANENT project files were updated\n- Brief summary of completed workflow for final notification",
+      "completionCondition": "Documentation updated for all feature changes, workflow summary prepared for notification",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflow_completion_summary": {
+            "type": "string",
+            "minLength": 30,
+            "description": "Brief final summary of entire completed workflow for final notification"
+          }
+        },
+        "required": [
+          "workflow_completion_summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-workflow-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-workflow-complete",
+      "message": "🏆 *Development Complete*\n\n🎯 **Feature:** {{feature_name}}\n👤 **Satisfaction:** {{user_satisfaction}}\n\n**📊 Summary:**\n{{workflow_completion_summary}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-report-attempt",
+      "expressions": [
+        "validation_attempt_count = validation_attempt_count + 1"
+      ],
+      "connections": {
+        "default": "expr-set-plan-target-extend"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "feature_name",
+        "user_task_description",
+        "user_satisfaction",
+        "final_report_file",
+        "workspace_directory",
+        "validation_attempt_count"
+      ]
+    },
+    {
+      "type": "agent-directive",
+      "id": "initial-system-startup",
+      "directive": "Start the project system and verify it works correctly.\n\n{{startup_check_directive}}\n\n⚠️ IMPORTANT: If system does NOT start or has errors - MUST report this in response. User needs to know about problems before starting development.\n\nRESPONSE OPTIONS:\n- \"yes\" - System started correctly, all checks passed\n- \"no\" - System has problems that can be fixed by agent (code issues, missing files)\n- \"environmental_issue\" - System has ENVIRONMENTAL problems that USER must fix:\n  - Wrong Node.js version\n  - Missing system dependencies\n  - Docker not running\n  - Database connection issues\n  - Port conflicts\n  - Permission problems\n\nIn your response indicate:\n- Did system start correctly?\n- What commands did you run for startup\n- What problems were discovered (if any)",
+      "completionCondition": "System started and startup correctness verified",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "system_status": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "environmental_issue"
+            ],
+            "description": "yes=started correctly, no=has fixable problems, environmental_issue=needs user intervention"
+          }
+        },
+        "required": [
+          "system_status"
+        ]
+      },
+      "connections": {
+        "success": "route-environmental-issue"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-environmental-issue",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "system_status"
+        },
+        "right": "environmental_issue"
+      },
+      "connections": {
+        "true": "notify-environmental-issue",
+        "false": "route-skip-initial-tests"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-environmental-issue",
+      "message": "⚠️ *Environmental Issue Detected*\n\nThe development environment has a problem that requires your attention.\n\nPlease check the agent's message and fix the issue.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "wait-environmental-fix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "wait-environmental-fix",
+      "directive": "An environmental issue was detected that requires user intervention.\n\nWait for the user to confirm they have fixed the issue.\n\nAsk: \"Please fix the environmental issue and confirm when ready to retry.\"\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed the environmental issue is fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_confirmation": {
+            "type": "string",
+            "enum": [
+              "fixed"
+            ],
+            "description": "User confirms issue is fixed"
+          }
+        },
+        "required": [
+          "user_confirmation"
+        ]
+      },
+      "connections": {
+        "success": "initial-system-startup"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-initial-tests",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "test_info"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "initial-run-tests",
+        "false": "notify-step-start"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "initial-run-tests",
+      "directive": "Run all project tests and check results.\n\n⚠️ IMPORTANT: If project has no tests - just report this.\n\n{{run_tests_directive}}\n\n⚠️ IMPORTANT: If tests FAIL - MUST report this in response with details. User needs to know about failing tests before starting development.\n\nIn your response indicate:\n- How many tests passed\n- How many tests failed\n- Details of failed tests (if any)",
+      "completionCondition": "Tests run and results obtained",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_results": {
+            "type": "string",
+            "description": "Test results: number of passed/failed and details of failures"
+          }
+        },
+        "required": [
+          "test_results"
+        ]
+      },
+      "connections": {
+        "success": "notify-step-start"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-has-docs-standards",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "documentation_standards"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "validate-documentation",
+        "false": "route-skip-git-commit"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-iteration",
+      "expressions": [
+        "current_iteration = current_iteration + 1",
+        "fix_iteration_count = fix_iteration_count + 1"
+      ],
+      "connections": {
+        "default": "check-fix-iteration-limit"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-iteration-checklist",
+      "expressions": [
+        "current_iteration = current_iteration + 1",
+        "fix_iteration_count = fix_iteration_count + 1"
+      ],
+      "connections": {
+        "default": "check-fix-iteration-limit-checklist"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-fix-iteration-limit-checklist",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "fix_iteration_count"
+        },
+        "right": {
+          "contextPath": "max_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "escalate-iteration-limit",
+        "false": "create-iteration-workspace-checklist"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-step",
+      "expressions": [
+        "current_step_index = current_step_index + 1",
+        "current_iteration = 1",
+        "fix_iteration_count = 0"
+      ],
+      "connections": {
+        "default": "get-next-step-name"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-refined-plan",
+      "directive": "Delegate refined plan review to subagent via Task tool.\n\nIMPORTANT: DO NOT do self-review.\n\n1) Launch subagent with prompt:\n   YOU ARE plan validator. CHECK refined plan.\n\n   READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}development-plan.md\n   - Requirements: {{workspace_path}}task-requirements.md\n   - Planning standards: {{workspace_path}}planning-standards.md\n\n   CHECK:\n   - Steps are properly sized (not too small/large)\n   - Each step has verifiable result\n   - Dependencies correct\n   - User concerns from refinement addressed\n   - REQUIREMENTS COVERAGE: refinement did not break coverage of requirements from task-requirements.md\n   - STANDARDS COMPLIANCE: plan still follows planning-standards.md\n\n   RETURN: refinement_review_issues_count and refinement_issues_found\n\n2) Pass subagent result honestly\n\n3) Save issues to {{workspace_path}}plan-review-issues-{{plan_iteration}}.md (overwrite previous)\n   Format: numbered list with issue, affected_step, suggested_fix",
+      "completionCondition": "Refined plan reviewed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "refinement_review_issues_count": {
+            "type": "number",
+            "minimum": 0
+          },
+          "refinement_issues_found": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "refinement_review_issues_count",
+          "refinement_issues_found"
+        ]
+      },
+      "connections": {
+        "success": "check-refinement-review-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-refinement-review-issues",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "refinement_review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "expr-inc-refine-review-fix",
+        "false": "notify-plan-refined"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-refined-plan-issues",
+      "directive": "FIX found issues in refined plan.\n\nREAD issues from {{workspace_path}}plan-review-issues-{{plan_iteration}}.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{workspace_path}}development-plan.md\n3. Apply the fix\n4. Verify fix addresses the issue\n\nUpdate {{workspace_path}}development-plan.md",
+      "completionCondition": "All issues fixed",
+      "connections": {
+        "success": "review-refined-plan"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-refinement-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "refinement_approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "initialize-plan-tracking",
+        "false": "expr-set-plan-target-refine"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-extended-plan",
+      "directive": "Delegate extended plan review to subagent via Task tool.\n\nIMPORTANT: DO NOT do self-review.\n\n1) Launch subagent with prompt:\n   YOU ARE plan validator. CHECK extended plan.\n\n   READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}development-plan.md\n   - Requirements: {{workspace_path}}task-requirements.md\n   - Planning standards: {{workspace_path}}planning-standards.md\n\n   CHECK:\n   - New steps are properly sized (not too small/large)\n   - Each step has verifiable result\n   - Dependencies correct\n   - NEW USER REQUIREMENTS: extension addresses new requirements that user added\n   - ORIGINAL COVERAGE: original requirements from task-requirements.md are still covered\n   - STANDARDS COMPLIANCE: plan follows planning-standards.md\n\n   RETURN: extension_review_issues_count and extension_issues_found\n\n2) Pass subagent result honestly\n\n3) Save issues to {{workspace_path}}plan-review-issues-{{plan_iteration}}.md (overwrite previous)\n   Format: numbered list with issue, affected_step, suggested_fix",
+      "completionCondition": "Extended plan reviewed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "extension_review_issues_count": {
+            "type": "number",
+            "minimum": 0
+          },
+          "extension_issues_found": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "extension_review_issues_count",
+          "extension_issues_found"
+        ]
+      },
+      "connections": {
+        "success": "check-extension-review-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-extension-review-issues",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "extension_review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "expr-inc-extend-review-fix",
+        "false": "notify-plan-extended"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-extension-plan-issues",
+      "directive": "FIX found issues in extended plan.\n\nREAD issues from {{workspace_path}}plan-review-issues-{{plan_iteration}}.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{workspace_path}}development-plan.md\n3. Apply the fix\n4. Verify fix addresses the issue\n\nUpdate {{workspace_path}}development-plan.md",
+      "completionCondition": "All issues fixed",
+      "connections": {
+        "success": "review-extended-plan"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-extension-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "extension_approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "set-extension-total-steps",
+        "false": "expr-set-plan-target-extend"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "set-extension-total-steps",
+      "directive": "Count total steps in the APPROVED plan.\n\nRead {{workspace_path}}development-plan.md and count total number of steps.\n\nProvide the final total_steps count.",
+      "completionCondition": "Total steps counted",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_steps": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Final total step count from approved plan"
+          }
+        },
+        "required": [
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-step"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-updated-plan",
+      "directive": "Delegate updated plan review to subagent via Task tool.\n\nIMPORTANT: DO NOT do self-review.\n\n1) Launch subagent with prompt:\n   YOU ARE plan validator. CHECK updated plan.\n\n   READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}development-plan.md\n   - Requirements: {{workspace_path}}task-requirements.md\n   - Planning standards: {{workspace_path}}planning-standards.md\n\n   CHECK:\n   - Changed steps are properly sized (not too small/large)\n   - Each step has verifiable result\n   - Dependencies correct\n   - Changes address the reason for plan update\n   - REQUIREMENTS COVERAGE: update did not break coverage of requirements from task-requirements.md\n   - STANDARDS COMPLIANCE: plan still follows planning-standards.md\n\n   RETURN: update_review_issues_count and update_issues_found\n\n2) Pass subagent result honestly\n\n3) Save issues to {{workspace_path}}plan-review-issues-{{plan_iteration}}.md (overwrite previous)\n   Format: numbered list with issue, affected_step, suggested_fix",
+      "completionCondition": "Updated plan reviewed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "update_review_issues_count": {
+            "type": "number",
+            "minimum": 0
+          },
+          "update_issues_found": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "update_review_issues_count",
+          "update_issues_found"
+        ]
+      },
+      "connections": {
+        "success": "check-update-review-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-update-review-issues",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "update_review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "expr-inc-update-review-fix",
+        "false": "confirm-plan-update"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-updated-plan-issues",
+      "directive": "FIX found issues in updated plan.\n\nREAD issues from {{workspace_path}}plan-review-issues-{{plan_iteration}}.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{workspace_path}}development-plan.md\n3. Apply the fix\n4. Verify fix addresses the issue\n\nUpdate {{workspace_path}}development-plan.md",
+      "completionCondition": "All issues fixed",
+      "connections": {
+        "success": "review-updated-plan"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-update-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "update_approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "set-update-total-steps",
+        "false": "expr-set-plan-target-update"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "set-update-total-steps",
+      "directive": "Count total steps in the APPROVED updated plan.\n\nRead {{workspace_path}}development-plan.md and count total number of steps.\n\nProvide the final total_steps count.",
+      "completionCondition": "Total steps counted",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_steps": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Final total step count from approved plan"
+          }
+        },
+        "required": [
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "reinitialize-plan-tracking"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-fix-iteration-limit",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "fix_iteration_count"
+        },
+        "right": {
+          "contextPath": "max_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "escalate-iteration-limit",
+        "false": "create-iteration-workspace"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "escalate-iteration-limit",
+      "directive": "Fix iteration limit reached ({{fix_iteration_count}}/{{max_fix_iterations}}).\n\nThe workflow has attempted {{fix_iteration_count}} fix iterations without resolving all issues.\n\nAsk the user:\n1. **Continue** - reset counter and continue fixing\n2. **Reset** - reset counter and continue fixing (same as continue)\n3. **Abort** - stop development, document current state\n\nIf user chooses continue: proceed with reset.\nIf user chooses abort: prepare summary of unresolved issues.",
+      "completionCondition": "User decision obtained",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "abort",
+              "reset"
+            ],
+            "description": "User's decision"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-escalation-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-escalation-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "document-abort-state",
+        "false": "expr-reset-fix-counter"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-fix-counter",
+      "expressions": [
+        "fix_iteration_count = 0"
+      ],
+      "connections": {
+        "default": "create-iteration-workspace"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-abort-state",
+      "directive": "User chose to abort development due to iteration limit.\n\nDocument:\n1. Current state of implementation\n2. Unresolved issues\n3. Recommended next steps\n\nSave to workspace as `abort-summary.md`.",
+      "completionCondition": "Abort summary documented",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-after-plan-update",
+      "expressions": [
+        "current_step_index = current_step_index + 1",
+        "current_iteration = 1",
+        "fix_iteration_count = 0"
+      ],
+      "connections": {
+        "default": "create-initial-iteration-workspace"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-git-commit",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "git_enabled"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "commit-step",
+        "false": "check-user-approval-needed"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-plan-review-fix",
+      "expressions": [
+        "plan_fix_counter = plan_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-plan-review-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-plan-review-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "plan_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_plan_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-plan-issues",
+        "false": "ask-user-plan-review-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-refine-review-fix",
+      "expressions": [
+        "refine_fix_counter = refine_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-refine-review-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-refine-review-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "refine_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_refine_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-refined-plan-issues",
+        "false": "ask-user-refine-review-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-extend-review-fix",
+      "expressions": [
+        "extend_fix_counter = extend_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-extend-review-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-extend-review-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "extend_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_extend_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-extension-plan-issues",
+        "false": "ask-user-extend-review-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-update-review-fix",
+      "expressions": [
+        "update_fix_counter = update_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-update-review-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-update-review-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "update_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_update_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-updated-plan-issues",
+        "false": "ask-user-update-review-limit-reached"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-plan-review-limit-reached",
+      "directive": "The plan review fix loop has reached its maximum iteration limit ({{max_plan_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_plan_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "reset"
+            ],
+            "description": "User decision: continue with current result or reset counter and retry"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-review-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-plan-review-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-plan-review-counter",
+        "false": "notify-plan-ready"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-plan-review-counter",
+      "expressions": [
+        "plan_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-plan-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-refine-review-limit-reached",
+      "directive": "The plan refinement review fix loop has reached its maximum iteration limit ({{max_refine_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_refine_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "reset"
+            ],
+            "description": "User decision: continue with current result or reset counter and retry"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-refine-review-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-refine-review-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-refine-review-counter",
+        "false": "notify-plan-refined"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-refine-review-counter",
+      "expressions": [
+        "refine_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-refined-plan-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-extend-review-limit-reached",
+      "directive": "The plan extension review fix loop has reached its maximum iteration limit ({{max_extend_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_extend_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "reset"
+            ],
+            "description": "User decision: continue with current result or reset counter and retry"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-extend-review-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-extend-review-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-extend-review-counter",
+        "false": "notify-plan-extended"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-extend-review-counter",
+      "expressions": [
+        "extend_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-extension-plan-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-update-review-limit-reached",
+      "directive": "The plan update review fix loop has reached its maximum iteration limit ({{max_update_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_update_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "reset"
+            ],
+            "description": "User decision: continue with current result or reset counter and retry"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-update-review-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-update-review-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-update-review-counter",
+        "false": "confirm-plan-update"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-update-review-counter",
+      "expressions": [
+        "update_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-updated-plan-issues"
+      }
+    },
+    {
+      "type": "teleport",
+      "id": "teleport-replan",
+      "hint": "Use when you realize the current plan needs restructuring — jumps to plan modification with all counters reset. Appropriate when: the current approach is fundamentally wrong, new requirements emerged that invalidate the plan, you need to add/remove/reorder plan steps.",
+      "directive": "Assess what needs to change in the development plan.\n\n1. Review the current plan at {{workspace_path}}development-plan.md\n2. Identify what went wrong or what changed\n3. Describe the required plan modifications\n4. All counters will be reset — you start fresh after replanning\n\nCurrent state: step {{current_step_index}} of {{total_steps}}, iteration {{current_iteration}}, fix cycle {{fix_iteration_count}}",
+      "completionCondition": "Assessment of required plan changes documented with specific modifications needed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "replan_reason": {
+            "type": "string",
+            "description": "Why the plan needs restructuring"
+          },
+          "proposed_changes": {
+            "type": "string",
+            "description": "What changes to the plan are needed"
+          }
+        },
+        "required": [
+          "replan_reason",
+          "proposed_changes"
+        ]
+      },
+      "connections": {
+        "success": "expr-reset-for-replan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-for-replan",
+      "expressions": [
+        "fix_iteration_count = 0",
+        "current_iteration = 1",
+        "update_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "save-rework-context"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-screenshot-validation",
+      "directive": "Ask the user if they want screenshot validation for this task. Screenshot validation captures UI state at key points during development via Playwright scripts, then generates a local HTML report with before/after comparisons. Explain briefly: 1) What it does (captures screenshots during each implementation step) 2) What it produces (interactive HTML report in iteration folder) 3) It is optional and can be skipped. Ask user: do they want screenshot validation enabled for this task?",
+      "completionCondition": "User answered whether screenshot validation is needed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "screenshot_validation_enabled": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether user wants screenshot validation for this task"
+          }
+        },
+        "required": [
+          "screenshot_validation_enabled"
+        ]
+      },
+      "connections": {
+        "success": "check-screenshot-validation"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-screenshot-validation",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "screenshot_validation_enabled"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "setup-screenshot-infrastructure",
+        "false": "route-skip-foundation"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "setup-screenshot-infrastructure",
+      "directive": "Search for screenshot guide file in the project and set up screenshot validation infrastructure.\n\n1) SEARCH for existing screenshot guide:\n   - Look for: screenshot-guide.md, SCREENSHOT-GUIDE.md, docs/screenshot-guide.md, docs/SCREENSHOT-GUIDE.md\n   - Also check {{workspace_path}}screenshot-guide.md\n   - If found → save the FILE PATH to screenshot_guide_path\n   - If NOT found → ask user: \"Screenshot guide not found. Create one? (in project docs/ or workspace?)\"\n     - If yes → create the file with sections: Overview (purpose, when to capture), Naming Convention (step-N-feature-name.png), Playwright Script Template (basic page.screenshot() pattern with configurable viewports), Report HTML Template structure, How to Add New Validators (step-by-step). Save path to screenshot_guide_path.\n     - If no → set screenshot_guide_path = '' and skip\n\n2) Check if screenshots/ directory exists in workspace, create if not.\n3) Check if Playwright config for screenshots exists (playwright-screenshots.config.ts or similar), create minimal one if not.\n4) Report what already existed vs what was created.",
+      "completionCondition": "Screenshot infrastructure verified: guide file, screenshots directory, and Playwright config all exist (created only what was missing)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "screenshot_guide_path": {
+            "type": "string",
+            "description": "Path to screenshot guide markdown file"
+          },
+          "screenshot_infrastructure_ready": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Infrastructure is ready"
+          },
+          "items_created": {
+            "type": "number",
+            "description": "Number of infrastructure items created (0 if all existed)"
+          }
+        },
+        "required": [
+          "screenshot_guide_path",
+          "screenshot_infrastructure_ready"
+        ]
+      },
+      "connections": {
+        "success": "route-skip-foundation"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-skip-screenshot-validation",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "screenshot_validation_enabled"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "run-screenshot-validation",
+        "false": "route-skip-git-commit"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "run-screenshot-validation",
+      "directive": "CRITICAL: DON'T FIX issues - ONLY VALIDATE screenshots.\n\nRun screenshot validation for current step. 1) Read screenshot guide from {{screenshot_guide_path}} 2) Check all screenshot scripts in {{workspace_path}}screenshots/ cover new functionality from this step 3) If new UI features were added but no screenshot validators exist for them — report as missing coverage 4) Run Playwright screenshot scripts 5) Check screenshots captured correctly (no errors, no blank screens, correct viewports) 6) Compare with previous step screenshots if available — identify visual regressions 7) Count total issues: script errors + missing coverage + visual regressions + blank/broken captures\n\n8) Save validation report to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/screenshot-validation.md:\n   # Screenshot Validation\n\n   Scripts total: [X]\n   Scripts passed: [Y]\n   Coverage gaps: [Z]\n   Visual regressions: [W]\n   Total issues: [N]\n\n   ## Issues Found\n   ### 1. [issue]\n   What needs to be fixed: [action]\n\nReturn issues count.",
+      "completionCondition": "Screenshot validation completed, all scripts run, issues counted and documented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "screenshot_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Total screenshot issues: script errors + missing coverage + regressions"
+          },
+          "screenshots_captured": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of screenshots successfully captured"
+          }
+        },
+        "required": [
+          "screenshot_issues_count",
+          "screenshots_captured"
+        ]
+      },
+      "connections": {
+        "success": "check-screenshot-results"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-screenshot-results",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "screenshot_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "generate-screenshot-report",
+        "false": "fix-screenshot-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-screenshot-issues",
+      "directive": "CRITICAL: FIX SCREENSHOT ISSUES - NO REPORTS!\n\nScreenshot validation failed — fix all issues.\n\nREAD issues from {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/screenshot-validation.md\n\nFor EACH issue in the file:\n1. Read \"What needs to be fixed\"\n2. Fix the issue (add missing validators, fix broken scripts, address regressions)\n3. Verify the fix works\n\nTypes of issues:\n- Script errors: fix Playwright script syntax/logic\n- Missing coverage: add new screenshot validators for uncovered UI features\n- Visual regressions: investigate and fix or document as intentional change\n- Broken captures: fix viewport/selector issues\n\n{{code_quality_principles}}\n\nConfirm ALL issues are fixed.",
+      "completionCondition": "ALL SCREENSHOT ISSUES FIXED",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "screenshot_issues_fixed": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Confirmation that all screenshot issues are fixed"
+          }
+        },
+        "required": [
+          "screenshot_issues_fixed"
+        ]
+      },
+      "connections": {
+        "success": "document-screenshot-fixes"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-screenshot-report",
+      "directive": "Generate interactive HTML screenshot report for current step and present it to the user. 1) Collect all captured screenshots from {{workspace_path}}screenshots/ 2) Generate an interactive HTML report with: title (Step {{current_step_index}} Screenshot Report), timestamp, thumbnail grid with click-to-expand, before/after comparisons if previous step screenshots exist 3) Save HTML report to {{workspace_path}}step-{{current_step_index}}/screenshot-report.html 4) Do NOT upload the report anywhere — it stays local 5) PRESENT the report path to the user explicitly: tell them the file path and number of screenshots so they can review it. This is the user's opportunity to see visual validation results.",
+      "completionCondition": "HTML screenshot report generated, saved to step folder, and file path presented to user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "screenshot_report_path": {
+            "type": "string",
+            "description": "Path to generated HTML screenshot report"
+          },
+          "screenshots_in_report": {
+            "type": "number",
+            "description": "Number of screenshots included in report"
+          }
+        },
+        "required": [
+          "screenshot_report_path",
+          "screenshots_in_report"
+        ]
+      },
+      "connections": {
+        "success": "route-skip-git-commit"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "document-screenshot-fixes",
+      "directive": "Document screenshot validation fixes to {{workspace_path}}step-{{current_step_index}}/iteration-{{current_iteration}}/screenshot-fixes.md. List what was fixed and why.",
+      "completionCondition": "Screenshot fixes documented to file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fixes_summary": {
+            "type": "string",
+            "description": "Summary of fixes applied"
+          }
+        },
+        "required": [
+          "fixes_summary"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-iteration"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-validation-attempt",
+      "expressions": [
+        "validation_attempt_count = validation_attempt_count + 1"
+      ],
+      "connections": {
+        "default": "expr-set-plan-target-extend"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-set-plan-target-refine",
+      "expressions": [
+        "plan_change_target = \"refine\""
+      ],
+      "connections": {
+        "default": "expr-increment-plan-iteration"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-set-plan-target-extend",
+      "expressions": [
+        "plan_change_target = \"extend\""
+      ],
+      "connections": {
+        "default": "expr-increment-plan-iteration"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-set-plan-target-update",
+      "expressions": [
+        "plan_change_target = \"update\""
+      ],
+      "connections": {
+        "default": "expr-increment-plan-iteration"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-increment-plan-iteration",
+      "expressions": [
+        "plan_iteration = plan_iteration + 1"
+      ],
+      "connections": {
+        "default": "create-plan-change-reasons"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-plan-change-reasons",
+      "directive": "Create file {{workspace_path}}plan-change-reasons-{{plan_iteration}}.md documenting:\n\n1) Why the plan needs to change\n2) What specifically needs to be modified\n3) Source of change (read plan_change_target variable: \"refine\"=user rejected plan, \"extend\"=validation gaps/user unsatisfied, \"update\"=mid-execution replan)\n4) Reference any related files (feedback, validation reports)\n\nContext variable plan_change_target tells the routing destination — do NOT change it.",
+      "completionCondition": "Plan change reasons file created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "reasons_summary": {
+            "type": "string",
+            "description": "Summary of plan change reasons"
+          }
+        },
+        "required": [
+          "reasons_summary"
+        ]
+      },
+      "connections": {
+        "success": "check-plan-change-is-refine"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-plan-change-is-refine",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan_change_target"
+        },
+        "right": "refine"
+      },
+      "connections": {
+        "true": "refine-development-plan",
+        "false": "check-plan-change-is-extend"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-plan-change-is-extend",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan_change_target"
+        },
+        "right": "extend"
+      },
+      "connections": {
+        "true": "create-additional-steps",
+        "false": "update-plan-during-execution"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-screenshot-change-type",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "has_ui_changes"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "route-skip-screenshot-validation",
+        "false": "route-skip-git-commit"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-rework-context",
+      "directive": "Save current rework context. Document in {{workspace_path}}rework-context-{{plan_iteration}}.md:\n\n1) Current state of development\n2) What triggered the replan (teleport)\n3) Any relevant feedback or issues\n\nThis provides context for the plan modification that follows.",
+      "completionCondition": "Rework context saved to file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "context_summary": {
+            "type": "string",
+            "description": "Summary of rework context"
+          }
+        },
+        "required": [
+          "context_summary"
+        ]
+      },
+      "connections": {
+        "success": "expr-set-plan-target-update"
+      }
+    }
+  ],
+  "id": "91b11263-a180-4a08-9399-55f406f82c69"
+}

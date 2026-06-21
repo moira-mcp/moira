@@ -1,0 +1,104 @@
+{
+  "slug": "notes-demo-metrics-reporter",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "26fbb877-d6e2-4d34-a0a9-c1cb1db0317f",
+  "metadata": {
+    "name": "Notes Demo: Metrics Reporter",
+    "version": "1.2.4",
+    "description": "Demo workflow: reads project metrics from Notes (saved by Metrics Collector) and generates analysis report. Part 2 of the Metrics Pipeline example. Demonstrates read-note node and {{note:KEY}} template syntax."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {}
+      },
+      "connections": {
+        "default": "ask-project"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-project",
+      "directive": "Ask the user which project they want to generate a metrics report for. The project name must match one previously used in the Metrics Collector workflow.",
+      "completionCondition": "Project name is provided by the user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "projectName"
+        ],
+        "globalInputs": [
+          "projectName"
+        ]
+      },
+      "connections": {
+        "success": "load-all-metrics"
+      }
+    },
+    {
+      "type": "read-note",
+      "id": "load-all-metrics",
+      "outputVariable": "metricsNotes",
+      "filter": {
+        "tag": "metrics",
+        "keyPattern": "metrics-"
+      },
+      "connections": {
+        "default": "generate-report",
+        "error": "no-data"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-report",
+      "directive": "Generate a project metrics report using the collected data.\n\n**Latest metrics snapshot:**\n{{note:latest-metrics-{{ask-project.projectName}}}}\n\n**All collected metrics notes:**\n{{load-all-metrics.metricsNotes}}\n\nCreate a structured report that includes:\n1. **Project Overview** — name, primary language, project size\n2. **Code Health** — lines of code, file count, quality indicators\n3. **Testing Summary** — total tests, pass rate, categories covered\n4. **Trends** — if multiple collection dates exist, note any changes\n5. **Recommendations** — based on the metrics, suggest areas for improvement\n\nFormat the report in clean markdown.",
+      "completionCondition": "A complete metrics report has been generated with all available data points analyzed.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "report"
+        ],
+        "globalInputs": [
+          "report"
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "no-data",
+      "directive": "No metrics data was found in Notes. This means the Metrics Collector workflow has not been run yet for any project.\n\nInform the user that they need to run the 'Notes Demo: Metrics Collector' workflow first to gather project metrics before generating a report.",
+      "completionCondition": "User has been informed about the missing data and directed to run the Collector workflow first.",
+      "connections": {
+        "success": "end-no-data"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end-success",
+      "finalOutput": [
+        "metricsNotes"
+      ]
+    },
+    {
+      "type": "end",
+      "id": "end-no-data"
+    }
+  ],
+  "variableRegistry": {
+    "projectName": {
+      "type": "string",
+      "description": "Workflow-global projectName"
+    },
+    "report": {
+      "type": "string",
+      "description": "Workflow-global report"
+    }
+  }
+}

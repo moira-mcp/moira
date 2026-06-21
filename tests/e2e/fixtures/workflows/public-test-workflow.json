@@ -1,0 +1,30 @@
+{
+  "slug": "public-test-workflow",
+  "metadata": {
+    "name": "Public Test Workflow",
+    "version": "1.0.0",
+    "description": "Public workflow for testing visibility features"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "step1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step1",
+      "directive": "Public workflow step",
+      "completionCondition": "Step completed",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

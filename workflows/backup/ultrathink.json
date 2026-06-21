@@ -1,0 +1,440 @@
+{
+  "slug": "ultrathink",
+  "metadata": {
+    "name": "Ultrathink Deep Analysis",
+    "version": "1.0.0",
+    "description": "Глубокий многоуровневый анализ сложных проблем с итеративным углублением понимания"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "analyze-user-needs"
+      },
+      "initialData": {
+        "stage": "initialization",
+        "startTime": "{{timestamp}}"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-user-needs",
+      "directive": "Проанализируй потребности пользователя для покупки товара. Узнай: какой товар нужен, бюджет, цель покупки, важные требования и ограничения. Задай уточняющие вопросы для понимания контекста.",
+      "completionCondition": "Получена полная информация о потребностях: тип товара, бюджет, цель использования, ключевые требования",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "product_type": {
+            "type": "string",
+            "description": "Тип товара, который нужно купить"
+          },
+          "budget_min": {
+            "type": "number",
+            "description": "Минимальный бюджет"
+          },
+          "budget_max": {
+            "type": "number",
+            "description": "Максимальный бюджет"
+          },
+          "use_case": {
+            "type": "string",
+            "description": "Цель покупки и основное использование"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ключевые требования и критерии"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ограничения (размер, вес, регион и т.д.)"
+          }
+        },
+        "required": [
+          "product_type",
+          "budget_max",
+          "use_case"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "research-product-category"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "research-product-category",
+      "directive": "Исследуй товарную категорию {{product_type}}. Определи: основные типы и виды, ключевые параметры для сравнения, технологические тренды, альтернативные решения, сезонность цен. Создай экспертную базу знаний по категории.",
+      "completionCondition": "Создана полная экспертная база по категории товара с типами, параметрами сравнения и альтернативами",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "product_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Основные типы и виды в категории"
+          },
+          "key_parameters": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ключевые параметры для сравнения товаров"
+          },
+          "technology_trends": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Актуальные технологические тренды"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Альтернативные решения и заменители"
+          },
+          "seasonality": {
+            "type": "string",
+            "description": "Информация о сезонности цен и оптимальном времени покупки"
+          }
+        },
+        "required": [
+          "product_types",
+          "key_parameters"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "determine-search-sources"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "determine-search-sources",
+      "directive": "Определи оптимальные источники для поиска {{product_type}} в рамках бюджета {{budget_min}}-{{budget_max}}. Включи: маркетплейсы, специализированные магазины, производителей, региональные сети. Учти особенности категории и регион пользователя.",
+      "completionCondition": "Составлен приоритетный список источников поиска с обоснованием выбора каждого",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "marketplaces": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Основные маркетплейсы для поиска"
+          },
+          "specialized_stores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Специализированные магазины по категории"
+          },
+          "manufacturers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Производители с прямыми продажами"
+          },
+          "regional_stores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Региональные торговые сети"
+          },
+          "search_priority": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Приоритетный порядок поиска с обоснованием"
+          }
+        },
+        "required": [
+          "marketplaces",
+          "search_priority"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "search-and-analyze"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "search-and-analyze",
+      "directive": "Проведи поиск {{product_type}} на определенных источниках {{search_priority}}. Найди товары в рамках бюджета {{budget_min}}-{{budget_max}}, отфильтруй по требованиям {{requirements}} и ограничениям {{constraints}}. Создай первичный список кандидатов с характеристиками.",
+      "completionCondition": "Найден список товаров-кандидатов (5-15 штук) с основными характеристиками и ценами",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "brand": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "key_specs": {
+                  "type": "object"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "price",
+                "source"
+              ]
+            },
+            "description": "Список товаров-кандидатов"
+          },
+          "search_summary": {
+            "type": "string",
+            "description": "Краткое резюме поиска и найденных вариантов"
+          }
+        },
+        "required": [
+          "candidates",
+          "search_summary"
+        ]
+      },
+      "maxRetries": 3,
+      "connections": {
+        "success": "deep-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "deep-analysis",
+      "directive": "Проведи глубокий анализ топ-кандидатов из списка {{candidates}}. Изучи отзывы на разных площадках, репутацию брендов, сравни технические характеристики, найди экспертные обзоры. Выяви плюсы, минусы и подводные камни каждого варианта.",
+      "completionCondition": "Проведен детальный анализ каждого кандидата с отзывами, экспертными мнениями и выявленными плюсами/минусами",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "detailed_analysis": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_name": {
+                  "type": "string"
+                },
+                "pros": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "cons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "review_summary": {
+                  "type": "string"
+                },
+                "expert_opinion": {
+                  "type": "string"
+                },
+                "rating_score": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "product_name",
+                "pros",
+                "cons",
+                "rating_score"
+              ]
+            },
+            "description": "Детальный анализ каждого кандидата"
+          }
+        },
+        "required": [
+          "detailed_analysis"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "analyze-purchase-conditions"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-purchase-conditions",
+      "directive": "Проанализируй условия покупки для лучших вариантов из анализа {{detailed_analysis}}. Сравни полную стоимость (товар + доставка), условия гарантии и возврата, сроки доставки, наличие товара, текущие акции и скидки.",
+      "completionCondition": "Получен полный анализ условий покупки с расчетом итоговой стоимости и сравнением условий",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "purchase_analysis": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "product_name": {
+                  "type": "string"
+                },
+                "total_cost": {
+                  "type": "number"
+                },
+                "delivery_cost": {
+                  "type": "number"
+                },
+                "delivery_time": {
+                  "type": "string"
+                },
+                "warranty": {
+                  "type": "string"
+                },
+                "return_policy": {
+                  "type": "string"
+                },
+                "availability": {
+                  "type": "string"
+                },
+                "current_offers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "product_name",
+                "total_cost"
+              ]
+            },
+            "description": "Анализ условий покупки для каждого варианта"
+          }
+        },
+        "required": [
+          "purchase_analysis"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "generate-recommendations"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-recommendations",
+      "directive": "На основе всех данных (потребности {{use_case}}, анализ {{detailed_analysis}}, условия {{purchase_analysis}}) создай финальные рекомендации. Представь ТОП-3 варианта с обоснованием, сравнительную таблицу, расчет TCO и пошаговый план покупки.",
+      "completionCondition": "Созданы финальные рекомендации с ТОП-3 вариантами, сравнительной таблицей и планом действий",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "top_recommendations": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "rank": {
+                  "type": "number"
+                },
+                "product_name": {
+                  "type": "string"
+                },
+                "why_recommended": {
+                  "type": "string"
+                },
+                "best_for": {
+                  "type": "string"
+                },
+                "total_cost": {
+                  "type": "number"
+                },
+                "key_advantages": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "purchase_link": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "rank",
+                "product_name",
+                "why_recommended",
+                "total_cost"
+              ]
+            },
+            "description": "ТОП-3 рекомендованных товара"
+          },
+          "comparison_table": {
+            "type": "string",
+            "description": "Сравнительная таблица ключевых параметров"
+          },
+          "purchase_plan": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Пошаговый план покупки"
+          },
+          "alternative_options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Резервные варианты на случай отсутствия"
+          }
+        },
+        "required": [
+          "top_recommendations",
+          "comparison_table",
+          "purchase_plan"
+        ]
+      },
+      "maxRetries": 1,
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "product_type",
+        "budget_min",
+        "budget_max",
+        "use_case",
+        "top_recommendations",
+        "comparison_table",
+        "purchase_plan",
+        "alternative_options"
+      ]
+    }
+  ]
+}

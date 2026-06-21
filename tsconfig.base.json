@@ -1,0 +1,52 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022"],
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": false,
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@mcp-moira/workflow-engine": ["packages/workflow-engine/src"],
+      "@mcp-moira/workflow-engine/*": ["packages/workflow-engine/src/*"],
+      "@mcp-moira/mcp-server": ["packages/mcp-server/src"],
+      "@mcp-moira/mcp-server/*": ["packages/mcp-server/src/*"],
+      "@mcp-moira/web-backend": ["packages/web-backend/src"],
+      "@mcp-moira/web-backend/*": ["packages/web-backend/src/*"],
+      "@mcp-moira/web-frontend": ["packages/web-frontend/src"],
+      "@mcp-moira/web-frontend/*": ["packages/web-frontend/src/*"],
+      "@mcp-moira/shared": ["packages/shared/src"],
+      "@mcp-moira/shared/*": ["packages/shared/src/*"],
+      "@mcp-moira/workflow-testing": ["packages/workflow-testing/src"],
+      "@mcp-moira/workflow-testing/*": ["packages/workflow-testing/src/*"]
+    }
+  },
+  "ts-node": {
+    "esm": true
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "src/**/*",
+    "backend/**/*",
+    "frontend/**/*",
+    "scripts/**/*",
+    "types/**/*"
+  ]
+}

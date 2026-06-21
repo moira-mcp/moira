@@ -1,0 +1,100 @@
+---
+title: Information Collection Pattern
+description: Gather agent capabilities or user preferences at workflow start
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Collect information about agent environment, user preferences, or project configuration before workflow proceeds. This enables conditional behavior in later steps.
+
+## Structure
+
+```
+[start] → [collect-info] → [route-by-info] → [branch-a | branch-b]
+```
+
+## Implementation
+
+### Collector Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "collect-info",
+  "directive": "Determine agent capabilities:\n- File system access?\n- Web fetch access?\n- Test framework?",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "has_file_access": { "type": "boolean" },
+      "has_web_access": { "type": "boolean" },
+      "test_framework": { "type": "string" }
+    },
+    "required": ["has_file_access", "has_web_access"]
+  },
+  "connections": { "success": "route-by-capabilities" }
+}
+```
+
+### Routing Node
+
+```json
+{
+  "type": "condition",
+  "id": "route-by-capabilities",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "has_file_access" },
+    "right": true
+  },
+  "connections": {
+    "true": "file-based-flow",
+    "false": "memory-based-flow"
+  }
+}
+```
+
+## Using Collected Values
+
+After collection, values are in context. Use them with conditional templates:
+
+```json
+{
+  "directive": "{{#if has_file_access}}Save to {{output_path}}{{else}}Store in context variable{{/if}}"
+}
+```
+
+## Real Example
+
+From `development-flow.json`:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "get-initial-requirements",
+  "directive": "Study project and collect ALL information for development.\n\n1) Find CLAUDE.md or similar agent instructions\n2) Determine test command (npm test, pytest, etc.)\n3) Check for project checklist\n4) Check for agent onboarding document\n...",
+  "inputSchema": {
+    "properties": {
+      "test_command": { "type": "string" },
+      "has_tests": { "type": "string", "enum": ["yes", "no"] },
+      "build_command": { "type": "string" },
+      "checklist_path": { "type": "string" },
+      "has_checklist": { "type": "string", "enum": ["yes", "no"] },
+      "has_browser_ui": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["test_command", "has_tests", "build_command", "has_checklist"]
+  }
+}
+```
+
+<Aside type="tip">
+  Collect all configuration upfront rather than asking throughout the workflow. This improves user
+  experience and allows conditional branching.
+</Aside>
+
+## Related Patterns
+
+- [Skip Pattern](/docs/patterns/skip/) - Use collected flags to skip steps
+- [Dynamic Files](/docs/patterns/dynamic-files/) - Use collected paths in templates
+- [Branching](/docs/patterns/branching/) - Route based on collected values

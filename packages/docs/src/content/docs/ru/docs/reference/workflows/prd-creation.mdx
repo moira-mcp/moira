@@ -1,0 +1,109 @@
+---
+title: PRD Creation
+description: Создание PRD с гарантией полноты
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Workflow для создания PRD (Product Requirements Document) с гарантией полноты через обязательные секции и data-backed решения. Обеспечивает problem-first подход с измеримыми результатами.
+
+## Запуск
+
+```bash
+mcp__moira__start({ workflowId: "prd-creation" })
+```
+
+## Процесс
+
+```mermaid
+flowchart LR
+    A[Проблема] --> B[Исследование]
+    B --> C[Решение]
+    C --> D[User Stories]
+    D --> E[Edge Cases]
+    E --> F[Метрики]
+    F --> G[Assumptions]
+    G --> H[PRD]
+```
+
+## Шаги
+
+| Шаг | Действие | Результат |
+|-----|----------|-----------|
+| 1. Проблема | Определение problem statement, target users, urgency, cost of inaction | Конкретное определение проблемы |
+| 2. Исследование | Сбор данных из analytics, interviews, support tickets | Data-backed insights |
+| 3. Решение | Описание решения, in/out of scope, constraints | Спецификация решения |
+| 4. User Stories | Stories с testable acceptance criteria (мин. 3 AC каждая) | Тестируемые требования |
+| 5. Edge Cases | Документирование нестандартных сценариев (мин. 5) | Покрытие edge cases |
+| 6. Метрики | Определение primary metric с target и методом измерения | Измеримые критерии успеха |
+| 7. Assumptions | Список assumptions с validation methods | Явные предположения |
+| 8. PRD | Финальный PRD документ | Полный PRD |
+
+## Особенности
+
+<Aside type="tip">
+Начинай с проблемы, не с решения. Problem statement должен быть конкретным, измеримым и включать cost of inaction.
+</Aside>
+
+### Problem-First подход
+
+| Элемент | Требование |
+|---------|------------|
+| Problem statement | Конкретный и измеримый |
+| Target users | Чётко определённый сегмент |
+| Urgency | Timeline и business impact |
+| Cost of inaction | Что будет если не решить |
+
+### Data-Backed решения
+
+Каждое утверждение требует источник:
+- Analytics data
+- User interviews
+- Support tickets
+- Competitor research
+
+### Testable Acceptance Criteria
+
+| Требование | Описание |
+|------------|----------|
+| Минимум | 3 AC на каждую user story |
+| Проверяемость | Каждый AC тестируем автотестом или вручную |
+| Специфичность | Нет абстрактных "работает правильно" |
+
+<Aside type="caution">
+Edge cases обязательны. Документируй минимум 5 нестандартных сценариев с expected behavior и recovery paths.
+</Aside>
+
+### Measurable Metrics
+
+- **Primary metric** (north star) с конкретным target
+- **Timeline** для достижения
+- **Measurement method** определён и выполним
+
+### Explicit Assumptions
+
+| Элемент | Описание |
+|---------|----------|
+| Assumption | Чёткая формулировка предположения |
+| Validation method | Как проверить предположение |
+| Impact if wrong | Последствия если предположение неверно |
+
+## Пример конфигурации ноды
+
+```json
+{
+  "id": "define-problem",
+  "type": "agent-directive",
+  "directive": "Определи problem statement с target users, urgency и cost of inaction. Будь конкретен и измерим.",
+  "completionCondition": "Problem statement включает конкретных target users, измеримый impact и cost of inaction",
+  "connections": {
+    "next": "research-data"
+  }
+}
+```
+
+## Связанное
+
+- [UX Design](/ru/docs/reference/workflows/ux-design/) — Для проектирования user experience
+- [Test Planning](/ru/docs/reference/workflows/test-planning/) — Для создания тест-планов из PRD
+- [Обзор шаблонов](/ru/docs/reference/workflow-templates/) — Все доступные шаблоны

@@ -1,0 +1,403 @@
+{
+  "slug": "test-planning",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "31526b3b-d623-4e34-b62d-ef0327e9bd11",
+  "metadata": {
+    "name": "Test Planning Workflow",
+    "version": "1.2.0",
+    "description": "Structured test plan creation process: REQUIREMENTS -> RISK_ANALYSIS -> CATEGORIZE -> PRIORITIZE -> DETAIL -> COVERAGE_REVIEW -> OUTPUT. Guarantees complete coverage of critical scenarios with P0-P3 prioritization."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "requirements"
+      }
+    },
+    {
+      "id": "requirements",
+      "type": "agent-directive",
+      "directive": "Gather testing requirements.\n\nAsk user or find in documentation:\n1. What are we testing? (feature, API, page, module)\n2. Acceptance criteria (from task/spec) — minimum 1\n3. User stories / use cases — how user will use it\n4. Known constraints (browsers, devices, limits)\n\nIf user doesn't provide AC — ask to clarify or derive from feature description.",
+      "completionCondition": "Gathered: feature description, minimum 1 acceptance criteria, user stories",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string",
+            "description": "What we're testing (feature/module name)"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Acceptance criteria"
+          }
+        },
+        "required": [
+          "feature",
+          "acceptance_criteria"
+        ],
+        "globalInputs": [
+          "user_stories",
+          "constraints"
+        ]
+      },
+      "connections": {
+        "success": "risk-analysis"
+      }
+    },
+    {
+      "id": "risk-analysis",
+      "type": "agent-directive",
+      "directive": "Conduct risk analysis for {{requirements.feature}}.\n\nAnswer questions:\n1. What can go wrong? (technical risks)\n2. Which scenarios are business-critical? (data loss, money, reputation)\n3. What broke before in similar features?\n4. Security risks? (authorization, data, injections)\n\nFor each risk specify:\n- description: risk description\n- impact: high/medium/low (how serious if it happens)\n- likelihood: high/medium/low (how probable)",
+      "completionCondition": "Risks identified with impact and likelihood assessment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "impact": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "likelihood": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                }
+              },
+              "required": [
+                "description",
+                "impact"
+              ]
+            },
+            "description": "List of risks"
+          }
+        },
+        "required": [
+          "risks"
+        ]
+      },
+      "connections": {
+        "success": "categorize"
+      }
+    },
+    {
+      "id": "categorize",
+      "type": "agent-directive",
+      "directive": "Categorize tests for {{requirements.feature}}.\n\n{{test_categories}}\n\nFor each category:\n1. Category name\n2. Description of what we're checking\n3. List of tests (names)\n\nConsider acceptance criteria:\n{{requirements.acceptance_criteria}}\n\nConsider risks:\n{{risk-analysis.risks}}\n\nEach high-risk scenario must have a corresponding test.",
+      "completionCondition": "Tests distributed by categories, minimum 2 tests in each mandatory category",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "tests": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 2
+                }
+              },
+              "required": [
+                "name",
+                "tests"
+              ]
+            },
+            "description": "Test categories"
+          }
+        },
+        "required": [
+          "categories"
+        ]
+      },
+      "connections": {
+        "success": "prioritize"
+      }
+    },
+    {
+      "id": "prioritize",
+      "type": "agent-directive",
+      "directive": "Prioritize tests.\n\n{{priority_definitions}}\n\nTests from categorization:\n{{categorize.categories}}\n\nFor EACH test specify:\n- test_name: test name\n- priority: P0/P1/P2/P3\n- priority_reason: why this priority\n\nCheck: all high-impact risks covered by P0/P1 tests?",
+      "completionCondition": "Each test has priority P0-P3 with justification",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prioritized_tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "test_name": {
+                  "type": "string"
+                },
+                "category": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": [
+                    "P0",
+                    "P1",
+                    "P2",
+                    "P3"
+                  ]
+                },
+                "priority_reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "test_name",
+                "priority",
+                "priority_reason"
+              ]
+            },
+            "description": "Prioritized tests"
+          }
+        },
+        "required": [
+          "prioritized_tests"
+        ]
+      },
+      "connections": {
+        "success": "detail"
+      }
+    },
+    {
+      "id": "detail",
+      "type": "agent-directive",
+      "directive": "Detail test cases.\n\n{{test_case_template}}\n\nPrioritized tests:\n{{prioritize.prioritized_tests}}\n\nAcceptance criteria for references:\n{{requirements.acceptance_criteria}}\n\nFor each test fill ALL template fields.\n\nIMPORTANT: Expected result must be SPECIFIC and VERIFIABLE.\n❌ Bad: 'works correctly', 'data is saved'\n✅ Good: 'message \"Successfully saved\" is displayed', 'record with fields X, Y, Z appears in DB'",
+      "completionCondition": "Each test has: title, preconditions, steps, expected result, linked requirement",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "preconditions": {
+                  "type": "string"
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "expected_result": {
+                  "type": "string"
+                },
+                "requirement_ref": {
+                  "type": "string"
+                },
+                "priority": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "steps",
+                "expected_result"
+              ]
+            },
+            "description": "Detailed test cases"
+          }
+        },
+        "required": [
+          "test_cases"
+        ]
+      },
+      "connections": {
+        "success": "coverage-review"
+      }
+    },
+    {
+      "id": "coverage-review",
+      "type": "agent-directive",
+      "directive": "Delegate test coverage review to subagent via Task tool.\n\n**CONTEXT:**\n- Acceptance criteria: {{requirements.acceptance_criteria}}\n- Risks: {{risk-analysis.risks}}\n- Test cases: {{detail.test_cases}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE a test coverage reviewer.\n\nTASK: Check test plan coverage against requirements and risks.\n\nACCEPTANCE CRITERIA:\n{{requirements.acceptance_criteria}}\n\nIDENTIFIED RISKS:\n{{risk-analysis.risks}}\n\nTEST CASES:\n{{detail.test_cases}}\n\nCHECK:\n1. Are ALL acceptance criteria covered by tests? For each AC specify which tests cover it.\n2. Are ALL high-impact risks covered by P0/P1 tests?\n3. Are there gaps (uncovered areas)?\n4. What additional tests are needed (if gaps exist)?\n\nOUTPUT:\n- Coverage matrix: each requirement → covering tests\n- Risk coverage: each risk → covering tests\n- Gaps found (if any)\n- Recommendations for additional tests\n- issues_count: number of coverage gaps\n\nReturn issues_count = 0 if coverage is complete.\"\n\n**IMPORTANT:** Pass subagent result honestly to output.",
+      "completionCondition": "Coverage matrix built, gaps identified, recommendations provided",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "coverage",
+          "all_ac_covered",
+          "all_risks_covered"
+        ],
+        "globalInputs": [
+          "coverage",
+          "gaps",
+          "recommendations",
+          "all_ac_covered",
+          "all_risks_covered"
+        ]
+      },
+      "connections": {
+        "success": "output"
+      }
+    },
+    {
+      "id": "output",
+      "type": "agent-directive",
+      "directive": "Create final test plan for {{requirements.feature}}.\n\nInclude:\n1. **Summary** — test count by priority (P0: X, P1: Y, P2: Z, P3: W)\n2. **Full test case list** — grouped by categories\n3. **Coverage matrix** — which requirements are covered by which tests\n4. **Gaps and recommendations** — if there are uncovered areas\n5. **Automation recommendations** — which tests should be automated first (usually P0/P1)\n\nFormat: ready-to-use document (markdown).",
+      "completionCondition": "Test plan ready and shown to user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "test_plan_delivered",
+          "total_tests"
+        ],
+        "globalInputs": [
+          "test_plan_delivered",
+          "total_tests",
+          "p0_count",
+          "p1_count",
+          "p2_count",
+          "p3_count"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "variableRegistry": {
+    "test_categories": {
+      "type": "string",
+      "description": "Mandatory test categories for comprehensive coverage",
+      "default": "MANDATORY TEST CATEGORIES:\n\n1. Positive tests (happy path) — main usage scenarios\n2. Negative tests (invalid input, errors) — error handling, invalid input\n3. Edge cases (boundaries, limits) — boundary conditions, limits\n4. Security tests (auth, injection) — authorization, injections, OWASP\n5. Performance tests (if applicable) — load, speed\n\nMinimum 2 tests in each mandatory category."
+    },
+    "priority_definitions": {
+      "type": "string",
+      "description": "Test priority definitions P0-P3",
+      "default": "TEST PRIORITIES:\n\nP0: Blocker — cannot release without this. Critical functionality, data loss, security.\nP1: Critical — must pass before release. Main user flows.\nP2: Major — should be checked. Secondary scenarios.\nP3: Minor — nice to have. Cosmetics, rare edge cases.\n\nAll high-risk scenarios must be covered by P0/P1 tests."
+    },
+    "test_case_template": {
+      "type": "string",
+      "description": "Template for writing test cases",
+      "default": "TEST CASE TEMPLATE:\n\n- Title: brief name (what we're testing)\n- Preconditions: what needs to be prepared before test\n- Steps: numbered execution steps\n- Expected result: SPECIFIC verifiable result (not 'works correctly')\n- Linked requirement: reference to AC/user story\n- Priority: P0/P1/P2/P3 with justification"
+    },
+    "all_ac_covered": {
+      "type": "boolean",
+      "description": "Workflow-global all_ac_covered"
+    },
+    "all_risks_covered": {
+      "type": "boolean",
+      "description": "Workflow-global all_risks_covered"
+    },
+    "constraints": {
+      "type": "array",
+      "description": "Workflow-global constraints",
+      "items": {
+        "type": "string"
+      }
+    },
+    "coverage": {
+      "type": "array",
+      "description": "Workflow-global coverage",
+      "items": {
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "covered_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "requirement",
+          "covered_by"
+        ]
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "description": "Workflow-global gaps",
+      "items": {
+        "type": "string"
+      }
+    },
+    "p0_count": {
+      "type": "number",
+      "description": "Workflow-global p0_count"
+    },
+    "p1_count": {
+      "type": "number",
+      "description": "Workflow-global p1_count"
+    },
+    "p2_count": {
+      "type": "number",
+      "description": "Workflow-global p2_count"
+    },
+    "p3_count": {
+      "type": "number",
+      "description": "Workflow-global p3_count"
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "Workflow-global recommendations",
+      "items": {
+        "type": "string"
+      }
+    },
+    "test_plan_delivered": {
+      "type": "string",
+      "description": "Workflow-global test_plan_delivered",
+      "enum": [
+        "yes"
+      ]
+    },
+    "total_tests": {
+      "type": "number",
+      "description": "Workflow-global total_tests"
+    },
+    "user_stories": {
+      "type": "array",
+      "description": "Workflow-global user_stories",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

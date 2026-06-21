@@ -1,0 +1,326 @@
+---
+title: Editing Workflows
+description: How to modify existing workflows safely
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+## Editing Methods
+
+### Via MCP Tools
+
+Use the `manage` tool with edit action:
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    // changes go here
+  },
+});
+```
+
+### Via workflow-management-flow
+
+Start the management workflow:
+
+```typescript
+mcp__moira__start({
+  workflowId: "workflow-management-flow",
+});
+```
+
+Select "edit" when prompted for action.
+
+<Aside type="tip">
+  Use workflow-management-flow for complex edits. It guides through the process and validates
+  changes.
+</Aside>
+
+## Change Types
+
+### Update Metadata
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    metadata: {
+      version: "2.0.0",
+      description: "Updated description",
+    },
+  },
+});
+```
+
+### Update Node Content
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    updateNodes: [
+      {
+        nodeId: "task-node",
+        changes: {
+          directive: "New directive text",
+          completionCondition: "New condition",
+        },
+      },
+    ],
+  },
+});
+```
+
+### Add Nodes
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    addNodes: [
+      {
+        type: "agent-directive",
+        id: "new-node",
+        directive: "New task",
+        completionCondition: "Task complete",
+        connections: { success: "existing-node" },
+      },
+    ],
+  },
+});
+```
+
+### Remove Nodes
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    removeNodes: ["node-to-remove"],
+  },
+});
+```
+
+<Aside type="caution">
+  When removing nodes, update connections in other nodes that referenced the removed node.
+</Aside>
+
+## Safe Editing Process
+
+<Steps>
+1. **Get current structure**
+   ```typescript
+   mcp__moira__manage({
+     action: "get-structure",
+     workflowId: "my-workflow"
+   })
+   ```
+
+2. **Find nodes to edit**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "search-nodes",
+     workflowId: "my-workflow",
+     query: "search term",
+   });
+   ```
+
+3. **Get node details**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "get-node",
+     workflowId: "my-workflow",
+     nodeId: "node-id",
+   });
+   ```
+
+4. **Apply changes**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "edit",
+     workflowId: "my-workflow",
+     changes: {
+       /* ... */
+     },
+   });
+   ```
+
+5. **Validate**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "validate",
+     workflowId: "my-workflow",
+   });
+   ```
+
+</Steps>
+
+## Updating Connections
+
+### Single Connection Update
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "source-node",
+      changes: {
+        connections: {
+          success: "new-target-node",
+        },
+      },
+    },
+  ];
+}
+```
+
+### Condition Node Connections
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "condition-node",
+      changes: {
+        connections: {
+          true: "when-true-node",
+          false: "when-false-node",
+        },
+      },
+    },
+  ];
+}
+```
+
+## Version Control
+
+### Increment Version
+
+Always update version when making changes:
+
+```typescript
+{
+  metadata: {
+    version: "1.1.0"; // was 1.0.0
+  }
+}
+```
+
+Version semantics:
+
+- **Major** (2.0.0): Breaking changes, restructured flow
+- **Minor** (1.1.0): New features, new nodes
+- **Patch** (1.0.1): Bug fixes, text corrections
+
+### Compare Versions
+
+```typescript
+mcp__moira__manage({
+  action: "diff",
+  workflowId: "my-workflow",
+  compareWorkflowId: "my-workflow-old",
+});
+```
+
+## Common Edits
+
+### Fix Typo in Directive
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "task-node",
+      changes: {
+        directive: "Corrected directive text",
+      },
+    },
+  ];
+}
+```
+
+### Add Required Field to InputSchema
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "input-node",
+      changes: {
+        inputSchema: {
+          type: "object",
+          properties: {
+            existing_field: { type: "string" },
+            new_field: { type: "string" }, // added
+          },
+          required: ["existing_field", "new_field"], // updated
+        },
+      },
+    },
+  ];
+}
+```
+
+### Insert Node in Flow
+
+```typescript
+{
+  addNodes: [
+    {
+      type: "agent-directive",
+      id: "inserted-node",
+      directive: "New step",
+      connections: { success: "original-target" }
+    }
+  ],
+  updateNodes: [
+    {
+      nodeId: "original-source",
+      changes: {
+        connections: { success: "inserted-node" }
+      }
+    }
+  ]
+}
+```
+
+## Validation Errors
+
+### Missing Connection Target
+
+```
+Error: Node 'task-1' connection target 'missing-node' not found
+```
+
+Fix: Update connection to valid node ID.
+
+### Orphaned Node
+
+```
+Warning: Node 'orphan-node' is not reachable from start
+```
+
+Fix: Add connection from another node or remove orphaned node.
+
+### Invalid Node Type
+
+```
+Error: Unknown node type 'custom-type'
+```
+
+Fix: Use valid types: start, end, agent-directive, condition, expression, telegram-notification, subgraph, teleport, lock.
+
+## See Also
+
+- [Creating Workflows](/docs/guides/workflow-creation/) - Building new workflows
+- [MCP Tools](/docs/reference/tools/) - Tool reference

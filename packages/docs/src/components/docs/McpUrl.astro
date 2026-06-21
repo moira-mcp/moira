@@ -1,0 +1,19 @@
+---
+/**
+ * Component to display MCP URL from environment
+ * Used in documentation to avoid hardcoding URLs
+ *
+ * MoiraConfig.mcpUrl is injected at build time via Vite define in astro.config.ts
+ */
+import { getMcpUrl } from "@mcp-moira/shared/urls";
+
+interface Props {
+  /** Display format: 'code' for inline code, 'text' for plain text */
+  format?: "code" | "text";
+}
+
+const { format = "text" } = Astro.props;
+const mcpUrl = getMcpUrl();
+---
+
+{format === "code" ? <code>{mcpUrl}</code> : mcpUrl}

@@ -1,0 +1,170 @@
+---
+title: Claude Code Integration
+description: Set up Moira with Claude Code for AI workflow execution
+---
+
+import { Steps, Aside, FileTree } from "@astrojs/starlight/components";
+import McpUrl from "~/components/docs/McpUrl.astro";
+
+Claude Code is Anthropic's official CLI and VS Code extension for Claude. This guide covers integrating Moira with Claude Code.
+
+## Prerequisites
+
+- Claude Code installed and configured
+- Moira server access (cloud or self-hosted)
+- Valid Moira account credentials
+
+## Configuration
+
+<Steps>
+
+1. **Open Claude Code settings**
+
+   In VS Code, open Command Palette and run:
+
+   ```
+   Claude Code: Open Settings
+   ```
+
+   Or edit directly:
+
+   {/* prettier-ignore */}
+   <FileTree>
+   - ~/.claude/
+     - settings.json
+   </FileTree>
+
+2. **Add Moira MCP server**
+
+   Add to your `settings.json` with URL: <McpUrl format="code" />
+
+3. **Restart Claude Code**
+
+   Reload the window or restart VS Code to apply changes.
+
+4. **Authenticate**
+
+   When first using Moira tools, you'll be prompted to authenticate. Follow the OAuth flow in your browser.
+
+   **Alternative: API Token**
+
+   If OAuth is not available, create an API token in Moira web UI (Settings → API Tokens) and add it to your MCP config as a Bearer token header. See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
+
+</Steps>
+
+## Verify Connection
+
+Test the connection by asking Claude:
+
+```
+List available Moira workflows
+```
+
+You should see your workflows listed.
+
+## Using Moira in Claude Code
+
+### Starting a Workflow
+
+```
+Start the "development-flow" workflow in Moira
+```
+
+Claude will:
+
+1. Call `start` with the workflow ID
+2. Receive the first step directive
+3. Execute the directive
+4. Submit results via `step`
+5. Continue until workflow completes
+
+### Continuing a Session
+
+If a session was interrupted, continue with:
+
+```
+Continue my Moira workflow with process ID abc-123
+```
+
+### Getting Help
+
+```
+Show Moira documentation for nodes
+```
+
+Claude will call `get_help` with the topic.
+
+## CLAUDE.md Integration
+
+For project-specific workflows, add to your `CLAUDE.md`:
+
+```markdown
+## Moira Workflows
+
+This project uses Moira for development workflows.
+
+### Available Workflows
+
+- `dev-flow` - Main development workflow
+- `review-flow` - Code review workflow
+
+### Starting Development
+
+To start a task, run the development workflow:
+
+1. Start `dev-flow` workflow
+2. Follow each step directive
+3. Submit results before moving to next step
+```
+
+<Aside type="tip">
+  Add workflow process IDs to your CLAUDE.md for easy resumption after session interruption.
+</Aside>
+
+## Available Tools
+
+Once connected, these tools are available:
+
+| Tool               | Description                               |
+| ------------------ | ----------------------------------------- |
+| `list`   | List available workflows                  |
+| `start`   | Start a workflow, returns first directive |
+| `step`     | Submit result, get next directive         |
+| `get_help`         | Get documentation                         |
+| `manage_settings`  | User settings management                  |
+| `get_session_info` | Session and execution info                |
+
+## Troubleshooting
+
+### Connection Issues
+
+1. Verify MCP server URL is correct
+2. Check network connectivity
+3. Ensure authentication is valid
+4. Check Claude Code logs for errors
+
+### Workflow Not Starting
+
+1. Verify workflow ID exists: `list`
+2. Check workflow visibility permissions
+3. Ensure you have access to the workflow
+
+### Session Lost
+
+If process ID is lost:
+
+1. Check `get_session_info` for active executions
+2. Resume with the correct process ID
+3. Consider adding process ID to CLAUDE.md for persistence
+
+## Best Practices
+
+1. **Save Process IDs** - Store in CLAUDE.md for session continuity
+2. **Follow Directives** - Execute exactly what the directive says
+3. **Meet Completion Conditions** - Verify before submitting
+4. **Check Help** - Use `get_help` when unsure
+
+## Related
+
+- [Quick Start](/docs/getting-started/quickstart/) - General setup guide
+- [MCP Clients](/docs/integration/mcp-clients/) - Other client integrations

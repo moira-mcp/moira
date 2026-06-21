@@ -1,0 +1,171 @@
+---
+title: Branching Pattern
+description: Different paths for different scenarios
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Route workflow execution to different paths based on user choice, collected data, or computed conditions.
+
+## Structure
+
+```
+[get-choice] → [route] → choice=A → [path-a] → [merge]
+                      → choice=B → [path-b] → [merge]
+```
+
+## Implementation
+
+### Choice Collection
+
+```json
+{
+  "type": "agent-directive",
+  "id": "get-action",
+  "directive": "Ask user: create new or edit existing?",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": { "type": "string", "enum": ["create", "edit"] }
+    },
+    "required": ["action"]
+  },
+  "connections": { "success": "route-action" }
+}
+```
+
+### Simple Binary Route
+
+```json
+{
+  "type": "condition",
+  "id": "route-action",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "action" },
+    "right": "create"
+  },
+  "connections": {
+    "true": "create-workflow",
+    "false": "edit-workflow"
+  }
+}
+```
+
+## Multi-Way Branching
+
+For more than 2 options, chain conditions:
+
+```json
+{
+  "id": "check-create",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "action" },
+    "right": "create"
+  },
+  "connections": {
+    "true": "create-branch",
+    "false": "check-edit"
+  }
+}
+```
+
+```json
+{
+  "id": "check-edit",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "action" },
+    "right": "edit"
+  },
+  "connections": {
+    "true": "edit-branch",
+    "false": "delete-branch"
+  }
+}
+```
+
+<Aside type="tip">
+  For multi-way branches, order conditions from most to least common for efficiency.
+</Aside>
+
+## Branching by Boolean Flag
+
+```json
+{
+  "type": "condition",
+  "id": "check-has-tests",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "has_tests" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "run-tests",
+    "false": "skip-tests"
+  }
+}
+```
+
+## Branching by Numeric Value
+
+```json
+{
+  "type": "condition",
+  "id": "check-error-count",
+  "condition": {
+    "operator": "gt",
+    "left": { "contextPath": "error_count" },
+    "right": 0
+  },
+  "connections": {
+    "true": "fix-errors",
+    "false": "proceed"
+  }
+}
+```
+
+## Complex Conditions
+
+Combine multiple checks:
+
+```json
+{
+  "condition": {
+    "operator": "and",
+    "conditions": [
+      {
+        "operator": "eq",
+        "left": { "contextPath": "status" },
+        "right": "ready"
+      },
+      {
+        "operator": "gt",
+        "left": { "contextPath": "items_count" },
+        "right": 0
+      }
+    ]
+  }
+}
+```
+
+## Merging Branches
+
+Branches typically converge at a common node:
+
+```
+[create-branch] → [save-workflow]
+[edit-branch]   → [save-workflow]
+```
+
+Both paths connect to the same target node.
+
+## Related Patterns
+
+- [Information Collection](/docs/patterns/information-collection/) - Collect data for routing decisions
+- [Skip Pattern](/docs/patterns/skip/) - Special case of branching for optional steps

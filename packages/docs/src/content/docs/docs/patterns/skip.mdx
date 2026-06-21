@@ -1,0 +1,135 @@
+---
+title: Skip Pattern
+description: Allow users to skip optional steps
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Allow users or agents to skip optional workflow steps when not needed. Useful for optional analysis, reviews, or configuration steps.
+
+## Structure
+
+```
+[optional-step] → [check-skip] → skip=true  → [next-step]
+                              → skip=false → [process-result]
+```
+
+## Implementation
+
+### Optional Step Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "optional-analysis",
+  "directive": "Perform optional deep analysis. User can skip if not needed by providing skip='yes'.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "analysis_result": { "type": "string" },
+      "skip": { "type": "string", "enum": ["yes"] }
+    }
+  },
+  "connections": { "success": "check-skip" }
+}
+```
+
+<Aside type="note">
+  The `skip` field uses `enum: ["yes"]` to make it optional but explicit. If user wants to skip,
+  they provide `skip: "yes"`. Otherwise they provide the actual result.
+</Aside>
+
+### Skip Check Node
+
+```json
+{
+  "type": "condition",
+  "id": "check-skip",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "skip" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "next-step",
+    "false": "process-analysis"
+  }
+}
+```
+
+## Alternative: Boolean Flag
+
+For simpler cases:
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "result": { "type": "string" },
+      "skipped": { "type": "boolean" }
+    },
+    "required": ["skipped"]
+  }
+}
+```
+
+## Combining with Information Collection
+
+Skip decisions can be made upfront:
+
+```json
+{
+  "id": "collect-preferences",
+  "directive": "Ask user: do you want detailed analysis?",
+  "inputSchema": {
+    "properties": {
+      "want_detailed_analysis": { "type": "boolean" }
+    },
+    "required": ["want_detailed_analysis"]
+  }
+}
+```
+
+Then use condition:
+
+```json
+{
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "want_detailed_analysis" },
+    "right": false
+  },
+  "connections": {
+    "true": "skip-to-summary",
+    "false": "detailed-analysis"
+  }
+}
+```
+
+## Real Example
+
+From `workflow-management-flow.json`:
+
+```json
+{
+  "id": "review-existing-workflow",
+  "directive": "If editing, review the existing workflow structure.\nIf creating new workflow, skip this step.",
+  "inputSchema": {
+    "properties": {
+      "workflow_reviewed": { "type": "string" },
+      "skip": { "type": "string", "enum": ["yes"] }
+    }
+  }
+}
+```
+
+<Aside type="tip">
+  Make skip behavior explicit in the directive. Tell the user exactly when and how to skip.
+</Aside>
+
+## Related Patterns
+
+- [Information Collection](/docs/patterns/information-collection/) - Collect skip preferences upfront
+- [Branching](/docs/patterns/branching/) - Route to different paths based on decisions

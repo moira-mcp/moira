@@ -1,0 +1,112 @@
+---
+title: Completeness Self-Review
+description: Verify every requirement against the real artifact before delivery
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A workflow that produces a deliverable from explicit requirements runs a completeness self-review before final delivery. The review checks the produced artifact against the frozen original requirements, counts the unmet ones, and routes any gaps into a bounded fix path so the workflow never delivers silently with requirements outstanding.
+
+## Five Rules
+
+1. **Source of truth is the frozen original requirements.** Compare against the original requirements file or the `success_criteria` captured at the start — not the current plan and not the agent's memory of what was asked.
+2. **Verify against the artifact, not claims.** For each requirement, find concrete evidence in the produced work: a code path, a file, a test, an output. For code, read the real code or run tests.
+3. **One check per requirement.** Optionally delegate to a child `moira/todo-list` with one task per requirement. Return `requirements_gaps_count` and `total_requirements`.
+4. **Gaps route to a bounded fix path.** A condition node on `requirements_gaps_count` sends gaps to a fix/extend branch. Never deliver with gaps greater than zero. Bound the loop with `validation_attempt_count` and escalation.
+5. **Persist a coverage report.** Write a report such as `requirements-coverage-report-v{attempt}.md` recording each requirement and its evidence.
+
+## Variable Registry
+
+Declare the review counters with numeric defaults:
+
+```json
+{
+  "variableRegistry": {
+    "validation_attempt_count": { "type": "number", "description": "Coverage review attempt", "default": 1 },
+    "requirements_gaps_count": { "type": "number", "description": "Requirements with no evidence of completion", "default": 0 },
+    "total_requirements": { "type": "number", "description": "Total requirements checked", "default": 0 }
+  }
+}
+```
+
+## Coverage Review Node
+
+The review node checks every requirement against the artifact and writes the gap count and total as globals:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "validate-requirements-coverage",
+  "directive": "Read the frozen original requirements (the requirements file or captured success_criteria), NOT the current plan.\n\nFor each requirement, find concrete evidence in the produced artifact: code path, file, test, or output. For code, read the real code or run the tests.\n\nWrite requirements-coverage-report-v{{validation_attempt_count}}.md listing every requirement and its evidence. Set total_requirements to the count checked and requirements_gaps_count to the count with no evidence.",
+  "completionCondition": "Every requirement verified against the artifact and the coverage report written",
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["requirements_gaps_count", "total_requirements"],
+    "properties": {
+      "coverage_report_path": { "type": "string" }
+    },
+    "required": ["requirements_gaps_count", "total_requirements", "coverage_report_path"]
+  },
+  "connections": { "success": "check-requirements-gaps" }
+}
+```
+
+## Gap Check
+
+```json
+{
+  "type": "condition",
+  "id": "check-requirements-gaps",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "requirements_gaps_count" },
+    "right": 0
+  },
+  "connections": {
+    "true": "deliver",
+    "false": "fix-gaps"
+  }
+}
+```
+
+When `requirements_gaps_count` is 0, the workflow proceeds to delivery. Otherwise it enters the fix/extend branch.
+
+## Bounding the Fix Loop
+
+The fix branch increments the attempt counter and re-enters the coverage review. A bound check routes the limit to a user escalation rather than looping forever:
+
+```json
+{
+  "type": "expression",
+  "id": "increment-validation-attempt",
+  "expressions": ["validation_attempt_count = validation_attempt_count + 1"],
+  "connections": { "default": "check-attempt-limit" }
+}
+```
+
+```json
+{
+  "type": "condition",
+  "id": "check-attempt-limit",
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "validation_attempt_count" },
+    "right": 5
+  },
+  "connections": {
+    "true": "validate-requirements-coverage",
+    "false": "escalate-to-user"
+  }
+}
+```
+
+<Aside type="caution">
+  A gap count above zero must reach the fix branch. Routing the coverage check straight to delivery
+  when gaps remain is the silent-skip anti-pattern.
+</Aside>
+
+## Related
+
+- [Validation Loop](/docs/patterns/validation-loop/) - Bounded re-validation mechanics
+- [Replan Pattern](/docs/patterns/replan/) - Extending the plan when coverage finds gaps
+- [Subagent Review](/docs/patterns/subagent-review/) - Delegating per-requirement checks to a child workflow

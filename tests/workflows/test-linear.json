@@ -1,0 +1,44 @@
+{
+  "slug": "test-linear",
+  "metadata": {
+    "name": "Test Linear",
+    "version": "1.0.0",
+    "description": "Simple linear test"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "ask-name"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-name",
+      "directive": "What is your name?",
+      "completionCondition": "Name provided",
+      "connections": {
+        "success": "end"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "userName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userName"
+        ]
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "userName"
+      ]
+    }
+  ]
+}

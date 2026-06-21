@@ -1,0 +1,738 @@
+{
+  "slug": "server-security-audit-v1",
+  "metadata": {
+    "name": "Server Security Audit & Monitoring",
+    "version": "1.0.0",
+    "description": "Comprehensive 8-stage security audit workflow with user approval gates. Analyzes system health, running processes, security threats (brute-force, intrusion attempts), Docker containers, disk usage, vulnerabilities, and web application logs. Generates detailed reports and actionable recommendations."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-server-info"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-server-info",
+      "directive": "Ask user for server audit configuration:\n1. Server hostname or IP address to audit\n2. How to access server (SSH via infrastructure-tools MCP or other method)\n3. Server description/purpose\n4. Any specific concerns or focus areas\n\nProvide clear explanation that audit will be READ-ONLY (no changes unless explicitly approved).",
+      "completionCondition": "User provided server access information. Server accessibility confirmed. Audit mode (READ-ONLY) acknowledged by user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "serverName": {
+            "type": "string",
+            "description": "Server hostname or identifier"
+          },
+          "accessMethod": {
+            "type": "string",
+            "description": "How to access (e.g., 'infrastructure-tools MCP', 'direct SSH')"
+          },
+          "serverPurpose": {
+            "type": "string",
+            "description": "What this server is used for"
+          },
+          "focusAreas": {
+            "type": "string",
+            "description": "Any specific concerns"
+          }
+        },
+        "required": [
+          "serverName",
+          "accessMethod"
+        ]
+      },
+      "connections": {
+        "success": "notify-audit-start"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-audit-start",
+      "message": "🔍 Security Audit Started\nServer: {{serverName}}\nMode: READ-ONLY Analysis\nStages: 8 total",
+      "connections": {
+        "default": "stage1-system-health"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage1-system-health",
+      "directive": "STAGE 1: System Health & Resources (10-15 min)\n\nExecute these checks on {{serverName}}:\n1. CPU usage: top, load average, idle percentage\n2. RAM usage: free -h, swap status, available memory\n3. Disk space: df -h, df -i (inodes)\n4. Network: connection count, bandwidth\n5. Uptime: system stability, last reboot\n\nCommands to run via {{accessMethod}}:\n- top -bn1 | head -20\n- free -h\n- df -h\n- df -i\n- uptime\n- vmstat 1 5\n\nSave results to SERVER-AUDIT-PLAN.md under Stage 1 section with findings.\nProvide user with SHORT summary of critical findings only.",
+      "completionCondition": "All Stage 1 checks executed. Results saved to SERVER-AUDIT-PLAN.md. Critical issues (if any) reported to user. User received summary.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cpuStatus": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "warning",
+              "critical"
+            ]
+          },
+          "ramStatus": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "warning",
+              "critical"
+            ]
+          },
+          "diskStatus": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "warning",
+              "critical"
+            ]
+          },
+          "criticalFindings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "description": "Brief summary for user"
+          }
+        },
+        "required": [
+          "cpuStatus",
+          "ramStatus",
+          "diskStatus",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage1",
+      "directive": "Present Stage 1 results to user:\n{{summary}}\n\nCritical findings: {{criticalFindings}}\n\nAsk user: Continue to Stage 2 (Running Processes & Services)?",
+      "completionCondition": "User explicitly approved continuing to Stage 2 OR user declined (workflow can end).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean",
+            "description": "User approval to continue"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage2"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage2",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage2-processes",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage2-processes",
+      "directive": "STAGE 2: Running Processes & Services (10-15 min)\n\nExecute these checks on {{serverName}}:\n1. Process list: top CPU/RAM consumers\n2. Docker containers: status, health checks\n3. Systemd services: running services\n4. Zombie processes: check for defunct processes\n5. Port listeners: exposed ports\n\nCommands:\n- ps auxf --sort=-%mem | head -40\n- docker ps -a --format \"table {{.Names}}\\t{{.Status}}\\t{{.Image}}\"\n- docker stats --no-stream\n- systemctl list-units --type=service --state=running\n- ss -tuln\n- ps aux | grep defunct\n\nUpdate SERVER-AUDIT-PLAN.md Stage 2. Provide SHORT summary focusing on security concerns.",
+      "completionCondition": "Stage 2 checks complete. Results in SERVER-AUDIT-PLAN.md. Security concerns (exposed ports, suspicious processes) reported to user.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "containersCount": {
+            "type": "number"
+          },
+          "containersHealthy": {
+            "type": "boolean"
+          },
+          "exposedPorts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "securityConcerns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "containersCount",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage2"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage2",
+      "directive": "Stage 2 complete:\n{{summary}}\n\nContainers: {{containersCount}}\nSecurity concerns: {{securityConcerns}}\n\nContinue to Stage 3 (SSH Attack Logs)?",
+      "completionCondition": "User approved continuing to Stage 3.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage3"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage3",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage3-security-logs",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage3-security-logs",
+      "directive": "STAGE 3: Security - Access Logs & Failed Logins (15-20 min)\n\nAnalyze attack patterns on {{serverName}}:\n1. SSH failed login attempts (brute-force detection)\n2. Recent successful logins\n3. Suspicious patterns in auth logs\n4. Geographic distribution of attackers\n5. Unusual access times\n\nCommands:\n- lastb | head -100\n- last | head -50\n- grep \"Failed password\" /var/log/auth.log | tail -100\n- grep \"Accepted\" /var/log/auth.log | tail -50\n- journalctl -u ssh -n 100 --no-pager\n\nUpdate SERVER-AUDIT-PLAN.md Stage 3. Identify attacking IPs, coordinated attacks, reconnaissance signs.",
+      "completionCondition": "Attack analysis complete. Top attacking IPs identified. Attack patterns documented. Results in file. User notified of CRITICAL findings.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "attackIntensity": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "topAttackers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of IP addresses"
+          },
+          "coordinatedAttack": {
+            "type": "boolean",
+            "description": "Botnet detected"
+          },
+          "reconnaissanceDetected": {
+            "type": "boolean",
+            "description": "Attackers know domain/structure"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attackIntensity",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage3"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage3",
+      "directive": "Stage 3 - SSH Attack Analysis:\n{{summary}}\n\nAttack intensity: {{attackIntensity}}\nTop attackers: {{topAttackers}}\nCoordinated attack: {{coordinatedAttack}}\n\nContinue to Stage 4 (Network & Intrusion Detection)?",
+      "completionCondition": "User approved Stage 4.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage4"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage4",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage4-network-intrusion",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage4-network-intrusion",
+      "directive": "STAGE 4: Network & Intrusion Detection (15-20 min)\n\nAnalyze network security on {{serverName}}:\n1. Established connections from suspicious IPs\n2. Firewall rules audit (UFW/iptables)\n3. Open ports vs expected services\n4. Reverse shells or suspicious processes\n5. Rootkit indicators\n\nCommands:\n- netstat -antp | grep ESTABLISHED\n- ufw status verbose\n- iptables -L -n -v | head -50\n- ps aux | grep -E \"nc|netcat|socat|/dev/tcp\"\n\nUpdate SERVER-AUDIT-PLAN.md Stage 4. Report active attacker connections, firewall gaps, process anomalies.",
+      "completionCondition": "Network analysis complete. Active attacker connections identified. Firewall status documented. No rootkits/backdoors found (or reported if found). Results saved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "activeAttackers": {
+            "type": "number",
+            "description": "Count of established connections from attackers"
+          },
+          "firewallStatus": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "weak",
+              "moderate",
+              "strong"
+            ]
+          },
+          "rootkitsFound": {
+            "type": "boolean"
+          },
+          "suspiciousProcesses": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "firewallStatus",
+          "rootkitsFound",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage4"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage4",
+      "directive": "Stage 4 - Network Security:\n{{summary}}\n\nFirewall: {{firewallStatus}}\nActive attackers online: {{activeAttackers}}\nRootkits: {{rootkitsFound}}\n\nContinue to Stage 5 (Docker Security)?",
+      "completionCondition": "User approved Stage 5.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage5"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage5",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage5-docker-security",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage5-docker-security",
+      "directive": "STAGE 5: Docker & Container Security (15-20 min)\n\nAnalyze Docker security on {{serverName}}:\n1. Container logs: errors, warnings, failures\n2. Image vulnerabilities: outdated images\n3. Network exposure: publicly accessible ports\n4. Volume security: mount permissions\n5. Resource limits: memory/CPU caps\n\nCommands:\n- docker ps -q | xargs -I {} docker logs --tail 50 {} 2>&1 | grep -iE \"error|warning|fail\"\n- docker images --format \"table {{.Repository}}\\t{{.Tag}}\\t{{.CreatedAt}}\"\n- docker inspect $(docker ps -q) --format='{{.Name}}: Ports={{.NetworkSettings.Ports}}'\n- docker system df -v\n- docker ps --format \"{{.Names}}\" | xargs -I {} docker inspect {} --format='{{.Name}}: Memory={{.HostConfig.Memory}}'\n\nUpdate SERVER-AUDIT-PLAN.md Stage 5. Report web exploits in logs, outdated images, resource limit issues.",
+      "completionCondition": "Docker security audit complete. Exploit attempts logged. Outdated images identified. Network exposure documented. Resource limits checked. Results saved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "webExploitsDetected": {
+            "type": "boolean"
+          },
+          "outdatedImages": {
+            "type": "number"
+          },
+          "publiclyExposedPorts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "noResourceLimits": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "webExploitsDetected",
+          "outdatedImages",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage5"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage5",
+      "directive": "Stage 5 - Docker Security:\n{{summary}}\n\nWeb exploits: {{webExploitsDetected}}\nOutdated images: {{outdatedImages}}\nPublic ports: {{publiclyExposedPorts}}\nNo limits: {{noResourceLimits}}\n\nContinue to Stage 6 (Disk Cleanup Opportunities)?",
+      "completionCondition": "User approved Stage 6.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage6"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage6",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage6-disk-cleanup",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage6-disk-cleanup",
+      "directive": "STAGE 6: Disk Usage & Cleanup Opportunities (10-15 min)\n\nFind cleanup opportunities on {{serverName}}:\n1. Large files (>100MB)\n2. Old log files (>30 days)\n3. Docker unused images/volumes\n4. Temp file accumulation\n5. Package cache\n\nCommands:\n- find / -type f -size +100M 2>/dev/null | head -30\n- find /var/log -type f -name \"*.log\" -mtime +30\n- docker system df\n- docker images -f \"dangling=true\" | wc -l\n- du -sh /tmp /var/tmp /var/cache\n- du -sh /var/lib/docker\n\nUpdate SERVER-AUDIT-PLAN.md Stage 6. Calculate total reclaimable space. DO NOT delete anything (READ-ONLY mode).",
+      "completionCondition": "Disk analysis complete. Reclaimable space calculated. Cleanup opportunities documented. Specific cleanup commands provided for user approval. Results saved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "danglingImages": {
+            "type": "number"
+          },
+          "reclaimableGB": {
+            "type": "number",
+            "description": "Total GB that can be freed"
+          },
+          "largeFilesFound": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "danglingImages",
+          "reclaimableGB",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage6"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage6",
+      "directive": "Stage 6 - Disk Cleanup:\n{{summary}}\n\nDangling images: {{danglingImages}}\nReclaimable: {{reclaimableGB}}GB\nLarge files: {{largeFilesFound}}\n\nContinue to Stage 7 (Vulnerabilities)?",
+      "completionCondition": "User approved Stage 7.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage7"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage7",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage7-vulnerabilities",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage7-vulnerabilities",
+      "directive": "STAGE 7: System Vulnerabilities Scan (10-15 min)\n\nCheck for vulnerabilities on {{serverName}}:\n1. Outdated packages\n2. Security updates available\n3. Kernel version vs known CVEs\n4. SSL/TLS certificate expiration\n5. Weak file permissions (world-writable)\n\nCommands:\n- apt list --upgradable 2>/dev/null | head -50\n- uname -r\n- cat /etc/os-release\n- find /opt /home -type f -perm -002 2>/dev/null | head -20\n- docker exec traefik ls -la /letsencrypt/acme.json\n\nUpdate SERVER-AUDIT-PLAN.md Stage 7. Report critical security updates, EOL warnings, permission issues.",
+      "completionCondition": "Vulnerability scan complete. Outdated packages counted. Security updates identified. World-writable files found. SSL cert status checked. Results saved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "packagesNeedingUpdate": {
+            "type": "number"
+          },
+          "criticalUpdates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "osEOL": {
+            "type": "string",
+            "description": "OS EOL date or 'none'"
+          },
+          "worldWritableFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "packagesNeedingUpdate",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage7"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage7",
+      "directive": "Stage 7 - Vulnerabilities:\n{{summary}}\n\nUpdates needed: {{packagesNeedingUpdate}}\nCritical: {{criticalUpdates}}\nOS EOL: {{osEOL}}\nWorld-writable: {{worldWritableFiles}}\n\nContinue to Stage 8 (Web Server Logs - Final Stage)?",
+      "completionCondition": "User approved Stage 8.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-stage8"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-stage8",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "stage8-web-logs",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage8-web-logs",
+      "directive": "STAGE 8: Web Server & Application Logs (15-20 min) - FINAL STAGE\n\nAnalyze web attack patterns on {{serverName}}:\n1. Traefik access logs: top IPs, request patterns\n2. Nginx/Apache logs\n3. Application errors\n4. Suspicious patterns: SQL injection, XSS, path traversal\n5. Rate limiting violations\n\nCommands:\n- docker logs traefik 2>&1 | tail -200\n- docker logs traefik 2>&1 | grep -iE \"error|fail|deny\" | tail -50\n- docker logs traefik 2>&1 | grep -E \"SELECT|UNION|<script|\\.\\.\\/|etc\\/passwd|wp-admin|\\.env|\\.git\"\n- docker logs traefik 2>&1 | grep -oE '\"[^\"]*HTTP' | sort | uniq -c | sort -rn | head -20\n\nUpdate SERVER-AUDIT-PLAN.md Stage 8. Identify attack vectors: WordPress exploitation, credential harvesting, API reconnaissance.",
+      "completionCondition": "Web log analysis complete. Attack patterns identified (.env harvesting, .git scanning, WordPress, etc). Traffic statistics analyzed. Results saved in file.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "wordpressAttacks": {
+            "type": "boolean"
+          },
+          "envHarvestingAttempts": {
+            "type": "number"
+          },
+          "gitScanningAttempts": {
+            "type": "number"
+          },
+          "attackVectors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "approve-stage8"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-stage8",
+      "directive": "Stage 8 - Web Attack Analysis (FINAL):\n{{summary}}\n\nWordPress attacks: {{wordpressAttacks}}\n.env harvesting: {{envHarvestingAttempts}} attempts\n.git scanning: {{gitScanningAttempts}} attempts\nAttack vectors: {{attackVectors}}\n\nAll 8 stages complete! Generate final summary and action plan?",
+      "completionCondition": "User approved generating final summary.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approved"
+        ]
+      },
+      "connections": {
+        "success": "check-approval-summary"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-approval-summary",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "generate-final-summary",
+        "false": "end-early"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-final-summary",
+      "directive": "Generate comprehensive final summary in SERVER-AUDIT-PLAN.md:\n\n1. Critical Issues (Priority 1 - Immediate):\n   - List all critical findings from all stages\n   - Provide specific commands to fix\n\n2. High Priority Issues (Priority 2 - This Week):\n   - Urgent but not critical items\n   - Include disk cleanup, updates\n\n3. Medium Priority Issues (Priority 3 - This Month):\n   - Important improvements\n\n4. Security Posture Assessment:\n   - Overall rating (X/10)\n   - Strengths and weaknesses\n   - Active threats summary\n   - Risk assessment\n\nCreate separate SERVER-ACTIONS-TODO.md with prioritized action checklist (47 items from audit).\n\nProvide user with executive summary highlighting top 3-5 most critical findings.",
+      "completionCondition": "Final summary generated in SERVER-AUDIT-PLAN.md. Action plan created in SERVER-ACTIONS-TODO.md. Executive summary presented to user. Files saved successfully.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "securityRating": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "criticalIssuesCount": {
+            "type": "number"
+          },
+          "highPriorityCount": {
+            "type": "number"
+          },
+          "totalActionsCount": {
+            "type": "number"
+          },
+          "top3Findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5
+          },
+          "executiveSummary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "securityRating",
+          "criticalIssuesCount",
+          "executiveSummary"
+        ]
+      },
+      "connections": {
+        "success": "notify-audit-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-audit-complete",
+      "message": "✅ Security Audit Complete\n\nServer: {{serverName}}\nRating: {{securityRating}}/10\nCritical: {{criticalIssuesCount}}\nActions: {{totalActionsCount}}\n\nTop Findings:\n{{top3Findings}}",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "serverName",
+        "securityRating",
+        "criticalIssuesCount",
+        "highPriorityCount",
+        "totalActionsCount",
+        "executiveSummary"
+      ]
+    },
+    {
+      "type": "end",
+      "id": "end-early",
+      "finalOutput": [
+        "serverName",
+        "summary"
+      ]
+    }
+  ]
+}

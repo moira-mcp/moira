@@ -1,0 +1,555 @@
+{
+  "slug": "workflow-presentation-generator",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "a4d6cc4c-2319-4426-a788-34d410441357",
+  "metadata": {
+    "name": "Workflow Presentation Generator",
+    "version": "1.1.1",
+    "description": "Генерация презентационных HTML-страниц для любого Moira workflow. Анализирует структуру workflow и создаёт страницу с двумя уровнями: для бизнеса (что это, какую проблему решает) и для разработчиков (техническая схема, nodes, паттерны)."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "collect-input"
+      }
+    },
+    {
+      "id": "collect-input",
+      "type": "agent-directive",
+      "directive": "Собери информацию о workflow для которого нужно создать презентацию.\n\n**СПРОСИ У ПОЛЬЗОВАТЕЛЯ:**\n1. Источник workflow:\n   - `id` — если workflow уже загружен в Moira (укажи ID, например `moira/research`)\n   - `file` — если это локальный JSON файл (укажи путь)\n\n2. Дополнительный контекст (опционально):\n   - Для какой аудитории в первую очередь (заказчики, коллеги, документация)?\n   - Есть ли особые акценты которые нужно сделать?\n   - Нужны ли примеры использования?",
+      "completionCondition": "Получен источник workflow (ID или путь к файлу) и опциональный контекст",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_type": {
+            "type": "string",
+            "enum": [
+              "id",
+              "file"
+            ],
+            "description": "Тип источника: id (из Moira) или file (локальный JSON)"
+          },
+          "workflow_source": {
+            "type": "string",
+            "description": "ID workflow в Moira (например moira/research) или путь к JSON файлу"
+          },
+          "target_audience": {
+            "type": "string",
+            "default": "общая аудитория",
+            "description": "Основная целевая аудитория презентации"
+          },
+          "special_focus": {
+            "type": "string",
+            "default": "",
+            "description": "Особые акценты или требования к презентации"
+          }
+        },
+        "required": [
+          "source_type",
+          "workflow_source"
+        ]
+      },
+      "connections": {
+        "success": "route-source"
+      }
+    },
+    {
+      "id": "route-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "collect-input.source_type"
+        },
+        "right": "id"
+      },
+      "connections": {
+        "true": "fetch-workflow-by-id",
+        "false": "load-workflow-from-file"
+      }
+    },
+    {
+      "id": "fetch-workflow-by-id",
+      "type": "agent-directive",
+      "directive": "Получи workflow из Moira по ID.\n\n**WORKFLOW ID:** {{collect-input.workflow_source}}\n\n**ДЕЙСТВИЕ:**\n1. Используй MCP tool `mcp__moira__manage` с action: \"get\" и workflowId: \"{{collect-input.workflow_source}}\"\n2. Сохрани полученный JSON workflow\n\n**ЕСЛИ ОШИБКА:**\n- Workflow не найден — установи fetch_status = \"error\"\n- Нет доступа — установи fetch_status = \"error\"",
+      "completionCondition": "Workflow получен из Moira API или зафиксирована ошибка",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fetch_status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "error"
+            ],
+            "description": "Статус получения workflow"
+          }
+        },
+        "required": [
+          "fetch_status"
+        ],
+        "globalInputs": [
+          "workflow_json",
+          "error_message"
+        ]
+      },
+      "connections": {
+        "success": "route-fetch-status"
+      }
+    },
+    {
+      "id": "route-fetch-status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "fetch-workflow-by-id.fetch_status"
+        },
+        "right": "success"
+      },
+      "connections": {
+        "true": "setup-workspace",
+        "false": "handle-error"
+      }
+    },
+    {
+      "id": "load-workflow-from-file",
+      "type": "agent-directive",
+      "directive": "Загрузи workflow из локального JSON файла.\n\n**ПУТЬ К ФАЙЛУ:** {{collect-input.workflow_source}}\n\n**ДЕЙСТВИЕ:**\n1. Прочитай файл по указанному пути\n2. Распарси JSON\n3. Проверь что это валидный Moira workflow (есть metadata, nodes)\n\n**ЕСЛИ ОШИБКА:**\n- Файл не найден — установи load_status = \"error\"\n- Невалидный JSON — установи load_status = \"error\"\n- Не workflow — установи load_status = \"error\"",
+      "completionCondition": "Workflow загружен из файла или зафиксирована ошибка",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "load_status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "error"
+            ],
+            "description": "Статус загрузки workflow"
+          }
+        },
+        "required": [
+          "load_status"
+        ],
+        "globalInputs": [
+          "workflow_json",
+          "error_message"
+        ]
+      },
+      "connections": {
+        "success": "route-load-status"
+      }
+    },
+    {
+      "id": "route-load-status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "load-workflow-from-file.load_status"
+        },
+        "right": "success"
+      },
+      "connections": {
+        "true": "setup-workspace",
+        "false": "handle-error"
+      }
+    },
+    {
+      "id": "handle-error",
+      "type": "agent-directive",
+      "directive": "Произошла ошибка при загрузке workflow.\n\n**СООБЩЕНИЕ ОБ ОШИБКЕ:** {{error_message}}\n\n**ДЕЙСТВИЕ:**\nСообщи пользователю об ошибке и предложи:\n1. Проверить правильность ID или пути к файлу\n2. Убедиться что workflow существует и доступен\n3. Попробовать другой источник",
+      "completionCondition": "Пользователь информирован об ошибке",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "error_reported"
+        ],
+        "globalInputs": [
+          "error_reported"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "setup-workspace",
+      "type": "agent-directive",
+      "directive": "Создай рабочую директорию для генерации презентации.\n\n**ДЕЙСТВИЕ:**\n1. Создай директорию: `./moira-ws/presentation-{workflow-id}-YYYYMMDD-HHMM/`\n   (замени {workflow-id} на ID workflow, YYYYMMDD-HHMM на текущую дату и время)\n2. Сохрани workflow.json в эту директорию для референса\n\n**СТРУКТУРА:**\n```\n./moira-ws/presentation-{workflow-id}-{timestamp}/\n├── workflow.json      # Исходный workflow\n├── analysis.md        # Результаты анализа (будет создан)\n├── presentation.html  # Финальная презентация (будет создана)\n```",
+      "completionCondition": "Рабочая директория создана, workflow.json сохранён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace_path": {
+            "type": "string",
+            "description": "Полный путь к созданной рабочей директории"
+          }
+        },
+        "required": [
+          "workspace_path"
+        ]
+      },
+      "connections": {
+        "success": "analyze-workflow"
+      }
+    },
+    {
+      "id": "analyze-workflow",
+      "type": "agent-directive",
+      "directive": "Проанализируй структуру workflow и извлеки информацию для презентации.\n\n**WORKFLOW:** {{setup-workspace.workspace_path}}/workflow.json\n\n**ИЗВЛЕКИ:**\n\n1. **Metadata:**\n   - name, version, description\n   - visibility (public/private)\n\n2. **Бизнес-цель:**\n   - Какую проблему решает этот workflow?\n   - Кто целевая аудитория?\n   - Какой результат получает пользователь?\n\n3. **Техническая структура:**\n   - Список всех nodes с их типами\n   - Connections между nodes (построй граф)\n   - Используемые паттерны (validation loop, branching, etc.)\n   - Ключевые переменные из initialData\n\n4. **Flow:**\n   - Опиши последовательность шагов\n   - Где есть условия (branching)\n   - Где есть циклы (validation loops)\n\n**СОХРАНИ** результаты анализа в `{{setup-workspace.workspace_path}}/analysis.md`\n\n**ВЕРНИ:** patterns_summary — строку с перечислением найденных паттернов через запятую",
+      "completionCondition": "Анализ завершён, файл analysis.md создан с полной информацией о workflow",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflow_name": {
+            "type": "string",
+            "description": "Название workflow из metadata"
+          },
+          "workflow_description": {
+            "type": "string",
+            "description": "Описание из metadata"
+          },
+          "node_count": {
+            "type": "number",
+            "description": "Количество nodes в workflow"
+          },
+          "patterns_summary": {
+            "type": "string",
+            "description": "Выявленные паттерны через запятую (например: validation-loop, branching, workspace)"
+          }
+        },
+        "required": [
+          "workflow_name",
+          "business_purpose",
+          "node_count",
+          "patterns_summary"
+        ],
+        "globalInputs": [
+          "business_purpose"
+        ]
+      },
+      "connections": {
+        "success": "generate-business-content"
+      }
+    },
+    {
+      "id": "generate-business-content",
+      "type": "agent-directive",
+      "directive": "Создай контент для бизнес-секции презентации (для нетехнарей).\n\n**ИСХОДНЫЕ ДАННЫЕ:** {{setup-workspace.workspace_path}}/analysis.md\n**ЦЕЛЕВАЯ АУДИТОРИЯ:** {{collect-input.target_audience}}\n**ОСОБЫЕ АКЦЕНТЫ:** {{collect-input.special_focus}}\n\n**СТРУКТУРА СЕКЦИИ:**\n{{business_section_structure}}\n\n**ПРАВИЛА НАПИСАНИЯ:**\n{{business_writing_rules}}\n\n**ВАЖНО:**\n- Объясни что такое Moira если это не очевидно из контекста\n- Используй аналогии из реальной жизни\n- Фокусируйся на пользе и результате\n- Избегай технических терминов или объясняй их\n\n**СОХРАНИ** контент в `{{setup-workspace.workspace_path}}/business-content.md`",
+      "completionCondition": "Бизнес-контент создан, понятен без технического бэкграунда",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "business_content_ready"
+        ],
+        "globalInputs": [
+          "business_content_ready"
+        ]
+      },
+      "connections": {
+        "success": "generate-technical-content"
+      }
+    },
+    {
+      "id": "generate-technical-content",
+      "type": "agent-directive",
+      "directive": "Создай контент для технической секции презентации (для разработчиков).\n\n**ИСХОДНЫЕ ДАННЫЕ:** {{setup-workspace.workspace_path}}/analysis.md\n\n**СТРУКТУРА СЕКЦИИ:**\n{{technical_section_structure}}\n\n**ПРАВИЛА НАПИСАНИЯ:**\n{{technical_writing_rules}}\n\n**ОБЯЗАТЕЛЬНО ВКЛЮЧИ:**\n1. Текстовую диаграмму workflow (ASCII art или box-drawing characters)\n2. Таблицу nodes с описанием каждого\n3. Список используемых паттернов с объяснением\n4. Примеры ключевых переменных из initialData\n\n**СОХРАНИ** контент в `{{setup-workspace.workspace_path}}/technical-content.md`",
+      "completionCondition": "Технический контент создан, включает диаграмму и описание всех nodes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "technical_content_ready",
+          "diagram_included",
+          "all_nodes_described"
+        ],
+        "globalInputs": [
+          "technical_content_ready",
+          "diagram_included",
+          "all_nodes_described"
+        ]
+      },
+      "connections": {
+        "success": "generate-html"
+      }
+    },
+    {
+      "id": "generate-html",
+      "type": "agent-directive",
+      "directive": "Сгенерируй финальную HTML страницу презентации.\n\n**ИСХОДНЫЕ ФАЙЛЫ:**\n- {{setup-workspace.workspace_path}}/business-content.md\n- {{setup-workspace.workspace_path}}/technical-content.md\n\n**ТРЕБОВАНИЯ К HTML:**\n{{html_requirements}}\n\n**СТРУКТУРА СТРАНИЦЫ:**\n1. Header с названием workflow: {{analyze-workflow.workflow_name}}\n2. Навигация между секциями\n3. Секция \"Простыми словами\" — для бизнеса\n4. Секция \"Для разработчиков\" — техническая\n5. Footer с информацией о Moira\n\n**СОХРАНИ** HTML в `{{setup-workspace.workspace_path}}/presentation.html`\n\n**ИНИЦИАЛИЗАЦИЯ счётчика:** fix_iteration = 0",
+      "completionCondition": "HTML страница создана, включает обе секции, стили встроены",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html_file_path": {
+            "type": "string",
+            "description": "Путь к созданному HTML файлу"
+          }
+        },
+        "required": [
+          "html_created",
+          "html_file_path"
+        ],
+        "globalInputs": [
+          "html_created",
+          "fix_iteration"
+        ]
+      },
+      "connections": {
+        "success": "verify-presentation"
+      }
+    },
+    {
+      "id": "verify-presentation",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{fix_iteration}} of up to 3 — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nПроверь качество созданной презентации.\n\n**ФАЙЛ:** {{generate-html.html_file_path}}\n\n**ЧЕКЛИСТ ПРОВЕРКИ:**\n{{quality_checklist}}\n\n**ДОПОЛНИТЕЛЬНЫЕ ПРОВЕРКИ:**\n- HTML синтаксис валиден\n- Все секции на месте\n- Навигация работает (якоря корректны)\n- Текст читаем (нет обрезанных слов, правильные переносы)\n- Диаграмма workflow отображается корректно\n\n**РЕЗУЛЬТАТ:**\n- Если всё ок: issues_count = 0\n- Если есть проблемы: перечисли их в issues_description и укажи issues_count",
+      "completionCondition": "Проверка завершена, issues_count определён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Количество найденных проблем"
+          },
+          "issues_description": {
+            "type": "string",
+            "description": "Описание найденных проблем (если есть)"
+          }
+        },
+        "required": [
+          "issues_count"
+        ],
+        "globalInputs": [
+          "verification_notes"
+        ]
+      },
+      "connections": {
+        "success": "route-validation"
+      }
+    },
+    {
+      "id": "route-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "verify-presentation.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "save-output",
+        "false": "check-max-iterations"
+      }
+    },
+    {
+      "id": "check-max-iterations",
+      "type": "condition",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_iteration"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "fix-presentation",
+        "false": "save-output-with-issues"
+      }
+    },
+    {
+      "id": "fix-presentation",
+      "type": "agent-directive",
+      "directive": "Исправь найденные проблемы в презентации.\n\n**ПРОБЛЕМЫ:**\n{{verify-presentation.issues_description}}\n\n**ФАЙЛ:** {{generate-html.html_file_path}}\n\n**ДЕЙСТВИЕ:**\n1. Прочитай HTML файл\n2. Исправь каждую проблему из описания\n3. Сохрани исправленный файл\n\n**ВАЖНО:** Исправляй только указанные проблемы, не меняй остальное.\n\n**УВЕЛИЧЬ счётчик:** fix_iteration = {{fix_iteration}} + 1",
+      "completionCondition": "Все проблемы из списка исправлены",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied",
+          "fix_iteration"
+        ],
+        "globalInputs": [
+          "fixes_applied",
+          "fix_iteration"
+        ]
+      },
+      "connections": {
+        "success": "verify-presentation"
+      }
+    },
+    {
+      "id": "save-output-with-issues",
+      "type": "agent-directive",
+      "directive": "Достигнут лимит итераций исправлений ({{max_fix_iterations}}).\n\n**ОСТАВШИЕСЯ ПРОБЛЕМЫ:**\n{{verify-presentation.issues_description}}\n\n**ДЕЙСТВИЕ:**\nСообщи пользователю что:\n1. Презентация создана но содержит некоторые проблемы\n2. Укажи какие проблемы остались\n3. Укажи путь к файлу: {{generate-html.html_file_path}}\n4. Предложи вручную исправить оставшиеся проблемы",
+      "completionCondition": "Пользователь информирован о проблемах",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "output_delivered",
+          "final_html_path"
+        ],
+        "globalInputs": [
+          "output_delivered",
+          "final_html_path"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "save-output",
+      "type": "agent-directive",
+      "directive": "Финализируй и сохрани презентацию.\n\n**WORKSPACE:** {{setup-workspace.workspace_path}}\n**HTML FILE:** {{generate-html.html_file_path}}\n\n**ДЕЙСТВИЯ:**\n1. Сообщи пользователю что презентация готова\n2. Укажи путь к файлу: {{generate-html.html_file_path}}\n3. Предложи:\n   - Открыть в браузере для просмотра\n   - Загрузить на статик-хостер (upload-static команда)\n   - Скопировать в другое место\n\n**РЕЗЮМЕ:**\n- Workflow: {{analyze-workflow.workflow_name}}\n- Описание: {{analyze-workflow.workflow_description}}\n- Nodes: {{analyze-workflow.node_count}}\n- Паттерны: {{analyze-workflow.patterns_summary}}",
+      "completionCondition": "Пользователь информирован о готовности презентации",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "output_delivered",
+          "final_html_path"
+        ],
+        "globalInputs": [
+          "output_delivered",
+          "final_html_path"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "variableRegistry": {
+    "business_section_structure": {
+      "type": "string",
+      "description": "Structure template for business content section",
+      "default": "1. Executive Summary\n2. Problem & Solution\n3. User Journey\n4. Business Value\n5. Success Metrics"
+    },
+    "business_writing_rules": {
+      "type": "string",
+      "description": "Writing guidelines for business content",
+      "default": "Write for non-technical stakeholders. Use clear language, avoid jargon. Include concrete examples and metrics. Focus on business outcomes and user value."
+    },
+    "technical_section_structure": {
+      "type": "string",
+      "description": "Structure template for technical content section",
+      "default": "1. Architecture Overview\n2. Node Flow Diagram\n3. Node Descriptions\n4. Condition Logic\n5. Integration Points\n6. Error Handling"
+    },
+    "technical_writing_rules": {
+      "type": "string",
+      "description": "Writing guidelines for technical content",
+      "default": "Be precise and specific. Include node IDs and connection details. Document all condition logic. Use diagrams where helpful. Cover edge cases and error paths."
+    },
+    "quality_checklist": {
+      "type": "string",
+      "description": "Checklist for presentation quality verification",
+      "default": "1. All nodes described\n2. All connections documented\n3. Condition logic explained\n4. Business value articulated\n5. Diagrams included\n6. No broken HTML\n7. Responsive layout\n8. Consistent styling"
+    },
+    "html_requirements": {
+      "type": "string",
+      "description": "Requirements for HTML presentation generation",
+      "default": "Single-file HTML with embedded CSS/JS. Responsive design. Clean typography. Syntax highlighting for code. Mermaid diagrams for flow visualization. Print-friendly layout."
+    },
+    "max_fix_iterations": {
+      "type": "number",
+      "description": "Maximum number of fix iterations before accepting with issues",
+      "default": 3
+    },
+    "all_nodes_described": {
+      "type": "string",
+      "description": "Workflow-global all_nodes_described",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "business_content_ready": {
+      "type": "string",
+      "description": "Workflow-global business_content_ready",
+      "enum": [
+        "yes"
+      ]
+    },
+    "business_purpose": {
+      "type": "string",
+      "description": "Workflow-global business_purpose"
+    },
+    "diagram_included": {
+      "type": "string",
+      "description": "Workflow-global diagram_included",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Workflow-global error_message"
+    },
+    "error_reported": {
+      "type": "string",
+      "description": "Workflow-global error_reported",
+      "enum": [
+        "yes"
+      ]
+    },
+    "final_html_path": {
+      "type": "string",
+      "description": "Workflow-global final_html_path"
+    },
+    "fix_iteration": {
+      "type": "number",
+      "description": "Workflow-global fix_iteration"
+    },
+    "fixes_applied": {
+      "type": "string",
+      "description": "Workflow-global fixes_applied",
+      "enum": [
+        "yes"
+      ]
+    },
+    "html_created": {
+      "type": "string",
+      "description": "Workflow-global html_created",
+      "enum": [
+        "yes"
+      ]
+    },
+    "output_delivered": {
+      "type": "string",
+      "description": "Workflow-global output_delivered",
+      "enum": [
+        "yes"
+      ]
+    },
+    "technical_content_ready": {
+      "type": "string",
+      "description": "Workflow-global technical_content_ready",
+      "enum": [
+        "yes"
+      ]
+    },
+    "verification_notes": {
+      "type": "string",
+      "description": "Workflow-global verification_notes"
+    },
+    "workflow_json": {
+      "type": "object",
+      "description": "Workflow-global workflow_json"
+    }
+  }
+}

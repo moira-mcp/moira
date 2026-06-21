@@ -1,0 +1,739 @@
+---
+title: Справочник MCP Tools
+description: Полный справочник по всем MCP инструментам Moira
+---
+
+Moira предоставляет возможности выполнения workflow через MCP инструменты. Этот справочник документирует все доступные инструменты с параметрами, возвращаемыми значениями и примерами.
+
+## Категории инструментов
+
+### Управление Workflow
+
+- `list` - Список шаблонов workflow
+- `manage` - Создание, редактирование или получение workflow
+- `start` - Запуск выполнения workflow
+- `step` - Продвижение workflow с ответом агента
+
+### Сессия и настройки
+
+- `session` - Информация о пользователе, выполнениях или шаге
+- `settings` - Управление настройками пользователя
+
+### Большие файлы
+
+- `token` - Генерация токенов для загрузки/скачивания
+
+### Помощь
+
+- `help` - Получение документации и помощи
+
+---
+
+## list
+
+Список всех доступных шаблонов workflow со статусом валидации.
+
+**Параметры:** Нет
+
+**Возвращает:**
+
+- Массив объектов workflow с метаданными
+- Статус валидации для каждого workflow
+- Пути к файлам и временные метки
+
+**Пример:**
+
+```json
+list()
+→ [{ id: "example", name: "Example Workflow", valid: true, ... }]
+```
+
+---
+
+## start
+
+Запускает выполнение нового workflow.
+
+**Параметры:**
+
+- `workflowId` (string, обязательный) - ID workflow для выполнения
+- `note` (string, опционально) - Краткая заметка для идентификации выполнения (max 500 chars)
+- `parentExecutionId` (string, опционально) - ID родительского выполнения для связывания workflow
+- `skipTelegramCheck` (boolean, опционально) - Пропустить проверку конфигурации Telegram. Если workflow содержит telegram-notification ноды и Telegram не настроен, start возвращает инструкции по настройке вместо запуска. Установите `true` для пропуска проверки.
+
+**Возвращает:**
+
+- Process ID для отслеживания выполнения
+- Первую директиву агента с инструкциями
+- Условие завершения и inputSchema
+
+**Пример:**
+
+```json
+start({ workflowId: "example", note: "Реализация фичи" })
+→ { processId: "abc-123", directive: "...", ... }
+```
+
+**Связывание родительского выполнения:**
+
+```json
+start({ workflowId: "sub-workflow", parentExecutionId: "parent-abc-123" })
+```
+
+Когда дочерний workflow завершается, система возвращает информацию для продолжения родительского выполнения.
+
+---
+
+## step
+
+Продвигает выполнение workflow с ответом агента.
+
+**Параметры:**
+
+- `processId` (string, обязательный) - Process ID из start
+- `input` (any) - Ответ агента, соответствующий inputSchema
+
+**Возвращает:**
+
+- Следующую директиву агента (если workflow продолжается)
+- Статус завершения (если workflow завершен)
+- Обновленный контекст и состояние
+
+**Пример:**
+
+```json
+step({
+  processId: "abc-123",
+  input: { result: "completed", confidence: 9 }
+})
+→ { directive: "Next task...", ... }
+```
+
+**Magic Variable - execution_note:**
+
+Когда input содержит поле `execution_note`, заметка выполнения обновляется для отслеживания:
+
+```json
+step({
+  processId: "abc-123",
+  input: { task_name: "Auth feature", execution_note: "Реализация OAuth" }
+})
+```
+
+Обновленная заметка появляется в списке выполнений (`session({ action: "executions" })`).
+
+---
+
+## manage
+
+Унифицированный инструмент для CRUD операций с workflow.
+
+### Action: create
+
+Создает новый workflow из JSON определения с валидацией.
+
+**Параметры:**
+
+- `action`: `"create"` (обязательный)
+- `workflow` (object, обязательный) - Определение workflow
+  - `systemReminder` (string, опционально) - System reminder для workflow, переопределяет глобальную настройку
+- `overwrite` (boolean, опционально) - Разрешить перезапись существующего
+
+**Возвращает:**
+
+- Статус успеха
+- ID workflow
+- Результаты валидации с ошибками/предупреждениями
+
+**Пример:**
+
+```json
+manage({
+  action: "create",
+  workflow: {
+    id: "my-workflow",
+    metadata: { name: "My Workflow", version: "1.0.0", description: "..." },
+    nodes: [...]
+  }
+})
+→ { success: true, workflowId: "my-workflow", validation: {...} }
+```
+
+### Action: edit
+
+Редактирует существующий workflow с частичными обновлениями.
+
+**Параметры:**
+
+- `action`: `"edit"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow для редактирования
+- `changes` (object, обязательный) - Изменения для применения
+  - `metadata` - Обновление name, version, description
+  - `addNodes` - Массив нод для добавления
+  - `removeNodes` - Массив ID нод для удаления
+  - `updateNodes` - Массив объектов с nodeId и changes
+  - `systemReminder` - System reminder для workflow (пустая строка для удаления)
+
+**Возвращает:**
+
+- Статус успеха
+- Сводка изменений
+- Результаты валидации
+
+**Пример:**
+
+```json
+manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    metadata: { description: "Updated description" },
+    addNodes: [{ type: "end", id: "new-end", ... }]
+  }
+})
+→ { success: true, changesSummary: {...}, validation: {...} }
+```
+
+### Action: get
+
+Получает информацию о workflow с метаданными и валидацией.
+
+**Параметры:**
+
+- `action`: `"get"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `includeNodes` (boolean, опционально, default: true) - Включить определения нод
+- `includeValidation` (boolean, опционально, default: true) - Включить валидацию
+- `offset` (number, опционально) - Пагинация: начальный индекс
+- `limit` (number, опционально) - Пагинация: количество нод
+
+**Возвращает:**
+
+- Метаданные workflow
+- Анализ структуры
+- Ноды (если includeNodes=true)
+- Статус валидации (если includeValidation=true)
+
+**Пример:**
+
+```json
+manage({
+  action: "get",
+  workflowId: "my-workflow",
+  includeNodes: true,
+  includeValidation: true
+})
+→ { metadata: {...}, nodes: [...], validation: {...} }
+```
+
+### Action: get-structure
+
+Получает структуру workflow (метаданные + граф нод) без полного содержимого нод. Полезно для понимания структуры workflow.
+
+**Параметры:**
+
+- `action`: `"get-structure"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow для анализа
+
+**Возвращает:**
+
+- Метаданные workflow
+- Граф нод с соединениями
+- Без полного содержимого директив/схем (легкий ответ)
+
+**Пример:**
+
+```json
+manage({ action: "get-structure", workflowId: "my-workflow" })
+→ { metadata: {...}, graph: { nodes: [...], edges: [...] } }
+```
+
+### Action: get-node
+
+Получает конкретную ноду по ID с полным содержимым.
+
+**Параметры:**
+
+- `action`: `"get-node"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `nodeId` (string, обязательный) - ID ноды для получения
+
+**Возвращает:**
+
+- Полное определение ноды
+- Соединения
+- Input schema
+
+**Пример:**
+
+```json
+manage({ action: "get-node", workflowId: "my-workflow", nodeId: "step-1" })
+→ { id: "step-1", type: "agent-directive", directive: "...", ... }
+```
+
+### Action: search-nodes
+
+Поиск нод по тексту в directive, completionCondition или ID.
+
+**Параметры:**
+
+- `action`: `"search-nodes"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `query` (string, обязательный) - Текст поиска
+- `limit` (number, опционально) - Максимум результатов
+- `offset` (number, опционально) - Смещение для пагинации
+
+**Возвращает:**
+
+- Массив найденных нод
+- Контекст совпадения (где найден текст)
+
+**Пример:**
+
+```json
+manage({ action: "search-nodes", workflowId: "my-workflow", query: "validation" })
+→ { results: [{ nodeId: "validate-step", matches: ["directive"] }] }
+```
+
+### Action: validate
+
+Валидирует структуру workflow и возвращает ошибки/предупреждения.
+
+**Параметры:**
+
+- `action`: `"validate"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+
+**Возвращает:**
+
+- Статус валидации (valid/invalid)
+- Массив ошибок (блокирующие проблемы)
+- Массив предупреждений (неблокирующие проблемы)
+
+**Пример:**
+
+```json
+manage({ action: "validate", workflowId: "my-workflow" })
+→ { valid: true, errors: [], warnings: ["Node 'old-step' is unreachable"] }
+```
+
+### Action: list-variables
+
+Список всех объявленных глобальных переменных из `variableRegistry` воркфлоу.
+
+**Параметры:**
+
+- `action`: `"list-variables"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+
+**Возвращает:**
+
+- Количество переменных
+- Массив переменных с именем, типом и превью
+
+**Пример:**
+
+```json
+manage({ action: "list-variables", workflowId: "my-workflow" })
+→ { variableCount: 3, variables: [{ name: "test_directive", type: "string", preview: "Run npm test" }] }
+```
+
+### Action: get-variable
+
+Получает конкретную объявленную глобальную переменную из `variableRegistry` воркфлоу.
+
+**Параметры:**
+
+- `action`: `"get-variable"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `variableName` (string, обязательный) - Имя переменной
+
+**Возвращает:**
+
+- Имя и значение переменной
+
+**Пример:**
+
+```json
+manage({ action: "get-variable", workflowId: "my-workflow", variableName: "test_directive" })
+→ { variableName: "test_directive", value: "Run npm test" }
+```
+
+### Action: set-variable
+
+Устанавливает или создаёт объявленную глобальную переменную в `variableRegistry` воркфлоу.
+
+**Параметры:**
+
+- `action`: `"set-variable"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `variableName` (string, обязательный) - Имя переменной
+- `variableValue` (any, обязательный) - Значение
+
+**Возвращает:**
+
+- Старое и новое значение
+- Сообщение об успехе
+
+**Пример:**
+
+```json
+manage({ action: "set-variable", workflowId: "my-workflow", variableName: "test_directive", variableValue: "Run npm test -- --coverage" })
+→ { variableName: "test_directive", oldValue: "Run npm test", newValue: "Run npm test -- --coverage" }
+```
+
+### Action: delete-variable
+
+Удаляет объявленную глобальную переменную из `variableRegistry` воркфлоу.
+
+**Параметры:**
+
+- `action`: `"delete-variable"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `variableName` (string, обязательный) - Имя переменной
+
+**Возвращает:**
+
+- Удалённое значение
+- Сообщение об успехе
+
+**Пример:**
+
+```json
+manage({ action: "delete-variable", workflowId: "my-workflow", variableName: "unused_var" })
+→ { variableName: "unused_var", deletedValue: "old value" }
+```
+
+### Action: diff
+
+Сравнивает два workflow и показывает различия.
+
+**Параметры:**
+
+- `action`: `"diff"` (обязательный)
+- `workflowId` (string, обязательный) - ID первого workflow
+- `compareWorkflowId` (string, обязательный) - ID второго workflow
+
+**Возвращает:**
+
+- Различия в metadata
+- Добавленные ноды
+- Удалённые ноды
+- Изменённые ноды с деталями
+
+**Пример:**
+
+```json
+manage({ action: "diff", workflowId: "workflow-v1", compareWorkflowId: "workflow-v2" })
+→ { metadataDiff: { version: { old: "1.0.0", new: "2.0.0" } }, addedNodes: ["new-step"], removedNodes: [], modifiedNodes: [...] }
+```
+
+---
+
+## session
+
+Унифицированный инструмент для информации о сессии и выполнении.
+
+### Action: user
+
+Информация о текущем аутентифицированном пользователе.
+
+**Параметры:**
+
+- `action`: `"user"` (обязательный)
+
+**Возвращает:**
+
+- Email
+- Имя
+
+**Пример:**
+
+```json
+session({ action: "user" })
+→ { email: "user@example.com", name: "John" }
+```
+
+### Action: executions
+
+Список активных выполнений workflow текущего пользователя.
+
+**Параметры:**
+
+- `action`: `"executions"` (обязательный)
+
+**Возвращает:**
+
+- Массив объектов активных выполнений
+- Статус, workflowId, время старта для каждого
+
+**Пример:**
+
+```json
+session({ action: "executions" })
+→ [{ executionId: "abc-123", workflowId: "example", status: "waiting", note: "Реализация фичи", ... }]
+```
+
+### Action: execution_context
+
+Полное состояние выполнения включая переменные контекста.
+
+**Параметры:**
+
+- `action`: `"execution_context"` (обязательный)
+- `executionId` (string, обязательный) - ID выполнения
+
+**Возвращает:**
+
+- Статус выполнения (running, waiting, completed, failed)
+- Информация о текущей ноде
+- Переменные контекста
+- История выполнения нод
+
+**Пример:**
+
+```json
+session({ action: "execution_context", executionId: "abc-123" })
+→ { status: "waiting", currentNodeId: "task-1", context: {...}, ... }
+```
+
+### Action: current_step
+
+Повторяет текущий шаг workflow без продвижения выполнения.
+
+**Параметры:**
+
+- `action`: `"current_step"` (обязательный)
+- `executionId` (string, обязательный) - ID выполнения
+
+**Возвращает:**
+
+- Текущую директиву
+- Условие завершения
+- Input schema
+- Информацию о контексте
+
+**Пример:**
+
+```json
+session({ action: "current_step", executionId: "abc-123" })
+→ { directive: "Complete task...", completionCondition: "...", inputSchema: {...} }
+```
+
+### Action: update-note
+
+Обновляет заметку выполнения для удобной идентификации в списках.
+
+**Параметры:**
+
+- `action`: `"update-note"` (обязательный)
+- `executionId` (string, обязательный) - ID выполнения
+- `note` (string, обязательный) - Новая заметка (макс 500 символов)
+
+**Возвращает:**
+
+- Статус успеха
+- ID выполнения и заметку
+
+**Пример:**
+
+```json
+session({ action: "update-note", executionId: "abc-123", note: "Шаг 5: Интеграционные тесты" })
+→ { success: true, executionId: "abc-123", note: "Шаг 5: Интеграционные тесты" }
+```
+
+---
+
+## settings
+
+Унифицированный инструмент для управления настройками пользователя.
+
+### Action: get
+
+Получение настроек пользователя по категории или всех настроек.
+
+**Параметры:**
+
+- `action`: `"get"` (обязательный)
+- `category` (string, опционально) - Фильтр по категории (telegram, ui, profile, etc.)
+
+**Возвращает:**
+
+- Объект настроек со значениями
+- Зашифрованные поля показаны как [encrypted]
+
+**Пример:**
+
+```json
+settings({ action: "get", category: "ui" })
+→ { "ui.theme": "dark", "ui.language": "en" }
+```
+
+### Action: set
+
+Установка значения настройки с валидацией.
+
+**Параметры:**
+
+- `action`: `"set"` (обязательный)
+- `key` (string, обязательный) - Ключ настройки (например, ui.theme)
+- `value` (any, обязательный) - Значение настройки
+
+**Возвращает:**
+
+- Статус успеха
+- Обновленное значение (зашифрованное если применимо)
+
+**Пример:**
+
+```json
+settings({
+  action: "set",
+  key: "ui.theme",
+  value: "dark"
+})
+→ { success: true, key: "ui.theme", value: "dark" }
+```
+
+### Action: list
+
+Список доступных настроек.
+
+**Параметры:**
+
+- `action`: `"list"` (обязательный)
+- `category` (string, опционально) - Фильтр по категории
+
+**Возвращает:**
+
+- Массив настроек с ключом и описанием
+
+**Пример:**
+
+```json
+settings({ action: "list", category: "telegram" })
+→ [{ key: "telegram.bot_token", description: "Your Telegram bot token" }]
+```
+
+---
+
+## token
+
+Генерация временных токенов для операций с большими файлами workflow.
+
+### Action: upload
+
+Генерация токена для загрузки больших workflow через HTTP.
+
+**Параметры:**
+
+- `action`: `"upload"` (обязательный)
+- `ttlMinutes` (number, опционально, default: 60) - TTL токена в минутах
+
+**Возвращает:**
+
+- `token` - Токен загрузки
+- `uploadUrl` - Полный URL для загрузки
+- `expiresAt` - Время истечения в ISO 8601
+- `uploadInstructions` - Детали загрузки:
+  - `method`: `"POST"`
+  - `contentType`: `"multipart/form-data"`
+  - `fieldName`: `"workflow"`
+  - `fileFormat`: `"JSON file with workflow definition"`
+  - `example`: пример curl команды
+
+**Запрос загрузки:**
+
+```bash
+curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
+```
+
+**Пример:**
+
+```json
+token({ action: "upload", ttlMinutes: 30 })
+→ {
+    token: "abc123",
+    uploadUrl: "https://{MOIRA_HOST}/api/public/workflows/upload/abc123",
+    expiresAt: "2024-01-15T12:00:00.000Z",
+    uploadInstructions: {
+      method: "POST",
+      contentType: "multipart/form-data",
+      fieldName: "workflow",
+      fileFormat: "JSON file with workflow definition",
+      example: "curl -X POST '...' -F 'workflow=@your-workflow.json'"
+    }
+  }
+```
+
+### Action: download
+
+Генерация токена для скачивания workflow.
+
+**Параметры:**
+
+- `action`: `"download"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow для скачивания
+- `ttlMinutes` (number, опционально, default: 60) - TTL токена в минутах
+
+**Возвращает:**
+
+- Токен скачивания
+- URL скачивания
+- Время истечения
+
+**Пример:**
+
+```json
+token({
+  action: "download",
+  workflowId: "my-workflow",
+  ttlMinutes: 30
+})
+→ { token: "abc123", downloadUrl: "https://.../download", expiresAt: "..." }
+```
+
+---
+
+## help
+
+Получение документации и помощи по системе workflow.
+
+**Параметры:**
+
+- `topic` (string | string[], опционально) - Тема(ы) помощи, одна или массив
+
+**Темы:**
+
+- `overview`, `introduction` - Обзор системы
+- `quickstart` - Руководство по началу работы
+- `nodes` - Справочник по типам нод
+- `workflows` - Структура workflow
+- `templates` - Переменные шаблонов
+- `tools` - Справочник инструментов
+- `validation` - Система валидации
+- `claude-code` - Интеграция с Claude Code
+- `mcp-clients` - Другие MCP клиенты
+- `examples` - Примеры паттернов с фрагментами кода
+- `pattern-*` - Паттерны workflow (например, pattern-workspace, pattern-skip)
+
+**Пример одной темы:**
+
+```json
+help({ topic: "nodes" })
+→ "# Node Types\n\nMoira supports these node types..."
+```
+
+**Пример нескольких тем:**
+
+```json
+help({ topic: ["pattern-workspace", "pattern-skip"] })
+→ "# Workspace Pattern\n...\n\n---\n\n# Skip Pattern\n..."
+```
+
+Несколько тем объединяются с разделителями для комбинированного поиска документации.
+
+## Связанная документация
+
+- [Руководство для агентов](/ru/docs/integration/agent-guide/) - Использование MCP tools
+- [Решение проблем](/ru/docs/integration/troubleshooting/) - Типичные проблемы

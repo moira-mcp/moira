@@ -1,0 +1,326 @@
+---
+title: Редактирование Workflows
+description: Как безопасно изменять существующие workflows
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+## Способы редактирования
+
+### Через MCP Tools
+
+Используйте инструмент `manage` с действием edit:
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    // изменения здесь
+  },
+});
+```
+
+### Через workflow-management-flow
+
+Запустите управляющий workflow:
+
+```typescript
+mcp__moira__start({
+  workflowId: "workflow-management-flow",
+});
+```
+
+Выберите "edit" при запросе действия.
+
+<Aside type="tip">
+  Используйте workflow-management-flow для сложных правок. Он проведёт через весь процесс и
+  валидирует изменения.
+</Aside>
+
+## Типы изменений
+
+### Обновление метаданных
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    metadata: {
+      version: "2.0.0",
+      description: "Updated description",
+    },
+  },
+});
+```
+
+### Обновление содержимого узла
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    updateNodes: [
+      {
+        nodeId: "task-node",
+        changes: {
+          directive: "New directive text",
+          completionCondition: "New condition",
+        },
+      },
+    ],
+  },
+});
+```
+
+### Добавление узлов
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    addNodes: [
+      {
+        type: "agent-directive",
+        id: "new-node",
+        directive: "New task",
+        completionCondition: "Task complete",
+        connections: { success: "existing-node" },
+      },
+    ],
+  },
+});
+```
+
+### Удаление узлов
+
+```typescript
+mcp__moira__manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    removeNodes: ["node-to-remove"],
+  },
+});
+```
+
+<Aside type="caution">
+  При удалении узлов обновите соединения в других узлах, которые ссылались на удалённый узел.
+</Aside>
+
+## Безопасный процесс редактирования
+
+<Steps>
+1. **Получите текущую структуру**
+   ```typescript
+   mcp__moira__manage({
+     action: "get-structure",
+     workflowId: "my-workflow"
+   })
+   ```
+
+2. **Найдите узлы для редактирования**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "search-nodes",
+     workflowId: "my-workflow",
+     query: "search term",
+   });
+   ```
+
+3. **Получите детали узла**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "get-node",
+     workflowId: "my-workflow",
+     nodeId: "node-id",
+   });
+   ```
+
+4. **Примените изменения**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "edit",
+     workflowId: "my-workflow",
+     changes: {
+       /* ... */
+     },
+   });
+   ```
+
+5. **Валидация**
+
+   ```typescript
+   mcp__moira__manage({
+     action: "validate",
+     workflowId: "my-workflow",
+   });
+   ```
+
+</Steps>
+
+## Обновление соединений
+
+### Обновление одного соединения
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "source-node",
+      changes: {
+        connections: {
+          success: "new-target-node",
+        },
+      },
+    },
+  ];
+}
+```
+
+### Соединения узла-условия
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "condition-node",
+      changes: {
+        connections: {
+          true: "when-true-node",
+          false: "when-false-node",
+        },
+      },
+    },
+  ];
+}
+```
+
+## Контроль версий
+
+### Инкремент версии
+
+Всегда обновляйте версию при внесении изменений:
+
+```typescript
+{
+  metadata: {
+    version: "1.1.0"; // было 1.0.0
+  }
+}
+```
+
+Семантика версий:
+
+- **Major** (2.0.0): Ломающие изменения, перестроенный поток
+- **Minor** (1.1.0): Новые функции, новые узлы
+- **Patch** (1.0.1): Исправления ошибок, правки текста
+
+### Сравнение версий
+
+```typescript
+mcp__moira__manage({
+  action: "diff",
+  workflowId: "my-workflow",
+  compareWorkflowId: "my-workflow-old",
+});
+```
+
+## Типичные правки
+
+### Исправление опечатки в директиве
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "task-node",
+      changes: {
+        directive: "Corrected directive text",
+      },
+    },
+  ];
+}
+```
+
+### Добавление обязательного поля в InputSchema
+
+```typescript
+{
+  updateNodes: [
+    {
+      nodeId: "input-node",
+      changes: {
+        inputSchema: {
+          type: "object",
+          properties: {
+            existing_field: { type: "string" },
+            new_field: { type: "string" }, // добавлено
+          },
+          required: ["existing_field", "new_field"], // обновлено
+        },
+      },
+    },
+  ];
+}
+```
+
+### Вставка узла в поток
+
+```typescript
+{
+  addNodes: [
+    {
+      type: "agent-directive",
+      id: "inserted-node",
+      directive: "New step",
+      connections: { success: "original-target" }
+    }
+  ],
+  updateNodes: [
+    {
+      nodeId: "original-source",
+      changes: {
+        connections: { success: "inserted-node" }
+      }
+    }
+  ]
+}
+```
+
+## Ошибки валидации
+
+### Отсутствует цель соединения
+
+```
+Error: Node 'task-1' connection target 'missing-node' not found
+```
+
+Решение: обновите соединение на валидный ID узла.
+
+### Изолированный узел
+
+```
+Warning: Node 'orphan-node' is not reachable from start
+```
+
+Решение: добавьте соединение от другого узла или удалите изолированный узел.
+
+### Неверный тип узла
+
+```
+Error: Unknown node type 'custom-type'
+```
+
+Решение: используйте допустимые типы: start, end, agent-directive, condition, expression, telegram-notification, subgraph, teleport, lock.
+
+## Смотрите также
+
+- [Создание Workflows](/ru/docs/guides/workflow-creation/) - Создание новых workflows
+- [MCP Tools](/ru/docs/reference/tools/) - Справочник инструментов

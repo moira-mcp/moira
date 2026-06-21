@@ -1,0 +1,457 @@
+{
+  "slug": "ux-design",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "6266d829-11a6-4bf2-b00b-f3d230cee4c2",
+  "metadata": {
+    "name": "UX Design Workflow",
+    "version": "1.3.1",
+    "description": "Structured UX/UI design process: USERS -> CONSTRAINTS -> DESIGN_SYSTEM -> FLOW -> MICROCOPY -> ACCESSIBILITY -> PROTOTYPE -> VALIDATION. Guarantees user-centered and context-aware solutions with mandatory accessibility checks."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "users"
+      }
+    },
+    {
+      "id": "users",
+      "type": "agent-directive",
+      "directive": "Gather information about target users.\n\nUse planning standards: {{planning_standards}}\n\nAsk user or find in documentation:\n1. Who are target users? (personas — name, role, context)\n2. What is usage context? (device, environment, time)\n3. Jobs to be done — what are they trying to achieve?\n4. Pain points — current problems\n\nDefine primary persona — main user we are designing for.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave user research issues to `{{workspace_path}}/users-issues.md` with format:\n```\n# User Research Issues\n\n## PERSONA COMPLETENESS\n1. [Missing persona element]\n\n## USER-CENTERED DESIGN\n1. [Gap in user understanding]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `users_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER-CENTERED DESIGN per {{planning_standards}}\n2. Minimum 1 complete persona\n3. Primary persona defined\n4. Context and pain points documented\n\nReturn `issues_count` = number of issues found (0 if user research complete).",
+      "completionCondition": "Gathered: minimum 1 persona with context, jtbd and pain_points, primary persona defined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "personas": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "context": {
+                  "type": "string"
+                },
+                "jtbd": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "pain_points": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "context",
+                "jtbd"
+              ]
+            },
+            "minItems": 1
+          },
+          "primary_persona": {
+            "type": "string",
+            "description": "Primary persona name"
+          }
+        },
+        "required": [
+          "personas",
+          "primary_persona"
+        ]
+      },
+      "connections": {
+        "success": "constraints"
+      }
+    },
+    {
+      "id": "constraints",
+      "type": "agent-directive",
+      "directive": "Define design constraints.\n\nUse planning standards: {{planning_standards}}\n\nGather information about:\n1. Technical constraints — platform, devices, browsers, performance\n2. Business constraints — timeline, resources, budget\n3. Existing patterns — which patterns are already used in the product\n4. Brand guidelines — colors, fonts, communication tone\n\nThese constraints will be considered in all subsequent decisions.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave constraints issues to `{{workspace_path}}/constraints-issues.md` with format:\n```\n# Constraints Issues\n\n## CONSISTENCY\n1. [Missing constraint category]\n\n## COMPLETENESS\n1. [Undocumented constraint]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `constraints_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. CONSISTENCY per {{planning_standards}}\n2. Technical constraints documented\n3. Existing patterns identified\n4. Brand guidelines captured\n\nReturn `issues_count` = number of issues found (0 if constraints complete).",
+      "completionCondition": "Constraints gathered: technical, business, existing patterns, brand",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "technical": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Technical constraints"
+          },
+          "existing_patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Existing patterns in the product"
+          }
+        },
+        "required": [
+          "technical",
+          "existing_patterns"
+        ],
+        "globalInputs": [
+          "business",
+          "brand_guidelines"
+        ]
+      },
+      "connections": {
+        "success": "design-system"
+      }
+    },
+    {
+      "id": "design-system",
+      "type": "agent-directive",
+      "directive": "Check product design system.\n\nDetermine:\n1. Which components already exist in design system?\n2. What can be reused for current task?\n3. Are new components needed?\n4. How will new solution fit into existing system?\n\nExisting patterns from previous step:\n{{constraints.existing_patterns}}",
+      "completionCondition": "Determined: existing components, what to reuse, if new needed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "existing_components",
+          "reusable"
+        ],
+        "globalInputs": [
+          "existing_components",
+          "reusable",
+          "new_needed",
+          "integration_notes"
+        ]
+      },
+      "connections": {
+        "success": "flow"
+      }
+    },
+    {
+      "id": "flow",
+      "type": "agent-directive",
+      "directive": "Design user flow.\n\nUse planning standards: {{planning_standards}}\n\nUsers:\n{{users.personas}}\nPrimary persona: {{users.primary_persona}}\n\nConstraints:\n- Technical: {{constraints.technical}}\n- Existing patterns: {{constraints.existing_patterns}}\n\n{{design_rationale_requirements}}\n\nFor EACH flow step specify:\n1. What user sees\n2. What they can do\n3. Why this order (rationale)\n4. Which alternatives were considered\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave flow issues to `{{workspace_path}}/flow-issues.md` with format:\n```\n# User Flow Issues\n\n## FLOW COMPLETENESS\n1. [Missing flow element]\n\n## USER-CENTERED DESIGN\n1. [Decision without rationale]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `flow_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER FLOW COMPLETENESS per {{planning_standards}}\n2. All entry/exit points mapped\n3. Rationale for each step\n4. Alternatives considered\n\nReturn `issues_count` = number of issues found (0 if flow complete).",
+      "completionCondition": "Flow designed, each step has rationale and alternatives_considered",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "user_sees": {
+                  "type": "string"
+                },
+                "user_actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "rationale": {
+                  "type": "string"
+                },
+                "alternatives_considered": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "user_sees",
+                "rationale"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "steps"
+        ]
+      },
+      "connections": {
+        "success": "microcopy"
+      }
+    },
+    {
+      "id": "microcopy",
+      "type": "agent-directive",
+      "directive": "Write UX copy for the flow.\n\nFlow steps:\n{{flow.steps}}\n\n{{microcopy_guidelines}}\n\nFor each text element specify:\n- element: type (heading, button, instruction, error, empty_state)\n- text: the text\n- purpose: why this text\n- clarity_check: understandable on first read (yes/no + why)",
+      "completionCondition": "Microcopy written for all flow elements, each checked for clarity",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "copy": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "element": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "purpose": {
+                  "type": "string"
+                },
+                "clarity_check": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "element",
+                "text",
+                "clarity_check"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "copy"
+        ]
+      },
+      "connections": {
+        "success": "accessibility"
+      }
+    },
+    {
+      "id": "accessibility",
+      "type": "agent-directive",
+      "directive": "Check accessibility against WCAG AA checklist.\n\nUse planning standards: {{planning_standards}}\n\n{{accessibility_checklist}}\n\nFor EACH checklist item specify:\n- requirement: the requirement\n- how_addressed: how it is fulfilled in your design\n\nIf any item is not applicable — specify why.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave accessibility issues to `{{workspace_path}}/accessibility-issues.md` with format:\n```\n# Accessibility Issues\n\n## WCAG COMPLIANCE\n1. [Unaddressed requirement]\n\n## ACCESSIBILITY STANDARDS\n1. [Gap in implementation]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `accessibility_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. ACCESSIBILITY per {{planning_standards}}\n2. All WCAG AA items checked\n3. Each item addressed or justified\n4. No compliance gaps\n\nReturn `issues_count` = number of issues found (0 if accessibility complete).",
+      "completionCondition": "All WCAG AA checklist items checked and addressed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "checklist"
+        ],
+        "globalInputs": [
+          "checklist"
+        ]
+      },
+      "connections": {
+        "success": "prototype"
+      }
+    },
+    {
+      "id": "prototype",
+      "type": "agent-directive",
+      "directive": "Describe prototype screen by screen.\n\nUse planning standards: {{planning_standards}}\n\nFlow:\n{{flow.steps}}\n\nMicrocopy:\n{{microcopy.copy}}\n\nFor each screen specify:\n- name: screen name\n- layout: layout description (what is positioned where)\n- interactions: which interactions are possible\n- edge_cases: what happens in edge cases (empty data, errors)\n- responsive: how it adapts to different sizes\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave prototype issues to `{{workspace_path}}/prototype-issues.md` with format:\n```\n# Prototype Issues\n\n## USER FLOW COMPLETENESS\n1. [Missing state]\n\n## CONSISTENCY\n1. [Pattern violation]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `prototype_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER FLOW COMPLETENESS per {{planning_standards}} - edge cases and empty states\n2. CONSISTENCY per {{planning_standards}} - design system adherence\n3. All screens described\n4. Responsive behavior defined\n\nReturn `issues_count` = number of issues found (0 if prototype complete).",
+      "completionCondition": "All screens described with layout, interactions, edge cases and responsive behavior",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "screens"
+        ],
+        "globalInputs": [
+          "screens"
+        ]
+      },
+      "connections": {
+        "success": "validation"
+      }
+    },
+    {
+      "id": "validation",
+      "type": "agent-directive",
+      "directive": "Create design testing plan with users.\n\nUse planning standards: {{planning_standards}}\n\nPrimary persona: {{users.primary_persona}}\nFlow: {{flow.steps}}\n\nDetermine:\n1. Which hypotheses are we testing? (what can go wrong)\n2. Which testing method? (usability testing, A/B, survey)\n3. Success criteria — how will we know the design works\n4. Who to involve — how many participants, selection criteria\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave validation issues to `{{workspace_path}}/validation-issues.md` with format:\n```\n# Validation Plan Issues\n\n## COMPLETENESS\n1. [Missing element]\n\n## USER-CENTERED DESIGN\n1. [Gap in testing coverage]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `validation_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER-CENTERED DESIGN per {{planning_standards}} - testing with target users\n2. Hypotheses defined\n3. Success criteria measurable\n4. Participant criteria clear\n\nReturn `issues_count` = number of issues found (0 if validation plan complete).",
+      "completionCondition": "Testing plan ready: hypotheses, method, success criteria, participants",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "hypotheses",
+          "method",
+          "success_criteria"
+        ],
+        "globalInputs": [
+          "hypotheses",
+          "method",
+          "success_criteria",
+          "participants"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "variableRegistry": {
+    "accessibility_checklist": {
+      "type": "string",
+      "description": "WCAG AA compliance checklist items",
+      "default": "WCAG AA CHECKLIST:\n\n1. Color contrast: minimum 4.5:1 for text, 3:1 for large text\n2. Keyboard navigation: all interactive elements accessible via keyboard\n3. Screen reader: all elements have accessible names, correct heading structure\n4. Touch targets: minimum 44x44px for mobile\n5. Focus states: visible focus indicator for all interactive elements\n6. Alt text: all images have descriptions\n7. Form labels: all form fields have associated labels"
+    },
+    "microcopy_guidelines": {
+      "type": "string",
+      "description": "UX copywriting rules for clear communication",
+      "default": "UX COPYWRITING RULES:\n\n1. CLARITY > CLEVERNESS - user should understand on first read\n2. Short sentences - maximum 15-20 words\n3. Active voice - 'Save changes' instead of 'Changes will be saved'\n4. Specific CTAs - 'Submit application' instead of 'Submit'\n5. Friendly errors - explain what went wrong and how to fix it\n6. Empty states - explain what this space is for and how to fill it"
+    },
+    "design_rationale_requirements": {
+      "type": "string",
+      "description": "Requirements for documenting design decisions",
+      "default": "DESIGN DECISION RATIONALE REQUIREMENTS:\n\nEach design decision must contain:\n1. WHY this decision (rationale in product context)\n2. WHICH alternatives were considered\n3. WHY alternatives were rejected\n4. HOW this relates to user needs from first step"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "UX design planning standards for accessibility, flow, consistency and user-centered design",
+      "default": "UX DESIGN PLANNING STANDARDS:\n\n1. ACCESSIBILITY:\n- WCAG AA compliance mandatory\n- Color contrast ratios verified\n- Keyboard navigation tested\n- Screen reader compatibility ensured\n- Touch targets meet minimum size\n- Focus states clearly visible\n\n2. USER FLOW COMPLETENESS:\n- All entry points mapped\n- All exit points defined\n- Error states handled\n- Edge cases covered\n- Empty states designed\n- Loading states considered\n\n3. CONSISTENCY:\n- Design system components used\n- Patterns match existing product\n- Terminology consistent throughout\n- Interaction patterns uniform\n- Visual hierarchy maintained\n- Spacing system followed\n\n4. USER-CENTERED DESIGN:\n- Primary persona defined\n- Jobs-to-be-done clear\n- Pain points addressed\n- Context of use considered\n- Rationale documented for decisions\n- Alternatives evaluated\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan/task item's directive in isolation.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
+    },
+    "brand_guidelines": {
+      "type": "array",
+      "description": "Workflow-global brand_guidelines",
+      "items": {
+        "type": "string"
+      }
+    },
+    "business": {
+      "type": "array",
+      "description": "Workflow-global business",
+      "items": {
+        "type": "string"
+      }
+    },
+    "checklist": {
+      "type": "array",
+      "description": "Workflow-global checklist",
+      "items": {
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "how_addressed": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement",
+          "how_addressed"
+        ]
+      },
+      "minItems": 5
+    },
+    "existing_components": {
+      "type": "array",
+      "description": "Workflow-global existing_components",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "description": "Workflow-global hypotheses",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "integration_notes": {
+      "type": "string",
+      "description": "Workflow-global integration_notes"
+    },
+    "method": {
+      "type": "string",
+      "description": "Workflow-global method"
+    },
+    "new_needed": {
+      "type": "array",
+      "description": "Workflow-global new_needed",
+      "items": {
+        "type": "string"
+      }
+    },
+    "participants": {
+      "type": "object",
+      "description": "Workflow-global participants",
+      "properties": {
+        "count": {
+          "type": "number"
+        },
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "reusable": {
+      "type": "array",
+      "description": "Workflow-global reusable",
+      "items": {
+        "type": "string"
+      }
+    },
+    "screens": {
+      "type": "array",
+      "description": "Workflow-global screens",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "layout": {
+            "type": "string"
+          },
+          "interactions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "edge_cases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "responsive": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "layout",
+          "interactions"
+        ]
+      },
+      "minItems": 1
+    },
+    "success_criteria": {
+      "type": "array",
+      "description": "Workflow-global success_criteria",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Workflow-global workspace_path"
+    },
+    "has_file_access": {
+      "type": "boolean",
+      "description": "Agent can read/write local files"
+    }
+  }
+}

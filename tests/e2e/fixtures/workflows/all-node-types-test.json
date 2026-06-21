@@ -1,0 +1,65 @@
+{
+  "slug": "all-node-types-test",
+  "metadata": {
+    "name": "All Node Types Test",
+    "version": "1.0.0",
+    "description": "Test workflow containing all supported node types for E2E testing"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "agent-step"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "agent-step",
+      "directive": "Test agent directive",
+      "completionCondition": "Agent step completed",
+      "connections": {
+        "success": "condition-step"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "condition-step",
+      "condition": {
+        "operator": "eq",
+        "left": "{{test_var}}",
+        "right": "value"
+      },
+      "connections": {
+        "true": "expression-step",
+        "false": "telegram-step"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expression-step",
+      "expressions": [
+        "result = input * 2",
+        "status = 'processed'"
+      ],
+      "metadata": {
+        "displayName": "Calculate Expression"
+      },
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "telegram-step",
+      "message": "Test notification message",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

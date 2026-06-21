@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "strict": false,
+    "baseUrl": "./src",
+    "paths": {
+      "@/*": ["./*"],
+      "@shared/types": ["./types"],
+      "types": ["./types"],
+      "types/*": ["./types/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["tests/**/*", "dist/**/*"]
+}

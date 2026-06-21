@@ -1,0 +1,336 @@
+---
+title: Паттерн публикации Artifacts
+description: Публикация HTML контента с публичными URL для обмена
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Публикация статического HTML контента, доступного по публичному URL. Генерация отчётов, дашбордов и документов для просмотра в браузере.
+
+## Когда использовать
+
+| Сценарий                        | Пример                                                         |
+| ------------------------------- | -------------------------------------------------------------- |
+| **Отчёты**                      | Анализ покупок, результаты исследований, сравнительные таблицы |
+| **Дашборды**                    | Страницы статуса, визуализация метрик                          |
+| **Контент для обмена**          | Документы, презентации, портфолио                              |
+| **Уведомления**                 | Генерация отчёта + отправка URL через Telegram                 |
+| **Результаты для пользователя** | Всё, что нужно просмотреть в браузере                          |
+
+<Aside type="caution">
+  Не используйте artifacts для временных данных (используйте notes), структурированного JSON
+  хранения (используйте notes), бинарных файлов, часто изменяющегося контента, контента с
+  аутентификацией.
+</Aside>
+
+## Структура
+
+```
+[generate-data] → [create-html] → [upload-artifact] → [share-url]
+```
+
+## Реализация
+
+### Паттерн прямой загрузки
+
+Когда агент генерирует HTML в памяти:
+
+```json
+{
+  "id": "generate-and-upload",
+  "type": "agent-directive",
+  "directive": "Сгенерируй HTML отчёт из данных анализа.\n\n**Данные:**\n{{note:analysis-results}}\n\nСоздай адаптивный HTML с Tailwind CDN.\n\nЗагрузи:\nartifacts({ action: \"upload\", name: \"report.html\", content: \"<html>...\" })\n\nСохрани возвращённый `url` как report_url.",
+  "completionCondition": "Отчёт загружен и URL получен",
+  "inputSchema": {
+    "type": "object",
+    "required": ["report_url", "uploaded"],
+    "properties": {
+      "report_url": { "type": "string" },
+      "uploaded": { "type": "boolean" }
+    }
+  },
+  "connections": { "success": "notify-user" }
+}
+```
+
+### Паттерн загрузки по токену
+
+Когда агент сначала создаёт файлы локально:
+
+```json
+{
+  "id": "upload-via-token",
+  "type": "agent-directive",
+  "directive": "Загрузи файл отчёта.\n\n1. Получи токен: artifacts({ action: \"token\", ttlMinutes: 30 })\n2. Прочитай файл из {{report_file_path}}\n3. POST на uploadUrl с контентом\n4. Сохрани url из ответа",
+  "inputSchema": {
+    "properties": {
+      "report_url": { "type": "string" },
+      "uploaded": { "type": "boolean" }
+    }
+  }
+}
+```
+
+### Условный выбор по возможностям
+
+Маршрутизация на основе доступа агента к файлам:
+
+```json
+{
+  "id": "check-file-access",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "can_create_files" },
+    "right": true
+  },
+  "connections": {
+    "true": "generate-file-then-upload",
+    "false": "generate-and-upload-direct"
+  }
+}
+```
+
+## Использование MCP Tool
+
+### Загрузка Artifact
+
+```typescript
+artifacts({
+  action: "upload",
+  name: "purchase-report.html",
+  content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+  <h1 class="text-2xl font-bold">Отчёт</h1>
+</body>
+</html>`,
+  executionId: "exec-123", // Опционально: связь с workflow
+});
+```
+
+Ответ:
+
+```json
+{
+  "success": true,
+  "data": {
+    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "url": "https://{MOIRA_HOST}/a/a1b2c3d4...",
+    "name": "purchase-report.html",
+    "size": 1234,
+    "expiresAt": "2025-02-28T10:00:00.000Z"
+  }
+}
+```
+
+### Обновление Artifact
+
+```typescript
+artifacts({
+  action: "update",
+  uuid: "a1b2c3d4...",
+  content: "<html>...обновлённый контент...</html>",
+  name: "report-v2.html", // Опционально
+});
+```
+
+### Проверка квоты
+
+```typescript
+artifacts({
+  action: "stats",
+});
+// Возвращает: totalArtifacts, totalSize, storageLimit, usedPercent
+```
+
+### Список Artifacts
+
+```typescript
+artifacts({
+  action: "list",
+  limit: 20,
+});
+```
+
+## Квоты и лимиты
+
+| Лимит                     | Значение     |
+| ------------------------- | ------------ |
+| Хранилище на пользователя | 100 MB       |
+| Количество файлов         | 50 artifacts |
+| Максимальный размер файла | 5 MB         |
+| TTL токена                | 1-1440 минут |
+| Срок действия             | 30 дней      |
+
+<Aside type="tip">
+  Проверяйте квоту перед загрузкой с помощью `artifacts({ action: "stats" })`. Очищайте старые artifacts при приближении к лимитам.
+</Aside>
+
+## Советы по генерации HTML
+
+### Используйте Tailwind CDN
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <!-- Контент -->
+  </body>
+</html>
+```
+
+### Адаптивная вёрстка
+
+```html
+<div class="container mx-auto px-4 py-8">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- Карточки -->
+  </div>
+</div>
+```
+
+### Карточка продукта
+
+```html
+<div class="bg-white rounded-lg shadow-md p-6">
+  <h3 class="text-lg font-semibold">Название продукта</h3>
+  <p class="text-gray-600 mt-2">Описание</p>
+  <div class="mt-4 flex justify-between items-center">
+    <span class="text-2xl font-bold text-green-600">999 ₽</span>
+    <a
+      href="https://store.com/product"
+      class="bg-blue-500 text-white px-4 py-2 rounded"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Купить
+    </a>
+  </div>
+</div>
+```
+
+### Сравнительная таблица
+
+```html
+<table class="w-full border-collapse">
+  <thead>
+    <tr class="bg-gray-100">
+      <th class="border p-3 text-left">Продукт</th>
+      <th class="border p-3 text-left">Цена</th>
+      <th class="border p-3 text-left">Рейтинг</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="hover:bg-gray-50">
+      <td class="border p-3">Продукт А</td>
+      <td class="border p-3">599 ₽</td>
+      <td class="border p-3">4.5/5</td>
+    </tr>
+  </tbody>
+</table>
+```
+
+## Интеграция с уведомлениями
+
+Комбинация с telegram-уведомлениями:
+
+```json
+{
+  "id": "notify-with-link",
+  "type": "agent-directive",
+  "directive": "Отправь URL отчёта пользователю через Telegram.\n\nURL: {{report_url}}\n\nИспользуй telegram-notification для отправки ссылки.",
+  "connections": { "success": "end" }
+}
+```
+
+## Реальный пример
+
+Из workflow анализа покупок:
+
+```json
+{
+  "id": "create-report",
+  "type": "agent-directive",
+  "directive": "Создай HTML отчёт с рекомендациями продуктов.\n\n**Данные анализа:**\n{{note:purchase-{{executionId}}-03-analysis}}\n\nСгенерируй адаптивный HTML:\n- Карточки продуктов с изображениями, ценами, ссылками\n- Сравнительная таблица\n- Итоговые рекомендации\n\nЗагрузи: artifacts({ action: \"upload\", name: \"purchase-{{executionId}}.html\", content: html, executionId: \"{{executionId}}\" })",
+  "inputSchema": {
+    "properties": {
+      "report_url": { "type": "string" },
+      "uploaded": { "type": "boolean" }
+    },
+    "required": ["report_url"]
+  }
+}
+```
+
+## Лучшие практики
+
+### Описательные имена
+
+```typescript
+// Хорошо
+artifacts({ name: "purchase-analysis-2025-01-31.html" });
+
+// Плохо
+artifacts({ name: "report.html" });
+```
+
+### Связь с выполнением
+
+```typescript
+artifacts({
+  action: "upload",
+  name: "report.html",
+  content: htmlContent,
+  executionId: context.executionId,
+});
+```
+
+Преимущества:
+
+- Отслеживание какое выполнение создало artifact
+- Запрос artifacts по выполнению
+- Очистка при архивации выполнения
+
+### Обработка ошибок
+
+```json
+{
+  "id": "upload-report",
+  "type": "agent-directive",
+  "directive": "Загрузи отчёт. Сначала проверь квоту. При ошибке загрузки сообщи пользователю.",
+  "connections": {
+    "success": "notify-user",
+    "error": "handle-upload-error"
+  }
+}
+```
+
+## Антипаттерны
+
+### Использование Artifacts для хранения данных
+
+Используйте notes для JSON данных, artifacts только для презентабельного HTML.
+
+### Отсутствие проверки квот
+
+Всегда проверяйте `stats` перед большими загрузками. Обрабатывайте ошибки превышения квоты.
+
+### Неадаптивный HTML
+
+Используйте Tailwind или media queries. Фиксированная ширина ломается на мобильных.
+
+## Связанные паттерны
+
+- [Персистентность Notes](/ru/docs/patterns/notes-persistence/) - Для структурированного хранения данных
+- [Рабочее пространство](/ru/docs/patterns/workspace/) - Для организации файлов

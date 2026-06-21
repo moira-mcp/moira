@@ -1,0 +1,112 @@
+---
+title: Test Generation
+description: Automated test code generation workflow
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Workflow for generating automated test code including unit, integration, and e2e tests. Analyzes existing project patterns and generates tests following established conventions.
+
+## Start
+
+```bash
+mcp__moira__start({ workflowId: "test-generation" })
+```
+
+## Process
+
+```mermaid
+flowchart LR
+    A[Get Code] --> B[Analyze Project]
+    B --> C[Choose Approach]
+    C --> D[Analyze Structure]
+    D --> E[Select Test Type]
+    E --> F[Identify Cases]
+    F --> G[Create Plan]
+    G --> H[Generate Tests]
+    H --> I[Review]
+    I --> J[Finalize]
+```
+
+## Steps
+
+| Step | Action | Output |
+|------|--------|--------|
+| 1. Get Code | Obtain code for testing | Target code |
+| 2. Analyze Project | Study existing tests and patterns | Project analysis |
+| 3. Choose Approach | Use existing patterns or create new | Approach decision |
+| 4. Analyze Structure | Identify testable units (functions, classes, methods) | Unit inventory |
+| 5. Select Test Type | Choose unit, integration, or e2e | Test type |
+| 6. Identify Cases | Generate test cases (happy path, edge, error) | Case list |
+| 7. Create Plan | Final test plan | Approved plan |
+| 8. Generate Tests | Generate test code | Test files |
+| 9. Review | User review of generated tests | Approved tests |
+| 10. Finalize | Save tests to project | Saved tests |
+
+## Features
+
+<Aside type="tip">
+The workflow searches for existing tests in `tests/`, `__tests__/`, and `spec/` directories to match project conventions.
+</Aside>
+
+### Project Analysis
+
+| Element | Detection |
+|---------|-----------|
+| Test directories | `tests/`, `__tests__/`, `spec/` |
+| Frameworks | Jest, Playwright, pytest, Vitest |
+| Conventions | Naming patterns, helper usage |
+
+### Test Types
+
+| Type | Description |
+|------|-------------|
+| `unit` | Isolated function/method testing |
+| `integration` | Component interaction testing |
+| `e2e` | Full user flow testing |
+
+### Test Case Categories
+
+| Category | Focus |
+|----------|-------|
+| Happy path | Normal expected behavior |
+| Edge cases | Boundary conditions, limits |
+| Error cases | Invalid input, failure handling |
+
+### Validation Loops
+
+- **Project analysis**: Verify complete understanding
+- **Structure analysis**: Confirm testable units identified
+- **Cases coverage**: Ensure adequate coverage
+- **Syntax validation**: Verify generated code is valid
+
+<Aside type="caution">
+Up to 3 retry attempts for test generation. On repeated failure, workflow escalates to user.
+</Aside>
+
+### User Approval Gates
+
+- **Approach confirmation**: Agree on testing strategy
+- **Test type confirmation**: Approve test type selection
+- **Plan confirmation**: Approve final test plan
+- **Review**: Approve generated tests
+
+## Example Node Configuration
+
+```json
+{
+  "id": "generate-tests",
+  "type": "agent-directive",
+  "directive": "Generate test code following the approved plan. Use project conventions for naming, structure, and helpers.",
+  "completionCondition": "Test files generated with valid syntax covering all planned test cases",
+  "connections": {
+    "next": "review-tests"
+  }
+}
+```
+
+## Related
+
+- [Test Planning](/docs/reference/workflows/test-planning/) — For creating test plans without code generation
+- [Robust Task](/docs/reference/workflows/robust-task/) — For complex testing tasks
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates

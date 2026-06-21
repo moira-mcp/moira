@@ -1,0 +1,18 @@
+{
+  "name": "@mcp-moira/workflow-cli",
+  "version": "0.3.0",
+  "description": "CLI tool for Moira workflow management",
+  "type": "module",
+  "bin": {
+    "moira-workflow": "./bin/moira-workflow.js"
+  },
+  "scripts": {
+    "link": "npm link",
+    "unlink": "npm unlink -g"
+  },
+  "dependencies": {
+    "@mcp-moira/workflow-engine": "*",
+    "@mcp-moira/shared": "*"
+  },
+  "private": true
+}

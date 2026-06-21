@@ -1,0 +1,143 @@
+{
+  "slug": "artifacts-demo-dashboard-builder",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "3ee766d6-50bc-4dfe-941d-3fcb4fc6c77c",
+  "metadata": {
+    "name": "Artifacts Demo: Dashboard Builder",
+    "version": "1.2.0",
+    "description": "Demo workflow: builds an interactive data dashboard and publishes it as a static HTML artifact. Demonstrates advanced Artifacts usage with dynamic data visualization and shareable outputs."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {}
+      },
+      "connections": {
+        "default": "collect-data"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-data",
+      "directive": "Collect data for building a metrics dashboard. Ask the user for:\n\n1. **Dashboard title** — what this dashboard represents\n2. **Time period** — what period the data covers (e.g., Q1 2025, Last 30 days)\n3. **Metrics data** — collect 3-5 key metrics with:\n   - Metric name\n   - Current value\n   - Previous value (for comparison)\n   - Unit (e.g., %, count, hours, $)\n   - Trend (up, down, stable)\n4. **Chart type preference** — bar, line, or mixed\n\nIf the user doesn't have exact data, help them estimate reasonable values for demonstration purposes.",
+      "completionCondition": "Dashboard title, time period, at least 3 metrics with comparison values, and chart preference are collected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "dashboardTitle",
+          "timePeriod",
+          "metrics",
+          "chartType"
+        ],
+        "globalInputs": [
+          "dashboardTitle",
+          "timePeriod",
+          "metrics",
+          "chartType"
+        ]
+      },
+      "connections": {
+        "success": "build-and-publish-dashboard"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "build-and-publish-dashboard",
+      "directive": "Build an interactive HTML dashboard and publish it as an artifact.\n\n**Dashboard Configuration:**\n- Title: {{collect-data.dashboardTitle}}\n- Period: {{collect-data.timePeriod}}\n- Chart Type: {{collect-data.chartType}}\n- Metrics: {{collect-data.metrics}}\n\nCreate a complete HTML document with:\n1. **Header** with dashboard title and time period\n2. **KPI Cards** for each metric showing:\n   - Metric name and current value with unit\n   - Change percentage from previous value\n   - Trend indicator (↑ green, ↓ red, → gray)\n3. **Chart Section** using Chart.js CDN (include via script tag):\n   - Responsive chart based on chartType preference\n   - Compare current vs previous values\n4. **Styling:**\n   - Modern dark theme with CSS grid layout\n   - Responsive design\n   - Smooth animations\n   - Professional color palette\n5. **Footer** with generation timestamp and \"Powered by MCP Moira Artifacts\"\n\nThe HTML must be self-contained with all CSS inline or in style tags.\nInclude Chart.js via CDN: https://cdn.jsdelivr.net/npm/chart.js\n\nAfter generating the HTML, publish it using the `artifacts` MCP tool with:\n- **action:** \"upload\"\n- **name:** \"dashboard-{{collect-data.timePeriod}}.html\" (sanitize the period for filename)\n- **content:** The generated HTML\n\nReturn the artifact UUID and URL.",
+      "completionCondition": "Dashboard HTML generated and published as artifact with URL received.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "artifactUuid",
+          "artifactUrl"
+        ],
+        "globalInputs": [
+          "artifactUuid",
+          "artifactUrl"
+        ]
+      },
+      "connections": {
+        "success": "present-dashboard"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-dashboard",
+      "directive": "Present the published dashboard to the user.\n\n**Dashboard Published!**\n\n- Title: {{collect-data.dashboardTitle}}\n- Period: {{collect-data.timePeriod}}\n- Metrics: {{collect-data.metrics.length}} KPIs tracked\n- Artifact ID: {{build-and-publish-dashboard.artifactUuid}}\n- **Live Dashboard URL: {{build-and-publish-dashboard.artifactUrl}}**\n\nExplain to the user:\n1. The dashboard is now live and can be shared with anyone\n2. It includes interactive charts powered by Chart.js\n3. The artifact auto-expires in 30 days (can be extended)\n4. To update the dashboard with new data, they can:\n   - Run this workflow again to create a new version\n   - Use artifacts tool with 'update' action to modify in place\n5. Statistics available via artifacts tool 'stats' action\n\nProvide the URL prominently for easy copying.",
+      "completionCondition": "User has received the dashboard URL and understands the artifact features.",
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end-success",
+      "finalOutput": [
+        "artifactUrl",
+        "artifactUuid",
+        "dashboardTitle"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "artifactUrl": {
+      "type": "string",
+      "description": "Workflow-global artifactUrl"
+    },
+    "artifactUuid": {
+      "type": "string",
+      "description": "Workflow-global artifactUuid"
+    },
+    "chartType": {
+      "type": "string",
+      "description": "Workflow-global chartType",
+      "enum": [
+        "bar",
+        "line",
+        "mixed"
+      ]
+    },
+    "dashboardTitle": {
+      "type": "string",
+      "description": "Workflow-global dashboardTitle"
+    },
+    "metrics": {
+      "type": "array",
+      "description": "Workflow-global metrics",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "current": {
+            "type": "number"
+          },
+          "previous": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "trend": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "stable"
+            ]
+          }
+        }
+      }
+    },
+    "timePeriod": {
+      "type": "string",
+      "description": "Workflow-global timePeriod"
+    }
+  }
+}

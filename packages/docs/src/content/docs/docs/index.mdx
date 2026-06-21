@@ -1,0 +1,44 @@
+---
+title: Moira Documentation
+description: Agent Workflow Engine - Complete documentation
+template: splash
+hero:
+  tagline: Build structured workflows for AI agents with clear directives and success criteria
+  actions:
+    - text: Get Started
+      link: ./getting-started/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/moira-mcp/moira
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Core Features
+
+<CardGrid>
+  <Card title="Workflow Execution" icon="setting">
+    Define multi-step processes with node graphs. Each node contains a directive (what to do) and
+    completion condition (when done).
+  </Card>
+  <Card title="MCP Protocol" icon="puzzle">
+    Standard Model Context Protocol integration. Works with Claude Code, Cursor, and any
+    MCP-compatible client.
+  </Card>
+  <Card title="Template Engine" icon="document">
+    Dynamic content with variable interpolation. Access execution context, results, and metadata in
+    your workflows.
+  </Card>
+  <Card title="Multi-Language" icon="translate">
+    Full i18n support. Create workflows and documentation in multiple languages.
+  </Card>
+</CardGrid>
+
+## Quick Links
+
+- [Introduction](/docs/getting-started/introduction/) - What is Moira and why use it
+- [Quick Start](/docs/getting-started/quickstart/) - Connect Moira to your AI client
+- [Workflows](/docs/concepts/workflows/) - Understanding workflow structure
+- [Nodes](/docs/concepts/nodes/) - Node types and configuration

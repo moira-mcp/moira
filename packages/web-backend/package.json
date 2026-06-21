@@ -1,0 +1,19 @@
+{
+  "name": "@mcp-moira/web-backend",
+  "version": "0.3.0",
+  "description": "Express API server for MCP Moira workflow visualization",
+  "main": "src/server.ts",
+  "type": "module",
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "scripts": {},
+  "dependencies": {
+    "@mcp-moira/shared": "*",
+    "@mcp-moira/workflow-engine": "*",
+    "multer": "^2.0.2"
+  },
+  "devDependencies": {
+    "@types/multer": "^2.0.0"
+  }
+}

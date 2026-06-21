@@ -1,0 +1,37 @@
+{
+  "name": "@mcp-moira/docs",
+  "version": "0.3.0",
+  "description": "MCP Moira documentation site (Starlight) — served at /docs",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": "^18.17.1 || ^20.3.0 || >= 21.0.0"
+  },
+  "scripts": {},
+  "dependencies": {
+    "@astrojs/sitemap": "^3.6.0",
+    "@astrojs/starlight": "^0.36.3",
+    "@fontsource-variable/inter": "^5.2.8",
+    "astro": "^5.15.9",
+    "astro-icon": "^1.1.5",
+    "astro-mermaid": "^1.2.0",
+    "mermaid": "^11.12.2",
+    "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.5",
+    "@astrojs/mdx": "^4.3.11",
+    "@iconify-json/flat-color-icons": "^1.2.1",
+    "@iconify-json/tabler": "^1.2.20",
+    "@tailwindcss/vite": "^4.1.17",
+    "astro-compress": "2.3.8",
+    "mdast-util-to-string": "^4.0.0",
+    "prettier": "^3.6.2",
+    "prettier-plugin-astro": "^0.14.1",
+    "reading-time": "^1.5.0",
+    "sharp": "0.34.5",
+    "tailwindcss": "^4.1.17",
+    "typescript": "^5.8.3",
+    "unist-util-visit": "^5.0.0"
+  }
+}

@@ -1,0 +1,44 @@
+---
+title: Документация Moira
+description: Agent Workflow Engine - Полная документация
+template: splash
+hero:
+  tagline: Создавайте структурированные воркфлоу для AI-агентов с четкими инструкциями и критериями успеха
+  actions:
+    - text: Начать
+      link: /ru/docs/getting-started/introduction/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/moira-mcp/moira
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Основные возможности
+
+<CardGrid>
+  <Card title="Выполнение воркфлоу" icon="setting">
+    Определяйте многошаговые процессы с помощью графов узлов. Каждый узел содержит директиву (что
+    делать) и условие завершения (когда готово).
+  </Card>
+  <Card title="Протокол MCP" icon="puzzle">
+    Стандартная интеграция Model Context Protocol. Работает с Claude Code, Cursor и любым
+    MCP-совместимым клиентом.
+  </Card>
+  <Card title="Шаблонный движок" icon="document">
+    Динамический контент с подстановкой переменных. Доступ к контексту выполнения, результатам и
+    метаданным.
+  </Card>
+  <Card title="Мультиязычность" icon="translate">
+    Полная поддержка i18n. Создавайте воркфлоу и документацию на разных языках.
+  </Card>
+</CardGrid>
+
+## Быстрые ссылки
+
+- [Введение](/ru/docs/getting-started/introduction/) - Что такое Moira и зачем использовать
+- [Быстрый старт](/ru/docs/getting-started/quickstart/) - Подключение Moira к AI-клиенту
+- [Воркфлоу](/ru/docs/concepts/workflows/) - Понимание структуры воркфлоу
+- [Узлы](/ru/docs/concepts/nodes/) - Типы узлов и конфигурация

@@ -1,0 +1,384 @@
+---
+title: Templates
+description: Dynamic content with template variables in Moira workflows
+---
+
+import { Aside, Code } from "@astrojs/starlight/components";
+
+Templates allow dynamic content in workflow directives, conditions, and other fields. Use template variables to access execution context, step results, and workflow parameters.
+
+## Basic Syntax
+
+Template variables use double curly braces:
+
+```
+{{variableName}}
+```
+
+Variables are resolved at runtime from the execution context.
+
+## Variable Naming
+
+Variable and node ID names support:
+
+- **camelCase**: `{{projectName}}`, `{{userInput}}`
+- **snake_case**: `{{project_name}}`, `{{user_input}}`
+- **kebab-case**: `{{my-project}}`, `{{user-input}}`
+
+Kebab-case is supported in the first segment of variable references:
+
+```
+{{my-variable}}              - Simple variable
+{{setup-workspace.path}}     - Node ID with field access
+{{#each my-items}}...{{/each}} - Array iteration
+```
+
+Subsequent path segments use standard identifiers:
+
+```
+{{my-node.field_name}}       - Kebab node ID, snake_case field
+{{setup-workspace.result.data}} - Nested path access
+```
+
+## Available Variables
+
+### Execution Context
+
+```
+{{executionId}}     - Current execution ID
+{{workflowId}}      - Workflow being executed
+{{currentNodeId}}   - Current node ID
+```
+
+### Global Variables
+
+Globals are declared once in the workflow `variableRegistry` and referenced by bare name:
+
+```
+{{projectName}}     - Declared global
+{{count}}           - Declared global (numeric)
+```
+
+A bare-name reference resolves only from `variableRegistry`. A name that is not a declared global (and not a system variable) resolves to nothing and fails validation.
+
+### Node Outputs
+
+A node's local outputs are referenced as `node-id.name`:
+
+```
+{{analyze-step.summary}}   - The 'summary' output of node 'analyze-step'
+{{review.issues_count}}    - The 'issues_count' output of node 'review'
+```
+
+## Declaring Variables
+
+Declare globals in the workflow `variableRegistry`. Each entry is a JSON Schema property: `type` and `description` are required, and any JSON Schema keyword (`enum`, `items`, `properties`, `pattern`, `minLength`, `minimum`, `default`, ...) may be added to constrain the value.
+
+```json
+{
+  "variableRegistry": {
+    "projectName": { "type": "string", "description": "Name of the project" },
+    "count": { "type": "number", "description": "Item counter", "default": 0 },
+    "approved": { "type": "string", "description": "Approval gate", "enum": ["yes", "no"] },
+    "tags": { "type": "array", "description": "Selected tags", "items": { "type": "string" } }
+  }
+}
+```
+
+The whole entry is carried into the schema the writing node is validated against, so a declared constraint is enforced on the agent's response. A string global with `enum` (a node writes it via `inputSchema.globalInputs`) must return one of the listed values — use this for gate variables read by condition nodes (e.g. `approved == "yes"`) so a free-text answer cannot slip past the gate. A typed array global with `items` enforces the element type of every entry (e.g. `tags` must be an array of strings). Do not put an `enum` on a numeric counter that nodes increment: it would pin the value and reject the running count.
+
+A node writes a global only by listing its name in `inputSchema.globalInputs`; every other key it returns is a node-local output described in `inputSchema.properties`:
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["projectName"],
+    "properties": {
+      "summary": { "type": "string", "description": "Step summary (node-local)" }
+    }
+  }
+}
+```
+
+The engine routes the agent's response by this declaration: `projectName` becomes the global `{{projectName}}`; `summary` is reachable only as `{{node-id.summary}}`.
+
+## Conditional Templates
+
+Use conditional blocks to include or exclude content based on context values:
+
+```
+{{#if variable}}Content when truthy{{else}}Content when falsy{{/if}}
+{{#if variable}}Content when truthy{{/if}}
+```
+
+Falsy values: `null`, `undefined`, `false`, `0`, `""`, `"нет"`, `"no"`
+
+### Examples
+
+```
+{{#if has_file_access}}Save to ./output.md{{else}}Return result in response{{/if}}
+```
+
+```
+{{#if approved}}Proceeding with deployment{{else}}Waiting for approval{{/if}}
+```
+
+Conditional templates are processed in `directive` and `completionCondition` fields of agent-directive nodes.
+
+The variable a block helper tests (`{{#if VAR}}`, `{{#unless VAR}}`, `{{#each VAR}}`, `{{#eq VAR ...}}`, `{{#neq VAR ...}}`) is validated like a bare-name reference: it must be a declared global in `variableRegistry`, a `node-id.name` output, or a system variable. An undeclared name fails validation.
+
+## Unless Templates
+
+Use `{{#unless}}` for the opposite of `{{#if}}` - content is shown when variable is falsy:
+
+```
+{{#unless isLoggedIn}}Please log in{{/unless}}
+{{#unless hasError}}Success!{{else}}Error occurred{{/unless}}
+```
+
+## Equality Comparison Templates
+
+Use `{{#eq}}` to compare a variable with a string value:
+
+```
+{{#eq variable 'value'}}Content when equal{{/eq}}
+{{#eq variable 'value'}}Content when equal{{else}}Content when not equal{{/eq}}
+```
+
+Example:
+
+```
+{{#eq upload_target 'staging'}}Deploy to staging server{{/eq}}
+{{#eq upload_target 'production'}}Deploy to production server{{/eq}}
+```
+
+## Not-Equal Comparison Templates
+
+Use `{{#neq}}` to show content when variable does NOT equal a value:
+
+```
+{{#neq variable 'value'}}Content when not equal{{/neq}}
+{{#neq variable 'value'}}Content when not equal{{else}}Content when equal{{/neq}}
+```
+
+Example:
+
+```
+{{#neq test_info 'skip'}}Run tests: {{test_command}}{{/neq}}
+```
+
+## Array Access
+
+Access array elements using bracket notation:
+
+```
+{{items[0].name}}           - First element's name field
+{{users[1].email}}          - Second element's email field
+{{data[2].nested.value}}    - Nested path after array access
+```
+
+### Dynamic Array Indexes
+
+Use variables as array indexes for dynamic access:
+
+```
+{{items[idx].field}}        - Access using variable idx
+{{steps[current_step].action}} - Common for step navigation
+{{matrix[row][col].value}}  - Chained dynamic indexes
+{{data[outer].items[inner].name}} - Mixed literal and variable
+```
+
+**Behavior:**
+
+- Variable must resolve to a non-negative integer
+- String variables like `"2"` are parsed as numbers
+- Invalid indexes (negative, float, non-numeric, null, object) return undefined placeholder
+- Out of bounds access returns undefined placeholder
+
+### Practical Example: Step Navigation
+
+```json
+{
+  "directive": "Execute step {{current_step}} of {{total_steps}}:\n\nAction: {{steps[current_step].action}}\nExpected: {{steps[current_step].expected_result}}",
+  "completionCondition": "Step completed with evidence"
+}
+```
+
+With context:
+
+```json
+{
+  "current_step": 0,
+  "total_steps": 3,
+  "steps": [
+    { "action": "Initialize project", "expected_result": "Project folder created" },
+    { "action": "Install dependencies", "expected_result": "node_modules populated" },
+    { "action": "Run tests", "expected_result": "All tests pass" }
+  ]
+}
+```
+
+Renders:
+
+```
+Execute step 0 of 3:
+
+Action: Initialize project
+Expected: Project folder created
+```
+
+## Iteration Templates
+
+Use `{{#each}}` to iterate over arrays:
+
+```
+{{#each items}}{{this}}, {{/each}}
+{{#each users}}{{name}} ({{age}})\n{{/each}}
+{{#each steps}}{{@index}}: {{action}}{{/each}}
+```
+
+Inside `{{#each}}`:
+
+- `{{this}}` - current item value (serialized for objects)
+- `{{this.fieldName}}` - access field of current item object
+- `{{this.nested.path}}` - access nested fields
+- `{{@index}}` - current index (0-based)
+- `{{fieldName}}` - shorthand for `{{this.fieldName}}`
+
+Supports conditionals inside loops:
+
+```
+{{#each tasks}}{{#if done}}[x]{{else}}[ ]{{/if}} {{name}}\n{{/each}}
+```
+
+## Examples
+
+### Dynamic Directive
+
+```json
+{
+  "directive": "Implement the {{featureName}} feature in {{projectName}}",
+  "completionCondition": "Feature {{featureName}} is implemented and tested"
+}
+```
+
+### Conditional Branch
+
+Branch with a `condition` node that reads a value via `contextPath`:
+
+```json
+{
+  "id": "check-tests",
+  "type": "condition",
+  "condition": { "operator": "eq", "left": { "contextPath": "testsPassed" }, "right": true },
+  "connections": { "true": "deploy", "false": "fix-and-retry" }
+}
+```
+
+### Loop with Counter
+
+Loop using an `expression` node to increment a counter and a `condition` node to test the limit:
+
+```json
+{
+  "id": "increment",
+  "type": "expression",
+  "expressions": ["iterationCount = iterationCount + 1"],
+  "connections": { "default": "check-limit" }
+}
+```
+
+```json
+{
+  "id": "check-limit",
+  "type": "condition",
+  "condition": { "operator": "lt", "left": { "contextPath": "iterationCount" }, "right": 5 },
+  "connections": { "true": "improve", "false": "done" }
+}
+```
+
+<Aside type="caution">
+  Undefined variables resolve to `null`. Use `{{#if var}}` to check if a variable exists before using it.
+</Aside>
+
+## Template in Input Schema Description
+
+Help agents understand expected format:
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "implementation": {
+        "type": "string",
+        "description": "Code for {{featureName}} in {{language}}"
+      }
+    }
+  }
+}
+```
+
+## Note References
+
+Reference stored notes directly in templates using `{{note:KEY}}` syntax:
+
+```
+Use this configuration: {{note:project-config}}
+Apply settings from {{note:my-settings}} to the project.
+```
+
+**Behavior:**
+
+- Note content fetched using execution's user context
+- Missing notes show: `[NOTE NOT FOUND: KEY]`
+- Key supports alphanumeric, underscore, hyphen
+
+### Dynamic Note Keys
+
+Note keys can contain template variables for dynamic references:
+
+```
+{{note:metrics-{{projectName}}}}
+{{note:config-{{environment}}}}
+{{note:latest-metrics-{{ask-project.projectName}}}}
+```
+
+Inner variables resolve first, then the note is fetched. If inner variable is missing, note lookup fails with the unresolved key in the error message.
+
+Note content can contain regular template variables - they are processed after note injection:
+
+```
+// Note "greeting" contains: "Hello, {{userName}}!"
+{{note:greeting}}  // Resolves to "Hello, Alice!" when userName="Alice"
+```
+
+## Escaping
+
+To output literal curly braces, use double escaping:
+
+```
+\\{{notAVariable}}   - Outputs: {{notAVariable}}
+```
+
+## Best Practices
+
+1. **Descriptive Names** - Use clear variable names
+2. **Default Values** - Provide fallbacks for optional variables
+3. **Type Consistency** - Keep variable types consistent across usage
+4. **Documentation** - Document custom variables in workflow description
+
+## Debugging
+
+Check variable values in execution context:
+
+```
+Agent: What are the current context variables?
+[calls get_execution_context]
+```
+
+## Related
+
+- [Workflows](/docs/concepts/workflows/) - Workflow structure
+- [Nodes](/docs/concepts/nodes/) - Node configuration

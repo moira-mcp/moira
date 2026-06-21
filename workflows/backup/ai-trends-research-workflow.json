@@ -1,0 +1,236 @@
+{
+  "slug": "ai-trends-research-workflow",
+  "metadata": {
+    "name": "AI Trends Research Workflow",
+    "version": "1.0.0",
+    "description": "Быстрый анализ текущих трендов в области искусственного интеллекта с уведомлениями о прогрессе"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-research-parameters"
+      },
+      "initialData": {
+        "workflow_name": "AI Trends Research",
+        "start_time": "{{executionId}}"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-research-parameters",
+      "directive": "Определите параметры исследования трендов AI: временной период анализа, ключевые области фокуса (LLM, computer vision, robotics, etc.), источники данных для анализа",
+      "completionCondition": "Четко определены: временной период (например, последние 3-6 месяцев), 3-5 ключевых областей AI, список релевантных источников (научные публикации, индустриальные отчеты, новости)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "time_period": {
+            "type": "string",
+            "description": "Временной период для анализа"
+          },
+          "focus_areas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ключевые области AI для анализа"
+          },
+          "data_sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Источники данных для исследования"
+          }
+        },
+        "required": [
+          "time_period",
+          "focus_areas",
+          "data_sources"
+        ]
+      },
+      "connections": {
+        "success": "notify-research-start"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-research-start",
+      "message": "🔍 *AI Trends Research Started*\n\nПериод: {{time_period}}\nОбласти: {{focus_areas}}\nИсточники: {{data_sources}}\n\nНачинаю сбор данных...",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "collect-trend-data"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-trend-data",
+      "directive": "Соберите актуальные данные о трендах AI из указанных источников за период {{time_period}} по областям {{focus_areas}}. Используйте web search для поиска последних публикаций, отчетов и новостей",
+      "completionCondition": "Собраны данные по каждой указанной области AI с минимум 5-10 релевантными источниками на область, включая последние разработки, статистику, ключевых игроков и технологические прорывы",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "collected_data": {
+            "type": "object",
+            "description": "Структурированные данные по каждой области AI"
+          },
+          "key_findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Основные находки и тренды"
+          },
+          "sources_count": {
+            "type": "number",
+            "description": "Общее количество проанализированных источников"
+          }
+        },
+        "required": [
+          "collected_data",
+          "key_findings",
+          "sources_count"
+        ]
+      },
+      "connections": {
+        "success": "notify-data-collection-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-data-collection-complete",
+      "message": "📊 *Data Collection Complete*\n\n✅ Проанализировано источников: {{sources_count}}\n✅ Ключевые находки: {{key_findings}}\n\nПереходим к анализу трендов...",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "analyze-trends"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-trends",
+      "directive": "Проанализируйте собранные данные {{collected_data}} и выявите: 1) Топ-5 emerging трендов в AI, 2) Быстрорастущие технологии и компании, 3) Потенциальные возможности и риски, 4) Прогнозы на следующие 6-12 месяцев",
+      "completionCondition": "Создан структурированный анализ с четкими выводами: топ-5 трендов с обоснованием, список быстрорастущих технологий/компаний, оценка возможностей и рисков, прогнозы с временными рамками",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "top_trends": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "trend": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "impact_score": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "Топ-5 emerging трендов в AI"
+          },
+          "growing_technologies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Быстрорастущие технологии и компании"
+          },
+          "opportunities_risks": {
+            "type": "object",
+            "properties": {
+              "opportunities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "risks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "predictions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Прогнозы на 6-12 месяцев"
+          }
+        },
+        "required": [
+          "top_trends",
+          "growing_technologies",
+          "opportunities_risks",
+          "predictions"
+        ]
+      },
+      "connections": {
+        "success": "notify-analysis-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-analysis-complete",
+      "message": "🎯 *AI Trends Analysis Complete*\n\n📈 Выявлено трендов: {{top_trends}}\n🚀 Растущие технологии: {{growing_technologies}}\n⚠️ Возможности/риски: проанализированы\n🔮 Прогнозы: готовы\n\nГенерирую финальный отчет...",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "generate-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-report",
+      "directive": "Создайте финальный отчет по AI трендам в формате markdown artifact, включающий: executive summary, детальный анализ топ-трендов {{top_trends}}, обзор растущих технологий {{growing_technologies}}, анализ возможностей и рисков {{opportunities_risks}}, прогнозы {{predictions}}, рекомендации для действий",
+      "completionCondition": "Создан полный markdown отчет с executive summary, структурированными разделами по всем аспектам анализа, визуально оформленный с заголовками, списками и таблицами, готовый для использования",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "report_created": {
+            "type": "boolean",
+            "description": "Подтверждение создания отчета"
+          },
+          "report_summary": {
+            "type": "string",
+            "description": "Краткое резюме отчета"
+          }
+        },
+        "required": [
+          "report_created",
+          "report_summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-completion"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-completion",
+      "message": "✅ *AI Trends Research Completed!*\n\n📋 Отчет готов: {{report_summary}}\n⏱️ Workflow ID: {{workflowId}}\n🔄 Process ID: {{executionId}}\n\nИсследование завершено успешно!",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "time_period",
+        "focus_areas",
+        "top_trends",
+        "growing_technologies",
+        "opportunities_risks",
+        "predictions",
+        "report_summary"
+      ]
+    }
+  ]
+}

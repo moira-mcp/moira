@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.moira-mcp/moira",
+  "title": "Moira",
+  "description": "Agent Workflow Engine — guides AI agents through multi-step processes via MCP, with per-step directives, completion conditions, and JSON-Schema validation. Self-hosted via Docker.",
+  "version": "0.3.2",
+  "websiteUrl": "https://github.com/moira-mcp/moira#readme",
+  "repository": {
+    "url": "https://github.com/moira-mcp/moira",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/moira-mcp/moira:0.3.2",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/mcp"
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+---
+/**
+ * Component to display static artifacts URL from environment
+ * Used in documentation to avoid hardcoding URLs
+ */
+import { getStaticArtifactsDomain } from "@mcp-moira/shared/urls";
+
+interface Props {
+  /** Path to append (e.g., "/abc-123.html") */
+  path?: string;
+  /** Display format: 'code' for inline code, 'text' for plain text */
+  format?: "code" | "text";
+}
+
+const { path = "", format = "text" } = Astro.props;
+const staticDomain = getStaticArtifactsDomain();
+const fullUrl = path ? `https://${staticDomain}${path}` : `https://${staticDomain}`;
+---
+
+{format === "code" ? <code>{fullUrl}</code> : fullUrl}

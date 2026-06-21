@@ -1,0 +1,237 @@
+---
+title: Artifacts
+description: Static HTML hosting for workflow outputs - reports, dashboards, and visualizations with public URLs
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+import MoiraUrl from "~/components/docs/MoiraUrl.astro";
+import StaticUrl from "~/components/docs/StaticUrl.astro";
+
+Artifacts provide static HTML hosting for workflow outputs. Upload HTML content (reports, dashboards, visualizations) and receive public URLs for sharing. Artifacts may include JavaScript: each artifact runs on its own isolated origin inside a sandboxed frame with no network access, and is served with a Moira branding bar.
+
+## Use Cases
+
+- **Reports**: Generate analysis reports accessible via URL
+- **Dashboards**: Create interactive HTML dashboards (JavaScript runs in-page)
+- **Visualizations**: Host charts, graphs, and data visualizations with the data
+  embedded in the HTML (no network access at runtime)
+- **Documentation**: Publish generated documentation
+- **Previews**: Share work-in-progress outputs with stakeholders
+
+## MCP Tool
+
+The `artifacts` MCP tool provides 6 actions:
+
+```json
+artifacts({ action: "upload", name: "report.html", content: "<html>...</html>" })
+artifacts({ action: "update", uuid: "abc-123", content: "<html>...</html>" })
+artifacts({ action: "delete", uuid: "abc-123" })
+artifacts({ action: "list", limit: 10 })
+artifacts({ action: "stats" })
+artifacts({ action: "token", ttlMinutes: 60 })
+```
+
+| Action   | Purpose                          |
+| -------- | -------------------------------- |
+| `upload` | Create new artifact, returns URL |
+| `update` | Update existing artifact content |
+| `delete` | Remove an artifact               |
+| `list`   | List artifacts with pagination   |
+| `stats`  | Quota usage statistics           |
+| `token`  | Generate one-time upload token   |
+
+### Upload
+
+Create a new HTML artifact. Artifacts are served at <StaticUrl format="code" />.
+
+```json
+artifacts({
+  action: "upload",
+  name: "analysis-report.html",
+  content: "<html><body><h1>Report</h1></body></html>"
+})
+→ {
+    uuid: "d0a925d6-7dd8-49ba-b90c-d03b43062d20",
+    url: "https://d0a925d6-7dd8-49ba-b90c-d03b43062d20.{STATIC_DOMAIN}/",
+    name: "analysis-report.html",
+    size: 52,
+    expiresAt: "2024-03-01T10:00:00Z"
+  }
+```
+
+Optional `executionId` links artifact to a workflow execution for tracking.
+
+### Update
+
+Replace content of an existing artifact:
+
+```json
+artifacts({
+  action: "update",
+  uuid: "d0a925d6-7dd8-49ba-b90c-d03b43062d20",
+  content: "<html><body><h1>Updated Report</h1></body></html>"
+})
+```
+
+### List
+
+Retrieve artifacts with pagination:
+
+```json
+artifacts({ action: "list", limit: 10, offset: 0 })
+→ {
+    artifacts: [{
+      uuid: "d0a925d6-...",
+      url: "https://d0a925d6-....{STATIC_DOMAIN}/",
+      name: "report.html",
+      size: 1024,
+      createdAt: "2024-01-15T10:00:00Z"
+    }],
+    total: 5
+  }
+```
+
+### Quotas
+
+| Limit         | Value           |
+| ------------- | --------------- |
+| Max file size | 5 MB            |
+| Total storage | 100 MB per user |
+| Max artifacts | 50 per user     |
+| Default TTL   | 30 days         |
+
+Check quota usage with `stats` action:
+
+```json
+artifacts({ action: "stats" })
+→ {
+    totalArtifacts: 5,
+    totalSize: 51200,
+    storageLimit: 104857600,
+    countLimit: 50,
+    storageUsedPercent: 0.05,
+    countUsedPercent: 10
+  }
+```
+
+## Upload Tokens
+
+Generate one-time tokens for HTTP API uploads. Useful for CI/CD pipelines or external tools that cannot use MCP directly.
+
+```json
+artifacts({ action: "token", ttlMinutes: 30 })
+→ {
+    token: "xyz-789",
+    expiresAt: "2024-01-15T10:30:00Z",
+    uploadUrl: "https://{MOIRA_HOST}/api/public/artifacts/upload/xyz-789"
+  }
+```
+
+Upload via HTTP:
+
+```bash
+curl -X POST "https://{MOIRA_HOST}/api/public/artifacts/upload/xyz-789" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "report.html", "content": "<html>...</html>"}'
+```
+
+Tokens are single-use and expire after the specified TTL.
+
+## Security
+
+Artifacts may contain JavaScript, so each one is sandboxed at multiple layers:
+
+- **Per-artifact origin** — every artifact is served on its own subdomain
+  (`{uuid}.{STATIC_DOMAIN}`), so the browser isolates storage, cookies, and
+  Service Workers between artifacts. This is the only way artifact content is
+  served — there is no path-based access; a request without the artifact's
+  subdomain serves no content. (On local development this works over HTTP via
+  `*.localhost`, which browsers resolve to loopback with no certificate.)
+- **Sandboxed frame** — artifact content runs inside an `<iframe sandbox="allow-scripts">`
+  (no `allow-same-origin`, no forms, no top-navigation, no popups) within a
+  Moira-controlled wrapper page. Scripts run, but cannot reach the wrapper.
+- **No network access** — the artifact frame is served with `connect-src 'none'`,
+  so JavaScript cannot make `fetch`/`XHR`/`WebSocket` requests. Data cannot be
+  sent anywhere; visualizations must embed their data in the HTML.
+- **First-visit warning** — viewers see an interstitial noting the content is
+  user-generated and not endorsed by Moira before the artifact is shown.
+
+| Protection             | Value                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| Frame CSP              | scripts allowed; `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'` |
+| Frame sandbox          | `allow-scripts` only                                                           |
+| X-Content-Type-Options | `nosniff`                                                                      |
+| Origin isolation       | per-artifact subdomain                                                         |
+
+<Aside type="caution">
+  JavaScript runs but has **no network access** — `fetch`, `XHR`, and `WebSocket` are blocked. Use
+  artifacts for self-contained interactive content (dashboards, calculators, visualizations with
+  embedded data), not for anything that needs to call a server.
+</Aside>
+
+## Branding and reporting
+
+Every artifact is shown inside a wrapper page with a fixed footer bar:
+
+- **Attribution** — a "Created with Moira" link. Because the footer lives in the
+  wrapper (a separate document from the artifact), artifact content cannot
+  overlap or remove it.
+- **Report** — a "Report" link lets viewers flag abusive content for review.
+  Administrators are notified (those who have Telegram configured in settings).
+
+The wrapper chrome (the first-visit warning and the footer) is shown in English
+or Russian based on the viewer's browser language, with an EN/RU toggle in the
+bottom-right corner. This affects only the Moira wrapper, never the artifact
+content itself.
+
+Abusive artifacts can be taken down by administrators, after which they
+immediately stop being served.
+
+## Workflow Integration
+
+### Workspace Pattern
+
+Use artifacts with the workspace pattern to organize workflow outputs:
+
+```
+./project-analysis/
+├── step-1/
+│   └── data-collection.md
+├── step-2/
+│   └── analysis.md
+└── artifacts/
+    ├── dashboard.html      # → upload as artifact
+    └── summary-report.html # → upload as artifact
+```
+
+### Linking to Executions
+
+Pass `executionId` when uploading to link artifacts to workflow executions:
+
+```json
+artifacts({
+  action: "upload",
+  name: "execution-report.html",
+  content: "...",
+  executionId: "exec-abc-123"
+})
+```
+
+Linked artifacts appear in the execution inspector UI.
+
+## Web UI
+
+Artifacts are managed through the web interface at `/app/artifacts`:
+
+- View all artifacts with name, size, URL, and expiration date
+- Upload new artifacts with HTML editor
+- Edit existing artifact content
+- Copy public URL to clipboard
+- Open artifacts in new tab
+- Delete artifacts
+- Monitor quota usage with visual indicator
+
+## Related
+
+- [MCP Tools Reference](/docs/reference/tools/) — `artifacts` tool with all 6 actions
+- [Workflow Creation](/docs/guides/workflow-creation/) — Workspace pattern for organizing outputs

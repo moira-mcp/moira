@@ -1,0 +1,757 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/mikelaud/mcp-moira/schemas/workflow-graph.json",
+  "title": "MCP Moira WorkflowGraph Schema",
+  "description": "JSON Schema for validating MCP Moira node-graph workflow definitions",
+  "type": "object",
+  "required": ["metadata", "nodes"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique workflow identifier (server-assigned; absent in workflow definition files, assigned on save)"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "version", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable workflow name"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semantic version (e.g., 1.0.0)"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Workflow description"
+        },
+        "author": {
+          "type": "string",
+          "description": "Workflow author"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Workflow tags"
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Graph nodes (minimum: start + end)",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/startNode"
+          },
+          {
+            "$ref": "#/$defs/endNode"
+          },
+          {
+            "$ref": "#/$defs/agentDirectiveNode"
+          },
+          {
+            "$ref": "#/$defs/conditionNode"
+          },
+          {
+            "$ref": "#/$defs/subgraphNode"
+          },
+          {
+            "$ref": "#/$defs/telegramNotificationNode"
+          },
+          {
+            "$ref": "#/$defs/expressionNode"
+          },
+          {
+            "$ref": "#/$defs/readNoteNode"
+          },
+          {
+            "$ref": "#/$defs/writeNoteNode"
+          },
+          {
+            "$ref": "#/$defs/upsertNoteNode"
+          },
+          {
+            "$ref": "#/$defs/lockNode"
+          },
+          {
+            "$ref": "#/$defs/teleportNode"
+          }
+        ]
+      }
+    },
+    "systemReminder": {
+      "type": "string",
+      "description": "Per-workflow system reminder that overrides global mcp.systemReminder setting"
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9-]+$",
+      "description": "URL-friendly workflow identifier (lowercase, hyphens, no spaces)"
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Catalog metadata: stable identifier of the owning user this flow is installed under (not part of the executable graph)"
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["public", "private"],
+      "description": "Catalog metadata: workflow visibility used when installing the flow (not part of the executable graph)"
+    },
+    "variableRegistry": {
+      "type": "object",
+      "description": "Global variable registry: each entry is a JSON Schema property (type + description required) describing a workflow-global variable. Any JSON Schema keyword may be added to constrain the value; the whole entry is enforced against the agent's response.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "description"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["string", "number", "boolean", "object", "array", "null"],
+            "description": "JSON Schema primitive type of the variable's value"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description (single source of truth)"
+          },
+          "default": {
+            "description": "Optional default value applied at workflow start"
+          },
+          "enum": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Optional set of allowed values; the agent's response is validated against it"
+          },
+          "items": {
+            "description": "Schema of array elements when type is array"
+          },
+          "properties": {
+            "type": "object",
+            "description": "Schema of object members when type is object"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "startNode": {
+      "type": "object",
+      "required": ["type", "id", "connections"],
+      "properties": {
+        "type": {
+          "const": "start"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "initialData": {
+          "type": "object",
+          "properties": {
+            "variables": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["description"],
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Human-readable description of the variable purpose"
+                  },
+                  "value": {
+                    "description": "Initial value (any type, null by default)"
+                  }
+                }
+              },
+              "description": "Workflow variables with descriptions"
+            }
+          },
+          "additionalProperties": false
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "endNode": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "const": "end"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "finalOutput": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "agentDirectiveNode": {
+      "type": "object",
+      "required": ["type", "id", "directive", "completionCondition", "connections"],
+      "properties": {
+        "type": {
+          "const": "agent-directive"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "directive": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completionCondition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputSchema": {
+          "type": "object"
+        },
+        "maxRetries": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "retryMessage": {
+          "type": "string"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["success"],
+          "properties": {
+            "success": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeout": {
+              "type": "string",
+              "minLength": 1
+            },
+            "maxRetriesExceeded": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "conditionNode": {
+      "type": "object",
+      "required": ["type", "id", "condition", "connections"],
+      "properties": {
+        "type": {
+          "const": "condition"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "condition": {
+          "type": "object"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["true", "false"],
+          "properties": {
+            "true": {
+              "type": "string",
+              "minLength": 1
+            },
+            "false": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "subgraphNode": {
+      "type": "object",
+      "required": ["type", "id", "graphId", "inputMapping", "outputMapping", "connections"],
+      "properties": {
+        "type": {
+          "const": "subgraph"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "graphId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reference to another workflow graph ID"
+        },
+        "inputMapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Variable path in parent context (e.g., 'user.name' or 'items[0].value')"
+          },
+          "description": "Maps parent context variables to child context variables"
+        },
+        "outputMapping": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Variable path in parent context to store child result"
+          },
+          "description": "Maps child context variables back to parent context variables"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["success"],
+          "properties": {
+            "success": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "telegramNotificationNode": {
+      "type": "object",
+      "required": ["type", "id", "message", "connections"],
+      "properties": {
+        "type": {
+          "const": "telegram-notification"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "description": "Message text with template variable support ({{variable}})"
+        },
+        "chatId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Target chat ID (can be template variable)"
+        },
+        "parseMode": {
+          "enum": ["Markdown", "HTML"],
+          "description": "Message formatting mode"
+        },
+        "disableNotification": {
+          "type": "boolean",
+          "description": "Send message silently without notification"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        },
+        "timeout": {
+          "type": "number",
+          "minimum": 1000,
+          "maximum": 30000,
+          "description": "Request timeout in milliseconds"
+        },
+        "replyMarkup": {
+          "type": "object",
+          "description": "Inline keyboard markup for interactive buttons",
+          "required": ["inline_keyboard"],
+          "properties": {
+            "inline_keyboard": {
+              "type": "array",
+              "description": "Array of button rows",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["text"],
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "callback_data": {
+                      "type": "string",
+                      "maxLength": 64
+                    },
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "expressionNode": {
+      "type": "object",
+      "required": ["type", "id", "expressions", "connections"],
+      "properties": {
+        "type": {
+          "const": "expression"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expressions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Array of expressions to evaluate (e.g., 'counter = counter + 1')"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "readNoteNode": {
+      "type": "object",
+      "required": ["type", "id", "outputVariable", "connections"],
+      "properties": {
+        "type": {
+          "const": "read-note"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outputVariable": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Context variable name to store read notes"
+        },
+        "filter": {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "type": "string",
+              "description": "Filter by tag"
+            },
+            "keyPattern": {
+              "type": "string",
+              "description": "Filter by key pattern (prefix match)"
+            },
+            "keySearch": {
+              "type": "string",
+              "description": "Search in key (contains)"
+            }
+          },
+          "additionalProperties": false
+        },
+        "singleMode": {
+          "type": "boolean",
+          "description": "If true and one note matches, store as object instead of array"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "writeNoteNode": {
+      "type": "object",
+      "required": ["type", "id", "source", "connections"],
+      "properties": {
+        "type": {
+          "const": "write-note"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "description": "Note key (supports template expressions). Required in single mode."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Value to write or context variable for batch mode"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tags to apply (supports template expressions)"
+        },
+        "batchMode": {
+          "type": "boolean",
+          "description": "If true, source is context variable containing array of {key, value, tags?}"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "upsertNoteNode": {
+      "type": "object",
+      "required": ["type", "id", "keyTemplate", "value", "connections"],
+      "properties": {
+        "type": {
+          "const": "upsert-note"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "search": {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "type": "string",
+              "description": "Search by tag"
+            },
+            "keyPattern": {
+              "type": "string",
+              "description": "Search by key pattern (prefix match)"
+            }
+          },
+          "additionalProperties": false
+        },
+        "keyTemplate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Key template for creating new note (supports template expressions)"
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Value to write (supports template expressions)"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tags to apply (supports template expressions)"
+        },
+        "outputVariable": {
+          "type": "string",
+          "description": "Context variable for storing result {key, version, created}"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "properties": {
+            "default": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "teleportNode": {
+      "type": "object",
+      "required": ["type", "id", "directive", "completionCondition", "hint", "connections"],
+      "properties": {
+        "type": {
+          "const": "teleport"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "directive": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completionCondition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable description of when agent should use this teleport"
+        },
+        "inputSchema": {
+          "type": "object"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["success"],
+          "properties": {
+            "success": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lockNode": {
+      "type": "object",
+      "required": ["type", "id", "reason", "connections"],
+      "properties": {
+        "type": {
+          "const": "lock"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reason for lock (supports template variables)"
+        },
+        "connections": {
+          "type": "object",
+          "required": ["unlocked"],
+          "properties": {
+            "unlocked": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Optional node metadata"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

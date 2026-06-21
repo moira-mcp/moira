@@ -1,0 +1,112 @@
+---
+title: Самопроверка полноты
+description: Проверка каждого требования против реального артефакта перед выдачей
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Workflow, который производит результат на основе явных требований, выполняет самопроверку полноты перед финальной выдачей. Проверка сверяет произведённый артефакт с зафиксированными исходными требованиями, считает невыполненные и маршрутизирует любые пробелы в ограниченную ветку исправления, так что workflow никогда не выдаёт результат молча при оставшихся требованиях.
+
+## Пять правил
+
+1. **Источник истины — зафиксированные исходные требования.** Сверяйте с исходным файлом требований или с `success_criteria`, захваченными на старте, — не с текущим планом и не с памятью агента о том, что просили.
+2. **Проверяйте против артефакта, а не утверждений.** Для каждого требования находите конкретное свидетельство в произведённой работе: путь в коде, файл, тест, вывод. Для кода читайте реальный код или запускайте тесты.
+3. **Одна проверка на требование.** Опционально делегируйте дочернему `moira/todo-list` с одной задачей на требование. Верните `requirements_gaps_count` и `total_requirements`.
+4. **Пробелы маршрутизируются в ограниченную ветку исправления.** Нода condition по `requirements_gaps_count` отправляет пробелы на ветку исправления/расширения. Никогда не выдавайте результат при числе пробелов больше нуля. Ограничьте цикл через `validation_attempt_count` и эскалацию.
+5. **Сохраняйте отчёт о покрытии.** Записывайте отчёт вроде `requirements-coverage-report-v{attempt}.md` с каждым требованием и его свидетельством.
+
+## Реестр переменных
+
+Объявите счётчики проверки с числовыми значениями по умолчанию:
+
+```json
+{
+  "variableRegistry": {
+    "validation_attempt_count": { "type": "number", "description": "Coverage review attempt", "default": 1 },
+    "requirements_gaps_count": { "type": "number", "description": "Requirements with no evidence of completion", "default": 0 },
+    "total_requirements": { "type": "number", "description": "Total requirements checked", "default": 0 }
+  }
+}
+```
+
+## Нода проверки покрытия
+
+Нода проверки сверяет каждое требование с артефактом и записывает число пробелов и общее число как глобальные переменные:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "validate-requirements-coverage",
+  "directive": "Read the frozen original requirements (the requirements file or captured success_criteria), NOT the current plan.\n\nFor each requirement, find concrete evidence in the produced artifact: code path, file, test, or output. For code, read the real code or run the tests.\n\nWrite requirements-coverage-report-v{{validation_attempt_count}}.md listing every requirement and its evidence. Set total_requirements to the count checked and requirements_gaps_count to the count with no evidence.",
+  "completionCondition": "Every requirement verified against the artifact and the coverage report written",
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["requirements_gaps_count", "total_requirements"],
+    "properties": {
+      "coverage_report_path": { "type": "string" }
+    },
+    "required": ["requirements_gaps_count", "total_requirements", "coverage_report_path"]
+  },
+  "connections": { "success": "check-requirements-gaps" }
+}
+```
+
+## Проверка пробелов
+
+```json
+{
+  "type": "condition",
+  "id": "check-requirements-gaps",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "requirements_gaps_count" },
+    "right": 0
+  },
+  "connections": {
+    "true": "deliver",
+    "false": "fix-gaps"
+  }
+}
+```
+
+Когда `requirements_gaps_count` равно 0, workflow переходит к выдаче. Иначе он входит в ветку исправления/расширения.
+
+## Ограничение цикла исправления
+
+Ветка исправления инкрементирует счётчик попыток и повторно входит в проверку покрытия. Проверка предела маршрутизирует предел на эскалацию к пользователю вместо бесконечного цикла:
+
+```json
+{
+  "type": "expression",
+  "id": "increment-validation-attempt",
+  "expressions": ["validation_attempt_count = validation_attempt_count + 1"],
+  "connections": { "default": "check-attempt-limit" }
+}
+```
+
+```json
+{
+  "type": "condition",
+  "id": "check-attempt-limit",
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "validation_attempt_count" },
+    "right": 5
+  },
+  "connections": {
+    "true": "validate-requirements-coverage",
+    "false": "escalate-to-user"
+  }
+}
+```
+
+<Aside type="caution">
+  Число пробелов больше нуля обязано достичь ветки исправления. Маршрутизация проверки покрытия
+  прямо на выдачу при оставшихся пробелах — это антипаттерн молчаливого пропуска.
+</Aside>
+
+## Связанные паттерны
+
+- [Цикл валидации](/ru/docs/patterns/validation-loop/) - Механика ограниченной ре-валидации
+- [Паттерн перепланирования](/ru/docs/patterns/replan/) - Расширение плана, когда проверка покрытия находит пробелы
+- [Ревью субагентом](/ru/docs/patterns/subagent-review/) - Делегирование проверок по требованиям дочернему workflow

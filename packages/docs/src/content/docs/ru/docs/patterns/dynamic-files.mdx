@@ -1,0 +1,153 @@
+---
+title: Паттерн динамических файлов
+description: Шаблонные пути к файлам для переиспользования workflow
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Использование шаблонных переменных для путей к файлам, чтобы сделать workflow переиспользуемыми в разных проектах. Пути собираются во время выполнения и используются на протяжении всего процесса.
+
+## Структура
+
+```
+[collect-paths] → [use-paths-in-directives] → [output-to-path]
+```
+
+## Реализация
+
+### Сбор путей
+
+```json
+{
+  "type": "agent-directive",
+  "id": "collect-project-paths",
+  "directive": "Determine project structure:\n- Docs location?\n- Output location?\n- Test files location?",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "docs_path": {
+        "type": "string",
+        "description": "Path to project documentation"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Path for workflow outputs"
+      },
+      "test_path": { "type": "string", "description": "Path to test files" }
+    },
+    "required": ["docs_path", "output_path"]
+  },
+  "connections": { "success": "read-documentation" }
+}
+```
+
+### Использование путей в директивах
+
+```json
+{
+  "type": "agent-directive",
+  "id": "read-documentation",
+  "directive": "Read project documentation from {{docs_path}}.\nAnalyze structure and content.",
+  "connections": { "success": "write-output" }
+}
+```
+
+### Вывод по динамическому пути
+
+```json
+{
+  "type": "agent-directive",
+  "id": "write-output",
+  "directive": "Write results to {{output_path}}/analysis-results.md",
+  "connections": { "success": "next-step" }
+}
+```
+
+## Стратегии обнаружения путей
+
+Агент может определять пути следующими способами:
+
+1. **Поиск в файловой системе**: Искать типичные паттерны (`docs/`, `README.md`)
+2. **Значения по умолчанию**: Использовать стандартные расположения как запасной вариант
+3. **Запрос у пользователя**: Когда путь не удаётся определить
+
+```json
+{
+  "directive": "Find project documentation:\n1. Search for docs/ directory\n2. Check for README.md\n3. Look in standard locations\n4. Ask user if not found"
+}
+```
+
+## Условное использование путей
+
+Комбинирование с условными шаблонами:
+
+```json
+{
+  "directive": "{{#if testing_guide_path}}Read testing guide from {{testing_guide_path}}{{else}}No testing guide found, proceed with default patterns{{/if}}"
+}
+```
+
+<Aside type="tip">
+  Собирайте все пути заранее на этапе сбора информации. Это позволяет выполнить валидацию и
+  предотвратить ошибки в середине выполнения workflow.
+</Aside>
+
+## Реальный пример
+
+Из `development-flow.json`:
+
+```json
+{
+  "id": "get-initial-requirements",
+  "inputSchema": {
+    "properties": {
+      "checklist_path": {
+        "type": "string",
+        "description": "Path to project checklist or empty if none"
+      },
+      "agent_onboarding_path": {
+        "type": "string",
+        "description": "Path to agent onboarding document or empty if none"
+      },
+      "docs_standards_path": {
+        "type": "string",
+        "description": "Path to documentation standards or empty if none"
+      },
+      "testing_guide_path": {
+        "type": "string",
+        "description": "Path to testing guide or empty if none"
+      }
+    }
+  }
+}
+```
+
+Используется далее:
+
+```json
+{
+  "directive": "{{#if has_checklist}}Review project checklist: {{checklist_path}}{{/if}}"
+}
+```
+
+## Валидация путей
+
+Используйте pattern в inputSchema для базовой валидации:
+
+```json
+{
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9/_.-]+$"
+    }
+  }
+}
+```
+
+## Связанные паттерны
+
+- [Сбор информации](/ru/docs/patterns/information-collection/) - Сбор путей как часть онбординга
+- [Паттерн пропуска](/ru/docs/patterns/skip/) - Пропуск шагов при недоступности путей

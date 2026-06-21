@@ -1,0 +1,84 @@
+---
+title: Telegram Setup
+description: Configure Telegram notifications for Moira workflows
+sidebar:
+  order: 5
+---
+
+Moira workflows can send Telegram notifications at specific steps using `telegram-notification` nodes. This requires a Telegram bot and your chat ID.
+
+## Setup
+
+### 1. Create a Bot via @BotFather
+
+1. Open Telegram and search for `@BotFather`
+2. Send `/newbot`
+3. Choose a display name (e.g., "My Moira Notifications")
+4. Choose a username ending in `bot` (e.g., `my_moira_bot`)
+5. BotFather will reply with a bot token — copy it (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+### 2. Get Your Chat ID
+
+**Method A — @userinfobot:**
+
+1. Search for `@userinfobot` in Telegram
+2. Send any message
+3. The bot replies with your user ID — that is your chat ID
+
+**Method B — Bot API:**
+
+1. Send any message to your new bot
+2. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser
+3. Find `"chat":{"id":XXXXXXX}` — that number is your chat ID
+
+### 3. Save Settings
+
+1. Open Moira and go to **Settings**
+2. Click the **Telegram** tab
+3. Enter your **Bot Token** in the corresponding field
+4. Enter your **Chat ID** in the corresponding field
+5. Make sure **Enabled** is toggled on
+6. Click **Save** for each setting
+
+### 4. Send a Test Notification
+
+On the same Telegram tab in Settings, click **Test Notification**. You should receive a message from your bot in Telegram.
+
+:::caution[Important]
+You must send at least one message to your bot in Telegram before testing. The Telegram API requires this before the bot can message you.
+:::
+
+## Guided Setup via Agent
+
+If you're using Moira through an MCP client (Claude Code, Claude Desktop), you can start the guided setup workflow:
+
+```
+start({ workflowId: "moira/telegram-setup", parentExecutionId: "none" })
+```
+
+The workflow walks through bot creation, chat ID retrieval, settings configuration, and sends a test notification.
+
+## Troubleshooting
+
+### "Chat not found" Error
+
+The bot cannot send messages until you send it a message first. Open Telegram, find your bot, send any text (e.g., "hello"), then retry.
+
+### "Invalid token" Error
+
+The bot token is incorrect or expired. Go to @BotFather, send `/mybots`, select your bot, and check the token. Generate a new one if needed.
+
+### "Network error" or "Timeout"
+
+Temporary connectivity issue. Wait a moment and retry. If persistent, check that the Moira server can reach `api.telegram.org`.
+
+### Bot Does Not Respond
+
+Bots created via @BotFather do not respond to messages by default. They only send notifications when Moira triggers a `telegram-notification` node. This is expected behavior.
+
+### Notification Not Received
+
+1. Verify you sent a message to the bot (required by Telegram API)
+2. Check your chat ID is correct (use @userinfobot to confirm)
+3. Verify Telegram is enabled in Settings > Telegram tab
+4. Check the bot token has not been revoked

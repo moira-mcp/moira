@@ -1,0 +1,240 @@
+---
+title: Паттерн ревью субагентом
+description: Делегирование ревью независимому субагенту для объективной проверки
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Обеспечивает независимую проверку путём делегирования задач ревью субагенту. Предотвращает предвзятость самопроверки, когда тот же агент оценивает свою собственную работу.
+
+<Aside type="caution">
+  Самопроверка ненадёжна. Агент, выполнивший работу, не может объективно оценить её качество.
+</Aside>
+
+## Проблема
+
+Когда агент проверяет собственную работу:
+
+- Предвзятость подтверждения влияет на суждение
+- Известные проблемы могут быть рационализированы
+- Стандарты качества размываются со временем
+- Синдром «выглядит нормально»
+
+## Решение
+
+Делегируйте ревью отдельному субагенту через Task tool:
+
+1. Агент завершает работу
+2. Workflow направляет к ноде ревью
+3. Нода ревью делегирует задачу субагенту через Task tool
+4. Субагент возвращает объективную оценку
+5. Workflow маршрутизирует на основе результатов
+
+## Контракт проблем
+
+Субагент возвращает ПЛОСКИЙ список проблем, а не отчёт с уровнями серьёзности. Нет уровней BLOCKING / MAJOR / MINOR — каждую проблему обязательно устранить. Условный узел проходит только когда счётчик равен нулю.
+
+- `issues_count` — количество найденных проблем (0 = пройдено)
+- `issues` — плоский список всех проблем, каждая обязательна
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "issues_count": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Number of issues found (0 = pass)"
+      },
+      "issues": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Flat list of every issue found (all mandatory, no severity tiers)"
+      }
+    },
+    "required": ["issues_count"]
+  }
+}
+```
+
+## Структура
+
+```
+[do-work] → [delegate-review] → [check-result] → pass → [next]
+                                      ↓
+                                    fail → [fix-issues] → [do-work]
+```
+
+## Реализация
+
+### Нода делегирования ревью
+
+```json
+{
+  "type": "agent-directive",
+  "id": "delegate-review",
+  "directive": "Delegate review to subagent using Task tool.\n\n1) Pass ONLY necessary information:\n   - File paths to review\n   - Success criteria\n   - Context directory\n\n2) Agent delegation rules:\n   - Role clarity: 'YOU ARE reviewer'\n   - Direct commands: 'CHECK' not 'could you check'\n   - Specify files: list exact paths\n   - Demand verification: 'VERIFY by reading files'\n\n3) Save review result to {{review_file_path}}\n\n4) Report findings honestly - if reviewer found issues, report issues_found: yes",
+  "completionCondition": "Review delegated, result saved, findings reported",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "review_file": {
+        "type": "string",
+        "description": "Path to saved review file"
+      },
+      "issues_found": {
+        "type": "string",
+        "enum": ["yes", "no"],
+        "description": "Did reviewer find any issues? (every issue is mandatory; no severity tiers)"
+      }
+    },
+    "required": ["review_file", "issues_found"]
+  },
+  "connections": { "success": "check-review-result" }
+}
+```
+
+### Ключевые элементы директивы
+
+**Назначение роли:**
+
+```
+YOU ARE plan reviewer. Your assessment determines if we proceed.
+```
+
+**Прямые команды:**
+
+```
+READ plan file directly.
+CHECK step implementation.
+VERIFY by reading actual files.
+RETURN every issue found as a flat list — every issue is mandatory; no severity tiers.
+```
+
+**Границы информации:**
+
+```
+Pass ONLY:
+- File paths to review
+- Success criteria
+- Relevant context paths
+
+DO NOT pass:
+- Your interpretation of quality
+- Hints about what you expect
+- Explanations of your work
+```
+
+### Нода проверки результата
+
+```json
+{
+  "type": "condition",
+  "id": "check-review-result",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "issues_found" },
+    "right": "no"
+  },
+  "connections": {
+    "true": "next-step",
+    "false": "fix-issues"
+  }
+}
+```
+
+## Реальный пример
+
+Из gate review в `development-flow.json`:
+
+```json
+{
+  "id": "agent-validate-step",
+  "directive": "Delegate critical review to subagent.\n\n1) Pass direct access to plan without interpretation\n2) No mentions of 'code was improved/added/fixed'\n3) Pass: file path, step index, changed files, reports directory\n4) Tell which project parts to study for context\n\nAgent prompt:\nYOU ARE plan step gate reviewer.\nYour assessment determines if we proceed.\nREAD plan file directly.\nCHECK step against PREVIOUS and FUTURE steps.\nEvaluate: code quality, errors, plan compliance.\nReturn every issue found as a flat list — every issue is mandatory; no severity tiers.\nProvide fix recommendations.",
+  "inputSchema": {
+    "properties": {
+      "agent_review_file": { "type": "string" },
+      "agent_issues_found": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["agent_review_file", "agent_issues_found"]
+  }
+}
+```
+
+## Антипаттерны
+
+### Самопроверка (неправильно)
+
+```json
+{
+  "directive": "Check if your work meets quality standards.",
+  "completionCondition": "Quality check passed"
+}
+```
+
+Проблема: агент оценивает собственную работу.
+
+### Предвзятое делегирование (неправильно)
+
+```json
+{
+  "directive": "Ask subagent to verify the improvements we made."
+}
+```
+
+Проблема: слово «improvements» предполагает положительный результат.
+
+### Избыточный контекст (неправильно)
+
+```json
+{
+  "directive": "Tell the reviewer about all the hard work done and why each decision was made."
+}
+```
+
+Проблема: влияет на суждение ревьювера.
+
+## Числовая валидация
+
+Совместите с числовой валидацией для объективных критериев:
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "issues_count": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Number of issues found (0 = pass)"
+      }
+    }
+  }
+}
+```
+
+```json
+{
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "issues_count" },
+    "right": 0
+  }
+}
+```
+
+## Лучшие практики
+
+1. **Минимум контекста** — передавайте только то, что нужно ревьюверу
+2. **Без интерпретации** — позвольте ревьюверу сформировать собственные выводы
+3. **Прямой доступ к файлам** — ревьювер читает файлы самостоятельно
+4. **Честная отчётность** — агент должен передавать результаты правдиво
+5. **Сохранение результатов** — записывайте ревью в файл для отслеживания
+
+## Связанные паттерны
+
+- [Цикл валидации](/ru/docs/patterns/validation-loop/) - Повторные попытки при неудаче
+- [Верификация шагов](/ru/docs/patterns/step-verification/) - Проверка конкретных шагов
+- [Эскалация](/ru/docs/patterns/escalation/) - Обработка повторяющихся сбоев

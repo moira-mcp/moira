@@ -1,0 +1,158 @@
+{
+  "slug": "notes-demo-metrics-collector",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "8de1d9fd-248d-411a-8714-8b7b286d1f32",
+  "metadata": {
+    "name": "Notes Demo: Metrics Collector",
+    "version": "1.3.0",
+    "description": "Demo workflow: collects project metrics and saves them to Notes for cross-workflow data persistence. Part 1 of the Metrics Pipeline example. Demonstrates write-note and upsert-note automatic nodes."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {}
+      },
+      "connections": {
+        "default": "gather-metrics"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "gather-metrics",
+      "directive": "Collect project metrics for analysis. Gather the following information about the project:\n\n1. **Project name** — ask the user or determine from context\n2. **Code metrics**: estimated lines of code, number of source files, primary language\n3. **Test metrics**: number of tests, pass rate percentage, test categories (unit/integration/e2e)\n4. **Quality indicators**: known issues count, code review status, documentation coverage (good/partial/minimal)\n\nIf exact numbers are unavailable, use reasonable estimates and mark them as such.\n\nReturn all metrics as structured data.",
+      "completionCondition": "All metric categories have values (exact or estimated). Project name is identified.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "projectName",
+          "collectionDate",
+          "metrics"
+        ],
+        "globalInputs": [
+          "projectName",
+          "collectionDate",
+          "metrics"
+        ]
+      },
+      "connections": {
+        "success": "write-metrics-note"
+      }
+    },
+    {
+      "type": "write-note",
+      "id": "write-metrics-note",
+      "key": "metrics-{{gather-metrics.projectName}}-{{gather-metrics.collectionDate}}",
+      "source": "{{gather-metrics.metrics}}",
+      "tags": [
+        "metrics",
+        "{{gather-metrics.projectName}}",
+        "raw-data"
+      ],
+      "connections": {
+        "default": "upsert-latest-summary",
+        "error": "end-error"
+      }
+    },
+    {
+      "type": "upsert-note",
+      "id": "upsert-latest-summary",
+      "search": {
+        "tag": "latest-metrics"
+      },
+      "keyTemplate": "latest-metrics-{{gather-metrics.projectName}}",
+      "value": "{{gather-metrics.metrics}}",
+      "tags": [
+        "metrics",
+        "{{gather-metrics.projectName}}",
+        "latest-metrics"
+      ],
+      "outputVariable": "upsertResult",
+      "connections": {
+        "default": "confirm-saved",
+        "error": "end-error"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "confirm-saved",
+      "directive": "Metrics have been saved to the Notes system:\n\n1. **Raw metrics** saved with key `metrics-{{gather-metrics.projectName}}-{{gather-metrics.collectionDate}}` (tags: metrics, {{gather-metrics.projectName}}, raw-data)\n2. **Latest summary** upserted with key `latest-metrics-{{gather-metrics.projectName}}` (tags: metrics, {{gather-metrics.projectName}}, latest-metrics)\n\nInform the user that metrics collection is complete and data has been persisted. Mention that these notes can be accessed by the 'Metrics Reporter' workflow or via the Notes MCP tool.",
+      "completionCondition": "User has been informed that metrics are saved and available for the reporter workflow.",
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end-success",
+      "finalOutput": [
+        "upsertResult"
+      ]
+    },
+    {
+      "type": "end",
+      "id": "end-error"
+    }
+  ],
+  "variableRegistry": {
+    "collectionDate": {
+      "type": "string",
+      "description": "Workflow-global collectionDate"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Workflow-global metrics",
+      "properties": {
+        "linesOfCode": {
+          "type": "number"
+        },
+        "sourceFiles": {
+          "type": "number"
+        },
+        "primaryLanguage": {
+          "type": "string"
+        },
+        "totalTests": {
+          "type": "number"
+        },
+        "testPassRate": {
+          "type": "number"
+        },
+        "testCategories": {
+          "type": "string"
+        },
+        "knownIssues": {
+          "type": "number"
+        },
+        "codeReviewStatus": {
+          "type": "string"
+        },
+        "documentationCoverage": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "linesOfCode",
+        "sourceFiles",
+        "primaryLanguage",
+        "totalTests",
+        "testPassRate"
+      ]
+    },
+    "projectName": {
+      "type": "string",
+      "description": "Workflow-global projectName"
+    },
+    "upsertNoteResult": {
+      "type": "string",
+      "description": "Workflow-global upsertNoteResult"
+    },
+    "upsertResult": {
+      "type": "string",
+      "description": "Workflow-global upsertResult"
+    }
+  }
+}

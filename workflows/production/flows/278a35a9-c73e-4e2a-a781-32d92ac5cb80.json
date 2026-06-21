@@ -1,0 +1,511 @@
+{
+  "slug": "simple-plan-execution",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "278a35a9-c73e-4e2a-a781-32d92ac5cb80",
+  "metadata": {
+    "name": "Simple Plan Execution",
+    "version": "1.3.1",
+    "description": "Простой контроль выполнения плана по шагам. Пользователь даёт задачу, агент разбивает её на этапы и предлагает план. Пользователь одобряет или отправляет на исправление. После принятия запускается цикл выполнения этапов. После выполнения всех этапов — ревью субагентом с циклом исправлений. Финальный отчёт пользователю с возможностью доработки."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "initialData": {
+        "variables": {
+          "current_step": {
+            "description": "Текущий номер шага (0-indexed)",
+            "value": 0
+          },
+          "total_steps": {
+            "description": "Общее количество шагов в плане",
+            "value": 0
+          },
+          "steps": {
+            "description": "Массив шагов плана [{id, action, expected_result}]",
+            "value": []
+          },
+          "review_iteration": {
+            "description": "Текущая итерация ревью субагентом",
+            "value": 0
+          },
+          "max_review_iterations": {
+            "description": "Максимум итераций ревью перед эскалацией",
+            "value": 3
+          },
+          "process_requirements": {
+            "description": "Требования к процессу выполнения",
+            "value": "ТРЕБОВАНИЯ К ВЫПОЛНЕНИЮ:\n\n1. ДЕКОМПОЗИЦИЯ:\n- Разбей задачу на конкретные шаги\n- Каждый шаг = одно действие с измеримым результатом\n- Количество шагов не ограничено — столько сколько нужно\n\n2. ВЫПОЛНЕНИЕ:\n- Выполняй шаги последовательно\n- Для каждого шага предоставь доказательства выполнения\n- Не пропускай шаги молча\n\n3. HUMAN-IN-THE-LOOP:\n- Покажи план перед выполнением\n- Получи подтверждение пользователя\n- Покажи итоговый отчёт"
+          },
+          "validation_criteria": {
+            "description": "Критерии валидации результатов",
+            "value": "КРИТЕРИИ ВАЛИДАЦИИ:\n\n1. ДОКАЗАТЕЛЬСТВА ОБЯЗАТЕЛЬНЫ:\n- Каждый шаг должен иметь доказательство выполнения\n- Типы: файл, команда, скриншот, детальное описание\n- 'Сделано' без деталей = НЕ принимается\n\n2. ПРОВЕРКА ШАГА:\n- Результат соответствует ожидаемому?\n- Есть конкретные доказательства?\n- Ничего не пропущено?\n\n3. ПРОВЕРКА ЗАДАЧИ:\n- Все шаги выполнены?\n- Ожидаемый результат достигнут?\n- Пользователь может проверить?"
+          },
+          "common_mistakes": {
+            "description": "Типичные ошибки и как их избегать",
+            "value": "ТИПИЧНЫЕ ОШИБКИ:\n\n❌ 'Готово!' без проверки → ✅ Всегда предоставляй доказательства\n❌ Молча пропускать шаги → ✅ Явно отмечай что пропущено и почему\n❌ 80% = готово → ✅ Только 100% = готово\n❌ Галлюцинации ('отправил', 'создал') → ✅ Только факты с доказательствами\n❌ Смешивать действие и проверку → ✅ Сначала сделай, потом проверь"
+          }
+        }
+      },
+      "connections": {
+        "default": "get-task"
+      }
+    },
+    {
+      "id": "get-task",
+      "type": "agent-directive",
+      "directive": "Получи задачу от пользователя.\n\nСпроси:\n1. Что нужно сделать? (описание задачи)\n2. Какой ожидаемый результат?\n\n⚠️ ОБЯЗАТЕЛЬНО: Дождись ответа пользователя.\nНЕ заполняй поля пока пользователь не ответит.",
+      "completionCondition": "Пользователь описал задачу и ожидаемый результат",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "execution_note": {
+            "type": "string",
+            "description": "Краткое название для списка executions"
+          }
+        },
+        "required": [
+          "task_description",
+          "expected_result",
+          "execution_note"
+        ],
+        "globalInputs": [
+          "task_description",
+          "expected_result"
+        ]
+      },
+      "connections": {
+        "success": "create-plan"
+      }
+    },
+    {
+      "id": "create-plan",
+      "type": "agent-directive",
+      "directive": "Разбей задачу на конкретные этапы.\n\nЗадача: {{task_description}}\nОжидаемый результат: {{expected_result}}\n\nТребования:\n{{process_requirements}}\n\nПравила:\n- Количество этапов не ограничено — столько сколько нужно (1, 5, 20...)\n- Каждый этап = одно конкретное действие\n- Для каждого этапа укажи что должно быть сделано и как проверить\n\nФормат этапа:\n- id: порядковый номер\n- action: что делаем\n- expected_result: как проверяем что сделано",
+      "completionCondition": "План создан, каждый этап имеет action и expected_result",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "steps",
+          "total_steps"
+        ],
+        "globalInputs": [
+          "steps",
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "present-plan"
+      }
+    },
+    {
+      "id": "present-plan",
+      "type": "agent-directive",
+      "directive": "Покажи план пользователю и запроси подтверждение.\n\nЗадача: {{task_description}}\nОжидаемый результат: {{expected_result}}\n\nПлан ({{total_steps}} этапов):\n{{steps}}\n\n⚠️ ОБЯЗАТЕЛЬНО: Спроси \"Подтверждаете план? (да/нет)\"\nДождись явного ответа.\n\n**КРИТИЧЕСКИ ВАЖНО — РЕАКЦИЯ НА FEEDBACK:**\n- Если пользователь сказал \"да\" → approved = \"yes\"\n- Если пользователь дал ЛЮБОЙ feedback или сказал \"нет\" → approved = \"no\"\n- НЕ исправляй сам!\n- Ответь approved = \"no\" и запиши feedback\n- Workflow сам направит в ветку исправления",
+      "completionCondition": "Пользователь явно ответил да или нет",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "approved"
+        ],
+        "globalInputs": [
+          "approved",
+          "feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-plan-approved"
+      }
+    },
+    {
+      "id": "check-plan-approved",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "check-steps-remaining",
+        "false": "revise-plan"
+      }
+    },
+    {
+      "id": "revise-plan",
+      "type": "agent-directive",
+      "directive": "Исправь план по замечаниям пользователя.\n\nЗамечания: {{feedback}}\n\nТекущий план:\n{{steps}}\n\nИсправь план учитывая замечания.",
+      "completionCondition": "План исправлен с учётом замечаний",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "steps",
+          "total_steps"
+        ],
+        "globalInputs": [
+          "steps",
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "present-plan"
+      }
+    },
+    {
+      "id": "check-steps-remaining",
+      "type": "condition",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "current_step"
+        },
+        "right": {
+          "contextPath": "total_steps"
+        }
+      },
+      "connections": {
+        "true": "execute-step",
+        "false": "subagent-review"
+      }
+    },
+    {
+      "id": "execute-step",
+      "type": "agent-directive",
+      "directive": "Выполни этап {{current_step}} из {{total_steps}} (нумерация с 0).\n\nДействие: {{steps[current_step].action}}\nОжидаемый результат: {{steps[current_step].expected_result}}\n\nТребования:\n{{validation_criteria}}\n\nИзбегай ошибок:\n{{common_mistakes}}\n\nПОСЛЕ ВЫПОЛНЕНИЯ:\n- Опиши что конкретно было сделано\n- Приведи доказательства (файлы, команды, результаты)",
+      "completionCondition": "Этап выполнен с доказательствами",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "step_completed": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Этап выполнен"
+          },
+          "what_was_done": {
+            "type": "string",
+            "description": "Что конкретно было сделано"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Доказательства выполнения"
+          }
+        },
+        "required": [
+          "step_completed",
+          "what_was_done"
+        ]
+      },
+      "connections": {
+        "success": "increment-step"
+      }
+    },
+    {
+      "id": "increment-step",
+      "type": "expression",
+      "expressions": [
+        "current_step = current_step + 1"
+      ],
+      "connections": {
+        "default": "check-steps-remaining"
+      }
+    },
+    {
+      "id": "subagent-review",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{review_iteration}} of up to {{max_review_iterations}} — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nДелегируй ревью субагенту через Task tool.\n\nИтерация ревью: {{review_iteration}} из {{max_review_iterations}}\n\n⚠️ КРИТИЧЕСКИ ВАЖНО: НЕ делай ревью сам — делегируй независимому субагенту.\n\n1) Передай субагенту:\n   - Задача: {{task_description}}\n   - Ожидаемый результат: {{expected_result}}\n   - План: {{steps}}\n   - Контекст: субагент должен проверить что ВСЕ этапы плана были выполнены в ходе сессии\n\n2) Промпт для субагента:\n   ТЫ — ревьювер работы. Проверь что все этапы плана выполнены.\n   \n   ПРОВЕРЬ:\n   - Все ли этапы плана выполнены?\n   - Соответствует ли результат ожидаемому?\n   - Есть ли пропущенные элементы?\n   - Достаточны ли доказательства?\n   \n   ВЕРНИ:\n   - issues_count: количество проблем (0 = всё ок)\n   - issues: список конкретных проблем с рекомендациями\n\n3) Честно передай результат субагента.",
+      "completionCondition": "Ревью завершено, issues_count указан",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "issues_count"
+        ],
+        "globalInputs": [
+          "issues_count",
+          "issues"
+        ]
+      },
+      "connections": {
+        "success": "check-review-passed"
+      }
+    },
+    {
+      "id": "check-review-passed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "prepare-report",
+        "false": "check-review-iterations"
+      }
+    },
+    {
+      "id": "check-review-iterations",
+      "type": "condition",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "review_iteration"
+        },
+        "right": {
+          "contextPath": "max_review_iterations"
+        }
+      },
+      "connections": {
+        "true": "fix-issues",
+        "false": "prepare-report-with-issues"
+      }
+    },
+    {
+      "id": "fix-issues",
+      "type": "agent-directive",
+      "directive": "Исправь проблемы найденные ревьювером.\n\nПроблемы:\n{{issues}}\n\nДля КАЖДОЙ проблемы:\n1. Пойми что не так\n2. Исправь\n3. Задокументируй исправление\n\nУвеличь review_iteration на 1.",
+      "completionCondition": "Проблемы исправлены",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fixes_applied": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "problem": {
+                  "type": "string"
+                },
+                "fix": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "fixes_applied",
+          "review_iteration"
+        ],
+        "globalInputs": [
+          "review_iteration"
+        ]
+      },
+      "connections": {
+        "success": "subagent-review"
+      }
+    },
+    {
+      "id": "prepare-report-with-issues",
+      "type": "agent-directive",
+      "directive": "Подготовь отчёт с оставшимися проблемами.\n\nЗадача: {{task_description}}\nОжидаемый результат: {{expected_result}}\n\nОставшиеся проблемы после {{max_review_iterations}} итераций:\n{{issues}}\n\nПодготовь честный отчёт о проделанной работе с указанием нерешённых проблем.",
+      "completionCondition": "Отчёт подготовлен",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "report",
+          "unresolved_issues"
+        ],
+        "globalInputs": [
+          "report",
+          "unresolved_issues"
+        ]
+      },
+      "connections": {
+        "success": "present-to-user"
+      }
+    },
+    {
+      "id": "prepare-report",
+      "type": "agent-directive",
+      "directive": "Подготовь финальный отчёт.\n\nЗадача: {{task_description}}\nОжидаемый результат: {{expected_result}}\n\nПодготовь отчёт на основе выполненной работы:\n1. Что было сделано (по этапам плана)\n2. Какие артефакты созданы\n3. Как проверить результат",
+      "completionCondition": "Отчёт подготовлен",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "report"
+        ],
+        "globalInputs": [
+          "report",
+          "artifacts"
+        ]
+      },
+      "connections": {
+        "success": "present-to-user"
+      }
+    },
+    {
+      "id": "present-to-user",
+      "type": "agent-directive",
+      "directive": "Покажи отчёт пользователю и спроси нужна ли доработка.\n\n{{report}}\n\n{{#if unresolved_issues}}Нерешённые проблемы:\n{{unresolved_issues}}{{/if}}\n\n{{#if artifacts}}Артефакты:\n{{artifacts}}{{/if}}\n\n⚠️ ОБЯЗАТЕЛЬНО: Спроси \"Принимаете работу или нужна доработка? (принять/доработать)\"\nДождись явного ответа.\n\n**КРИТИЧЕСКИ ВАЖНО — РЕАКЦИЯ НА FEEDBACK:**\n- Если пользователь сказал \"принять\" → user_decision = \"accept\"\n- Если пользователь дал ЛЮБОЙ feedback или сказал \"доработать\" → user_decision = \"rework\"\n- НЕ исправляй сам!\n- Workflow сам направит в ветку доработки",
+      "completionCondition": "Пользователь ответил",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_decision"
+        ],
+        "globalInputs": [
+          "user_decision",
+          "rework_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-user-accepts"
+      }
+    },
+    {
+      "id": "check-user-accepts",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "user_decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "end",
+        "false": "rework"
+      }
+    },
+    {
+      "id": "rework",
+      "type": "agent-directive",
+      "directive": "Доработай по замечаниям пользователя.\n\nЗамечания: {{rework_feedback}}\n\nВыполни доработку на основе текущего состояния работы.\nСбрось review_iteration в 0 для нового цикла ревью.",
+      "completionCondition": "Доработка выполнена",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rework_done": {
+            "type": "string",
+            "description": "Что было доработано"
+          }
+        },
+        "required": [
+          "rework_done",
+          "review_iteration"
+        ],
+        "globalInputs": [
+          "review_iteration"
+        ]
+      },
+      "connections": {
+        "success": "subagent-review"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "report",
+        "artifacts"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "current_step": {
+      "type": "number",
+      "description": "Текущий номер шага (0-indexed)",
+      "default": 0
+    },
+    "total_steps": {
+      "type": "number",
+      "description": "Общее количество шагов в плане",
+      "default": 0
+    },
+    "steps": {
+      "type": "array",
+      "description": "Массив шагов плана [{id, action, expected_result}]",
+      "default": []
+    },
+    "review_iteration": {
+      "type": "number",
+      "description": "Текущая итерация ревью субагентом",
+      "default": 0
+    },
+    "max_review_iterations": {
+      "type": "number",
+      "description": "Максимум итераций ревью перед эскалацией",
+      "default": 3
+    },
+    "process_requirements": {
+      "type": "string",
+      "description": "Требования к процессу выполнения",
+      "default": "ТРЕБОВАНИЯ К ВЫПОЛНЕНИЮ:\n\n1. ДЕКОМПОЗИЦИЯ:\n- Разбей задачу на конкретные шаги\n- Каждый шаг = одно действие с измеримым результатом\n- Количество шагов не ограничено — столько сколько нужно\n\n2. ВЫПОЛНЕНИЕ:\n- Выполняй шаги последовательно\n- Для каждого шага предоставь доказательства выполнения\n- Не пропускай шаги молча\n\n3. HUMAN-IN-THE-LOOP:\n- Покажи план перед выполнением\n- Получи подтверждение пользователя\n- Покажи итоговый отчёт\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan item's directive in isolation.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
+    },
+    "validation_criteria": {
+      "type": "string",
+      "description": "Критерии валидации результатов",
+      "default": "КРИТЕРИИ ВАЛИДАЦИИ:\n\n1. ДОКАЗАТЕЛЬСТВА ОБЯЗАТЕЛЬНЫ:\n- Каждый шаг должен иметь доказательство выполнения\n- Типы: файл, команда, скриншот, детальное описание\n- 'Сделано' без деталей = НЕ принимается\n\n2. ПРОВЕРКА ШАГА:\n- Результат соответствует ожидаемому?\n- Есть конкретные доказательства?\n- Ничего не пропущено?\n\n3. ПРОВЕРКА ЗАДАЧИ:\n- Все шаги выполнены?\n- Ожидаемый результат достигнут?\n- Пользователь может проверить?"
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Типичные ошибки и как их избегать",
+      "default": "ТИПИЧНЫЕ ОШИБКИ:\n\n❌ 'Готово!' без проверки → ✅ Всегда предоставляй доказательства\n❌ Молча пропускать шаги → ✅ Явно отмечай что пропущено и почему\n❌ 80% = готово → ✅ Только 100% = готово\n❌ Галлюцинации ('отправил', 'создал') → ✅ Только факты с доказательствами\n❌ Смешивать действие и проверку → ✅ Сначала сделай, потом проверь"
+    },
+    "task_description": {
+      "type": "string",
+      "description": "Описание задачи от пользователя"
+    },
+    "expected_result": {
+      "type": "string",
+      "description": "Ожидаемый результат"
+    },
+    "approved": {
+      "type": "string",
+      "description": "Пользователь подтвердил план",
+      "enum": [
+        "no",
+        "yes"
+      ]
+    },
+    "feedback": {
+      "type": "string",
+      "description": "Замечания пользователя (если есть)"
+    },
+    "issues_count": {
+      "type": "number",
+      "description": "Количество проблем (0 = всё ок)"
+    },
+    "issues": {
+      "type": "array",
+      "description": "Список проблем"
+    },
+    "report": {
+      "type": "string",
+      "description": "Отчёт о работе"
+    },
+    "unresolved_issues": {
+      "type": "array",
+      "description": "Global variable unresolved_issues"
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Список артефактов"
+    },
+    "user_decision": {
+      "type": "string",
+      "description": "Решение пользователя",
+      "enum": [
+        "accept",
+        "rework"
+      ]
+    },
+    "rework_feedback": {
+      "type": "string",
+      "description": "Что доработать (если rework)"
+    }
+  }
+}

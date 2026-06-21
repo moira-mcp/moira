@@ -1,0 +1,13 @@
+# Prevent direct commits to master branch
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" = "master" ]; then
+    echo ""
+    echo "❌ Direct commits to master branch are not allowed."
+    echo ""
+    echo "Please create a feature branch:"
+    echo "  git checkout -b feature/your-feature-name"
+    echo ""
+    exit 1
+fi
+
+npx lint-staged

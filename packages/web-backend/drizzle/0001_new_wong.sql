@@ -1,0 +1,1 @@
+ALTER TABLE `workflowExecution` ADD `errors` text;

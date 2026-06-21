@@ -1,0 +1,89 @@
+{
+  "slug": "simple-linear",
+  "metadata": {
+    "name": "Simple Linear Test",
+    "version": "1.0.0",
+    "description": "Basic linear workflow for testing"
+  },
+  "variableRegistry": {
+    "testMode": {
+      "type": "boolean",
+      "description": "Flag indicating test mode is active",
+      "default": true
+    },
+    "name": {
+      "type": "string",
+      "description": "User name entered in step1, used in step2"
+    }
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "step1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step1",
+      "directive": "ПЕРВЫЙ ШАГ: Введи свое имя",
+      "completionCondition": "Имя получено",
+      "connections": {
+        "success": "step2"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "name"
+        ],
+        "globalInputs": [
+          "name"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step2",
+      "directive": "ВТОРОЙ ШАГ: Поприветствуй пользователя {{name}}",
+      "completionCondition": "Приветствие сделано",
+      "connections": {
+        "success": "step3"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "greeting": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "greeting"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step3",
+      "directive": "ТРЕТИЙ ШАГ: Попрощайся с пользователем",
+      "completionCondition": "Прощание сделано",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "name",
+        "greeting",
+        "testMode"
+      ]
+    }
+  ],
+  "startNodeId": "start",
+  "endNodeIds": [
+    "end"
+  ]
+}

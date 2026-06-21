@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  DOCKER_IMAGE: mcp-moira-ci
+  DOCKER_PORT: 3030
+
+jobs:
+  lint:
+    name: Lint and Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npx eslint .
+
+      - name: Run Prettier
+        run: npx prettier --check .
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup env file
+        run: cp .env.ci .env
+
+      - name: Run unit tests
+        run: npm run test:unit
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: test-results/
+          retention-days: 7
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup env file
+        run: |
+          cp .env.ci .env
+          # Override DB_PATH for integration tests
+          echo "DB_PATH=./data/test-integration.db" >> .env
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Run integration tests
+        run: npm run test:integration
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: test-results/
+          retention-days: 7
+
+  docker-build-and-test:
+    name: Docker Build & API/E2E Tests
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Setup env files
+        run: |
+          cp .env.ci .env.local
+          cp .env.ci .env
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./config/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.DOCKER_IMAGE }}:latest
+          build-args: |
+            ENV_FILE=.env.local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Start Docker container
+        run: |
+          docker run \
+            --name ${{ env.DOCKER_IMAGE }} \
+            -p ${{ env.DOCKER_PORT }}:80 \
+            -v $(pwd)/workflows:/app/workflows \
+            -v $(pwd)/data:/app/data \
+            -e DISABLE_RATE_LIMIT=true \
+            -d \
+            ${{ env.DOCKER_IMAGE }}:latest
+
+      - name: Wait for application to start
+        run: |
+          echo "Waiting for application to be ready..."
+          TIMEOUT=60
+          ELAPSED=0
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if curl -f -s http://localhost:${{ env.DOCKER_PORT }}/startup-ready > /dev/null 2>&1; then
+              echo "Application is ready!"
+              exit 0
+            fi
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+            echo "Waiting... ($ELAPSED/$TIMEOUT)"
+          done
+          echo "Application failed to start!"
+          docker logs ${{ env.DOCKER_IMAGE }}
+          exit 1
+
+      - name: Start MCP Inspector
+        run: |
+          docker compose -f docker-compose.inspector.yml up -d
+          echo "Waiting for MCP Inspector to start..."
+          sleep 5
+          curl -f -s http://localhost:6274 > /dev/null && echo "MCP Inspector is ready!" || echo "MCP Inspector may not be ready yet"
+
+      - name: Run API tests
+        run: npm run test:api
+        env:
+          CI: true
+          TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
+
+      - name: Run MCP tools tests
+        run: npm run test:mcp-tools
+        env:
+          CI: true
+          TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          CI: true
+          TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs ${{ env.DOCKER_IMAGE }}
+
+      - name: Stop Docker containers
+        if: always()
+        run: |
+          docker stop ${{ env.DOCKER_IMAGE }} || true
+          docker compose -f docker-compose.inspector.yml down || true

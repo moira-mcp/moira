@@ -1,0 +1,1 @@
+CREATE INDEX `workflow_invite_workflowId_idx` ON `workflowInvite` (`workflowId`);

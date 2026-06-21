@@ -1,0 +1,255 @@
+---
+title: Паттерн цикла валидации
+description: Проверка результатов и повторные попытки при неудаче
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Обеспечивает качество путём проверки результатов и повторного выполнения, если они не соответствуют критериям. Предотвращает прохождение некачественных результатов дальше.
+
+## Структура
+
+```
+[action] → [check] → success → [next]
+              ↓
+           failure → [fix] → [increment-iteration] → [action]
+```
+
+## Реализация
+
+### Нода действия
+
+```json
+{
+  "type": "agent-directive",
+  "id": "do-work",
+  "directive": "Complete the task. Iteration: {{current_iteration}}",
+  "completionCondition": "Task completed with quality standards met",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "string" },
+      "quality_check_passed": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["result", "quality_check_passed"]
+  },
+  "connections": { "success": "check-quality" }
+}
+```
+
+### Нода проверки
+
+```json
+{
+  "type": "condition",
+  "id": "check-quality",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "quality_check_passed" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "next-step",
+    "false": "fix-issues"
+  }
+}
+```
+
+### Нода исправления
+
+```json
+{
+  "type": "agent-directive",
+  "id": "fix-issues",
+  "directive": "Fix issues found in iteration {{current_iteration}}. Previous result: {{result}}",
+  "connections": { "success": "increment-iteration" }
+}
+```
+
+### Счётчик итераций
+
+С использованием expression ноды:
+
+```json
+{
+  "type": "expression",
+  "id": "increment-iteration",
+  "expressions": ["current_iteration = current_iteration + 1"],
+  "connections": { "default": "do-work" }
+}
+```
+
+<Aside type="caution">
+  Всегда включайте счётчики итераций для предотвращения бесконечных циклов. Рекомендуется добавить
+  проверку максимального количества итераций.
+</Aside>
+
+## С ограничением итераций
+
+Добавьте проверку перед повторной попыткой:
+
+```json
+{
+  "type": "condition",
+  "id": "check-max-iterations",
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "current_iteration" },
+    "right": 5
+  },
+  "connections": {
+    "true": "do-work",
+    "false": "escalate-to-user"
+  }
+}
+```
+
+## Ограниченный цикл ре-валидации
+
+Цикл ре-валидации или ре-ревью на каждом круге возвращается к ОДНОЙ И ТОЙ ЖЕ ноде проверки. Без подсказки в директиве входа в цикл агент может ошибочно воспринять повторное появление той же ноды как зацикливание и сообщить о цикле пользователю. Два требования предотвращают это.
+
+### Счётчик — это expression нода
+
+Счётчик кругов ДОЛЖЕН инкрементироваться expression нодой (автоматически потоком), объявленной в `variableRegistry` с числовым `default`. Счётчик, инкрементируемый агентом, — это антипаттерн: агента не просят выполнять арифметику, а отсутствующее или нечисловое значение ломает проверку предела.
+
+```json
+{
+  "variableRegistry": {
+    "validation_round": { "type": "number", "description": "Re-validation pass counter", "default": 0 },
+    "max_validation_rounds": { "type": "number", "description": "Re-validation bound", "default": 5 }
+  }
+}
+```
+
+```json
+{
+  "type": "expression",
+  "id": "increment-validation-round",
+  "expressions": ["validation_round = validation_round + 1"],
+  "connections": { "default": "re-validate" }
+}
+```
+
+### Подсказка входа в цикл
+
+Директива входа в цикл отображает счётчик кругов и сообщает, что повторение ожидаемо:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "re-validate",
+  "directive": "Re-validation pass {{validation_round}} of {{max_validation_rounds}} — a normal quality loop, expected to converge. This is NOT a bug and NOT a stuck flow; do not report a loop to the user.\n\nRe-check the work against the criteria and report whether all issues are resolved.",
+  "completionCondition": "Work re-checked against criteria",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "all_resolved": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["all_resolved"]
+  },
+  "connections": { "success": "check-resolved" }
+}
+```
+
+<Aside type="caution">
+  Текст подсказки точный. Ре-валидация через одну и ту же ноду ожидаема, а не баг — директива должна
+  это сообщать, иначе агент может остановиться и сообщить о ложном цикле.
+</Aside>
+
+## Числовая проверка качества
+
+Для измеримого качества:
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "quality_score": { "type": "number", "minimum": 0, "maximum": 10 }
+    },
+    "required": ["quality_score"]
+  }
+}
+```
+
+```json
+{
+  "condition": {
+    "operator": "gte",
+    "left": { "contextPath": "quality_score" },
+    "right": 8
+  }
+}
+```
+
+## Реальный пример
+
+Из `development-flow.json`:
+
+```json
+{
+  "id": "verify-step-implementation",
+  "directive": "Verify step {{current_step_name}} implementation:\n- Expected: {{expected_outcome}}\n- Check actual matches expected",
+  "inputSchema": {
+    "properties": {
+      "step_verified": { "type": "string", "enum": ["yes", "no"] },
+      "verification_evidence": { "type": "string" }
+    },
+    "required": ["step_verified", "verification_evidence"]
+  }
+}
+```
+
+## Поведение агента на воротах валидации
+
+Когда workflow включает ворота валидации (ноды, запрашивающие подтверждение пользователя), агент должен следовать строгим правилам:
+
+### Паттерн директивы ворот валидации
+
+Всегда включайте эту инструкцию в директивы ворот валидации:
+
+```
+CRITICALLY IMPORTANT - REACTION TO FEEDBACK:
+- If user said "yes" → approval = "yes"
+- If user gave ANY feedback or said "no" → approval = "no"
+- DO NOT fix yourself!
+- Reply approval = "no" and write user_feedback with feedback
+- Workflow will direct to fix branch itself
+- All fixes are done only through workflow, not independently
+```
+
+### Почему это важно
+
+Без явных инструкций агенты склонны:
+
+1. Интерпретировать обратную связь пользователя как мелкие правки и исправлять самостоятельно
+2. Сообщать `approval = "yes"` даже когда пользователь дал замечания
+3. Полностью пропускать ветку исправлений workflow
+
+Это нарушает цикл итераций workflow и препятствует надлежащему контролю качества.
+
+### Пример ворот валидации
+
+```json
+{
+  "type": "agent-directive",
+  "id": "approve-plan",
+  "directive": "Show user the plan and ask for confirmation.\n\nPlan: {{plan_summary}}\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself",
+  "completionCondition": "User confirmed or rejected plan",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "plan_approved": { "type": "string", "enum": ["yes", "no"] },
+      "user_feedback": { "type": "string" }
+    },
+    "required": ["plan_approved"]
+  },
+  "connections": { "success": "route-plan-approval" }
+}
+```
+
+## Связанные паттерны
+
+- [Верификация шагов](/ru/docs/patterns/step-verification/) - Проверка конкретных шагов
+- [Эскалация](/ru/docs/patterns/escalation/) - Обработка повторяющихся сбоев

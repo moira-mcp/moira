@@ -1,0 +1,1101 @@
+{
+  "slug": "test-suite-audit-qnhl",
+  "owner": "system-admin",
+  "visibility": "public",
+  "id": "f1034523-99e4-4a3d-9a5a-9ac20542d1d3",
+  "metadata": {
+    "name": "Test Suite Audit",
+    "version": "3.2.0",
+    "description": "Feature-centric test suite audit using LLM semantic analysis. Builds Feature Taxonomy from production code, maps tests to features, detects cross-level redundancy and coverage gaps."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "collect-project-info"
+      },
+      "initialData": {
+        "variables": {
+          "methodology": {
+            "description": "Full methodology for feature-centric test audit",
+            "value": "# Методология автоматизированного Feature Mapping для аудита тестов\n\n## Обзор\n\nМетодология предназначена для LLM-агента (Claude/GPT), работающего через Moira workflow.\nЦель: построить Feature Map проекта и найти реальные дублирования и пробелы в покрытии.\n\n---\n\n## Phase 1: Feature Taxonomy (автоматическая)\n\n### Шаг 1.1: Извлечение features из production code\n\nАгент анализирует проект и строит **Feature Taxonomy** — иерархическое дерево features:\n\n```\nDomain → Feature Group → Feature → Behavior\n```\n\n**Промпт для агента:**\n```\nПрочитай структуру проекта (routes, handlers, services, repositories).\nПострой Feature Taxonomy в формате:\n\n[\n  {\n    \"domain\": \"auth\",\n    \"features\": [\n      {\n        \"id\": \"auth.registration\",\n        \"name\": \"User Registration\", \n        \"behaviors\": [\n          \"auth.registration.email_signup\",\n          \"auth.registration.gdpr_consent\",\n          \"auth.registration.email_verification\",\n          \"auth.registration.duplicate_email_rejection\"\n        ]\n      }\n    ]\n  }\n]\n\nПравила:\n- Behavior = конкретное наблюдаемое поведение системы\n- Behavior формулируется как \"система делает X когда Y\"\n- Один behavior = одна тестируемая вещь\n- НЕ включай implementation details, только observable behavior\n```\n\n**Как избежать галлюцинаций:** Агент ДОЛЖЕН указать конкретный файл/функцию/route для каждого behavior. Если не может — behavior не существует.\n\n### Шаг 1.2: Валидация taxonomy\n\nАгент проверяет taxonomy:\n- Каждый behavior имеет ссылку на production code\n- Нет дубликатов behaviors между feature groups\n- Taxonomy покрывает все основные routes/endpoints проекта\n\n---\n\n## Phase 2: Test-to-Feature Mapping\n\n### Шаг 2.1: Per-file analysis\n\nАгент читает КАЖДЫЙ тест-файл (группируя по файлам, не по отдельным тестам) и для каждого test block определяет:\n\n**Промпт для агента (per-file):**\n```\nПрочитай тестовый файл: {filepath}\n\nДля КАЖДОГО test/it блока определи:\n\n{\n  \"file\": \"{filepath}\",\n  \"test_name\": \"exact name from describe > test\",\n  \"level\": \"unit|workflow|integration|api|mcp|e2e\",\n  \"behavior_id\": \"auth.registration.email_signup\",  // из Feature Taxonomy\n  \"aspect\": \"happy_path|edge_case|error_handling|performance|security\",\n  \"what_verifies\": \"одно предложение: что конкретно этот тест доказывает\",\n  \"assertions\": [\"list of actual expect/assert calls\"],\n  \"confidence\": \"high|medium|low\"  // насколько уверен в маппинге\n}\n\nПравила:\n1. behavior_id ДОЛЖЕН быть из Feature Taxonomy (Phase 1)\n2. Если тест не маппится ни к одному behavior — используй \"UNMAPPED\" + опиши почему\n3. Если тест маппится к нескольким behaviors — создай запись для каждого\n4. confidence: high = тест явно тестирует behavior, low = тест косвенно затрагивает\n5. assertions: перечисли РЕАЛЬНЫЕ expect() вызовы, не описывай абстрактно\n```\n\n### Шаг 2.2: Batch processing\n\n260 файлов обрабатываются батчами по ~10-15 файлов:\n- Группировка по domain (auth/ → один батч, workflow/ → другой)\n- Результаты накапливаются в JSON файл\n- Каждый батч проверяется на UNMAPPED tests (их нужно разрешить)\n\n### Шаг 2.3: UNMAPPED resolution\n\nДля каждого UNMAPPED теста:\n- Если тест реально не маппится — возможно behavior отсутствует в taxonomy → добавить\n- Если тест тестирует infrastructure (helpers, utils) — маркировать как \"INFRA\"\n- Если тест устарел и тестирует удалённый функционал — маркировать как \"ORPHAN\"\n\n---\n\n## Phase 3: Redundancy Analysis\n\n### Шаг 3.1: Behavior Coverage Matrix\n\nСтроим матрицу: behavior × test level.\n\n```\n| Behavior ID                    | Unit | Workflow | Integration | API | MCP | E2E |\n|-------------------------------|------|----------|-------------|-----|-----|-----|\n| auth.registration.email_signup |  2   |    0     |      1      |  1  |  0  |  1  |\n| wf.execution.linear_flow      |  0   |    0     |      2      |  0  |  2  |  0  |\n```\n\n### Шаг 3.2: Redundancy Detection Rules\n\nАгент применяет правила для каждого behavior:\n\n**Rule R1: Same-Level Subset**\nЕсли тест A на том же уровне проверяет строгое подмножество того что проверяет тест B → тест A избыточен.\nПример: 2-step linear (subset) внутри 5-step linear.\n\n**Rule R2: Cross-Level Full Overlap**  \nЕсли тест на уровне L1 проверяет РОВНО то же поведение что тест на L2, но L1 быстрее и надёжнее → тест на L2 потенциально избыточен.\nПример: unit тестирует handler returns pause → integration тестирует executor returns directive (добавляет orchestration слой → НЕ избыточен).\n\n**Rule R3: Incidental Coverage**\nЕсли behavior проверяется только как побочный эффект другого теста (не отдельный test block) → coverage ненадёжна, не считается.\nПример: \"Workflow completed\" проверяется в 6 тестах, но ни один не тестирует конкретно completion logic.\n\n**Rule R4: Aspect Coverage**\nЕсли behavior покрыт только happy_path на всех уровнях, но error_handling только на одном → НЕ redundancy, это gap.\n\n### Шаг 3.3: Redundancy Report\n\nДля каждого найденного redundancy:\n\n```json\n{\n  \"behavior_id\": \"wf.execution.linear_flow\",\n  \"redundancy_type\": \"same_level_subset\",\n  \"tests\": [\n    {\"file\": \"integration/workflow-execution.test.ts\", \"test\": \"2-step linear\", \"role\": \"SUBSET\"},\n    {\"file\": \"integration/essential-cases-split.test.ts\", \"test\": \"3-step linear\", \"role\": \"SUPERSET\"}\n  ],\n  \"recommendation\": \"DELETE subset — 3-step test covers everything 2-step does\",\n  \"confidence\": \"high\",\n  \"evidence\": \"2-step tests: start→step1→complete. 3-step tests: start→step1→step2→step3→complete. 2-step is strict subset.\"\n}\n```\n\n---\n\n## Phase 4: Cross-Verification\n\n### Шаг 4.1: Sampling\n\nСлучайная выборка 15-20% findings для ручной верификации другим агентом (или тем же с другим seed).\n\n**Промпт для верификатора:**\n```\nТебе дан finding:\n- Behavior: {behavior_id}\n- Утверждение: тест A избыточен потому что тест B покрывает то же самое\n- Evidence: {evidence}\n\nПрочитай ОБА теста. Ответь:\n1. AGREE — тест A действительно избыточен\n2. DISAGREE — тест A проверяет что-то что тест B НЕ проверяет\n   Укажи что именно тест A проверяет дополнительно.\n```\n\n### Шаг 4.2: Threshold\n\n- <20% disagreement → findings accepted\n- ≥20% disagreement → пересмотр rules, cleanup false positives, повтор\n\n---\n\n## Phase 5: Gap Analysis (бонус)\n\nFeature Map также показывает GAPS — behaviors без тестов или с тестами только на одном уровне:\n\n```json\n{\n  \"behavior_id\": \"auth.registration.rate_limiting\",\n  \"coverage\": {\"unit\": 0, \"integration\": 0, \"api\": 0, \"e2e\": 0},\n  \"priority\": \"high\",\n  \"recommendation\": \"ADD API test for registration rate limiting\"\n}\n```\n\n---\n\n## Output Schema\n\nФинальный результат — JSON файл с 4 секциями:\n\n```json\n{\n  \"taxonomy\": [...],           // Feature Taxonomy\n  \"test_mapping\": [...],       // Per-test behavior mapping\n  \"redundancies\": [...],       // Confirmed redundancies with recommendations\n  \"gaps\": [...],               // Coverage gaps\n  \"stats\": {\n    \"total_tests\": 3145,\n    \"mapped_tests\": 3100,\n    \"unmapped_tests\": 45,\n    \"redundancy_candidates\": 150,\n    \"confirmed_redundancies\": 80,\n    \"coverage_gaps\": 30\n  }\n}\n```\n\n---\n\n## Ключевые отличия от v2.0\n\n| v2.0 | v3.0 |\n|------|------|\n| 10 метрических алгоритмов | LLM читает каждый тест |\n| Сравнивает тесты МЕЖДУ собой | Маппит тесты к FEATURES |\n| Не видит cross-level | Cross-level — основной фокус |\n| Static parsing (regex) | Semantic understanding |\n| 55% false positive | Ожидается <15% |\n| Находит пустые тесты | Находит реальное дублирование |\n\n---\n\n## Масштабирование\n\n### Для текущего проекта (3145 тестов, 260 файлов):\n- Phase 1 (Taxonomy): ~1 батч, агент читает routes/handlers\n- Phase 2 (Mapping): ~20 батчей по 13 файлов \n- Phase 3 (Analysis): автоматическая матрица + rules\n- Phase 4 (Verification): ~20 samples\n- **Итого: ~25 agent interactions через workflow**\n\n### Для произвольного проекта:\n- Phase 1 адаптируется: агент сам определяет структуру проекта\n- Phase 2-5 универсальны\n- Taxonomy schema может быть pre-defined для типовых проектов (REST API, CLI tool, etc.)\n\n---\n\n## Anti-patterns (что НЕ делать)\n\n1. **НЕ** маппить по import paths — тест может импортить helper но тестировать другой feature\n2. **НЕ** считать describe block = feature — один describe может содержать тесты для разных behaviors  \n3. **НЕ** маппить по имени файла — `auth.test.ts` может тестировать и registration и login\n4. **НЕ** считать одинаковые assertions = дублирование — `expect(status).toBe(200)` в разных контекстах тестирует разное\n5. **НЕ** удалять тесты на высшем уровне только потому что есть unit тест — E2E тестирует интеграцию всех слоёв\n"
+          },
+          "decision_framework": {
+            "description": "Decision tree for DELETE/MERGE/KEEP decisions",
+            "value": "# Decision Framework: Критерии избыточности тестов\n\n## Тестовая пирамида для MCP Moira\n\nПроект MCP Moira — серверное приложение с MCP API, REST API и Web UI.\nТестовые уровни (снизу вверх):\n\n```\n         ┌─────────┐\n         │   E2E   │  Browser + Docker container\n         │  (501)  │  Самый медленный, тестирует UI + API + DB\n         ├─────────┤\n         │   API   │  HTTP requests to Docker container\n         │  (345)  │  Тестирует REST endpoints\n         ├─────────┤\n         │  MCP    │  MCP protocol client → Docker container\n         │  (231)  │  Тестирует MCP tools through full stack\n         ├─────────┤\n         │  Integ  │  Direct code calls + local DB (test-integration.db)\n         │  (386)  │  Тестирует services/repositories together\n         ├─────────┤\n         │Workflow │  Workflow engine + in-process storage\n         │  (641)  │  Тестирует workflow scenarios\n         ├─────────┤\n         │  Unit   │  In-memory, no external deps\n         │ (1018)  │  Тестирует individual functions/classes\n         └─────────┘\n```\n\n### Какой уровень что добавляет\n\n| Уровень | Что тестирует уникально |\n|---------|------------------------|\n| Unit | Алгоритмическую корректность, edge cases, error handling в изоляции |\n| Workflow | Корректность workflow scenarios (проходимость графов, transitions) |\n| Integration | Взаимодействие компонентов, DB persistence, transactions |\n| MCP | MCP protocol layer, message formatting, tool argument parsing |\n| API | HTTP layer, auth middleware, rate limiting, CORS |\n| E2E | UI rendering, browser interactions, full user flows |\n\n---\n\n## Дерево решений\n\n### Step 0: Классификация finding\n\n```\nFinding: тесты T1 и T2 проверяют одно behavior B\n         T1 на уровне L1, T2 на уровне L2\n\nОпредели тип:\n├── L1 == L2 → SAME-LEVEL (go to Step 1)\n├── L1 != L2 → CROSS-LEVEL (go to Step 2)\n└── T1 содержит T2 или наоборот → SUBSET (go to Step 3)\n```\n\n### Step 1: Same-Level Redundancy\n\n```\nДва теста на одном уровне проверяют одно behavior\n\nQ1: Тест T1 проверяет подмножество того что T2?\n├── YES → DELETE T1 (subset)\n│         Пример: 2-step linear test ⊂ 5-step linear test\n│\n├── NO, T1 и T2 проверяют РАЗНЫЕ aspects (happy_path vs error)?\n│   └── KEEP BOTH — разные aspects\n│       Пример: \"login success\" + \"login wrong password\"\n│\n├── NO, T1 и T2 проверяют ОДИНАКОВЫЙ aspect с разными data?\n│   Q2: Разные data покрывают разные code paths?\n│   ├── YES → KEEP BOTH — параметрические вариации\n│   │         Пример: condition(true) + condition(false)\n│   └── NO → MERGE into data-driven test\n│             Пример: slug \"a-b\" + slug \"x-y\" (same code path)\n│\n└── NO, T1 и T2 буквально тестируют то же самое?\n    → DELETE тот что слабее (fewer assertions, less specific)\n```\n\n### Step 2: Cross-Level Redundancy\n\n```\nТесты T1 (level L1) и T2 (level L2) проверяют behavior B\nL1 \"ниже\" L2 (unit < workflow < integration < mcp < api < e2e)\n\nQ1: Тест T2 (higher level) проверяет ЧТО-ТО что T1 НЕ может проверить?\n├── YES → KEEP BOTH\n│   Примеры что НЕЛЬЗЯ проверить на lower level:\n│   - Unit → не проверит HTTP status code (нужен API/MCP)\n│   - Unit → не проверит MCP message formatting (нужен MCP)\n│   - Integration → не проверит browser rendering (нужен E2E)\n│   - Integration → не проверит auth middleware (нужен API)\n│\n├── NO → Q2: T2 (higher) критичен для confidence?\n│   ├── YES → KEEP but MARK as \"smoke test\"\n│   │   Ситуации когда higher-level нужен несмотря на overlap:\n│   │   - Auth flows: ВСЕГДА нужен E2E (security critical)\n│   │   - Payment: ВСЕГДА нужен integration + E2E\n│   │   - Data integrity: ВСЕГДА нужен integration\n│   │\n│   └── NO → DELETE T2 (higher level)\n│       Ситуации когда higher-level можно удалить:\n│       - E2E тестирует internal logic без UI interaction\n│       - API тестирует бизнес-логику без HTTP specifics\n│       - MCP тестирует computation без MCP protocol specifics\n\nQ3 (для KEEP BOTH): Оба теста специфичны для своего уровня?\n├── T1 (lower) тестирует внутреннюю логику → KEEP\n├── T2 (higher) тестирует transport/integration layer → KEEP\n└── T2 (higher) тестирует ту же внутреннюю логику через HTTP → CANDIDATE for DELETE\n```\n\n### Step 3: Subset Redundancy\n\n```\nТест T1 является подмножеством T2 (T1 ⊂ T2)\n\nQ1: T1 и T2 на одном уровне?\n├── YES → DELETE T1\n│         Если T1 содержит уникальный edge case → EXTRACT и добавить к T2\n│\n└── NO → Q2: T1 на lower level?\n    ├── YES → KEEP T1 (быстрее, точнее в failure reporting)\n    │         T2 — smoke test на higher level\n    │\n    └── NO → DELETE T1 (higher level subset of lower level = useless)\n```\n\n---\n\n## Матрица решений: конкретные паттерны\n\n| Паттерн | L1 | L2 | Решение | Обоснование |\n|---------|----|----|---------|-------------|\n| Валидация slug | Unit (validateSlug) | API (POST /workflows) | **KEEP both** | Unit: edge cases (symbols, length). API: HTTP layer, auth, response format |\n| Валидация slug | Unit (validateSlug) | E2E (form submission) | **KEEP both** | E2E: UI validation messages, form behavior |\n| Валидация slug | API (POST /workflows) | E2E (form submission) | **Review** | Если E2E только проверяет \"success message\" → может быть избыточен если API test покрывает |\n| Linear execution | Integration (3-step) | Integration (2-step) | **DELETE 2-step** | Strict subset |\n| Linear execution | Integration | MCP | **KEEP both** | Integration: executor. MCP: protocol+formatting |\n| Condition branch | Unit (handler) | Integration (executor) | **KEEP both** | Разные слои |\n| Condition branch | Integration | MCP | **Review** | Если MCP test не проверяет MCP-specific formatting → DELETE MCP |\n| Auth login | Unit (hash check) | E2E (login form) | **KEEP both** | E2E: UI flow, session, redirect. Unit: crypto |\n| Auth login | API (POST /auth/login) | E2E (login form) | **KEEP both** | API: response codes, tokens. E2E: UI flow |\n| Error message format | Unit (formatError) | MCP (tool returns error) | **KEEP both** | MCP: protocol-specific formatting |\n| Workflow list | Unit (repository) | API (GET /workflows) | **KEEP both** | API: pagination, auth, filtering |\n| Workflow list | API (GET /workflows) | E2E (workflow explorer) | **Review** | E2E нужен если тестирует UI rendering, не нужен если только data display |\n\n---\n\n## Принципы DELETE\n\n### Когда БЕЗОПАСНО удалять тест\n\n1. **Strict subset на том же уровне** — меньший тест ничего не добавляет\n2. **Higher level тестирует internal logic** — E2E тест без UI interactions, API тест без HTTP specifics\n3. **Тест с 0 unique assertions** — всё что он проверяет, проверяется другими тестами\n4. **Orphan test** — тестирует удалённый функционал\n5. **Infrastructure test без value** — тестирует что `expect(true).toBe(true)`\n\n### Когда ОПАСНО удалять тест\n\n1. **Единственный тест для behavior** — даже если избыточен по coverage, он единственный regression guard\n2. **Security-critical behavior** — auth, permissions, rate limiting — лучше overduplicate\n3. **Тест с уникальными edge cases** — даже если \"subset\", edge case может быть уникальным\n4. **E2E smoke тест** — даже если логика покрыта unit, E2E доказывает что система работает end-to-end\n\n### Когда MERGE\n\n1. **Несколько тестов на одном уровне проверяют вариации одного behavior** → data-driven test\n2. **Setup код дублируется** → общий describe block с shared setup\n3. **Assertion списки частично совпадают** → один тест с полным списком assertions\n\n---\n\n## Confidence уровни\n\n| Confidence | Действие | Автоматически? |\n|-----------|----------|----------------|\n| HIGH | DELETE/MERGE | Да, после cross-verify |\n| MEDIUM | DELETE/MERGE | Только с human approval |\n| LOW | KEEP | Пометить для manual review |\n\n**HIGH confidence:**\n- Strict subset (тест A проверяет {x}, тест B проверяет {x, y, z})\n- Identical assertions на одном уровне\n- Test with 0 assertions\n\n**MEDIUM confidence:**\n- Cross-level overlap где оба тестируют \"одно behavior\" но на разных уровнях\n- E2E тест который \"вроде бы\" не добавляет ничего к API тесту\n\n**LOW confidence:**\n- Тесты проверяют \"related\" behaviors (не identical)\n- Трудно определить добавляет ли higher level value\n\n---\n\n## Специфика MCP Moira\n\n### Behaviors где ВСЕГДА нужен multi-level coverage\n\n1. **Auth** (login, registration, sessions) — Unit + API + E2E\n2. **Workflow execution** (start, step) — Unit + Integration + MCP\n3. **Data persistence** (save/load workflows, executions) — Unit + Integration\n4. **Access control** (admin, owner, shared) — Unit + API + E2E\n\n### Behaviors где достаточно одного уровня\n\n1. **Template processing** — Integration (tests actual resolution with real context)\n2. **Condition evaluation** — Unit (pure function, no external deps)\n3. **Slug/handle validation** — Unit (pure function)\n4. **UI layout/styling** — E2E only (no business logic)\n"
+          },
+          "taxonomy_prompt": {
+            "description": "Prompt template for building Feature Taxonomy",
+            "value": "Read the project's production code structure (routes, handlers, services, repositories).\nBuild a Feature Taxonomy as hierarchical tree:\n\nDomain → Feature Group → Feature → Behavior\n\nOutput JSON array:\n[\n  {\n    \"domain\": \"domain_name\",\n    \"features\": [\n      {\n        \"id\": \"domain.feature_name\",\n        \"name\": \"Human-readable Feature Name\",\n        \"behaviors\": [\n          \"domain.feature_name.specific_behavior\"\n        ]\n      }\n    ]\n  }\n]\n\nRules:\n- Behavior = specific observable system behavior\n- Formulated as \"system does X when Y\"\n- One behavior = one testable thing\n- Do NOT include implementation details, only observable behavior\n- MUST reference concrete file/function/route for each behavior\n- If cannot reference production code — behavior does not exist"
+          },
+          "mapping_prompt": {
+            "description": "Prompt template for per-file test mapping",
+            "value": "Read test file: {filepath}\n\nFor EACH test/it block determine:\n\n{\n  \"file\": \"{filepath}\",\n  \"test_name\": \"exact name from describe > test\",\n  \"level\": \"unit|workflow|integration|api|mcp|e2e\",\n  \"behavior_id\": \"domain.feature.behavior\",\n  \"aspect\": \"happy_path|edge_case|error_handling|performance|security\",\n  \"what_verifies\": \"one sentence: what specifically this test proves\",\n  \"assertions\": [\"list of actual expect/assert calls\"],\n  \"confidence\": \"high|medium|low\"\n}\n\nRules:\n1. behavior_id MUST be from Feature Taxonomy\n2. If test maps to no behavior — use \"UNMAPPED\" + describe why\n3. If test maps to multiple behaviors — create entry for each\n4. confidence: high = test explicitly tests behavior, low = test incidentally touches it\n5. assertions: list REAL expect() calls, not abstract descriptions"
+          },
+          "verification_prompt": {
+            "description": "Prompt template for cross-verification",
+            "value": "Given finding:\n- Behavior: {behavior_id}\n- Claim: test A is redundant because test B covers the same\n- Evidence: {evidence}\n\nRead BOTH tests. Answer:\n1. AGREE — test A is truly redundant\n2. DISAGREE — test A verifies something test B does NOT\n   Specify what test A additionally verifies."
+          },
+          "taxonomy_fix_attempts": {
+            "description": "Retry counter for taxonomy fix loop",
+            "value": 0
+          },
+          "batch_fix_attempts": {
+            "description": "Retry counter for batch fix loop",
+            "value": 0
+          },
+          "verify_rounds": {
+            "description": "Retry counter for cross-verification loop",
+            "value": 0
+          },
+          "test_fix_attempts": {
+            "description": "Retry counter for test fix loop",
+            "value": 0
+          },
+          "current_batch": {
+            "description": "Current batch index",
+            "value": 0
+          },
+          "total_batches": {
+            "description": "Total number of batches",
+            "value": 0
+          },
+          "workspace_path": {
+            "description": "Path to audit workspace directory",
+            "value": ""
+          },
+          "anti_patterns": {
+            "description": "Common false positive patterns to avoid",
+            "value": "Common False Positive Patterns — DO NOT flag these as redundant:\n\nFP1: Different Aspects Look Similar\nTests that use similar setup but verify different aspects (happy_path vs error_handling). Same HTTP call but different assertions = NOT redundant.\n\nFP2: Cross-Level Tests Serve Different Purposes\nUnit test for validation logic + API test for HTTP response codes testing the same feature. Unit tests edge cases in isolation, API tests integration. Both needed.\n\nFP3: Similar Names ≠ Same Test\n\"should create workflow\" in unit vs integration — unit tests repository directly, integration tests through service layer with DB. Different layers tested.\n\nFP4: Shared Setup ≠ Shared Test\nTests sharing beforeEach setup but testing different behaviors are NOT redundant even if 80% of code is shared.\n\nFP5: E2E Smoke ≠ Unit Duplicate\nE2E test that clicks through login flow is NOT a duplicate of unit test for password hashing. They test fundamentally different things despite both being \"auth tests\".\n\nFP6: Parameterized Variations\ntest.each with different inputs testing different code paths is NOT redundancy — each parameter hits different branches.\n\nFP7: Incidental Overlap\nTest A checks \"workflow completes\" as part of testing condition branching. Test B checks \"workflow completes\" as part of testing linear execution. Both need completion to run, but test DIFFERENT things.\n\nWhen in doubt: If deleting test A would NOT be caught by test B's failure — they are NOT redundant."
+          }
+        }
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-project-info",
+      "directive": "Collect project information. Read package.json, project structure, and identify:\n1. Project name and type (monorepo, single package, etc.)\n2. Test framework(s) used (jest, playwright, vitest, etc.)\n3. Source code directories\n4. Test directories and their organization\n5. Number of test files per directory\n\nCreate a workspace directory for audit artifacts (e.g., ./audit-workspace-YYYY-MM-DD/).\nSave project info to the workspace as project-info.json.\nReport the workspace_path you created — it will be used by all subsequent steps.\n\nIf re-running after user rejection, incorporate this feedback: {{user_feedback}}",
+      "completionCondition": "Project info collected, workspace created, project-info.json saved",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_file_count": {
+            "type": "number",
+            "description": "Total number of test files found"
+          },
+          "source_dirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of source code directories (e.g., [\"src\", \"packages/shared/src\"])"
+          }
+        },
+        "required": [
+          "workspace_path",
+          "test_file_count",
+          "source_dirs"
+        ],
+        "globalInputs": [
+          "workspace_path"
+        ]
+      },
+      "connections": {
+        "success": "collect-test-inventory"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-test-inventory",
+      "directive": "Create complete test inventory. For EACH test file:\n1. Full file path\n2. Test level (unit, workflow, integration, api, mcp, e2e) — determine from directory and test content\n3. Number of test/it blocks\n4. Approximate line count\n\nSave inventory to {{workspace_path}}/test-inventory.json\n\nProvide summary: total files, total tests, tests per level.",
+      "completionCondition": "Test inventory saved to workspace. Summary with totals per level provided.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_files": {
+            "type": "number",
+            "description": "Total number of test files"
+          },
+          "total_tests": {
+            "type": "number",
+            "description": "Total number of test/it blocks across all files"
+          },
+          "level_counts": {
+            "type": "object",
+            "description": "Object with test counts per level, e.g. {\"unit\": 1018, \"workflow\": 641, \"integration\": 386, \"api\": 345, \"mcp\": 231, \"e2e\": 501}"
+          }
+        },
+        "required": [
+          "total_files",
+          "total_tests",
+          "level_counts"
+        ]
+      },
+      "connections": {
+        "success": "approve-setup"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-setup",
+      "directive": "Present project info and test inventory to user for approval.\n\nShow:\n1. Project: name, type, frameworks\n2. Source directories\n3. Test inventory summary: total files, total tests, per-level breakdown\n4. Estimated batches for mapping phase (~15 files per batch)\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback. Workflow will direct to fix branch itself.",
+      "completionCondition": "User reviewed setup and provided approval decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "approval"
+        ],
+        "globalInputs": [
+          "approval",
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-setup-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "build-feature-taxonomy",
+      "directive": "Build Feature Taxonomy from production code.\n\n{{taxonomy_prompt}}\n\nAnalyze the project's production code — read routes, handlers, services, models, repositories. For each domain, identify features and their specific behaviors.\n\nSave taxonomy to {{workspace_path}}/feature-taxonomy.json\n\nThe taxonomy should cover ALL major features of the project. Each behavior MUST reference a specific file/function.\n\nIf re-running after user rejection, incorporate this feedback: {{user_feedback}}",
+      "completionCondition": "Feature Taxonomy saved to workspace. All behaviors reference production code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain_count": {
+            "type": "number",
+            "description": "Number of top-level domains in taxonomy"
+          },
+          "feature_count": {
+            "type": "number",
+            "description": "Total number of features across all domains"
+          },
+          "behavior_count": {
+            "type": "number",
+            "description": "Total number of behaviors across all features"
+          }
+        },
+        "required": [
+          "domain_count",
+          "feature_count",
+          "behavior_count"
+        ]
+      },
+      "connections": {
+        "success": "verify-taxonomy"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-taxonomy",
+      "directive": "Verify Feature Taxonomy quality:\n\n1. Check each behavior has a valid production code reference\n2. Check no duplicate behaviors across feature groups\n3. Check taxonomy covers all major routes/endpoints\n4. Check behavior naming follows pattern 'domain.feature.specific_behavior'\n\nSave issues (if any) to {{workspace_path}}/taxonomy-issues.json\n\nReport issues_count. If 0 issues, taxonomy is ready.",
+      "completionCondition": "Taxonomy verified. Issues saved to file. issues_count reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues_summary": {
+            "type": "string",
+            "description": "Brief summary of issues found"
+          }
+        },
+        "required": [
+          "issues_count"
+        ],
+        "globalInputs": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "check-taxonomy-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-taxonomy-issues",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "inc-taxonomy-fix-attempts",
+        "false": "approve-taxonomy"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "inc-taxonomy-fix-attempts",
+      "expressions": [
+        "taxonomy_fix_attempts = {taxonomy_fix_attempts} + 1"
+      ],
+      "connections": {
+        "default": "fix-taxonomy"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-taxonomy",
+      "directive": "Fix taxonomy issues found in {{workspace_path}}/taxonomy-issues.json\n\nRead the issues file and fix each one:\n- Missing code references: find the actual production file/function\n- Duplicate behaviors: merge or differentiate\n- Missing coverage: add missing features/behaviors\n\nUpdate {{workspace_path}}/feature-taxonomy.json with fixes.",
+      "completionCondition": "Taxonomy issues fixed. Updated taxonomy saved.",
+      "maxRetries": 3,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fixes_applied": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "verify-taxonomy",
+        "maxRetriesExceeded": "approve-taxonomy"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-taxonomy",
+      "directive": "Present Feature Taxonomy to user for approval.\n\nShow:\n1. Number of domains, features, behaviors\n2. Top-level structure (domains and feature groups)\n3. Sample of 3-5 behaviors with their production code references\n4. Any unresolved issues from fix loops\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback.",
+      "completionCondition": "User reviewed taxonomy and provided approval decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "approval"
+        ],
+        "globalInputs": [
+          "approval",
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-taxonomy-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "plan-mapping-batches",
+      "directive": "Plan test file mapping batches.\n\nRead {{workspace_path}}/test-inventory.json and group test files into batches of ~15 files each.\n- Group by domain/directory when possible\n- Keep related test files in same batch\n\nSave batch plan to {{workspace_path}}/batch-plan.json with structure:\n[\n  { \"batch_index\": 0, \"files\": [\"path1\", \"path2\", ...] },\n  ...\n]\n\nReport total_batches count.",
+      "completionCondition": "Batch plan saved. total_batches reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "total_batches"
+        ],
+        "globalInputs": [
+          "total_batches"
+        ]
+      },
+      "connections": {
+        "success": "init-batch-counter"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "init-batch-counter",
+      "expressions": [
+        "current_batch = 0"
+      ],
+      "connections": {
+        "default": "check-batches-remaining"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-batches-remaining",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "current_batch"
+        },
+        "right": {
+          "contextPath": "total_batches"
+        }
+      },
+      "connections": {
+        "true": "map-batch",
+        "false": "resolve-unmapped"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "map-batch",
+      "directive": "Map test batch {{current_batch}} of {{total_batches}}.\n\nRead batch plan from {{workspace_path}}/batch-plan.json, get files for batch index {{current_batch}}.\n\nFor EACH test file in this batch:\n{{mapping_prompt}}\n\nRead the Feature Taxonomy from {{workspace_path}}/feature-taxonomy.json to map behaviors.\n\nAppend mappings to {{workspace_path}}/test-mappings.json (create if first batch).",
+      "completionCondition": "All files in batch mapped. Mappings saved to workspace.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files_mapped": {
+            "type": "number",
+            "description": "Number of test files processed in this batch"
+          },
+          "tests_mapped": {
+            "type": "number",
+            "description": "Number of individual test/it blocks mapped"
+          },
+          "unmapped_count": {
+            "type": "number",
+            "description": "Number of tests that could not be mapped to any behavior"
+          }
+        },
+        "required": [
+          "files_mapped",
+          "tests_mapped",
+          "unmapped_count"
+        ]
+      },
+      "connections": {
+        "success": "verify-batch"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-batch",
+      "directive": "Verify batch {{current_batch}} mapping quality.\n\nSpot-check 3 random mappings from this batch:\n1. Read the actual test code\n2. Confirm behavior_id matches what test actually tests\n3. Confirm aspect is correct\n4. Check assertions list matches actual expect() calls\n\nSave any issues to {{workspace_path}}/batch-issues.json",
+      "completionCondition": "Batch verified. Issues saved. issues_count reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "checked_count": {
+            "type": "number",
+            "description": "Number of mappings spot-checked"
+          }
+        },
+        "required": [
+          "issues_count",
+          "checked_count"
+        ],
+        "globalInputs": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "check-batch-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-batch-issues",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "inc-batch-fix-attempts",
+        "false": "increment-batch"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "inc-batch-fix-attempts",
+      "expressions": [
+        "batch_fix_attempts = {batch_fix_attempts} + 1"
+      ],
+      "connections": {
+        "default": "fix-batch"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-batch",
+      "directive": "Fix batch mapping issues from {{workspace_path}}/batch-issues.json\n\nRe-read the actual test files and correct mappings:\n- Wrong behavior_id: re-analyze what test actually tests\n- Wrong aspect: check if happy_path vs error_handling etc.\n- Missing assertions: re-read test and list actual expect() calls\n\nUpdate {{workspace_path}}/test-mappings.json with corrections.\nReset batch_fix_attempts counter if issues resolved.",
+      "completionCondition": "Batch issues fixed. Mappings updated.",
+      "maxRetries": 3,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fixes_applied": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "verify-batch",
+        "maxRetriesExceeded": "ask-user-batch-skip"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "increment-batch",
+      "expressions": [
+        "current_batch = {current_batch} + 1",
+        "batch_fix_attempts = 0"
+      ],
+      "connections": {
+        "default": "check-batches-remaining"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "resolve-unmapped",
+      "directive": "Resolve UNMAPPED tests.\n\nRead {{workspace_path}}/test-mappings.json and find all tests with behavior_id = 'UNMAPPED'.\n\nFor each:\n1. If test maps to a missing behavior → ADD behavior to taxonomy (update feature-taxonomy.json)\n2. If test is infrastructure/helper test → mark as 'INFRA'\n3. If test references deleted functionality → mark as 'ORPHAN'\n\nUpdate test-mappings.json with resolved mappings.\nReport counts of each resolution type.",
+      "completionCondition": "All UNMAPPED tests resolved. Mappings and taxonomy updated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "added_behaviors": {
+            "type": "number"
+          },
+          "infra_tests": {
+            "type": "number"
+          },
+          "orphan_tests": {
+            "type": "number"
+          },
+          "still_unmapped": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "added_behaviors",
+          "infra_tests",
+          "orphan_tests",
+          "still_unmapped"
+        ]
+      },
+      "connections": {
+        "success": "build-coverage-matrix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "build-coverage-matrix",
+      "directive": "Build Feature × Level Coverage Matrix.\n\nRead {{workspace_path}}/test-mappings.json and {{workspace_path}}/feature-taxonomy.json.\n\nFor each behavior, count how many tests cover it at each level:\n| Behavior ID | Unit | Workflow | Integration | API | MCP | E2E |\n\nSave matrix to {{workspace_path}}/coverage-matrix.json\n\nIdentify:\n- Behaviors with coverage at 3+ levels (potential cross-level redundancy)\n- Behaviors with 2+ tests at same level (potential same-level redundancy)\n- Behaviors with 0 tests (coverage gaps)",
+      "completionCondition": "Coverage matrix built and saved. Statistics reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_behaviors": {
+            "type": "number"
+          },
+          "multi_level_count": {
+            "type": "number",
+            "description": "Behaviors with 3+ levels covered"
+          },
+          "same_level_multi": {
+            "type": "number",
+            "description": "Behaviors with 2+ tests at one level"
+          },
+          "gap_count": {
+            "type": "number",
+            "description": "Behaviors with 0 tests"
+          }
+        },
+        "required": [
+          "total_behaviors",
+          "multi_level_count",
+          "same_level_multi",
+          "gap_count"
+        ]
+      },
+      "connections": {
+        "success": "detect-redundancies"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "detect-redundancies",
+      "directive": "Detect redundancies using 4 rules.\n\nRead coverage matrix from {{workspace_path}}/coverage-matrix.json and test mappings from {{workspace_path}}/test-mappings.json.\n\nApply redundancy detection rules from the methodology:\n{{methodology}}\n\nFor each behavior with potential redundancy:\n\nRule R1 (Same-Level Subset): If test A on same level checks strict subset of test B → A is redundant.\nRule R2 (Cross-Level Full Overlap): If test at L1 checks EXACTLY same behavior as L2, but L1 is faster → L2 potentially redundant. ONLY if L2 adds NOTHING unique.\nRule R3 (Incidental Coverage): If behavior only checked as side effect → not real coverage.\nRule R4 (Aspect Coverage): Different aspects ≠ redundancy.\n\nFor EACH finding, read BOTH tests to confirm. Generate evidence.\n\nSave findings to {{workspace_path}}/redundancy-findings.json with structure:\n[\n  {\n    \"behavior_id\": \"...\",\n    \"redundancy_type\": \"same_level_subset|cross_level_overlap|incidental\",\n    \"tests\": [{\"file\": \"...\", \"test\": \"...\", \"role\": \"SUBSET|SUPERSET|REDUNDANT|KEEP\"}],\n    \"recommendation\": \"DELETE|MERGE|KEEP\",\n    \"confidence\": \"high|medium|low\",\n    \"evidence\": \"detailed explanation\"\n  }\n]\n\nIMPORTANT — Avoid False Positives:\n{{anti_patterns}}",
+      "completionCondition": "Redundancy findings saved. All findings have evidence from reading actual test code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_findings": {
+            "type": "number",
+            "description": "Total redundancy findings"
+          },
+          "high_confidence": {
+            "type": "number",
+            "description": "Number of HIGH confidence findings"
+          },
+          "medium_confidence": {
+            "type": "number",
+            "description": "Number of MEDIUM confidence findings"
+          },
+          "low_confidence": {
+            "type": "number",
+            "description": "Number of LOW confidence findings"
+          },
+          "by_type": {
+            "type": "object",
+            "description": "Counts by type, e.g. {\"same_level_subset\": 5, \"cross_level_overlap\": 3, \"incidental\": 2}"
+          }
+        },
+        "required": [
+          "total_findings",
+          "high_confidence",
+          "medium_confidence",
+          "low_confidence"
+        ]
+      },
+      "connections": {
+        "success": "sample-for-verification"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "sample-for-verification",
+      "directive": "Select random 15-20% of redundancy findings for cross-verification.\n\nRead {{workspace_path}}/redundancy-findings.json.\n\nSelect a random sample (15-20% of total findings, minimum 5).\nPrioritize: include at least some from each redundancy_type and confidence level.\n\nSave sample to {{workspace_path}}/verification-sample.json",
+      "completionCondition": "Verification sample selected and saved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_findings": {
+            "type": "number"
+          },
+          "sample_size": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_findings",
+          "sample_size"
+        ]
+      },
+      "connections": {
+        "success": "verify-sample"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-sample",
+      "directive": "Cross-verify sampled findings.\n\nFor each finding in {{workspace_path}}/verification-sample.json:\n\n{{verification_prompt}}\n\nBe SKEPTICAL — try to find reasons the finding might be WRONG.\nLook for subtle differences between tests that the original analysis might have missed.\n\nFor each sample, record: AGREE or DISAGREE with reasoning.\n\nCalculate disagree_rate = disagreements / total_sample.\n\nSave results to {{workspace_path}}/verification-results.json\n\nIMPORTANT — Common False Positives to Watch For:\n{{anti_patterns}}",
+      "completionCondition": "All samples verified. Disagree rate calculated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agree_count": {
+            "type": "number",
+            "description": "Number of findings verified as correct"
+          },
+          "disagree_count": {
+            "type": "number",
+            "description": "Number of findings identified as false positives"
+          }
+        },
+        "required": [
+          "agree_count",
+          "disagree_count",
+          "disagree_rate"
+        ],
+        "globalInputs": [
+          "disagree_rate"
+        ]
+      },
+      "connections": {
+        "success": "check-verification"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-verification",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "disagree_rate"
+        },
+        "right": 0.2
+      },
+      "connections": {
+        "true": "apply-decision-framework",
+        "false": "inc-verify-rounds"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "inc-verify-rounds",
+      "expressions": [
+        "verify_rounds = {verify_rounds} + 1"
+      ],
+      "connections": {
+        "default": "cleanup-false-positives"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "cleanup-false-positives",
+      "directive": "Cross-verification disagreement rate is too high (≥20%).\n\nRead {{workspace_path}}/verification-results.json.\n\nAnalyze patterns in DISAGREE findings:\n1. Which redundancy types have most disagreements?\n2. What systematic errors are occurring?\n3. Are the detection rules too aggressive?\n\nRemove confirmed false positives from {{workspace_path}}/redundancy-findings.json.\nAdjust detection criteria if a pattern of errors is found.\n\nRe-run with cleaned findings (loop back to sample-for-verification).",
+      "completionCondition": "False positives removed. Findings cleaned up.",
+      "maxRetries": 3,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "removed_count": {
+            "type": "number"
+          },
+          "patterns_found": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "removed_count"
+        ]
+      },
+      "connections": {
+        "success": "sample-for-verification",
+        "maxRetriesExceeded": "approve-decisions"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "apply-decision-framework",
+      "directive": "Apply Decision Framework to all confirmed findings.\n\n{{decision_framework}}\n\nRead verified findings from {{workspace_path}}/redundancy-findings.json.\n\nFor EACH finding, apply the decision tree:\n- Step 1: Same-Level → subset? merge? keep?\n- Step 2: Cross-Level → higher adds value? critical? delete?\n- Step 3: Subset → same level? extract edge case?\n\nAlso perform Gap Analysis — identify behaviors with 0 or insufficient test coverage.\n\nSave decisions to {{workspace_path}}/decisions.json with structure:\n[\n  {\n    \"behavior_id\": \"...\",\n    \"action\": \"DELETE|MERGE|KEEP|REWRITE\",\n    \"target_tests\": [\"file:testname\"],\n    \"confidence\": \"HIGH|MEDIUM|LOW\",\n    \"rationale\": \"...\"\n  }\n]\n\nSave gaps to {{workspace_path}}/coverage-gaps.json\n\nIf re-running after user rejection, incorporate this feedback: {{user_feedback}}",
+      "completionCondition": "Decisions and gaps saved. All decisions have rationale.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "delete_count": {
+            "type": "number",
+            "description": "Number of tests to DELETE"
+          },
+          "merge_count": {
+            "type": "number",
+            "description": "Number of test groups to MERGE"
+          },
+          "keep_count": {
+            "type": "number",
+            "description": "Number of tests to KEEP unchanged"
+          },
+          "rewrite_count": {
+            "type": "number",
+            "description": "Number of tests to REWRITE"
+          },
+          "gap_count": {
+            "type": "number",
+            "description": "Number of coverage gaps identified"
+          }
+        },
+        "required": [
+          "delete_count",
+          "merge_count",
+          "keep_count",
+          "rewrite_count",
+          "gap_count"
+        ]
+      },
+      "connections": {
+        "success": "approve-decisions"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-decisions",
+      "directive": "Present decisions to user for approval.\n\nShow summary:\n1. DELETE: N tests (list with rationale for each)\n2. MERGE: N test groups (list with target)\n3. REWRITE: N tests (list with what needs changing)\n4. KEEP: N tests (no changes needed)\n5. Coverage gaps: N (list priorities)\n\nGroup by confidence: HIGH (auto-apply), MEDIUM (need approval), LOW (for review).\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback.",
+      "completionCondition": "User reviewed decisions and provided approval",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "approval"
+        ],
+        "globalInputs": [
+          "approval",
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-decisions-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "apply-changes",
+      "directive": "Apply approved changes to test files.\n\nRead {{workspace_path}}/decisions.json.\n\nFor each decision with action DELETE:\n- Remove the test (it block) or entire file if all tests deleted\n- Record what was deleted\n\nFor each MERGE:\n- Combine tests into single data-driven test\n- Record before/after\n\nFor each REWRITE:\n- Apply the specified rewrite\n- Record changes\n\nSave changelog to {{workspace_path}}/changelog.json",
+      "completionCondition": "All approved changes applied. Changelog saved.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files_modified": {
+            "type": "number",
+            "description": "Number of test files modified"
+          },
+          "files_deleted": {
+            "type": "number"
+          },
+          "tests_removed": {
+            "type": "number",
+            "description": "Total number of test blocks removed"
+          },
+          "tests_merged": {
+            "type": "number"
+          },
+          "tests_rewritten": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "files_modified",
+          "tests_removed"
+        ]
+      },
+      "connections": {
+        "success": "verify-tests-pass"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-tests-pass",
+      "directive": "Verify all tests still pass after changes.\n\nRun the project's test suite. Use the project's standard test command.\n\nIf tests fail, save failures to {{workspace_path}}/test-failures.json with:\n- Failed test file\n- Failed test name\n- Error message\n- Which change likely caused the failure\n\nReport pass/fail status.",
+      "completionCondition": "Tests executed. Pass/fail status reported.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "total_tests": {
+            "type": "number",
+            "description": "Total number of tests executed"
+          },
+          "passed": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "all_pass",
+          "total_tests"
+        ],
+        "globalInputs": [
+          "all_pass"
+        ]
+      },
+      "connections": {
+        "success": "check-tests-pass"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-tests-pass",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "all_pass"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "generate-report",
+        "false": "inc-test-fix-attempts"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "inc-test-fix-attempts",
+      "expressions": [
+        "test_fix_attempts = {test_fix_attempts} + 1"
+      ],
+      "connections": {
+        "default": "fix-test-failures"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-test-failures",
+      "directive": "Fix test failures caused by audit changes.\n\nRead {{workspace_path}}/test-failures.json.\n\nFor each failure:\n1. Identify which change caused it\n2. Fix the issue — either adjust the change or revert it\n3. Record the fix\n\nDo NOT revert changes unless the test failure reveals the change was wrong.\nUpdate changelog with fixes.",
+      "completionCondition": "Test failures addressed. Fixes applied.",
+      "maxRetries": 3,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fixes_applied": {
+            "type": "number"
+          },
+          "reverted_changes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "verify-tests-pass",
+        "maxRetriesExceeded": "ask-user-test-failures"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-report",
+      "directive": "Generate comprehensive HTML audit report.\n\nRead all workspace artifacts:\n- {{workspace_path}}/feature-taxonomy.json\n- {{workspace_path}}/test-mappings.json\n- {{workspace_path}}/coverage-matrix.json\n- {{workspace_path}}/redundancy-findings.json\n- {{workspace_path}}/decisions.json\n- {{workspace_path}}/coverage-gaps.json\n- {{workspace_path}}/changelog.json\n\nCreate HTML report with sections:\n1. Executive Summary (tests before/after, changes made)\n2. Feature Taxonomy (interactive tree)\n3. Coverage Matrix (table with color coding)\n4. Redundancy Findings (detailed list with evidence)\n5. Decisions Applied (DELETE/MERGE/REWRITE with rationale)\n6. Coverage Gaps (priorities and recommendations)\n7. Methodology (how analysis was done)\n\nUpload HTML report using Moira artifacts.\nSave report URL.",
+      "completionCondition": "HTML report generated and uploaded. Report URL available.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "report_url",
+          "tests_before",
+          "tests_after",
+          "changes_applied"
+        ],
+        "globalInputs": [
+          "report_url",
+          "tests_before",
+          "tests_after",
+          "changes_applied"
+        ]
+      },
+      "connections": {
+        "success": "notify-completion"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-completion",
+      "message": "✅ Test Suite Audit v3.0 Complete\n\nTests: {{tests_before}} → {{tests_after}}\nChanges: {{changes_applied}}\nReport: {{report_url}}",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "report_url",
+        "tests_before",
+        "tests_after",
+        "changes_applied"
+      ]
+    },
+    {
+      "type": "condition",
+      "id": "check-setup-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "build-feature-taxonomy",
+        "false": "collect-project-info"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-taxonomy-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "plan-mapping-batches",
+        "false": "build-feature-taxonomy"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-decisions-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "apply-changes",
+        "false": "apply-decision-framework"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-batch-skip",
+      "directive": "Batch mapping fix loop reached maximum 3 iterations. Some mapping issues remain unresolved for batch {{current_batch}}.\n\nShow the user the unresolved issues from {{workspace_path}}/batch-issues.json.\n\nAsk user:\n1. skip - Skip this batch and continue with next batch (unresolved mappings will be treated as UNMAPPED)\n2. abort - Stop the audit\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said skip → decision = \"skip\". If user said abort → decision = \"abort\".",
+      "completionCondition": "User decision received",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "check-batch-skip-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-batch-skip-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "increment-batch",
+        "false": "end"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-test-failures",
+      "directive": "Test fix loop reached maximum 3 iterations. Tests are still failing after changes.\n\nShow the user the remaining failures from {{workspace_path}}/test-failures.json.\n\nPresent options:\n1. report_with_warnings - Generate report noting that tests are failing (changes remain applied)\n2. revert_all - Revert ALL audit changes and generate report showing what WOULD have been changed\n3. abort - Stop the audit immediately\n\nCRITICALLY IMPORTANT: Report the user's exact choice.",
+      "completionCondition": "User decision received",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "check-test-failure-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-test-failure-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "end",
+        "false": "generate-report"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "methodology": {
+      "type": "string",
+      "description": "Full methodology for feature-centric test audit",
+      "default": "# Методология автоматизированного Feature Mapping для аудита тестов\n\n## Обзор\n\nМетодология предназначена для LLM-агента (Claude/GPT), работающего через Moira workflow.\nЦель: построить Feature Map проекта и найти реальные дублирования и пробелы в покрытии.\n\n---\n\n## Phase 1: Feature Taxonomy (автоматическая)\n\n### Шаг 1.1: Извлечение features из production code\n\nАгент анализирует проект и строит **Feature Taxonomy** — иерархическое дерево features:\n\n```\nDomain → Feature Group → Feature → Behavior\n```\n\n**Промпт для агента:**\n```\nПрочитай структуру проекта (routes, handlers, services, repositories).\nПострой Feature Taxonomy в формате:\n\n[\n  {\n    \"domain\": \"auth\",\n    \"features\": [\n      {\n        \"id\": \"auth.registration\",\n        \"name\": \"User Registration\", \n        \"behaviors\": [\n          \"auth.registration.email_signup\",\n          \"auth.registration.gdpr_consent\",\n          \"auth.registration.email_verification\",\n          \"auth.registration.duplicate_email_rejection\"\n        ]\n      }\n    ]\n  }\n]\n\nПравила:\n- Behavior = конкретное наблюдаемое поведение системы\n- Behavior формулируется как \"система делает X когда Y\"\n- Один behavior = одна тестируемая вещь\n- НЕ включай implementation details, только observable behavior\n```\n\n**Как избежать галлюцинаций:** Агент ДОЛЖЕН указать конкретный файл/функцию/route для каждого behavior. Если не может — behavior не существует.\n\n### Шаг 1.2: Валидация taxonomy\n\nАгент проверяет taxonomy:\n- Каждый behavior имеет ссылку на production code\n- Нет дубликатов behaviors между feature groups\n- Taxonomy покрывает все основные routes/endpoints проекта\n\n---\n\n## Phase 2: Test-to-Feature Mapping\n\n### Шаг 2.1: Per-file analysis\n\nАгент читает КАЖДЫЙ тест-файл (группируя по файлам, не по отдельным тестам) и для каждого test block определяет:\n\n**Промпт для агента (per-file):**\n```\nПрочитай тестовый файл: {filepath}\n\nДля КАЖДОГО test/it блока определи:\n\n{\n  \"file\": \"{filepath}\",\n  \"test_name\": \"exact name from describe > test\",\n  \"level\": \"unit|workflow|integration|api|mcp|e2e\",\n  \"behavior_id\": \"auth.registration.email_signup\",  // из Feature Taxonomy\n  \"aspect\": \"happy_path|edge_case|error_handling|performance|security\",\n  \"what_verifies\": \"одно предложение: что конкретно этот тест доказывает\",\n  \"assertions\": [\"list of actual expect/assert calls\"],\n  \"confidence\": \"high|medium|low\"  // насколько уверен в маппинге\n}\n\nПравила:\n1. behavior_id ДОЛЖЕН быть из Feature Taxonomy (Phase 1)\n2. Если тест не маппится ни к одному behavior — используй \"UNMAPPED\" + опиши почему\n3. Если тест маппится к нескольким behaviors — создай запись для каждого\n4. confidence: high = тест явно тестирует behavior, low = тест косвенно затрагивает\n5. assertions: перечисли РЕАЛЬНЫЕ expect() вызовы, не описывай абстрактно\n```\n\n### Шаг 2.2: Batch processing\n\n260 файлов обрабатываются батчами по ~10-15 файлов:\n- Группировка по domain (auth/ → один батч, workflow/ → другой)\n- Результаты накапливаются в JSON файл\n- Каждый батч проверяется на UNMAPPED tests (их нужно разрешить)\n\n### Шаг 2.3: UNMAPPED resolution\n\nДля каждого UNMAPPED теста:\n- Если тест реально не маппится — возможно behavior отсутствует в taxonomy → добавить\n- Если тест тестирует infrastructure (helpers, utils) — маркировать как \"INFRA\"\n- Если тест устарел и тестирует удалённый функционал — маркировать как \"ORPHAN\"\n\n---\n\n## Phase 3: Redundancy Analysis\n\n### Шаг 3.1: Behavior Coverage Matrix\n\nСтроим матрицу: behavior × test level.\n\n```\n| Behavior ID                    | Unit | Workflow | Integration | API | MCP | E2E |\n|-------------------------------|------|----------|-------------|-----|-----|-----|\n| auth.registration.email_signup |  2   |    0     |      1      |  1  |  0  |  1  |\n| wf.execution.linear_flow      |  0   |    0     |      2      |  0  |  2  |  0  |\n```\n\n### Шаг 3.2: Redundancy Detection Rules\n\nАгент применяет правила для каждого behavior:\n\n**Rule R1: Same-Level Subset**\nЕсли тест A на том же уровне проверяет строгое подмножество того что проверяет тест B → тест A избыточен.\nПример: 2-step linear (subset) внутри 5-step linear.\n\n**Rule R2: Cross-Level Full Overlap**  \nЕсли тест на уровне L1 проверяет РОВНО то же поведение что тест на L2, но L1 быстрее и надёжнее → тест на L2 потенциально избыточен.\nПример: unit тестирует handler returns pause → integration тестирует executor returns directive (добавляет orchestration слой → НЕ избыточен).\n\n**Rule R3: Incidental Coverage**\nЕсли behavior проверяется только как побочный эффект другого теста (не отдельный test block) → coverage ненадёжна, не считается.\nПример: \"Workflow completed\" проверяется в 6 тестах, но ни один не тестирует конкретно completion logic.\n\n**Rule R4: Aspect Coverage**\nЕсли behavior покрыт только happy_path на всех уровнях, но error_handling только на одном → НЕ redundancy, это gap.\n\n### Шаг 3.3: Redundancy Report\n\nДля каждого найденного redundancy:\n\n```json\n{\n  \"behavior_id\": \"wf.execution.linear_flow\",\n  \"redundancy_type\": \"same_level_subset\",\n  \"tests\": [\n    {\"file\": \"integration/workflow-execution.test.ts\", \"test\": \"2-step linear\", \"role\": \"SUBSET\"},\n    {\"file\": \"integration/essential-cases-split.test.ts\", \"test\": \"3-step linear\", \"role\": \"SUPERSET\"}\n  ],\n  \"recommendation\": \"DELETE subset — 3-step test covers everything 2-step does\",\n  \"confidence\": \"high\",\n  \"evidence\": \"2-step tests: start→step1→complete. 3-step tests: start→step1→step2→step3→complete. 2-step is strict subset.\"\n}\n```\n\n---\n\n## Phase 4: Cross-Verification\n\n### Шаг 4.1: Sampling\n\nСлучайная выборка 15-20% findings для ручной верификации другим агентом (или тем же с другим seed).\n\n**Промпт для верификатора:**\n```\nТебе дан finding:\n- Behavior: {behavior_id}\n- Утверждение: тест A избыточен потому что тест B покрывает то же самое\n- Evidence: {evidence}\n\nПрочитай ОБА теста. Ответь:\n1. AGREE — тест A действительно избыточен\n2. DISAGREE — тест A проверяет что-то что тест B НЕ проверяет\n   Укажи что именно тест A проверяет дополнительно.\n```\n\n### Шаг 4.2: Threshold\n\n- <20% disagreement → findings accepted\n- ≥20% disagreement → пересмотр rules, cleanup false positives, повтор\n\n---\n\n## Phase 5: Gap Analysis (бонус)\n\nFeature Map также показывает GAPS — behaviors без тестов или с тестами только на одном уровне:\n\n```json\n{\n  \"behavior_id\": \"auth.registration.rate_limiting\",\n  \"coverage\": {\"unit\": 0, \"integration\": 0, \"api\": 0, \"e2e\": 0},\n  \"priority\": \"high\",\n  \"recommendation\": \"ADD API test for registration rate limiting\"\n}\n```\n\n---\n\n## Output Schema\n\nФинальный результат — JSON файл с 4 секциями:\n\n```json\n{\n  \"taxonomy\": [...],           // Feature Taxonomy\n  \"test_mapping\": [...],       // Per-test behavior mapping\n  \"redundancies\": [...],       // Confirmed redundancies with recommendations\n  \"gaps\": [...],               // Coverage gaps\n  \"stats\": {\n    \"total_tests\": 3145,\n    \"mapped_tests\": 3100,\n    \"unmapped_tests\": 45,\n    \"redundancy_candidates\": 150,\n    \"confirmed_redundancies\": 80,\n    \"coverage_gaps\": 30\n  }\n}\n```\n\n---\n\n## Ключевые отличия от v2.0\n\n| v2.0 | v3.0 |\n|------|------|\n| 10 метрических алгоритмов | LLM читает каждый тест |\n| Сравнивает тесты МЕЖДУ собой | Маппит тесты к FEATURES |\n| Не видит cross-level | Cross-level — основной фокус |\n| Static parsing (regex) | Semantic understanding |\n| 55% false positive | Ожидается <15% |\n| Находит пустые тесты | Находит реальное дублирование |\n\n---\n\n## Масштабирование\n\n### Для текущего проекта (3145 тестов, 260 файлов):\n- Phase 1 (Taxonomy): ~1 батч, агент читает routes/handlers\n- Phase 2 (Mapping): ~20 батчей по 13 файлов \n- Phase 3 (Analysis): автоматическая матрица + rules\n- Phase 4 (Verification): ~20 samples\n- **Итого: ~25 agent interactions через workflow**\n\n### Для произвольного проекта:\n- Phase 1 адаптируется: агент сам определяет структуру проекта\n- Phase 2-5 универсальны\n- Taxonomy schema может быть pre-defined для типовых проектов (REST API, CLI tool, etc.)\n\n---\n\n## Anti-patterns (что НЕ делать)\n\n1. **НЕ** маппить по import paths — тест может импортить helper но тестировать другой feature\n2. **НЕ** считать describe block = feature — один describe может содержать тесты для разных behaviors  \n3. **НЕ** маппить по имени файла — `auth.test.ts` может тестировать и registration и login\n4. **НЕ** считать одинаковые assertions = дублирование — `expect(status).toBe(200)` в разных контекстах тестирует разное\n5. **НЕ** удалять тесты на высшем уровне только потому что есть unit тест — E2E тестирует интеграцию всех слоёв\n"
+    },
+    "decision_framework": {
+      "type": "string",
+      "description": "Decision tree for DELETE/MERGE/KEEP decisions",
+      "default": "# Decision Framework: Критерии избыточности тестов\n\n## Тестовая пирамида для MCP Moira\n\nПроект MCP Moira — серверное приложение с MCP API, REST API и Web UI.\nТестовые уровни (снизу вверх):\n\n```\n         ┌─────────┐\n         │   E2E   │  Browser + Docker container\n         │  (501)  │  Самый медленный, тестирует UI + API + DB\n         ├─────────┤\n         │   API   │  HTTP requests to Docker container\n         │  (345)  │  Тестирует REST endpoints\n         ├─────────┤\n         │  MCP    │  MCP protocol client → Docker container\n         │  (231)  │  Тестирует MCP tools through full stack\n         ├─────────┤\n         │  Integ  │  Direct code calls + local DB (test-integration.db)\n         │  (386)  │  Тестирует services/repositories together\n         ├─────────┤\n         │Workflow │  Workflow engine + in-process storage\n         │  (641)  │  Тестирует workflow scenarios\n         ├─────────┤\n         │  Unit   │  In-memory, no external deps\n         │ (1018)  │  Тестирует individual functions/classes\n         └─────────┘\n```\n\n### Какой уровень что добавляет\n\n| Уровень | Что тестирует уникально |\n|---------|------------------------|\n| Unit | Алгоритмическую корректность, edge cases, error handling в изоляции |\n| Workflow | Корректность workflow scenarios (проходимость графов, transitions) |\n| Integration | Взаимодействие компонентов, DB persistence, transactions |\n| MCP | MCP protocol layer, message formatting, tool argument parsing |\n| API | HTTP layer, auth middleware, rate limiting, CORS |\n| E2E | UI rendering, browser interactions, full user flows |\n\n---\n\n## Дерево решений\n\n### Step 0: Классификация finding\n\n```\nFinding: тесты T1 и T2 проверяют одно behavior B\n         T1 на уровне L1, T2 на уровне L2\n\nОпредели тип:\n├── L1 == L2 → SAME-LEVEL (go to Step 1)\n├── L1 != L2 → CROSS-LEVEL (go to Step 2)\n└── T1 содержит T2 или наоборот → SUBSET (go to Step 3)\n```\n\n### Step 1: Same-Level Redundancy\n\n```\nДва теста на одном уровне проверяют одно behavior\n\nQ1: Тест T1 проверяет подмножество того что T2?\n├── YES → DELETE T1 (subset)\n│         Пример: 2-step linear test ⊂ 5-step linear test\n│\n├── NO, T1 и T2 проверяют РАЗНЫЕ aspects (happy_path vs error)?\n│   └── KEEP BOTH — разные aspects\n│       Пример: \"login success\" + \"login wrong password\"\n│\n├── NO, T1 и T2 проверяют ОДИНАКОВЫЙ aspect с разными data?\n│   Q2: Разные data покрывают разные code paths?\n│   ├── YES → KEEP BOTH — параметрические вариации\n│   │         Пример: condition(true) + condition(false)\n│   └── NO → MERGE into data-driven test\n│             Пример: slug \"a-b\" + slug \"x-y\" (same code path)\n│\n└── NO, T1 и T2 буквально тестируют то же самое?\n    → DELETE тот что слабее (fewer assertions, less specific)\n```\n\n### Step 2: Cross-Level Redundancy\n\n```\nТесты T1 (level L1) и T2 (level L2) проверяют behavior B\nL1 \"ниже\" L2 (unit < workflow < integration < mcp < api < e2e)\n\nQ1: Тест T2 (higher level) проверяет ЧТО-ТО что T1 НЕ может проверить?\n├── YES → KEEP BOTH\n│   Примеры что НЕЛЬЗЯ проверить на lower level:\n│   - Unit → не проверит HTTP status code (нужен API/MCP)\n│   - Unit → не проверит MCP message formatting (нужен MCP)\n│   - Integration → не проверит browser rendering (нужен E2E)\n│   - Integration → не проверит auth middleware (нужен API)\n│\n├── NO → Q2: T2 (higher) критичен для confidence?\n│   ├── YES → KEEP but MARK as \"smoke test\"\n│   │   Ситуации когда higher-level нужен несмотря на overlap:\n│   │   - Auth flows: ВСЕГДА нужен E2E (security critical)\n│   │   - Payment: ВСЕГДА нужен integration + E2E\n│   │   - Data integrity: ВСЕГДА нужен integration\n│   │\n│   └── NO → DELETE T2 (higher level)\n│       Ситуации когда higher-level можно удалить:\n│       - E2E тестирует internal logic без UI interaction\n│       - API тестирует бизнес-логику без HTTP specifics\n│       - MCP тестирует computation без MCP protocol specifics\n\nQ3 (для KEEP BOTH): Оба теста специфичны для своего уровня?\n├── T1 (lower) тестирует внутреннюю логику → KEEP\n├── T2 (higher) тестирует transport/integration layer → KEEP\n└── T2 (higher) тестирует ту же внутреннюю логику через HTTP → CANDIDATE for DELETE\n```\n\n### Step 3: Subset Redundancy\n\n```\nТест T1 является подмножеством T2 (T1 ⊂ T2)\n\nQ1: T1 и T2 на одном уровне?\n├── YES → DELETE T1\n│         Если T1 содержит уникальный edge case → EXTRACT и добавить к T2\n│\n└── NO → Q2: T1 на lower level?\n    ├── YES → KEEP T1 (быстрее, точнее в failure reporting)\n    │         T2 — smoke test на higher level\n    │\n    └── NO → DELETE T1 (higher level subset of lower level = useless)\n```\n\n---\n\n## Матрица решений: конкретные паттерны\n\n| Паттерн | L1 | L2 | Решение | Обоснование |\n|---------|----|----|---------|-------------|\n| Валидация slug | Unit (validateSlug) | API (POST /workflows) | **KEEP both** | Unit: edge cases (symbols, length). API: HTTP layer, auth, response format |\n| Валидация slug | Unit (validateSlug) | E2E (form submission) | **KEEP both** | E2E: UI validation messages, form behavior |\n| Валидация slug | API (POST /workflows) | E2E (form submission) | **Review** | Если E2E только проверяет \"success message\" → может быть избыточен если API test покрывает |\n| Linear execution | Integration (3-step) | Integration (2-step) | **DELETE 2-step** | Strict subset |\n| Linear execution | Integration | MCP | **KEEP both** | Integration: executor. MCP: protocol+formatting |\n| Condition branch | Unit (handler) | Integration (executor) | **KEEP both** | Разные слои |\n| Condition branch | Integration | MCP | **Review** | Если MCP test не проверяет MCP-specific formatting → DELETE MCP |\n| Auth login | Unit (hash check) | E2E (login form) | **KEEP both** | E2E: UI flow, session, redirect. Unit: crypto |\n| Auth login | API (POST /auth/login) | E2E (login form) | **KEEP both** | API: response codes, tokens. E2E: UI flow |\n| Error message format | Unit (formatError) | MCP (tool returns error) | **KEEP both** | MCP: protocol-specific formatting |\n| Workflow list | Unit (repository) | API (GET /workflows) | **KEEP both** | API: pagination, auth, filtering |\n| Workflow list | API (GET /workflows) | E2E (workflow explorer) | **Review** | E2E нужен если тестирует UI rendering, не нужен если только data display |\n\n---\n\n## Принципы DELETE\n\n### Когда БЕЗОПАСНО удалять тест\n\n1. **Strict subset на том же уровне** — меньший тест ничего не добавляет\n2. **Higher level тестирует internal logic** — E2E тест без UI interactions, API тест без HTTP specifics\n3. **Тест с 0 unique assertions** — всё что он проверяет, проверяется другими тестами\n4. **Orphan test** — тестирует удалённый функционал\n5. **Infrastructure test без value** — тестирует что `expect(true).toBe(true)`\n\n### Когда ОПАСНО удалять тест\n\n1. **Единственный тест для behavior** — даже если избыточен по coverage, он единственный regression guard\n2. **Security-critical behavior** — auth, permissions, rate limiting — лучше overduplicate\n3. **Тест с уникальными edge cases** — даже если \"subset\", edge case может быть уникальным\n4. **E2E smoke тест** — даже если логика покрыта unit, E2E доказывает что система работает end-to-end\n\n### Когда MERGE\n\n1. **Несколько тестов на одном уровне проверяют вариации одного behavior** → data-driven test\n2. **Setup код дублируется** → общий describe block с shared setup\n3. **Assertion списки частично совпадают** → один тест с полным списком assertions\n\n---\n\n## Confidence уровни\n\n| Confidence | Действие | Автоматически? |\n|-----------|----------|----------------|\n| HIGH | DELETE/MERGE | Да, после cross-verify |\n| MEDIUM | DELETE/MERGE | Только с human approval |\n| LOW | KEEP | Пометить для manual review |\n\n**HIGH confidence:**\n- Strict subset (тест A проверяет {x}, тест B проверяет {x, y, z})\n- Identical assertions на одном уровне\n- Test with 0 assertions\n\n**MEDIUM confidence:**\n- Cross-level overlap где оба тестируют \"одно behavior\" но на разных уровнях\n- E2E тест который \"вроде бы\" не добавляет ничего к API тесту\n\n**LOW confidence:**\n- Тесты проверяют \"related\" behaviors (не identical)\n- Трудно определить добавляет ли higher level value\n\n---\n\n## Специфика MCP Moira\n\n### Behaviors где ВСЕГДА нужен multi-level coverage\n\n1. **Auth** (login, registration, sessions) — Unit + API + E2E\n2. **Workflow execution** (start, step) — Unit + Integration + MCP\n3. **Data persistence** (save/load workflows, executions) — Unit + Integration\n4. **Access control** (admin, owner, shared) — Unit + API + E2E\n\n### Behaviors где достаточно одного уровня\n\n1. **Template processing** — Integration (tests actual resolution with real context)\n2. **Condition evaluation** — Unit (pure function, no external deps)\n3. **Slug/handle validation** — Unit (pure function)\n4. **UI layout/styling** — E2E only (no business logic)\n"
+    },
+    "taxonomy_prompt": {
+      "type": "string",
+      "description": "Prompt template for building Feature Taxonomy",
+      "default": "Read the project's production code structure (routes, handlers, services, repositories).\nBuild a Feature Taxonomy as hierarchical tree:\n\nDomain → Feature Group → Feature → Behavior\n\nOutput JSON array:\n[\n  {\n    \"domain\": \"domain_name\",\n    \"features\": [\n      {\n        \"id\": \"domain.feature_name\",\n        \"name\": \"Human-readable Feature Name\",\n        \"behaviors\": [\n          \"domain.feature_name.specific_behavior\"\n        ]\n      }\n    ]\n  }\n]\n\nRules:\n- Behavior = specific observable system behavior\n- Formulated as \"system does X when Y\"\n- One behavior = one testable thing\n- Do NOT include implementation details, only observable behavior\n- MUST reference concrete file/function/route for each behavior\n- If cannot reference production code — behavior does not exist"
+    },
+    "mapping_prompt": {
+      "type": "string",
+      "description": "Prompt template for per-file test mapping",
+      "default": "Read test file: {filepath}\n\nFor EACH test/it block determine:\n\n{\n  \"file\": \"{filepath}\",\n  \"test_name\": \"exact name from describe > test\",\n  \"level\": \"unit|workflow|integration|api|mcp|e2e\",\n  \"behavior_id\": \"domain.feature.behavior\",\n  \"aspect\": \"happy_path|edge_case|error_handling|performance|security\",\n  \"what_verifies\": \"one sentence: what specifically this test proves\",\n  \"assertions\": [\"list of actual expect/assert calls\"],\n  \"confidence\": \"high|medium|low\"\n}\n\nRules:\n1. behavior_id MUST be from Feature Taxonomy\n2. If test maps to no behavior — use \"UNMAPPED\" + describe why\n3. If test maps to multiple behaviors — create entry for each\n4. confidence: high = test explicitly tests behavior, low = test incidentally touches it\n5. assertions: list REAL expect() calls, not abstract descriptions"
+    },
+    "verification_prompt": {
+      "type": "string",
+      "description": "Prompt template for cross-verification",
+      "default": "Given finding:\n- Behavior: {behavior_id}\n- Claim: test A is redundant because test B covers the same\n- Evidence: {evidence}\n\nRead BOTH tests. Answer:\n1. AGREE — test A is truly redundant\n2. DISAGREE — test A verifies something test B does NOT\n   Specify what test A additionally verifies."
+    },
+    "taxonomy_fix_attempts": {
+      "type": "number",
+      "description": "Retry counter for taxonomy fix loop",
+      "default": 0
+    },
+    "batch_fix_attempts": {
+      "type": "number",
+      "description": "Retry counter for batch fix loop",
+      "default": 0
+    },
+    "verify_rounds": {
+      "type": "number",
+      "description": "Retry counter for cross-verification loop",
+      "default": 0
+    },
+    "test_fix_attempts": {
+      "type": "number",
+      "description": "Retry counter for test fix loop",
+      "default": 0
+    },
+    "current_batch": {
+      "type": "number",
+      "description": "Current batch index",
+      "default": 0
+    },
+    "total_batches": {
+      "type": "number",
+      "description": "Total number of batches",
+      "default": 0
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Path to audit workspace directory",
+      "default": ""
+    },
+    "anti_patterns": {
+      "type": "string",
+      "description": "Common false positive patterns to avoid",
+      "default": "Common False Positive Patterns — DO NOT flag these as redundant:\n\nFP1: Different Aspects Look Similar\nTests that use similar setup but verify different aspects (happy_path vs error_handling). Same HTTP call but different assertions = NOT redundant.\n\nFP2: Cross-Level Tests Serve Different Purposes\nUnit test for validation logic + API test for HTTP response codes testing the same feature. Unit tests edge cases in isolation, API tests integration. Both needed.\n\nFP3: Similar Names ≠ Same Test\n\"should create workflow\" in unit vs integration — unit tests repository directly, integration tests through service layer with DB. Different layers tested.\n\nFP4: Shared Setup ≠ Shared Test\nTests sharing beforeEach setup but testing different behaviors are NOT redundant even if 80% of code is shared.\n\nFP5: E2E Smoke ≠ Unit Duplicate\nE2E test that clicks through login flow is NOT a duplicate of unit test for password hashing. They test fundamentally different things despite both being \"auth tests\".\n\nFP6: Parameterized Variations\ntest.each with different inputs testing different code paths is NOT redundancy — each parameter hits different branches.\n\nFP7: Incidental Overlap\nTest A checks \"workflow completes\" as part of testing condition branching. Test B checks \"workflow completes\" as part of testing linear execution. Both need completion to run, but test DIFFERENT things.\n\nWhen in doubt: If deleting test A would NOT be caught by test B's failure — they are NOT redundant."
+    },
+    "user_feedback": {
+      "type": "string",
+      "description": "Global variable user_feedback"
+    },
+    "issues_count": {
+      "type": "number",
+      "description": "Number of issues found (0 = taxonomy ready)"
+    },
+    "disagree_rate": {
+      "type": "number",
+      "description": "Ratio of disagreements to total sample (0.0 to 1.0, NOT percentage). E.g., 3 disagree out of 20 = 0.15"
+    },
+    "all_pass": {
+      "type": "boolean",
+      "description": "true if all tests passed, false if any failed"
+    },
+    "tests_before": {
+      "type": "number",
+      "description": "Total tests before audit"
+    },
+    "tests_after": {
+      "type": "number",
+      "description": "Total tests after audit changes"
+    },
+    "changes_applied": {
+      "type": "number",
+      "description": "Total number of changes applied (delete + merge + rewrite)"
+    },
+    "report_url": {
+      "type": "string",
+      "description": "URL of uploaded HTML report"
+    },
+    "approval": {
+      "type": "string",
+      "description": "Global variable approval",
+      "enum": [
+        "no",
+        "yes"
+      ]
+    },
+    "decision": {
+      "type": "string",
+      "description": "User decision: skip this batch or abort audit",
+      "enum": [
+        "abort",
+        "skip"
+      ]
+    }
+  }
+}

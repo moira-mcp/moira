@@ -1,0 +1,1308 @@
+{
+  "slug": "test-generation",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "78021f41-f006-4af6-aede-d9a039810aaa",
+  "metadata": {
+    "name": "Test Generation",
+    "version": "1.8.1",
+    "description": "Workflow for QA/Tester role - helps create tests for code. Analyzes project and code, determines what to test (functions, classes, API endpoints), generates test cases with edge case coverage, writes automated tests using selected framework following project patterns."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "get-code"
+      }
+    },
+    {
+      "id": "get-code",
+      "type": "agent-directive",
+      "directive": "Get code for testing from user.\n\nAsk:\n1. Which file/module/function needs to be tested?\n2. Path to file or code directly\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask question and STOP\n- DO NOT fill fields until user explicitly responds\n- Record in user_response_text exactly what user wrote",
+      "completionCondition": "User provided code or file path",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "code_source",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "code_source",
+          "file_path",
+          "code_content",
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "analyze-project"
+      }
+    },
+    {
+      "id": "analyze-project",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{fix_project_iteration}} of up to {{max_self_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nAnalyze the project structure and testing requirements.\n\nRead the code provided in context and identify:\n1. Main modules and components\n2. Public APIs and functions\n3. Dependencies and integrations\n4. Existing test coverage (if any)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave analysis issues to `{{workspace_path}}/project-analysis-issues.md` with format:\n```\n# Project Analysis Issues\n\n1. [Issue description]\n2. [Issue description]\n...\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `analysis_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if analysis complete).",
+      "completionCondition": "Project analyzed, test information collected",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tests_exist": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Do tests exist in project"
+          },
+          "test_framework": {
+            "type": "string",
+            "description": "Found framework (Jest, Playwright, pytest, etc.)"
+          },
+          "naming_pattern": {
+            "type": "string",
+            "description": "Naming pattern (*.test.ts, *.spec.js, test_*.py)"
+          },
+          "project_analysis_summary": {
+            "type": "string",
+            "description": "Brief description of findings"
+          },
+          "project_analysis_valid": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether project analysis is complete and valid"
+          }
+        },
+        "required": [
+          "tests_exist",
+          "test_framework",
+          "naming_pattern",
+          "project_analysis_valid"
+        ],
+        "globalInputs": [
+          "test_directory",
+          "existing_helpers"
+        ]
+      },
+      "connections": {
+        "success": "check-project-analysis"
+      }
+    },
+    {
+      "id": "check-project-analysis",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "analyze-project.project_analysis_valid"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "determine-approach",
+        "false": "expr-inc-proj-fix"
+      }
+    },
+    {
+      "id": "fix-project-analysis",
+      "type": "agent-directive",
+      "directive": "Fix project analysis issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/project-analysis-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `analysis_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Investigate the cause\n3. Apply fix or gather missing information\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
+      "completionCondition": "Analysis completed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "project_analysis_fix_hints"
+        ],
+        "globalInputs": [
+          "project_analysis_fix_hints"
+        ]
+      },
+      "connections": {
+        "success": "analyze-project"
+      }
+    },
+    {
+      "id": "determine-approach",
+      "type": "agent-directive",
+      "directive": "Determine test creation approach based on project analysis.\n\n{{#if analyze-project.project_analysis_summary}}Project analysis: {{analyze-project.project_analysis_summary}}{{else}}Project analysis: Not available (analysis fix limit reached){{/if}}\nTests exist: {{analyze-project.tests_exist}}\nFramework: {{analyze-project.test_framework}}\n\nIf tests exist:\n- Suggest using existing patterns\n- Specify which helpers to reuse\n\nIf no tests:\n- Suggest test structure\n- Recommend framework based on project stack\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show suggestion and ask 'Do you confirm? (yes/no)'\n- DO NOT fill approach_approved until user explicitly responds\n- Record in user_response_text exactly what user answered\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed or rejected approach",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approach_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "User confirmed approach"
+          }
+        },
+        "required": [
+          "approach",
+          "approach_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "approach",
+          "recommended_framework",
+          "recommended_structure",
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-approach-approval"
+      }
+    },
+    {
+      "id": "route-approach-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "determine-approach.approach_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "analyze-structure",
+        "false": "revise-approach"
+      }
+    },
+    {
+      "id": "revise-approach",
+      "type": "agent-directive",
+      "directive": "User did not confirm approach.\n\nUser response: {{user_response_text}}\n\nClarify what needs to change and suggest alternative.",
+      "completionCondition": "Alternative approach suggested",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "revised_approach"
+        ],
+        "globalInputs": [
+          "revised_approach"
+        ]
+      },
+      "connections": {
+        "success": "determine-approach"
+      }
+    },
+    {
+      "id": "analyze-structure",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{fix_structure_iteration}} of up to {{max_self_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nAnalyze the code structure for test generation.\n\nBased on project analysis, examine:\n1. Code organization and patterns\n2. Function signatures and types\n3. Dependencies between modules\n4. Testability considerations\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave structure issues to `{{workspace_path}}/structure-analysis-issues.md` with format:\n```\n# Structure Analysis Issues\n\n1. [Issue description]\n2. [Issue description]\n...\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `structure_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if analysis complete).",
+      "completionCondition": "Code structure analyzed, testable units determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "structure_analysis_valid": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        },
+        "required": [
+          "testable_units",
+          "structure_analysis_valid"
+        ],
+        "globalInputs": [
+          "testable_units"
+        ]
+      },
+      "connections": {
+        "success": "check-structure-analysis"
+      }
+    },
+    {
+      "id": "check-structure-analysis",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "analyze-structure.structure_analysis_valid"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "determine-test-type",
+        "false": "expr-inc-struct-fix"
+      }
+    },
+    {
+      "id": "fix-structure-analysis",
+      "type": "agent-directive",
+      "directive": "Fix structure analysis issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/structure-analysis-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `structure_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Investigate the cause\n3. Apply fix or gather missing information\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
+      "completionCondition": "Structure analysis fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "testable_units"
+        ],
+        "globalInputs": [
+          "testable_units"
+        ]
+      },
+      "connections": {
+        "success": "analyze-structure"
+      }
+    },
+    {
+      "id": "determine-test-type",
+      "type": "agent-directive",
+      "directive": "Determine test type for each testable unit.\n\nTestable units: {{testable_units}}\nProject framework: {{analyze-project.test_framework}}\n\nFor each unit determine:\n- unit test (isolated function)\n- integration test (module interaction)\n- e2e test (full user path)\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show suggestion and ask 'Do you confirm? (yes/no)'\n- DO NOT fill test_type_approved until user explicitly responds\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed test types",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_types": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unit_name": {
+                  "type": "string"
+                },
+                "test_type": {
+                  "type": "string",
+                  "enum": [
+                    "unit",
+                    "integration",
+                    "e2e"
+                  ]
+                }
+              }
+            }
+          },
+          "selected_framework": {
+            "type": "string",
+            "description": "Selected framework"
+          },
+          "test_type_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        },
+        "required": [
+          "test_types",
+          "selected_framework",
+          "test_type_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-test-type-approval"
+      }
+    },
+    {
+      "id": "route-test-type-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "determine-test-type.test_type_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "identify-cases",
+        "false": "revise-test-type"
+      }
+    },
+    {
+      "id": "revise-test-type",
+      "type": "agent-directive",
+      "directive": "User did not confirm test types.\n\nResponse: {{user_response_text}}\n\nRevise and suggest alternative.",
+      "completionCondition": "Test types revised",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "revised_test_types"
+        ],
+        "globalInputs": [
+          "revised_test_types"
+        ]
+      },
+      "connections": {
+        "success": "determine-test-type"
+      }
+    },
+    {
+      "id": "identify-cases",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{fix_cases_iteration}} of up to {{max_self_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nIdentify test cases based on analysis.\n\nUse planning standards: {{planning_standards}}\n\nFor each function/module:\n1. Happy path cases\n2. Edge cases (null, empty, boundary)\n3. Error cases (exceptions, validation)\n4. Integration cases (if applicable)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave coverage issues to `{{workspace_path}}/cases-coverage-issues.md` with format:\n```\n# Test Cases Coverage Issues\n\n## REQUIREMENTS COVERAGE\n1. [Requirement not covered]\n\n## STANDARDS COMPLIANCE\n1. [Standard not followed]\n\n## Missing Cases\n1. [Case description]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `coverage_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - every requirement has test cases\n2. STANDARDS COMPLIANCE - cases follow {{planning_standards}}\n3. Edge cases covered\n4. Error paths covered\n\nReturn `issues_count` = number of issues found (0 if complete).",
+      "completionCondition": "Test cases determined for all units",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "unit_name": {
+                  "type": "string"
+                },
+                "cases": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "happy_path",
+                          "edge_case",
+                          "error_case",
+                          "boundary"
+                        ]
+                      },
+                      "input": {
+                        "type": "string"
+                      },
+                      "expected": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "coverage_complete": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        },
+        "required": [
+          "test_cases",
+          "coverage_complete"
+        ]
+      },
+      "connections": {
+        "success": "check-cases-coverage"
+      }
+    },
+    {
+      "id": "check-cases-coverage",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "identify-cases.coverage_complete"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "create-plan",
+        "false": "expr-inc-cases-fix"
+      }
+    },
+    {
+      "id": "fix-cases",
+      "type": "agent-directive",
+      "directive": "Fix test cases coverage issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/cases-coverage-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `coverage_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Add missing test cases\n3. Ensure standards compliance\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
+      "completionCondition": "Test cases completed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "additional_cases"
+        ],
+        "globalInputs": [
+          "additional_cases"
+        ]
+      },
+      "connections": {
+        "success": "identify-cases"
+      }
+    },
+    {
+      "id": "create-plan",
+      "type": "agent-directive",
+      "directive": "Create final test plan.\n\nTestable units: {{testable_units}}\nTest types: {{determine-test-type.test_types}}\nTest cases: {{identify-cases.test_cases}}\nFramework: {{determine-test-type.selected_framework}}\n{{#if analyze-project.project_analysis_summary}}Project structure: {{analyze-project.project_analysis_summary}}{{else}}Project structure: Not available{{/if}}\n\nPlan should include:\n1. Test files to be created\n2. Which helpers/fixtures needed\n3. What needs to be mocked\n4. Test order\n\n{{#if has_file_access}}\n**FILE MODE:** Save test plan to `test-plan.md`\n{{else}}\n**CONTEXT MODE:** Store test plan in response\n{{/if}}",
+      "completionCondition": "Test plan created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_plan": {
+            "type": "object",
+            "properties": {
+              "files_to_create": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "helpers_needed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mocks_needed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "test_order": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "plan_summary": {
+            "type": "string",
+            "description": "Brief plan description"
+          }
+        },
+        "required": [
+          "test_plan",
+          "plan_summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-plan-ready"
+      }
+    },
+    {
+      "id": "notify-plan-ready",
+      "type": "telegram-notification",
+      "message": "*Test plan ready*\n\nFramework: {{determine-test-type.selected_framework}}\nTests: {{identify-cases.test_cases}}\n\nAwaiting confirmation.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "approve-plan",
+        "error": "approve-plan"
+      }
+    },
+    {
+      "id": "approve-plan",
+      "type": "agent-directive",
+      "directive": "Show user the test plan and get confirmation.\n\nPlan: {{create-plan.plan_summary}}\nFiles: {{create-plan.test_plan}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask 'Do you confirm the plan? (yes/no)'\n- DO NOT fill plan_approved until user explicitly responds\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed or rejected plan",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "plan_feedback": {
+            "type": "string",
+            "description": "Plan comments"
+          }
+        },
+        "required": [
+          "plan_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-approval"
+      }
+    },
+    {
+      "id": "route-plan-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-plan.plan_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "generate-tests",
+        "false": "revise-plan"
+      }
+    },
+    {
+      "id": "revise-plan",
+      "type": "agent-directive",
+      "directive": "User did not confirm plan.\n\nComments: {{approve-plan.plan_feedback}}\n\nRevise plan considering feedback.",
+      "completionCondition": "Plan revised",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "revised_plan"
+        ],
+        "globalInputs": [
+          "revised_plan"
+        ]
+      },
+      "connections": {
+        "success": "create-plan"
+      }
+    },
+    {
+      "id": "generate-tests",
+      "type": "agent-directive",
+      "directive": "Generate test code according to plan.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRE-READ the test plan from `{{workspace_path}}/test-plan.md` to ensure you have the latest version (plan may have been revised by user).\n\nPlan details from file:\n- Test files to be created\n- Helpers/fixtures needed\n- Mocks needed\n- Test order\n{{else}}\n**CONTEXT MODE:**\nPlan: {{create-plan.test_plan}}\n{{/if}}\n\nTest cases: {{identify-cases.test_cases}}\nFramework: {{determine-test-type.selected_framework}}\nProject patterns: {{analyze-project.naming_pattern}}\n\nQuality standards:\n{{quality_standards}}\n\nAvoid mistakes:\n{{common_mistakes}}\n\nCreate complete test code ready to run.",
+      "completionCondition": "Test code generated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "generated_tests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file_path": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "tests_count": {
+            "type": "number",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "generated_tests",
+          "tests_count"
+        ]
+      },
+      "connections": {
+        "success": "check-tests-valid"
+      }
+    },
+    {
+      "id": "check-tests-valid",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{retry_count}} of up to {{max_retries}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nDelegate test validation to subagent via Task tool.\n\nUse Task tool to spawn validation subagent with prompt:\n```\nYOU ARE test validation reviewer.\n\nValidate the following generated tests against criteria:\n1. Correct syntax - code compiles without errors\n2. Proper assertions - meaningful, not just truthy checks\n3. Test isolation - no shared state between tests\n4. Naming conventions - follows project patterns\n5. Planning standards compliance: {{planning_standards}}\n\nGenerated tests to validate:\n{{generate-tests.generated_tests}}\n\nTest framework: {{determine-test-type.selected_framework}}\nProject naming pattern: {{analyze-project.naming_pattern}}\n\nFor EACH test file:\n1. Check syntax validity\n2. Verify assertions are specific\n3. Confirm test isolation\n4. Check naming follows conventions\n\nReturn:\n- tests_valid: yes/no\n- validation_errors: array of specific issues found\n- issues_count: number of issues (0 if all valid)\n\nRead test files yourself - DO NOT ask main agent.\n```\n\nSubagent model: sonnet\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave validation issues to `{{workspace_path}}/test-validation-issues.md` with format:\n```\n# Test Validation Issues\n\n1. [Issue: test X has problem Y]\n2. [Issue: assertion in test Z is weak]\n...\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `validation_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if all tests valid).",
+      "completionCondition": "Tests verified",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tests_valid": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "validation_errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tests_valid"
+        ]
+      },
+      "connections": {
+        "success": "route-tests-validation"
+      }
+    },
+    {
+      "id": "route-tests-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "check-tests-valid.tests_valid"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "notify-tests-ready",
+        "false": "fix-tests"
+      }
+    },
+    {
+      "id": "fix-tests",
+      "type": "agent-directive",
+      "directive": "Fix test validation issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/test-validation-issues.md` for issues to fix.\nUpdate test files directly.\n{{else}}\n**CONTEXT MODE:**\nUse `validation_issues` from previous step.\nReturn fixed tests in response.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Fix the test code\n3. Verify fix resolves issue\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
+      "completionCondition": "Errors fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixed_tests"
+        ],
+        "globalInputs": [
+          "fixed_tests"
+        ]
+      },
+      "connections": {
+        "success": "expr-inc-retry"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-retry",
+      "expressions": [
+        "retry_count = retry_count + 1"
+      ],
+      "connections": {
+        "default": "check-retry-limit"
+      }
+    },
+    {
+      "id": "check-retry-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "retry_count"
+        },
+        "right": {
+          "contextPath": "max_retries"
+        }
+      },
+      "connections": {
+        "true": "escalate-to-user",
+        "false": "generate-tests"
+      }
+    },
+    {
+      "id": "escalate-to-user",
+      "type": "agent-directive",
+      "directive": "Cannot generate valid tests after {{max_retries}} attempts.\n\nErrors: {{check-tests-valid.validation_errors}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show problem and ask what to do\n- Options: continue with errors / cancel / help manually\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently\n- Or reset retry counter and try again",
+      "completionCondition": "User made decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "cancel",
+              "manual_help",
+              "reset"
+            ]
+          }
+        },
+        "required": [
+          "user_decision",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "check-reset-retry"
+      }
+    },
+    {
+      "id": "route-escalation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "escalate-to-user.user_decision"
+        },
+        "right": "continue"
+      },
+      "connections": {
+        "true": "notify-tests-ready",
+        "false": "end-cancelled"
+      }
+    },
+    {
+      "id": "end-cancelled",
+      "type": "end",
+      "finalOutput": [
+        "user_decision",
+        "validation_errors"
+      ]
+    },
+    {
+      "id": "notify-tests-ready",
+      "type": "telegram-notification",
+      "message": "*Tests ready for review*\n\nTests generated: {{generate-tests.tests_count}}\nFramework: {{determine-test-type.selected_framework}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "review-tests",
+        "error": "review-tests"
+      }
+    },
+    {
+      "id": "review-tests",
+      "type": "agent-directive",
+      "directive": "Show user generated tests for review.\n\nTests: {{generate-tests.generated_tests}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show test code\n- Ask 'Do you confirm? (yes/no)'\n- DO NOT fill tests_approved until user explicitly responds\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed or rejected tests",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tests_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "review_feedback": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tests_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-tests-approval"
+      }
+    },
+    {
+      "id": "route-tests-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-tests.tests_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "finalize",
+        "false": "revise-tests"
+      }
+    },
+    {
+      "id": "revise-tests",
+      "type": "agent-directive",
+      "directive": "User did not confirm tests.\n\nComments: {{review-tests.review_feedback}}\n\nRevise tests considering feedback and reset retry_count.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave feedback to `{{workspace_path}}/test-feedback.md` for reference.\nUpdate test files directly based on feedback.\n{{else}}\n**CONTEXT MODE:**\nApply feedback from `review_feedback` field.\nReturn revised tests in response.\n{{/if}}",
+      "completionCondition": "Tests revised",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "retry_count"
+        ],
+        "globalInputs": [
+          "retry_count"
+        ]
+      },
+      "connections": {
+        "success": "generate-tests"
+      }
+    },
+    {
+      "id": "finalize",
+      "type": "agent-directive",
+      "directive": "Save tests and create final report.\n\nTests: {{generate-tests.generated_tests}}\n\nSave files and prepare summary:\n- Which tests were created\n- How to run\n- What is tested",
+      "completionCondition": "Tests saved, report ready",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files_saved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "run_command": {
+            "type": "string",
+            "description": "Command to run tests"
+          }
+        },
+        "required": [
+          "files_saved",
+          "run_command",
+          "final_summary"
+        ],
+        "globalInputs": [
+          "final_summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-completion"
+      }
+    },
+    {
+      "id": "notify-completion",
+      "type": "telegram-notification",
+      "message": "*Tests created*\n\nFiles: {{finalize.files_saved}}\nRun: `{{finalize.run_command}}`",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end",
+        "error": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "files_saved",
+        "run_command",
+        "final_summary",
+        "tests_count"
+      ]
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-proj-fix",
+      "expressions": [
+        "fix_project_iteration = fix_project_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-proj-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-proj-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_project_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "fix-project-analysis",
+        "false": "ask-user-proj-fix-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-struct-fix",
+      "expressions": [
+        "fix_structure_iteration = fix_structure_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-struct-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-struct-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_structure_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "fix-structure-analysis",
+        "false": "ask-user-struct-fix-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-cases-fix",
+      "expressions": [
+        "fix_cases_iteration = fix_cases_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-cases-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-cases-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_cases_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "fix-cases",
+        "false": "ask-user-cases-fix-limit-reached"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-proj-fix-limit-reached",
+      "directive": "The project analysis fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-proj-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-proj-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-proj-fix-counter",
+        "false": "determine-approach"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-proj-fix-counter",
+      "expressions": [
+        "fix_project_iteration = 0"
+      ],
+      "connections": {
+        "default": "fix-project-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-struct-fix-limit-reached",
+      "directive": "The structure analysis fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-struct-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-struct-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-struct-fix-counter",
+        "false": "determine-test-type"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-struct-fix-counter",
+      "expressions": [
+        "fix_structure_iteration = 0"
+      ],
+      "connections": {
+        "default": "fix-structure-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-cases-fix-limit-reached",
+      "directive": "The test cases fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-cases-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-cases-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-cases-fix-counter",
+        "false": "create-plan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-cases-fix-counter",
+      "expressions": [
+        "fix_cases_iteration = 0"
+      ],
+      "connections": {
+        "default": "fix-cases"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-reset-retry",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "escalate-to-user.user_decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-retry-counter",
+        "false": "route-escalation"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-retry-counter",
+      "expressions": [
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "generate-tests"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "retry_count": {
+      "type": "number",
+      "description": "Stores retry count",
+      "default": 0
+    },
+    "max_retries": {
+      "type": "number",
+      "description": "Stores max retries",
+      "default": 3
+    },
+    "process_requirements": {
+      "type": "string",
+      "description": "Product requirements",
+      "default": "TEST GENERATION PROCESS:\n\n1. PROJECT ANALYSIS:\n- Study existing tests in project\n- Identify frameworks used (jest.config, pytest.ini, playwright.config)\n- Find patterns: file structure, naming conventions, helpers\n- If no tests exist - suggest structure\n\n2. CODE ANALYSIS:\n- Identify testable units (functions, classes, methods)\n- Determine dependencies and what needs to be mocked\n- Distinguish public API vs internal implementation\n\n3. TEST CASE GENERATION:\n- Happy path - main scenario\n- Edge cases - boundary conditions\n- Error cases - error handling\n- Boundary conditions - value limits\n\n4. TEST WRITING:\n- Follow project patterns\n- Use existing helpers\n- One test = one assertion"
+    },
+    "quality_standards": {
+      "type": "string",
+      "description": "Stores quality standards",
+      "default": "TEST QUALITY STANDARDS:\n\n1. ISOLATION:\n- Each test is independent from others\n- No shared state between tests\n- Use beforeEach/afterEach for setup/cleanup\n\n2. READABILITY:\n- Clear test names (should_return_X_when_Y)\n- Arrange-Act-Assert structure\n- One assert per test (when possible)\n\n3. RELIABILITY:\n- Tests are not flaky (don't depend on timing)\n- Deterministic result\n- Don't depend on external services (mock them)\n\n4. MAINTAINABILITY:\n- Test behavior, not implementation\n- Avoid tests tied to internal structure\n- When refactoring code, tests shouldn't break"
+    },
+    "validation_criteria": {
+      "type": "string",
+      "description": "Criteria for validation",
+      "default": "TEST VALIDATION CRITERIA:\n\n1. SYNTAX:\n- Code compiles without errors\n- Imports are correct\n- No undefined variables\n\n2. EXECUTION:\n- Tests run without errors\n- All assertions pass\n- No timeout issues\n\n3. COVERAGE:\n- Happy path covered\n- At least 2 edge cases\n- Error handling verified\n\n4. PROJECT COMPLIANCE:\n- Follows project naming conventions\n- Uses existing helpers\n- Files in correct directory"
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Stores common mistakes",
+      "default": "COMMON TEST GENERATION MISTAKES:\n\n❌ Tests tied to implementation details → ✅ Test behavior and outputs\n❌ One test verifies many things → ✅ One test = one assertion\n❌ Copy-paste without adaptation → ✅ Adapt to specific code\n❌ Ignoring existing patterns → ✅ Study and follow project patterns\n❌ Hardcoded values → ✅ Use constants and fixtures\n❌ No cleanup after test → ✅ Always cleanup in afterEach\n❌ Testing private methods → ✅ Test through public API\n❌ Too many mocks → ✅ Only mock external dependencies"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "Test generation planning standards",
+      "default": "TEST GENERATION PLANNING STANDARDS:\n\n1. TEST COVERAGE:\n- Every public function/method must have tests\n- Edge cases: null, empty, boundary values\n- Error paths: exceptions, validation failures\n- Happy paths: normal successful execution\n\n2. TEST ISOLATION:\n- Each test independent, no shared state\n- Use mocks for external dependencies\n- Setup/teardown for each test\n- No order dependency between tests\n\n3. NAMING CONVENTIONS:\n- Descriptive test names: should_[expected]_when_[condition]\n- Group related tests in describe blocks\n- Clear assertion messages\n\n4. ASSERTION QUALITY:\n- One logical assertion per test\n- Specific assertions (not just \"truthy\")\n- Test behavior, not implementation\n- Verify both positive and negative cases\n\n5. TEST STRUCTURE:\n- Arrange-Act-Assert pattern\n- Given-When-Then for BDD\n- Keep tests short and focused\n- DRY for setup, explicit for assertions\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan item's directive in isolation — other items and any general rules stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
+    },
+    "fix_project_iteration": {
+      "type": "number",
+      "description": "Counter for project analysis fix loop",
+      "default": 0
+    },
+    "fix_structure_iteration": {
+      "type": "number",
+      "description": "Counter for structure analysis fix loop",
+      "default": 0
+    },
+    "fix_cases_iteration": {
+      "type": "number",
+      "description": "Counter for test cases fix loop",
+      "default": 0
+    },
+    "max_self_fix_iterations": {
+      "type": "number",
+      "description": "Max iterations for self-fix loops before proceeding",
+      "default": 3
+    },
+    "additional_cases": {
+      "type": "array",
+      "description": "Workflow-global additional_cases",
+      "items": {
+        "type": "object"
+      }
+    },
+    "approach": {
+      "type": "string",
+      "description": "Workflow-global approach",
+      "enum": [
+        "use_existing",
+        "create_new"
+      ]
+    },
+    "code_content": {
+      "type": "string",
+      "description": "Workflow-global code_content"
+    },
+    "code_source": {
+      "type": "string",
+      "description": "Workflow-global code_source",
+      "enum": [
+        "file_path",
+        "inline_code"
+      ]
+    },
+    "decision": {
+      "type": "string",
+      "description": "Workflow-global decision",
+      "enum": [
+        "continue",
+        "reset"
+      ]
+    },
+    "existing_helpers": {
+      "type": "array",
+      "description": "Workflow-global existing_helpers",
+      "items": {
+        "type": "string"
+      }
+    },
+    "file_path": {
+      "type": "string",
+      "description": "Workflow-global file_path"
+    },
+    "final_summary": {
+      "type": "string",
+      "description": "Workflow-global final_summary"
+    },
+    "fixed_tests": {
+      "type": "array",
+      "description": "Workflow-global fixed_tests",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file_path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "project_analysis_fix_hints": {
+      "type": "string",
+      "description": "Workflow-global project_analysis_fix_hints",
+      "minLength": 20
+    },
+    "recommended_framework": {
+      "type": "string",
+      "description": "Workflow-global recommended_framework"
+    },
+    "recommended_structure": {
+      "type": "string",
+      "description": "Workflow-global recommended_structure"
+    },
+    "revised_approach": {
+      "type": "string",
+      "description": "Workflow-global revised_approach"
+    },
+    "revised_plan": {
+      "type": "string",
+      "description": "Workflow-global revised_plan"
+    },
+    "revised_test_types": {
+      "type": "string",
+      "description": "Workflow-global revised_test_types"
+    },
+    "test_directory": {
+      "type": "string",
+      "description": "Workflow-global test_directory"
+    },
+    "testable_units": {
+      "type": "array",
+      "description": "Workflow-global testable_units",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "returns": {
+            "type": "string"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "user_response_text": {
+      "type": "string",
+      "description": "Workflow-global user_response_text",
+      "minLength": 2
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Workflow-global workspace_path"
+    },
+    "has_file_access": {
+      "type": "boolean",
+      "description": "Agent can read/write local files"
+    }
+  }
+}

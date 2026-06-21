@@ -1,0 +1,258 @@
+{
+  "slug": "telegram-setup",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "5495dafe-f731-4ca8-ba1b-f740f8516893",
+  "metadata": {
+    "name": "Telegram Setup",
+    "version": "1.0.5",
+    "description": "Guided setup for Telegram notifications in Moira. Walks through bot creation, chat ID retrieval, settings configuration, and test notification."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "explain"
+      }
+    },
+    {
+      "id": "explain",
+      "type": "agent-directive",
+      "directive": "Explain what Telegram notifications do in Moira and ask if the user wants to proceed with setup.\n\n**Key points:**\n1. Moira can send Telegram notifications during workflow execution\n2. Use cases: get notified when a long workflow completes, receive step results, error alerts\n3. Setup requires: a Telegram bot (created via @BotFather) and a chat ID\n4. The entire process takes about 2-3 minutes\n\nAsk the user if they want to proceed with the setup.",
+      "completionCondition": "User confirmed they want to proceed with Telegram setup",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "proceed": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Does the user want to proceed with setup?"
+          }
+        },
+        "required": [
+          "proceed"
+        ]
+      },
+      "connections": {
+        "success": "check-proceed"
+      }
+    },
+    {
+      "id": "check-proceed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "explain.proceed"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "create-bot",
+        "false": "end-skipped"
+      }
+    },
+    {
+      "id": "create-bot",
+      "type": "agent-directive",
+      "directive": "Guide the user to create a Telegram bot via @BotFather.\n\n**Step-by-step instructions to give the user:**\n1. Open Telegram and search for `@BotFather`\n2. Send `/newbot` command\n3. Choose a name for your bot (e.g., \"My Moira Notifications\")\n4. Choose a username for your bot (must end in `bot`, e.g., `my_moira_notifier_bot`)\n5. BotFather will send you the bot token — it looks like `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`\n\n**Important:** Tell the user to copy the bot token and paste it here.\n\nIf the user already has a bot token, they can provide it directly.",
+      "completionCondition": "User provided a bot token (format: digits:alphanumeric string)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bot_token": {
+            "type": "string",
+            "description": "The bot token from @BotFather (format: 123456789:ABCdefGHI...)"
+          }
+        },
+        "required": [
+          "bot_token"
+        ]
+      },
+      "connections": {
+        "success": "get-chat-id"
+      }
+    },
+    {
+      "id": "get-chat-id",
+      "type": "agent-directive",
+      "directive": "Guide the user to find their Telegram chat ID.\n\n**Method 1 (Recommended):**\n1. Open Telegram and find the bot you just created\n2. Send any message to the bot (e.g., \"hello\")\n3. This step is required — the bot needs at least one message from you before it can send notifications\n\n**Method 2 — Using @userinfobot:**\n1. Search for `@userinfobot` in Telegram\n2. Start a chat and send any message\n3. The bot will reply with your user ID — that's your chat ID\n\n**Method 3 — Using the API:**\nAfter sending a message to your bot, open this URL in a browser:\n`https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`\nLook for `\"chat\":{\"id\":XXXXXXX}` — that number is your chat ID.\n\nAsk the user to provide their chat ID (a number, usually 6-10 digits).",
+      "completionCondition": "User provided a chat ID (numeric string)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chat_id": {
+            "type": "string",
+            "description": "The Telegram chat ID (numeric, e.g., 123456789)"
+          }
+        },
+        "required": [
+          "chat_id"
+        ]
+      },
+      "connections": {
+        "success": "save-settings"
+      }
+    },
+    {
+      "id": "save-settings",
+      "type": "agent-directive",
+      "directive": "Save the Telegram settings using the MCP settings tool.\n\nExecute these MCP tool calls:\n1. `settings({ action: \"set\", key: \"telegram.bot_token\", value: \"{{create-bot.bot_token}}\" })`\n2. `settings({ action: \"set\", key: \"telegram.chat_id\", value: \"{{get-chat-id.chat_id}}\" })`\n3. `settings({ action: \"set\", key: \"telegram.enabled\", value: true })`\n\nConfirm that all three settings were saved successfully.",
+      "completionCondition": "All three Telegram settings (bot_token, chat_id, enabled) saved successfully via MCP settings tool",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "settings_saved": {
+            "type": "boolean",
+            "description": "Were all three settings saved successfully?"
+          }
+        },
+        "required": [
+          "settings_saved"
+        ]
+      },
+      "connections": {
+        "success": "check-settings-saved"
+      }
+    },
+    {
+      "id": "check-settings-saved",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "save-settings.settings_saved"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "test-notification",
+        "false": "save-failed"
+      }
+    },
+    {
+      "id": "save-failed",
+      "type": "agent-directive",
+      "directive": "Settings could not be saved. Ask the user to check:\n1. Are they authenticated with Moira? (MCP connection active)\n2. Try saving manually via Settings page: go to Settings → Telegram tab\n3. Enter the bot token and chat ID in the fields\n4. Click Save\n\nOffer to retry or end the setup.",
+      "completionCondition": "User acknowledged the issue",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "acknowledged"
+        ],
+        "globalInputs": [
+          "acknowledged"
+        ]
+      },
+      "connections": {
+        "success": "end-incomplete"
+      }
+    },
+    {
+      "id": "test-notification",
+      "type": "telegram-notification",
+      "message": "Telegram setup complete! Your Moira notifications are working.\n\nYou will receive notifications from workflows that include telegram-notification nodes.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "confirm-received",
+        "error": "test-failed"
+      }
+    },
+    {
+      "id": "confirm-received",
+      "type": "agent-directive",
+      "directive": "A test notification was just sent to the user's Telegram.\n\nAsk the user: \"Did you receive the test notification in Telegram?\"\n\nIf yes — setup is complete.\nIf no — suggest troubleshooting:\n1. Check that you sent a message to the bot first (required by Telegram)\n2. Verify the chat ID is correct\n3. Try sending another message to the bot and retrying",
+      "completionCondition": "User confirmed whether they received the notification",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "notification_received": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Did the user receive the Telegram notification?"
+          }
+        },
+        "required": [
+          "notification_received"
+        ]
+      },
+      "connections": {
+        "success": "check-received"
+      }
+    },
+    {
+      "id": "check-received",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "confirm-received.notification_received"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "end-success",
+        "false": "end-incomplete"
+      }
+    },
+    {
+      "id": "test-failed",
+      "type": "agent-directive",
+      "directive": "The test notification failed to send. This usually means:\n\n1. **\"Chat not found\"** — You need to send any message to your bot in Telegram first, then we can retry\n2. **\"Invalid token\"** — The bot token may be incorrect. Check it at @BotFather\n3. **Network error** — Temporary issue, try again\n\nAsk the user to:\n1. Open Telegram and send a message to their bot\n2. Confirm they've done it so we can retry, or end the setup",
+      "completionCondition": "User acknowledged the failure and next steps",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "acknowledged"
+        ],
+        "globalInputs": [
+          "acknowledged"
+        ]
+      },
+      "connections": {
+        "success": "end-incomplete"
+      }
+    },
+    {
+      "id": "end-skipped",
+      "type": "end",
+      "finalOutput": [
+        "proceed"
+      ]
+    },
+    {
+      "id": "end-success",
+      "type": "end",
+      "finalOutput": [
+        "bot_token",
+        "chat_id",
+        "settings_saved",
+        "notification_received"
+      ]
+    },
+    {
+      "id": "end-incomplete",
+      "type": "end",
+      "finalOutput": [
+        "bot_token",
+        "chat_id",
+        "settings_saved"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "acknowledged": {
+      "type": "boolean",
+      "description": "Workflow-global acknowledged"
+    }
+  }
+}

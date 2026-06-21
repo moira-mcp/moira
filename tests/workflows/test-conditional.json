@@ -1,0 +1,77 @@
+{
+  "slug": "test-conditional",
+  "metadata": {
+    "name": "Test Conditional",
+    "version": "1.0.0",
+    "description": "Conditional branching test"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-score"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-score",
+      "directive": "Enter test score",
+      "completionCondition": "Score provided",
+      "connections": {
+        "success": "check-score"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "score"
+        ]
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-score",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "score"
+        },
+        "right": 70
+      },
+      "connections": {
+        "true": "congratulate",
+        "false": "encourage"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "congratulate",
+      "directive": "Congratulate on excellent score",
+      "completionCondition": "Congratulations delivered",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "encourage",
+      "directive": "Encourage to try again",
+      "completionCondition": "Encouragement given",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "score"
+      ]
+    }
+  ]
+}

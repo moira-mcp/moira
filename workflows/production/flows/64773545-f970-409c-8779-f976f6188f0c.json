@@ -1,0 +1,1679 @@
+{
+  "slug": "architecture-design-flow",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "64773545-f970-409c-8779-f976f6188f0c",
+  "metadata": {
+    "name": "Architecture Design Flow",
+    "version": "1.4.1",
+    "description": "Structured architecture design and documentation process supporting two scenarios: new project design (requirements → domain → C4 diagrams) and existing project analysis (scan → reverse-engineer → gap analysis → improvements). Both converge into shared stages: ADRs, quality attributes, crosscutting concerns, documentation assembly with subagent reviews and fix cycles. Produces complete docs/architecture/ package with C4 diagrams, bounded context maps, ADRs, and quality attribute scenarios."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "gather-context"
+      }
+    },
+    {
+      "id": "gather-context",
+      "type": "agent-directive",
+      "directive": "Ask user: Is this a new project (design from scratch) or an existing project (analyze and document existing architecture)? Collect: project name, brief description, key stakeholders, primary goals for architecture work. If existing project — confirm project path is accessible.",
+      "completionCondition": "Project identified, scenario_type set to \"new\" or \"existing\", initial context collected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "type": "string"
+          },
+          "project_path": {
+            "type": "string",
+            "description": "For existing projects — path to codebase"
+          }
+        },
+        "required": [
+          "project_name",
+          "project_description",
+          "scenario_type",
+          "primary_goals"
+        ],
+        "globalInputs": [
+          "project_description",
+          "scenario_type",
+          "primary_goals"
+        ]
+      },
+      "connections": {
+        "success": "check-scenario"
+      }
+    },
+    {
+      "id": "check-scenario",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "scenario_type"
+        },
+        "right": "new"
+      },
+      "connections": {
+        "true": "a-requirements",
+        "false": "b-project-scan"
+      }
+    },
+    {
+      "id": "a-requirements",
+      "type": "agent-directive",
+      "directive": "Gather requirements for the new system (methodology stage A1).\n\n1. Collect functional requirements (features, use cases, user stories) — ask user or read from existing docs\n2. Collect non-functional requirements with measurable targets (use {{quality_attributes_checklist}})\n3. Identify stakeholders and their concerns\n4. Document business constraints (budget, timeline, team size, compliance)\n5. Document technical constraints (existing infrastructure, mandated technologies, integration points)\n6. Describe at least 3 key use cases end-to-end\n7. Define success criteria for the system\n\nUse: {{architecture_principles}}\n\n**VALIDATION CHECKS:**\n1. All stakeholder roles identified with concerns\n2. Functional requirements listed with priority (must/should/could)\n3. NFRs have measurable targets\n4. At least 3 use cases\n5. Constraints documented\n\nReturn issues_count.",
+      "completionCondition": "Requirements complete: stakeholders, FR, NFR with targets, constraints, 3+ use cases, success criteria defined.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stakeholders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string"
+                },
+                "concerns": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "concerns"
+              ]
+            },
+            "minItems": 1
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "business",
+                    "technical"
+                  ]
+                },
+                "constraint": {
+                  "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "constraint"
+              ]
+            },
+            "minItems": 1
+          },
+          "key_use_cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "actors": {
+                  "type": "string"
+                },
+                "flow": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "flow"
+              ]
+            },
+            "minItems": 3
+          }
+        },
+        "required": [
+          "stakeholders",
+          "functional_requirements",
+          "non_functional_requirements",
+          "constraints",
+          "key_use_cases",
+          "success_criteria"
+        ],
+        "globalInputs": [
+          "functional_requirements",
+          "non_functional_requirements",
+          "success_criteria",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "a-domain-analysis"
+      }
+    },
+    {
+      "id": "a-domain-analysis",
+      "type": "agent-directive",
+      "directive": "Analyze the business domain (methodology stages A2+A3).\n\nContext: Project: {{gather-context.project_name}}. Requirements: {{functional_requirements}}. Use cases: {{a-requirements.key_use_cases}}.\n\n**Part 1 — Domain Analysis (A2):**\n1. Identify core domain concepts and entities\n2. Define Ubiquitous Language — minimum 10 terms with definitions\n3. Classify subdomains: Core (competitive advantage), Supporting (necessary), Generic (commodity)\n4. Map key business processes (input → steps → output)\n5. Identify domain events and state transitions\n\n**Part 2 — Bounded Contexts (A3):**\n1. Group related concepts into bounded contexts (minimum 2)\n2. Define context boundaries — what belongs inside vs. outside\n3. Create Context Map with DDD relationship types (Shared Kernel, Customer-Supplier, ACL, etc.)\n4. Define data ownership — which context owns which entities\n5. Define integration patterns between contexts\n\nUse: {{planning_standards}}\n\n**VALIDATION CHECKS:**\n1. Minimum 10 glossary terms\n2. Core subdomain explicitly identified\n3. Minimum 2 bounded contexts\n4. No concept in multiple contexts without shared kernel\n5. Every context relationship has DDD type\n6. Context map is valid Mermaid\n\nReturn issues_count.",
+      "completionCondition": "Domain model complete: glossary (10+ terms), subdomains classified, bounded contexts defined (2+) with relationships and data ownership.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "glossary",
+          "subdomains",
+          "bounded_contexts",
+          "context_map_mermaid"
+        ],
+        "globalInputs": [
+          "glossary",
+          "subdomains",
+          "bounded_contexts",
+          "context_relationships",
+          "context_map_mermaid",
+          "domain_events",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "a-system-context"
+      }
+    },
+    {
+      "id": "a-system-context",
+      "type": "agent-directive",
+      "directive": "Design the System Context — C4 Level 1 (methodology stage A4).\n\nContext: Project: {{gather-context.project_name}}. Stakeholders: {{a-requirements.stakeholders}}. Requirements: {{functional_requirements}}, {{non_functional_requirements}}. Bounded contexts: {{bounded_contexts}}.\n\n1. Define the system boundary — what is \"our system\" vs. external\n2. Identify all user types/personas (from stakeholders)\n3. Identify all external systems the system interacts with\n4. Document each interaction: protocol, data exchanged, frequency\n5. Create C4 Level 1 diagram in Mermaid\n\nNOTE: For library/package projects, adapt: the \"system\" is the package. External actors are consumers and upstream dependencies. See {{architecture_principles}} point 6.\n\nUse: {{planning_standards}}\n\n**VALIDATION CHECKS:**\n1. System boundary explicitly defined\n2. All stakeholder roles represented\n3. All external systems identified\n4. Every relationship labeled (verb + data + protocol)\n5. Diagram renders correctly in Mermaid\n6. No internal details shown at this level\n\nReturn issues_count.",
+      "completionCondition": "System Context Diagram complete in Mermaid. All users and external systems represented with labeled relationships.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "system_boundary",
+          "user_roles",
+          "context_diagram_mermaid"
+        ],
+        "globalInputs": [
+          "system_boundary",
+          "user_roles",
+          "external_systems",
+          "context_diagram_mermaid",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "a-detailed-design"
+      }
+    },
+    {
+      "id": "a-detailed-design",
+      "type": "agent-directive",
+      "directive": "Design Containers and Components — C4 Levels 2 and 3 (methodology stages A5+A6).\n\nContext: Project: {{gather-context.project_name}}. System context: {{context_diagram_mermaid}}. Bounded contexts: {{bounded_contexts}}. Requirements: {{non_functional_requirements}}. Constraints: {{a-requirements.constraints}}.\n\n**Part 1 — Container Design (C4 Level 2):**\n1. Decompose system into containers (web apps, APIs, services, databases, queues)\n2. Choose technology for each container with justification\n3. Define responsibilities (max 3 per container)\n4. Map communication protocols (sync/async, REST/gRPC/AMQP/WebSocket)\n5. Map containers to bounded contexts\n6. Create C4 Level 2 diagram in Mermaid\n\n**Part 2 — Component Design (C4 Level 3):**\n1. Select max 3 architecturally significant containers for component design\n2. For each: define internal modules, interfaces (in/out), key patterns\n3. Verify no circular dependencies, dependency inversion respected\n4. Create C4 Level 3 diagram(s) in Mermaid\n\nNOTE: For library projects, C4 L2 = modules/entry points, C4 L3 = internal components within each module. See {{architecture_principles}} point 6.\n\nUse: {{planning_standards}}, {{common_architecture_mistakes}}\n\n**VALIDATION CHECKS:**\n1. Every bounded context has ≥1 container\n2. No container has >3 responsibilities\n3. Communication protocols specified\n4. Technology choices justified\n5. No circular dependencies in component diagrams\n6. All diagrams render correctly\n\nReturn issues_count.",
+      "completionCondition": "Container diagram complete with technology choices. Component diagrams complete for key containers. All diagrams render in Mermaid.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "containers",
+          "container_diagram_mermaid",
+          "component_designs",
+          "technology_choices"
+        ],
+        "globalInputs": [
+          "containers",
+          "container_communications",
+          "container_diagram_mermaid",
+          "component_designs",
+          "technology_choices",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "confirm-scope"
+      }
+    },
+    {
+      "id": "b-project-scan",
+      "type": "agent-directive",
+      "directive": "Scan the existing project to understand its technology stack and structure (methodology stage B1).\n\nProject path: {{gather-context.project_path}}\n\n1. Scan directory structure (top 3 levels)\n2. Identify package manager, runtime, and key dependencies\n3. Read configuration files (docker-compose, CI/CD, infrastructure-as-code, bundler config)\n4. Identify entry points (main files, server setup, route definitions)\n5. Count and categorize source files by language and directory\n6. Identify test infrastructure (frameworks, coverage, test directories)\n7. Read existing documentation (README, docs/, ARCHITECTURE.md, ADRs, CLAUDE.md)\n\nUse actual tools to read files and directories. Do not guess.\n\n**VALIDATION CHECKS:**\n1. Project root structure documented (3 levels)\n2. Languages and frameworks identified with versions\n3. Dependencies listed (count + key ones)\n4. Build system identified\n5. Deployment mechanism identified (Docker, K8s, serverless, etc.)\n6. Test framework identified\n7. Entry points located\n8. No \"unknown\" entries\n\nReturn issues_count.",
+      "completionCondition": "Technology stack fully identified. Project structure documented. No unknown entries in scan results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "directory_structure": {
+            "type": "string",
+            "description": "Top 3 levels of project structure"
+          },
+          "entry_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "directory_structure",
+          "languages",
+          "build_system",
+          "entry_points"
+        ],
+        "globalInputs": [
+          "languages",
+          "frameworks",
+          "key_dependencies",
+          "build_system",
+          "deployment_mechanism",
+          "test_infrastructure",
+          "existing_documentation",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "b-reverse-engineer"
+      }
+    },
+    {
+      "id": "b-reverse-engineer",
+      "type": "agent-directive",
+      "directive": "Reverse-engineer the architecture and identify boundaries (methodology stages B2+B3).\n\nContext: Project: {{gather-context.project_name}}. Scan results: {{b-project-scan.directory_structure}}, {{languages}}, {{frameworks}}, {{b-project-scan.entry_points}}.\n\n**Part 1 — Reverse-Engineering Structure (B2):**\n1. Analyze directory structure to identify logical modules/services\n2. Trace imports/dependencies to build dependency graph\n3. Identify data stores and access patterns\n4. Map API endpoints/routes to handlers\n5. Identify external system integrations\n6. Trace at least 2 key use cases end-to-end through code\n7. Identify architectural patterns in use (MVC, hexagonal, layered, event-driven)\n\n**Part 2 — Boundary Identification (B3):**\n1. Analyze module/package boundaries — which concepts are grouped together\n2. Identify shared models (cross-boundary coupling signals)\n3. Extract domain language from code (class/variable/method names)\n4. Map data ownership per module\n5. Identify integration points between modules\n6. Classify boundaries as intentional or accidental\n\nREAD THE CODE. Do not guess. Trace actual imports, actual function calls.\n\nNOTE: For library projects, adapt C4: L2 = entry points/sub-packages, L3 = internal modules. See {{architecture_principles}}.\n\nUse: {{planning_standards}}, {{common_architecture_mistakes}}\n\n**VALIDATION CHECKS:**\n1. All deployable units identified\n2. Communication between services documented\n3. At least 2 use cases traced end-to-end\n4. Architectural pattern identified (or \"no clear pattern\" documented)\n5. Module boundaries mapped to domains\n6. Shared entities identified\n7. Data ownership documented\n\nReturn issues_count.",
+      "completionCondition": "Architecture reverse-engineered with C4 L2+L3 diagrams. Bounded contexts identified. At least 2 use cases traced through code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "architectural_pattern": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "containers",
+          "container_diagram_mermaid",
+          "bounded_contexts",
+          "traced_use_cases"
+        ],
+        "globalInputs": [
+          "containers",
+          "container_diagram_mermaid",
+          "component_designs",
+          "traced_use_cases",
+          "bounded_contexts",
+          "context_map_mermaid",
+          "shared_models",
+          "glossary",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "b-current-state"
+      }
+    },
+    {
+      "id": "b-current-state",
+      "type": "agent-directive",
+      "directive": "Document current architecture state and identify gaps (methodology stages B4+B5).\n\nContext: Project: {{gather-context.project_name}}. Containers: {{containers}}. Components: {{component_designs}}. Bounded contexts: {{bounded_contexts}}. Pattern: {{b-reverse-engineer.architectural_pattern}}.\n\n**Part 1 — Document Current State (B4):**\n1. Create C4 Level 1 diagram from observed external interactions\n2. Write Architecture Overview: goals (inferred), constraints (observed), scope, solution strategy\n3. Document current quality attributes — what the system achieves TODAY (not aspirational)\n4. Document known technical decisions (even without formal ADRs)\n\n**Part 2 — Gap Analysis (B5):**\n1. Evaluate each quality attribute: current state vs. best practices (use {{quality_attributes_checklist}})\n2. Identify architectural anti-patterns present (use {{common_architecture_mistakes}})\n3. Assess test coverage and quality gaps\n4. Evaluate documentation completeness\n5. Assess operational readiness (monitoring, logging, alerting)\n6. List technical debt items with severity (critical/major/minor)\n\nIMPORTANT: Current state = what IS, not what SHOULD BE. Gaps need code evidence.\n\n**VALIDATION CHECKS:**\n1. C4 L1 diagram shows all users and external systems\n2. Current quality attributes documented with evidence\n3. At least 5 gaps identified\n4. Each gap has code evidence\n5. Gaps prioritized by impact and effort\n6. Anti-patterns identified with code references\n\nReturn issues_count.",
+      "completionCondition": "Current state documented. System Context Diagram created. At least 5 gaps identified with code evidence. Gaps prioritized.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "anti_patterns_found": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "where": {
+                  "type": "string"
+                },
+                "evidence": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pattern",
+                "where"
+              ]
+            }
+          }
+        },
+        "required": [
+          "context_diagram_mermaid",
+          "current_quality_attributes",
+          "gaps"
+        ],
+        "globalInputs": [
+          "context_diagram_mermaid",
+          "current_quality_attributes",
+          "known_decisions",
+          "gaps",
+          "tech_debt",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "b-improvements"
+      }
+    },
+    {
+      "id": "b-improvements",
+      "type": "agent-directive",
+      "directive": "Propose architectural improvements to address gaps (methodology stage B6).\n\nContext: Project: {{gather-context.project_name}}. Gaps: {{gaps}}. Tech debt: {{tech_debt}}. Anti-patterns: {{b-current-state.anti_patterns_found}}. Current quality: {{current_quality_attributes}}.\n\n1. For each critical/major gap, propose a specific improvement\n2. Group improvements: short-term (quick wins), medium-term (next quarter), long-term (roadmap)\n3. Estimate effort: S/M/L/XL (T-shirt sizing)\n4. Identify dependencies between improvements\n5. Identify quick wins (high value, low effort)\n6. Propose target architecture — updated Container Diagram showing desired state\n\nUse: {{architecture_principles}}\n\n**VALIDATION CHECKS:**\n1. Every critical gap has a proposed improvement\n2. Improvements categorized by timeline\n3. Effort estimates provided\n4. Dependencies identified\n5. No \"rewrite everything\" — improvements are incremental\n6. Each improvement has clear success criteria\n7. Target architecture diagram provided\n\nReturn issues_count.",
+      "completionCondition": "All critical gaps addressed. Improvements categorized by timeline with effort estimates. Target architecture described.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "improvements",
+          "quick_wins",
+          "target_container_diagram_mermaid"
+        ],
+        "globalInputs": [
+          "improvements",
+          "quick_wins",
+          "target_container_diagram_mermaid",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "confirm-scope"
+      }
+    },
+    {
+      "id": "confirm-scope",
+      "type": "agent-directive",
+      "directive": "Present architecture analysis/design to user for approval (quality gate G1/G3/G4).\n\nPresent a structured summary to the user:\n\n{{#if functional_requirements}}\n**For Scenario A (new project):**\n- Requirements summary: {{functional_requirements}}, {{non_functional_requirements}}\n- Domain model: {{bounded_contexts}}, {{context_map_mermaid}}\n- System context: {{context_diagram_mermaid}}\n- Containers and technology choices: {{containers}}, {{container_diagram_mermaid}}\n- Component designs: {{component_designs}}\n{{/if}}\n\n{{#if languages}}\n**For Scenario B (existing project):**\n- Scan summary: {{languages}}, {{frameworks}}\n- Architecture as-is: {{containers}}, {{container_diagram_mermaid}}\n- Bounded contexts: {{bounded_contexts}}, {{context_map_mermaid}}\n- Gaps found: {{gaps}}\n- Proposed improvements: {{improvements}}\n- Target architecture: {{target_container_diagram_mermaid}}\n{{/if}}\n\nAsk user: \"Do you approve this scope and direction? Or do you have feedback?\"",
+      "completionCondition": "User has reviewed the architecture analysis/design and provided a decision.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "user_feedback": {
+            "type": "string",
+            "description": "Feedback if not approved"
+          }
+        },
+        "required": [
+          "scope_approved"
+        ]
+      },
+      "connections": {
+        "success": "check-scope-approved"
+      }
+    },
+    {
+      "id": "check-scope-approved",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "confirm-scope.scope_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "subagent-review",
+        "false": "refine-scope"
+      }
+    },
+    {
+      "id": "refine-scope",
+      "type": "agent-directive",
+      "directive": "Refine architecture based on user feedback.\n\nUser feedback: {{confirm-scope.user_feedback}}\n\nAddress all user concerns. Re-analyze, re-design, or re-scope as requested. Update relevant artifacts (diagrams, context maps, container definitions, gap analysis, improvements).\n\nDo NOT skip feedback items. Address each one explicitly.",
+      "completionCondition": "All user feedback points addressed. Artifacts updated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "changes_made",
+          "feedback_addressed"
+        ],
+        "globalInputs": [
+          "changes_made",
+          "feedback_addressed"
+        ]
+      },
+      "connections": {
+        "success": "confirm-scope"
+      }
+    },
+    {
+      "id": "subagent-review",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{fix_iteration_count}} of up to {{max_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nDelegate architecture review to a subagent (quality gate G4/G5).\n\nCRITICAL: Use Task tool to delegate review to a subagent. Do NOT self-review.\n\nSend to subagent:\n- All C4 diagrams (context, container, component)\n- Bounded context map\n- Technology choices with justifications\n- Quality attributes (if available)\n\nSubagent reviews against:\n- {{architecture_principles}}\n- {{common_architecture_mistakes}}\n- {{planning_standards}}\n\nSubagent checks:\n1. Each container has single clear responsibility (no God services)\n2. Communication protocols specified for all interactions\n3. Technology choices justified\n4. Bounded contexts map to containers\n5. No circular dependencies in component diagrams\n6. Diagrams are internally consistent\n7. Anti-patterns from {{common_architecture_mistakes}} not present\n8. For existing projects: improvements are incremental (no \"rewrite everything\")\n\nReport ALL subagent findings as one flat list — there are NO severity tiers; every issue found is mandatory to fix. Put every real issue into blocking_issues (treat all as must-fix); leave major_issues/minor_issues empty unless you need them for notes only. Set review_issues_count to the total number of issues.",
+      "completionCondition": "Subagent review completed. All issues listed as a flat mandatory-to-fix set with specific findings (no severity tiers).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_issues_count": {
+            "type": "number",
+            "minimum": 0
+          },
+          "blocking_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "major_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "review_issues_count",
+          "review_summary"
+        ],
+        "globalInputs": [
+          "minor_issues",
+          "review_summary"
+        ]
+      },
+      "connections": {
+        "success": "check-review-issues"
+      }
+    },
+    {
+      "id": "check-review-issues",
+      "type": "condition",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "gt",
+            "left": {
+              "contextPath": "subagent-review.review_issues_count"
+            },
+            "right": 0
+          },
+          {
+            "operator": "or",
+            "conditions": [
+              {
+                "operator": "gt",
+                "left": {
+                  "contextPath": "subagent-review.blocking_issues.length"
+                },
+                "right": 0
+              },
+              {
+                "operator": "gt",
+                "left": {
+                  "contextPath": "subagent-review.major_issues.length"
+                },
+                "right": 0
+              }
+            ]
+          }
+        ]
+      },
+      "connections": {
+        "true": "fix-architecture",
+        "false": "create-adrs"
+      }
+    },
+    {
+      "id": "fix-architecture",
+      "type": "agent-directive",
+      "directive": "Fix architecture issues found by subagent review.\n\nReview findings (all mandatory to fix — no severity tiers):\n- {{subagent-review.blocking_issues}}\n- {{subagent-review.major_issues}}\n\nFix iteration: {{fix_iteration_count}} of {{max_fix_iterations}}\n\n1. Address EVERY issue — all are mandatory, none optional\n2. Update affected diagrams and artifacts\n3. Document what was changed and why\n\nCRITICAL: Actually fix the architecture — update diagrams, change technology choices, restructure components. Do not just acknowledge issues.\n\nUse: {{architecture_principles}}, {{common_architecture_mistakes}}",
+      "completionCondition": "All issues addressed (every issue is mandatory — no severity tiers). Artifacts updated with fixes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied",
+          "all_blocking_fixed"
+        ],
+        "globalInputs": [
+          "fixes_applied",
+          "all_blocking_fixed"
+        ]
+      },
+      "connections": {
+        "success": "expr-increment-fix"
+      }
+    },
+    {
+      "id": "expr-increment-fix",
+      "type": "expression",
+      "expressions": [
+        "fix_iteration_count = fix_iteration_count + 1"
+      ],
+      "connections": {
+        "default": "check-fix-limit"
+      }
+    },
+    {
+      "id": "check-fix-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "fix_iteration_count"
+        },
+        "right": {
+          "contextPath": "max_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "confirm-scope",
+        "false": "subagent-review"
+      }
+    },
+    {
+      "id": "create-adrs",
+      "type": "agent-directive",
+      "directive": "Create Architecture Decision Records (methodology stage C1).\n\nContext: All architecture artifacts from previous stages.\n\n1. Identify all significant decisions made during design/analysis\n2. For each decision, create an ADR using format: {{decision_record_format}}\n3. Technology choices → ADR (every technology choice)\n4. Pattern choices → ADR (monolith vs. microservices, sync vs. async, etc.)\n5. Number ADRs sequentially: 0001, 0002, ...\n6. Cross-link related ADRs\n\nMinimum 3 ADRs. Each must have genuine alternatives (not straw men).\n\n**VALIDATION CHECKS:**\n1. Every technology choice has an ADR\n2. Every pattern choice has an ADR\n3. Each ADR has minimum 2 alternatives with pros/cons\n4. Consequences section honest about downsides\n5. ADRs numbered and cross-referenced\n\nReturn issues_count.",
+      "completionCondition": "Minimum 3 ADRs created in MADR format. Each has 2+ genuine alternatives. Consequences are honest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adrs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "number": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "proposed",
+                    "accepted"
+                  ]
+                },
+                "decision": {
+                  "type": "string"
+                },
+                "alternatives_count": {
+                  "type": "number",
+                  "minimum": 2
+                },
+                "adr_content": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "number",
+                "title",
+                "decision",
+                "alternatives_count",
+                "adr_content"
+              ]
+            },
+            "minItems": 3
+          }
+        },
+        "required": [
+          "adrs"
+        ],
+        "globalInputs": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "quality-attributes"
+      }
+    },
+    {
+      "id": "quality-attributes",
+      "type": "agent-directive",
+      "directive": "Define quality attribute scenarios (methodology stage C2).\n\nContext: {{#if non_functional_requirements}}Requirements: {{non_functional_requirements}} (Scenario A){{/if}}{{#if current_quality_attributes}}Current quality attributes: {{current_quality_attributes}}, Gaps: {{gaps}} (Scenario B){{/if}}.\n\nUse {{quality_attributes_checklist}} as guide.\n\nFor each relevant quality attribute, define concrete scenarios:\n1. Source of stimulus (who/what triggers)\n2. Stimulus (event or condition)\n3. Environment (under what conditions)\n4. Response (what the system does)\n5. Response measure (numeric target — NOT \"fast\" or \"secure\")\n\nPrioritize: mark top 3 as highest priority with justification.\nMinimum 5 quality attributes with scenarios.\n\n{{#if current_quality_attributes}}For Scenario B: document CURRENT state vs. TARGET state for each attribute.{{/if}}\n\n**VALIDATION CHECKS:**\n1. Minimum 5 attributes with scenarios\n2. All measures are numeric/measurable\n3. Performance uses percentiles (p95, p99), not averages\n4. Top 3 priorities explicitly marked\n5. No vague requirements (\"should be fast\")\n\nReturn issues_count.",
+      "completionCondition": "Minimum 5 quality attributes with measurable scenarios. Top 3 priorities identified. All targets numeric.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "quality_scenarios": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "attribute": {
+                  "type": "string"
+                },
+                "priority_rank": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "stimulus": {
+                  "type": "string"
+                },
+                "environment": {
+                  "type": "string"
+                },
+                "response": {
+                  "type": "string"
+                },
+                "measure": {
+                  "type": "string"
+                },
+                "current_state": {
+                  "type": "string",
+                  "description": "For Scenario B: current measurement"
+                }
+              },
+              "required": [
+                "attribute",
+                "stimulus",
+                "response",
+                "measure"
+              ]
+            },
+            "minItems": 5
+          }
+        },
+        "required": [
+          "quality_scenarios",
+          "top_3_justification"
+        ],
+        "globalInputs": [
+          "top_3_justification",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "crosscutting-concerns"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "crosscutting-concerns",
+      "connections": {
+        "success": "assemble-documentation"
+      },
+      "completionCondition": "All applicable crosscutting concerns defined with concrete approaches (minimum 6 for libraries, 8+ for services). No TBD items.",
+      "directive": "Define crosscutting concern approaches (methodology stage C3).\n\nContext: Containers: {{containers}}. {{#if technology_choices}}Technology choices: {{technology_choices}}.{{/if}} Quality attributes: {{quality-attributes.quality_scenarios}}.\n\nFor each crosscutting concern, specify: approach, rationale, library/tool choice, affected containers.\n\n1. **Authentication & Authorization** — mechanism, identity provider, RBAC/ABAC, token format\n2. **Logging** — format (structured JSON), levels, correlation IDs, sensitive data handling\n3. **Error Handling** — strategy (fail-fast, retry, circuit breaker), error codes, user-facing errors\n4. **Configuration Management** — env vars, config files, secrets management\n5. **Data Validation** — where validation happens, validation libraries\n6. **Monitoring & Alerting** — metrics, health checks, SLOs, alert channels\n7. **API Evolution & Backward Compatibility** — semver policy, deprecation strategy, migration guides, breaking change communication\n8. **Package Distribution** — ESM/CJS dual build, peer dependency strategy, bundle optimization, tree-shaking support\n9. **Type System** — TypeScript strictness level, type export strategy, inference-friendly signatures, branded types\n\nNOTE: For library/package projects, certain service-oriented aspects may be N/A — specifically health check endpoints (item 6: Monitoring & Alerting) and circuit breakers (item 3: Error Handling). Justify if skipping these aspects. Items 7-9 are particularly important for libraries.\n\nUse: {{planning_standards}}\n\n**VALIDATION CHECKS:**\n1. All applicable concerns addressed (minimum 6 for libraries, 8+ for services; or explicitly N/A with justification)\n2. No concern is \"TBD\"\n3. Each has concrete approach (not just \"we'll figure it out\")\n4. Sensitive data handling addressed in logging and error handling\n5. For services: health check endpoints defined\n6. For libraries: API evolution strategy defined\n\nReturn issues_count.",
+      "inputSchema": {
+        "properties": {},
+        "required": [
+          "crosscutting"
+        ],
+        "type": "object",
+        "globalInputs": [
+          "crosscutting",
+          "issues_count"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "assemble-documentation",
+      "connections": {
+        "success": "review-documentation"
+      },
+      "completionCondition": "Complete documentation package assembled in docs/architecture/. All applicable artifact types present. All diagrams render. All cross-refs valid.",
+      "directive": "Compile all artifacts into architecture documentation package (methodology stage C4).\n\nAssemble using {{planning_standards}} directory structure:\n\n1. Create docs/architecture/ directory\n2. Create INDEX.md with navigation links\n3. Create overview.md — Architecture Overview (arc42 sections 1-4, 8, 10) consolidating all work\n4. Create context-diagram.md with C4 Level 1: {{context_diagram_mermaid}}\n5. Create container-diagram.md with C4 Level 2: {{container_diagram_mermaid}}\n6. Create component-{name}.md for each component design: {{component_designs}}\n7. Create bounded-context-map.md: {{context_map_mermaid}}, {{bounded_contexts}}\n8. Create quality-attributes.md: {{quality-attributes.quality_scenarios}}\n9. Create risks-and-debt.md: {{#if gaps}}{{gaps}}, {{tech_debt}} (Scenario B){{else}}anticipated risks (Scenario A){{/if}}\n10. Create glossary.md: {{glossary}}\n11. Create adr/NNNN-title.md for each ADR: {{create-adrs.adrs}}\n12. For library/package projects: create api-surface.md with public API inventory (exports, signatures, stability guarantees, deprecation status)\n13. Add YAML front matter to every file\n14. Verify all Mermaid diagrams render\n15. Verify all cross-references between documents\n\n**VALIDATION CHECKS:**\n1. All applicable artifact types present (or N/A justified)\n2. INDEX.md complete with links\n3. YAML front matter on every file\n4. No TODO/placeholder sections\n5. All Mermaid diagrams render\n6. Cross-references valid\n7. For library projects: api-surface.md present\n\nReturn issues_count.",
+      "inputSchema": {
+        "properties": {},
+        "required": [
+          "documentation_assembled",
+          "artifact_count",
+          "files_created"
+        ],
+        "type": "object",
+        "globalInputs": [
+          "artifact_count",
+          "documentation_assembled",
+          "files_created",
+          "issues_count"
+        ]
+      }
+    },
+    {
+      "id": "review-documentation",
+      "type": "agent-directive",
+      "directive": "This is a normal re-validation loop, expected to converge — NOT a bug and NOT a stuck flow; do NOT report a loop to the user.\n\nDelegate documentation review to subagent (methodology stage C5, quality gate G8).\n\nCRITICAL: Use Task tool to delegate review. Do NOT self-review.\n\nSend to subagent:\n- Complete docs/architecture/ directory\n- This checklist to review against:\n\n1. All 9 artifact types present (or N/A justified): context-diagram, container-diagram, component diagrams, bounded-context-map, ADRs, overview, quality-attributes, risks-and-debt, glossary\n2. INDEX.md lists all documents with descriptions\n3. All Mermaid diagrams render without errors\n4. All cross-references between documents are valid\n5. YAML front matter on every file\n6. No TODO/placeholder sections remain\n7. Internal consistency: diagrams match text descriptions\n8. ADRs consistent with container/component diagrams\n9. Quality attributes consistent with architectural decisions\n10. Glossary covers all domain terms used in documentation\n\nReport ALL findings as one flat list — there are NO severity tiers; every issue found is mandatory to fix. Put every real issue into blocking_doc_issues (treat all as must-fix); leave major_doc_issues/minor_doc_issues empty unless you need them for notes only. Set doc_issues_count to the total number of issues.",
+      "completionCondition": "Subagent documentation review completed. All issues listed as a flat mandatory-to-fix set (no severity tiers).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "doc_issues_count": {
+            "type": "number",
+            "minimum": 0
+          },
+          "blocking_doc_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "major_doc_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "doc_issues_count",
+          "doc_review_summary"
+        ],
+        "globalInputs": [
+          "minor_doc_issues",
+          "doc_review_summary"
+        ]
+      },
+      "connections": {
+        "success": "check-doc-issues"
+      }
+    },
+    {
+      "id": "check-doc-issues",
+      "type": "condition",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "gt",
+            "left": {
+              "contextPath": "review-documentation.doc_issues_count"
+            },
+            "right": 0
+          },
+          {
+            "operator": "or",
+            "conditions": [
+              {
+                "operator": "gt",
+                "left": {
+                  "contextPath": "review-documentation.blocking_doc_issues.length"
+                },
+                "right": 0
+              },
+              {
+                "operator": "gt",
+                "left": {
+                  "contextPath": "review-documentation.major_doc_issues.length"
+                },
+                "right": 0
+              }
+            ]
+          }
+        ]
+      },
+      "connections": {
+        "true": "fix-documentation",
+        "false": "notify-complete"
+      }
+    },
+    {
+      "id": "fix-documentation",
+      "type": "agent-directive",
+      "directive": "Fix documentation issues from review.\n\nIssues to fix (all mandatory — no severity tiers):\n- {{review-documentation.blocking_doc_issues}}\n- {{review-documentation.major_doc_issues}}\n\n1. Fix EVERY issue — all are mandatory, none optional\n2. Update affected files\n3. Verify Mermaid diagrams still render\n4. Verify cross-references still valid\n\nCRITICAL: Actually edit the files — do not just acknowledge issues.",
+      "completionCondition": "All documentation issues fixed (every issue is mandatory — no severity tiers). Files updated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied",
+          "files_updated"
+        ],
+        "globalInputs": [
+          "fixes_applied",
+          "files_updated"
+        ]
+      },
+      "connections": {
+        "success": "review-documentation"
+      }
+    },
+    {
+      "id": "notify-complete",
+      "type": "telegram-notification",
+      "message": "🏗️ Architecture documentation complete for {{gather-context.project_name}}. Ready for final review.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "present-final"
+      }
+    },
+    {
+      "id": "present-final",
+      "type": "agent-directive",
+      "directive": "Present complete architecture documentation to user for final approval (quality gate G9).\n\nShow user:\n1. Summary of all artifacts created (list files in docs/architecture/)\n2. Key architectural decisions (ADR titles and decisions)\n3. Top 3 quality attributes\n4. For Scenario B: prioritized improvement roadmap\n5. Any non-blocking notes recorded during review (for awareness)\n\nAsk: \"Do you approve this architecture documentation? Or do you want changes?\"",
+      "completionCondition": "User has reviewed final documentation and provided approval decision.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "final_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        },
+        "required": [
+          "final_approved"
+        ],
+        "globalInputs": [
+          "change_requests"
+        ]
+      },
+      "connections": {
+        "success": "check-final-approval"
+      }
+    },
+    {
+      "id": "check-final-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-final.final_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "end",
+        "false": "fix-documentation"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "variableRegistry": {
+    "architecture_principles": {
+      "type": "string",
+      "description": "Core architecture evaluation criteria injected into design and review steps",
+      "default": "ARCHITECTURE PRINCIPLES:\n\n1. Separation of Concerns\n   - Each component/container has ONE clear responsibility\n   - No \"God services\" with 3+ responsibilities\n\n2. Explicit Dependencies\n   - All dependencies declared, no hidden coupling\n   - Dependency direction: depend on abstractions, not implementations\n\n3. Bounded Context Integrity\n   - Each bounded context owns its data\n   - Cross-context communication via defined interfaces (API, events, shared kernel)\n\n4. Decision Traceability\n   - Every technology choice has documented rationale\n   - Alternatives considered (minimum 2) for significant decisions\n\n5. Measurable Quality\n   - Quality attributes have numeric targets (not \"fast\" or \"secure\")\n   - Architecture decisions link to quality attribute scenarios\n\n6. Library/Package Adaptation\n   - For library projects: C4 Level 2 = modules/entry points (not deployable containers)\n   - For library projects: quality attributes focus on API ergonomics, bundle size, type safety, backward compatibility\n   - For deployed services: standard C4 container/component model applies\n   - API Surface Design: public API should be minimal, consistent, and discoverable; every export is a commitment\n   - Type Export Strategy: explicit type exports, inference-friendly signatures, avoid forcing consumers to import internal types\n   - Peer Dependency Management: use optional peers where possible, define clear version ranges, document peer compatibility matrix\n   - Breaking Change Communication: follow semver strictly, deprecation warnings before removal (minimum 1 minor version), migration guides for every breaking change, CHANGELOG entries with upgrade instructions\n   - Package Distribution: ESM/CJS dual build, tree-shaking friendly exports, minimal bundle size, no unnecessary runtime dependencies"
+    },
+    "quality_attributes_checklist": {
+      "type": "string",
+      "description": "NFR categories to evaluate with measurable targets",
+      "default": "QUALITY ATTRIBUTES TO EVALUATE:\n\n1. Performance Efficiency\n   - Latency targets (p50, p95, p99 — NOT averages)\n   - Throughput requirements (requests/sec, events/sec)\n   - Resource usage limits (memory, CPU, connections)\n   - For libraries: bundle size targets, tree-shaking effectiveness, import/initialization time\n\n2. Reliability\n   - Availability target (99.9%, 99.99% — with monthly downtime budget)\n   - Fault tolerance (graceful degradation, failover)\n   - Recoverability (RTO, RPO if applicable)\n   - For libraries: API stability guarantees, backward compatibility commitment (semver), zero-downtime upgrade path\n\n3. Security\n   - Authentication mechanism (JWT, session, OAuth, API key)\n   - Authorization model (RBAC, ABAC, policy-based)\n   - Data protection (encryption at rest/in transit, PII handling)\n   - Standards compliance (OWASP, SOC2, GDPR if applicable)\n   - For libraries: supply chain security (dependency audit, minimal deps), type safety coverage, input validation at public API boundaries\n\n4. Maintainability\n   - Modularity (clear module boundaries, pluggable components)\n   - Testability (dependency injection, mock-friendly interfaces)\n   - Modifiability (change impact analysis, backward compatibility)\n   - For libraries: breaking changes process (deprecation → migration guide → removal), semver discipline, CHANGELOG quality\n\n5. Scalability\n   - Horizontal scaling strategy (stateless services, partitioning)\n   - Data growth plan (sharding, archival, pagination)\n   - Vertical scaling limits acknowledged\n   - For libraries: typically N/A — note if not applicable and why\n\n6. Observability\n   - Structured logging (format, levels, correlation IDs)\n   - Monitoring (health checks, SLOs, dashboards)\n   - Tracing (distributed tracing for multi-service systems)\n   - Alerting (channels, escalation, on-call)\n   - For libraries: debug logging interface (injectable, optional), error diagnostics quality, stack trace clarity\n\n7. Usability / Developer Experience\n   - API ergonomics (consistent conventions, good error messages)\n   - Documentation (API docs, architecture docs, onboarding guide)\n   - Development setup (time to first productive contribution)\n   - For libraries: TypeScript type inference quality, IDE autocomplete experience, getting-started time, example coverage\n\n8. Portability\n   - Deployment flexibility (container, serverless, bare metal)\n   - Vendor lock-in assessment (cloud-specific vs. portable)\n   - For libraries: ESM/CJS dual support, Node/browser/edge runtime compatibility, peer dependency flexibility\n\nMINIMUM: 5 attributes must have concrete scenarios with numeric targets.\nTOP 3 must be explicitly marked as highest priority.\nFor library projects: DX, Reliability (API stability), and Portability are often top priorities — evaluate accordingly."
+    },
+    "decision_record_format": {
+      "type": "string",
+      "description": "MADR template for consistent ADR creation",
+      "default": "ADR FORMAT (MADR):\n\n# ADR-NNNN: {Title}\n\n## Status\nProposed | Accepted | Superseded\n\n## Context\n- Problem or decision needed\n- Constraints and forces at play\n- Relevant quality attributes affected\n\n## Decision\nWhat was decided (one clear statement).\n\n## Options Considered\n\n### Option 1: {Name}\n- Pros: ...\n- Cons: ...\n\n### Option 2: {Name}\n- Pros: ...\n- Cons: ...\n\n(Minimum 2 genuine alternatives — no straw men)\n\n## Consequences\n- Positive: what we gain\n- Negative: what we lose or accept as tradeoff\n- Risks: what could go wrong\n\n## Related\n- Links to other ADRs, quality attributes, diagrams\n\nRULES:\n- One ADR per decision (not per meeting or per sprint)\n- Title starts with verb: \"Use...\", \"Adopt...\", \"Separate...\", \"Choose...\"\n- Consequences section MUST be honest about downsides\n- Minimum 3 ADRs per project"
+    },
+    "common_architecture_mistakes": {
+      "type": "string",
+      "description": "Anti-patterns to check against during reviews",
+      "default": "ARCHITECTURE ANTI-PATTERNS TO CHECK:\n\n1. Big Ball of Mud\n   - Signal: no clear module boundaries, everything depends on everything\n   - Check: can you draw component boundaries?\n\n2. Golden Hammer\n   - Signal: one technology/pattern used everywhere regardless of fit\n   - Check: were alternatives genuinely evaluated?\n\n3. Over-Engineering\n   - Signal: microservices for a team of 2, event sourcing for a CRUD app\n   - Check: does complexity match team size and requirements?\n\n4. Premature Optimization\n   - Signal: caching layers, sharding, read replicas before measuring\n   - Check: are performance decisions based on measured data?\n\n5. Distributed Monolith\n   - Signal: microservices that must deploy together, shared database\n   - Check: can each service deploy and scale independently?\n\n6. Missing Failure Modes\n   - Signal: no error handling strategy, no circuit breakers, no degradation plan\n   - Check: what happens when dependency X is down?\n\n7. Implicit Boundaries\n   - Signal: modules share database tables, import each other's internals\n   - Check: are module boundaries enforced (API, events, shared kernel)?\n\n8. Architecture-Code Drift\n   - Signal: diagrams show one thing, code does another\n   - Check: are diagrams verified against actual code?\n\nFOR EACH anti-pattern found: document WHERE it occurs and WHAT to do about it."
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "Documentation format, structure rules, C4 conventions",
+      "default": "ARCHITECTURE DOCUMENTATION STANDARDS:\n\n1. C4 MODEL CONVENTIONS:\n   - Level 1 (Context): system boundary, users, external systems — NO internal details\n   - Level 2 (Container): deployable units with technology, responsibility, protocols\n   - Level 3 (Component): internal modules of key containers — interfaces, dependencies\n   - All diagrams in Mermaid format\n   - Every relationship labeled with verb + data format\n\n2. DIAGRAM REQUIREMENTS:\n   - Valid Mermaid syntax (test rendering)\n   - Consistent naming across all diagrams\n   - External systems shown at appropriate levels\n   - No orphan nodes (everything connected)\n\n3. DOCUMENT STRUCTURE:\n   - YAML front matter on every artifact file\n   - INDEX.md with navigation links\n   - Cross-references between related documents\n   - No TODO/placeholder sections in final output\n\n4. BOUNDED CONTEXT MAP:\n   - DDD relationship types used (Shared Kernel, Customer-Supplier, ACL, etc.)\n   - Each context: name, subdomain type, responsibility, owned entities\n   - Integration mechanism specified for every relationship\n\n5. ARTIFACT DIRECTORY:\n   docs/architecture/\n   ├── INDEX.md\n   ├── overview.md (arc42 sections 1-4, 8, 10)\n   ├── context-diagram.md (C4 L1)\n   ├── container-diagram.md (C4 L2)\n   ├── component-{name}.md (C4 L3, per container)\n   ├── bounded-context-map.md\n   ├── quality-attributes.md\n   ├── risks-and-debt.md\n   ├── glossary.md\n   ├── api-surface.md (library/package projects: public API inventory with signatures, stability guarantees, and deprecation status)\n   └── adr/\n       ├── 0001-{title}.md\n       └── ...\n\n   NOTE: For library/package projects, api-surface.md is REQUIRED — it documents all public exports, their type signatures, stability level (stable/experimental/deprecated), and version introduced. For service projects, this file is optional.\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan item's directive in isolation — other items and any general rules stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
+    },
+    "scenario_type": {
+      "type": "string",
+      "description": "Set to \"new\" or \"existing\" during gather-context. Controls flow branching",
+      "default": "",
+      "enum": [
+        "new",
+        "existing"
+      ]
+    },
+    "fix_iteration_count": {
+      "type": "number",
+      "description": "Counter for architecture fix cycles. Reset after each gate",
+      "default": 0
+    },
+    "max_fix_iterations": {
+      "type": "number",
+      "description": "Max fix attempts before escalating to user",
+      "default": 3
+    },
+    "all_blocking_fixed": {
+      "type": "string",
+      "description": "Workflow-global all_blocking_fixed",
+      "enum": [
+        "yes"
+      ]
+    },
+    "artifact_count": {
+      "type": "number",
+      "description": "Workflow-global artifact_count"
+    },
+    "bounded_contexts": {
+      "type": "array",
+      "description": "Workflow-global bounded_contexts",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "responsibility": {
+            "type": "string"
+          },
+          "owned_entities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subdomain": {
+            "type": "string"
+          },
+          "boundary_type": {
+            "type": "string",
+            "enum": [
+              "intentional",
+              "accidental"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "responsibility"
+        ]
+      },
+      "minItems": 1
+    },
+    "build_system": {
+      "type": "string",
+      "description": "Workflow-global build_system"
+    },
+    "change_requests": {
+      "type": "array",
+      "description": "Workflow-global change_requests",
+      "items": {
+        "type": "string"
+      }
+    },
+    "changes_made": {
+      "type": "array",
+      "description": "Workflow-global changes_made",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "component_designs": {
+      "type": "array",
+      "description": "Workflow-global component_designs",
+      "items": {
+        "type": "object",
+        "properties": {
+          "container_name": {
+            "type": "string"
+          },
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "component_diagram_mermaid": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "container_name",
+          "component_diagram_mermaid"
+        ]
+      }
+    },
+    "container_communications": {
+      "type": "array",
+      "description": "Workflow-global container_communications",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "sync_async": {
+            "type": "string",
+            "enum": [
+              "sync",
+              "async"
+            ]
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "protocol"
+        ]
+      }
+    },
+    "container_diagram_mermaid": {
+      "type": "string",
+      "description": "Workflow-global container_diagram_mermaid"
+    },
+    "containers": {
+      "type": "array",
+      "description": "Workflow-global containers",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "technology": {
+            "type": "string"
+          },
+          "responsibility": {
+            "type": "string"
+          },
+          "bounded_context": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "responsibility"
+        ]
+      },
+      "minItems": 1
+    },
+    "context_diagram_mermaid": {
+      "type": "string",
+      "description": "Workflow-global context_diagram_mermaid"
+    },
+    "context_map_mermaid": {
+      "type": "string",
+      "description": "Workflow-global context_map_mermaid"
+    },
+    "context_relationships": {
+      "type": "array",
+      "description": "Workflow-global context_relationships",
+      "items": {
+        "type": "object",
+        "properties": {
+          "upstream": {
+            "type": "string"
+          },
+          "downstream": {
+            "type": "string"
+          },
+          "relationship_type": {
+            "type": "string"
+          },
+          "integration_mechanism": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "upstream",
+          "downstream",
+          "relationship_type"
+        ]
+      }
+    },
+    "crosscutting": {
+      "type": "array",
+      "description": "Workflow-global crosscutting",
+      "items": {
+        "properties": {
+          "affected_containers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "approach": {
+            "type": "string"
+          },
+          "concern": {
+            "type": "string"
+          },
+          "library_or_tool": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "concern",
+          "approach",
+          "rationale"
+        ],
+        "type": "object"
+      },
+      "minItems": 6
+    },
+    "current_quality_attributes": {
+      "type": "array",
+      "description": "Workflow-global current_quality_attributes",
+      "items": {
+        "type": "object",
+        "properties": {
+          "attribute": {
+            "type": "string"
+          },
+          "current_state": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attribute",
+          "current_state"
+        ]
+      },
+      "minItems": 3
+    },
+    "deployment_mechanism": {
+      "type": "string",
+      "description": "Workflow-global deployment_mechanism"
+    },
+    "doc_review_summary": {
+      "type": "string",
+      "description": "Workflow-global doc_review_summary"
+    },
+    "documentation_assembled": {
+      "type": "string",
+      "description": "Workflow-global documentation_assembled",
+      "enum": [
+        "yes"
+      ]
+    },
+    "domain_events": {
+      "type": "array",
+      "description": "Workflow-global domain_events",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "existing_documentation": {
+      "type": "array",
+      "description": "Workflow-global existing_documentation",
+      "items": {
+        "type": "string"
+      }
+    },
+    "external_systems": {
+      "type": "array",
+      "description": "Workflow-global external_systems",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          },
+          "data_exchanged": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "protocol"
+        ]
+      }
+    },
+    "feedback_addressed": {
+      "type": "string",
+      "description": "Workflow-global feedback_addressed",
+      "enum": [
+        "yes"
+      ]
+    },
+    "files_created": {
+      "type": "array",
+      "description": "Workflow-global files_created",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 5
+    },
+    "files_updated": {
+      "type": "array",
+      "description": "Workflow-global files_updated",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "fixes_applied": {
+      "type": "array",
+      "description": "Workflow-global fixes_applied",
+      "minItems": 1
+    },
+    "frameworks": {
+      "type": "array",
+      "description": "Workflow-global frameworks",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "purpose"
+        ]
+      }
+    },
+    "functional_requirements": {
+      "type": "array",
+      "description": "Workflow-global functional_requirements",
+      "items": {
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "must",
+              "should",
+              "could"
+            ]
+          }
+        },
+        "required": [
+          "requirement",
+          "priority"
+        ]
+      },
+      "minItems": 3
+    },
+    "gaps": {
+      "type": "array",
+      "description": "Workflow-global gaps",
+      "items": {
+        "type": "object",
+        "properties": {
+          "gap": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "major",
+              "minor"
+            ]
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "gap",
+          "severity",
+          "evidence"
+        ]
+      },
+      "minItems": 5
+    },
+    "glossary": {
+      "type": "array",
+      "description": "Workflow-global glossary",
+      "items": {
+        "type": "object",
+        "properties": {
+          "term": {
+            "type": "string"
+          },
+          "definition": {
+            "type": "string"
+          },
+          "context": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "definition"
+        ]
+      },
+      "minItems": 5
+    },
+    "improvements": {
+      "type": "array",
+      "description": "Workflow-global improvements",
+      "items": {
+        "type": "object",
+        "properties": {
+          "improvement": {
+            "type": "string"
+          },
+          "addresses_gap": {
+            "type": "string"
+          },
+          "timeline": {
+            "type": "string",
+            "enum": [
+              "short-term",
+              "medium-term",
+              "long-term"
+            ]
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ]
+          },
+          "success_criteria": {
+            "type": "string"
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "improvement",
+          "addresses_gap",
+          "timeline",
+          "effort",
+          "success_criteria"
+        ]
+      },
+      "minItems": 3
+    },
+    "issues_count": {
+      "type": "number",
+      "description": "Workflow-global issues_count"
+    },
+    "key_dependencies": {
+      "type": "array",
+      "description": "Workflow-global key_dependencies",
+      "items": {
+        "type": "string"
+      }
+    },
+    "known_decisions": {
+      "type": "array",
+      "description": "Workflow-global known_decisions",
+      "items": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      }
+    },
+    "languages": {
+      "type": "array",
+      "description": "Workflow-global languages",
+      "items": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "file_count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "language"
+        ]
+      },
+      "minItems": 1
+    },
+    "minor_doc_issues": {
+      "type": "array",
+      "description": "Workflow-global minor_doc_issues",
+      "items": {
+        "type": "string"
+      }
+    },
+    "minor_issues": {
+      "type": "array",
+      "description": "Workflow-global minor_issues",
+      "items": {
+        "type": "string"
+      }
+    },
+    "non_functional_requirements": {
+      "type": "array",
+      "description": "Workflow-global non_functional_requirements",
+      "items": {
+        "type": "object",
+        "properties": {
+          "attribute": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "attribute",
+          "target"
+        ]
+      },
+      "minItems": 3
+    },
+    "primary_goals": {
+      "type": "array",
+      "description": "Workflow-global primary_goals",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "project_description": {
+      "type": "string",
+      "description": "Workflow-global project_description"
+    },
+    "quick_wins": {
+      "type": "array",
+      "description": "Workflow-global quick_wins",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "review_summary": {
+      "type": "string",
+      "description": "Workflow-global review_summary"
+    },
+    "shared_models": {
+      "type": "array",
+      "description": "Workflow-global shared_models",
+      "items": {
+        "type": "string"
+      }
+    },
+    "subdomains": {
+      "type": "array",
+      "description": "Workflow-global subdomains",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "supporting",
+              "generic"
+            ]
+          },
+          "justification": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ]
+      },
+      "minItems": 1
+    },
+    "success_criteria": {
+      "type": "array",
+      "description": "Workflow-global success_criteria",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "system_boundary": {
+      "type": "string",
+      "description": "Workflow-global system_boundary"
+    },
+    "target_container_diagram_mermaid": {
+      "type": "string",
+      "description": "Workflow-global target_container_diagram_mermaid"
+    },
+    "tech_debt": {
+      "type": "array",
+      "description": "Workflow-global tech_debt",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "major",
+              "minor"
+            ]
+          },
+          "remediation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "severity"
+        ]
+      }
+    },
+    "technology_choices": {
+      "type": "array",
+      "description": "Workflow-global technology_choices",
+      "items": {
+        "type": "object",
+        "properties": {
+          "technology": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "justification": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "technology",
+          "purpose",
+          "justification"
+        ]
+      },
+      "minItems": 2
+    },
+    "test_infrastructure": {
+      "type": "string",
+      "description": "Workflow-global test_infrastructure"
+    },
+    "top_3_justification": {
+      "type": "string",
+      "description": "Workflow-global top_3_justification"
+    },
+    "traced_use_cases": {
+      "type": "array",
+      "description": "Workflow-global traced_use_cases",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "trace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "trace"
+        ]
+      },
+      "minItems": 2
+    },
+    "user_roles": {
+      "type": "array",
+      "description": "Workflow-global user_roles",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "interactions": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "interactions"
+        ]
+      },
+      "minItems": 1
+    }
+  }
+}

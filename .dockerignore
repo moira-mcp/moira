@@ -1,0 +1,58 @@
+# Dependencies - будут установлены внутри Docker
+node_modules/
+packages/*/node_modules/
+
+# Build outputs
+dist/
+packages/*/dist/
+
+# Development files
+.git/
+.github/
+*.md
+!README.md
+!config/prompts/**
+
+# IDE
+.idea/
+.vscode/
+
+# Tests
+tests/
+packages/*/tests/
+*.test.ts
+*.spec.ts
+test-results/
+playwright-report/
+
+# Logs
+logs/
+*.log
+
+# Environment (будет скопирован явно в Dockerfile)
+# .env файлы копируются отдельной командой
+
+# Storage
+.moira-storage/
+.graph-storage/
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+claude-temp-files/
+tmp/
+temp/
+*.tmp
+
+# Backups
+backups/
+workflow-backups/
+workflows/backup/
+
+# Development artifacts
+deploy-logs/
+load-tests/
+moira-ws/

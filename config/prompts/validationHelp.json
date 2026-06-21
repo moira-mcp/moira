@@ -1,0 +1,49 @@
+{
+  "general": [
+    "Check field names match schema exactly (case sensitive)",
+    "Verify required fields are provided",
+    "Check data types (string vs number vs boolean)",
+    "Use the inputSchema from directive response as reference"
+  ],
+  "json_format": [
+    "Check for missing quotes around string values",
+    "Remove trailing commas after last array/object item",
+    "Ensure all brackets are properly matched: { } [ ]",
+    "Use JSON validator (jsonlint.com) to check syntax"
+  ],
+  "workflow_troubleshooting": [
+    "Verify workflow ID is correct",
+    "Use list() to see available workflows",
+    "Check if workflow was created successfully"
+  ],
+  "process_troubleshooting": [
+    "Verify process ID is correct",
+    "Use session({ action: 'executions' }) to list active executions",
+    "Check if workflow execution is still active"
+  ],
+  "auth_troubleshooting": [
+    "Re-authorize MCP server in client settings",
+    "Token may have expired - re-authenticate",
+    "Check account status at {{BASE_URL}}"
+  ],
+  "connection_troubleshooting": [
+    "Check MCP server status at {{BASE_URL}}",
+    "Verify network connectivity",
+    "Try reconnecting MCP server in client settings"
+  ],
+  "tool_update_troubleshooting": [
+    "MCP server may have been updated",
+    "Reconnect MCP server to get latest tool definitions",
+    "Check {{BASE_URL}} for release notes"
+  ],
+  "settings_troubleshooting": [
+    "Only user settings can be modified",
+    "Admin-only settings require admin privileges",
+    "Use settings({ action: 'list' }) to see available settings"
+  ],
+  "help_troubleshooting": [
+    "Use help() without arguments to see all available topics",
+    "Check topic name spelling",
+    "Try using topic aliases: overview, intro, pattern"
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "slug": "react-flow-theme-test",
+  "metadata": {
+    "name": "React Flow Theme Test",
+    "version": "1.0.0",
+    "description": "Simple workflow for testing React Flow theme switching"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "step1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step1",
+      "directive": "First step",
+      "completionCondition": "Step 1 completed",
+      "connections": {
+        "success": "step2"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step2",
+      "directive": "Second step",
+      "completionCondition": "Step 2 completed",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

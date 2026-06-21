@@ -1,0 +1,189 @@
+---
+title: MCP Clients Integration
+description: Connect Moira with various MCP-compatible AI clients
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+import McpUrl from "~/components/docs/McpUrl.astro";
+import ClientSetupTabs from "~/components/docs/ClientSetupTabs.astro";
+
+Moira works with any client that supports the Model Context Protocol (MCP). This guide covers setup for 11 popular MCP clients.
+
+## MCP Protocol Overview
+
+Moira exposes tools via MCP over HTTP/SSE:
+
+- **Endpoint**: <McpUrl format="code" />
+- **Transport**: HTTP with SSE for streaming
+- **Authentication**: OAuth 2.0 or API Token
+
+## Client Configuration
+
+<ClientSetupTabs lang="en" />
+
+### Custom Client
+
+For custom MCP client implementations, use the MCP SDK with URL: <McpUrl format="code" />
+
+## Available Tools
+
+All MCP clients have access to these tools:
+
+### Workflow Management
+
+| Tool             | Parameters           | Description              |
+| ---------------- | -------------------- | ------------------------ |
+| `list` | -                    | List available workflows |
+| `start` | `workflowId`         | Start workflow execution |
+| `step`   | `processId`, `input` | Submit step result       |
+
+### Session Management
+
+| Tool                    | Parameters    | Description                |
+| ----------------------- | ------------- | -------------------------- |
+| `get_session_info`      | `action`      | Get session/execution info |
+| `get_execution_context` | `executionId` | Get execution context      |
+
+### Help & Settings
+
+| Tool              | Parameters               | Description       |
+| ----------------- | ------------------------ | ----------------- |
+| `get_help`        | `topic` (optional)       | Get documentation |
+| `manage_settings` | `action`, `key`, `value` | Manage settings   |
+
+## Authentication
+
+Moira supports two authentication methods:
+
+### OAuth 2.0 (Default)
+
+<Steps>
+  1. Client initiates connection to MCP endpoint 2. Server returns authentication required response
+  3. Client opens browser for OAuth flow 4. User authenticates with Moira 5. Client receives access
+  token 6. Subsequent requests include token
+</Steps>
+
+<Aside type="note">
+  Token refresh is handled automatically. If token expires, re-authentication may be required.
+</Aside>
+
+### API Tokens
+
+For MCP clients that do not support OAuth (custom scripts, CI/CD pipelines, headless environments), use API tokens:
+
+<Steps>
+  1. Log in to Moira web UI 2. Go to **Settings → API Tokens** 3. Click **Create Token**, enter a
+  name and expiration 4. Copy the token (shown once, starts with `moira_`) 5. Configure your client
+  with the token as Bearer authorization
+</Steps>
+
+Example configuration for a custom MCP client:
+
+```json
+{
+  "mcpServers": {
+    "moira": {
+      "url": "YOUR_MCP_ENDPOINT",
+      "headers": {
+        "Authorization": "Bearer moira_your_token_here"
+      }
+    }
+  }
+}
+```
+
+<Aside type="tip">
+  Replace `YOUR_MCP_ENDPOINT` with your Moira MCP endpoint: <McpUrl format="code" />. API tokens
+  skip the OAuth flow entirely — use them when your client cannot open a browser for authentication.
+</Aside>
+
+## Tool Call Examples
+
+### List Workflows
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "list",
+    "arguments": {}
+  }
+}
+```
+
+### Start Workflow
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "start",
+    "arguments": {
+      "workflowId": "development-flow"
+    }
+  }
+}
+```
+
+### Execute Step
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "step",
+    "arguments": {
+      "processId": "abc-123",
+      "input": {
+        "result": "Task completed successfully",
+        "details": { "files": ["main.ts", "utils.ts"] }
+      }
+    }
+  }
+}
+```
+
+## Error Handling
+
+Common error responses:
+
+| Error              | Cause                       | Solution           |
+| ------------------ | --------------------------- | ------------------ |
+| `UNAUTHORIZED`     | Invalid/expired token       | Re-authenticate    |
+| `NOT_FOUND`        | Invalid workflow/process ID | Verify IDs         |
+| `FORBIDDEN`        | No access to resource       | Check permissions  |
+| `VALIDATION_ERROR` | Invalid input               | Check input schema |
+
+## Self-Hosted Setup
+
+For self-hosted Moira:
+
+1. Deploy Moira server
+2. Configure MCP endpoint URL
+3. Set up authentication (optional)
+4. Update client configuration with your endpoint
+
+## Troubleshooting
+
+### Connection Timeout
+
+- Check network connectivity
+- Verify endpoint URL
+- Ensure SSE is not blocked by firewall
+
+### Tools Not Appearing
+
+- Restart client after configuration
+- Verify JSON syntax in config
+- Check client logs for errors
+
+### Authentication Loop
+
+- Clear stored tokens
+- Check OAuth configuration
+- Verify redirect URIs
+
+## Related
+
+- [Claude Code](/docs/integration/claude-code/) - Claude Code specific setup
+- [Quick Start](/docs/getting-started/quickstart/) - General getting started

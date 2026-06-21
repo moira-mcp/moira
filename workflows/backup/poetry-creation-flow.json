@@ -1,0 +1,262 @@
+{
+  "slug": "poetry-creation-flow",
+  "metadata": {
+    "name": "Создание поэмы с уточнением темы",
+    "version": "1.0.0",
+    "description": "Простой workflow для создания поэмы с интерактивным уточнением темы и стиля у пользователя"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-theme"
+      },
+      "initialData": {
+        "greeting": "Добро пожаловать в мастерскую поэзии!"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-theme",
+      "directive": "Узнайте у пользователя тему для поэмы. Поприветствуйте пользователя и спросите, о чем он хотел бы написать стихотворение. Будьте дружелюбны и вдохновляющи.",
+      "completionCondition": "Пользователь четко указал тему или предмет для поэмы",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "theme": {
+            "type": "string",
+            "description": "Основная тема поэмы"
+          },
+          "user_mood": {
+            "type": "string",
+            "description": "Настроение или эмоция, которую хочет передать пользователь"
+          }
+        },
+        "required": [
+          "theme"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "get-details",
+        "error": "get-theme"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-details",
+      "directive": "Теперь уточните детали для поэмы на тему '{{theme}}'. Спросите пользователя о:\n1. Желаемом стиле (классический, современный, свободный стих, etc.)\n2. Настроении (грустное, веселое, романтичное, философское, etc.)\n3. Примерной длине (короткое, среднее, длинное)\n4. Любых особых пожеланиях",
+      "completionCondition": "Собраны все необходимые детали для создания поэмы: стиль, настроение, длина",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "style": {
+            "type": "string",
+            "description": "Стиль поэмы"
+          },
+          "mood": {
+            "type": "string",
+            "description": "Настроение поэмы"
+          },
+          "length": {
+            "type": "string",
+            "description": "Желаемая длина поэмы"
+          },
+          "special_requests": {
+            "type": "string",
+            "description": "Особые пожелания пользователя"
+          }
+        },
+        "required": [
+          "style",
+          "mood",
+          "length"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "write-poem",
+        "error": "get-details"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "write-poem",
+      "directive": "Создайте красивую поэму на основе собранной информации:\n- Тема: {{theme}}\n- Стиль: {{style}}\n- Настроение: {{mood}}\n- Длина: {{length}}\n- Особые пожелания: {{special_requests}}\n\nНапишите оригинальную, вдохновляющую поэму, которая отражает все указанные параметры. Будьте творческими и эмоциональными.",
+      "completionCondition": "Создана завершенная поэма, которая соответствует всем заданным параметрам и имеет художественную ценность",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "poem": {
+            "type": "string",
+            "description": "Текст созданной поэмы"
+          },
+          "title": {
+            "type": "string",
+            "description": "Название поэмы"
+          },
+          "author_notes": {
+            "type": "string",
+            "description": "Краткие заметки автора о поэме"
+          }
+        },
+        "required": [
+          "poem",
+          "title"
+        ]
+      },
+      "maxRetries": 2,
+      "connections": {
+        "success": "present-poem",
+        "error": "write-poem"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-poem",
+      "directive": "Красиво представьте созданную поэму пользователю:\n\nНазвание: {{title}}\nПоэма:\n{{poem}}\n\nЗаметки: {{author_notes}}\n\nСпросите пользователя, доволен ли он результатом, или хочет ли внести изменения. Будьте готовы к обратной связи.",
+      "completionCondition": "Поэма представлена пользователю, получена обратная связь о его удовлетворенности результатом",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_feedback": {
+            "type": "string",
+            "description": "Отзыв пользователя о поэме"
+          },
+          "satisfaction_level": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Уровень удовлетворенности от 1 до 10"
+          },
+          "needs_revision": {
+            "type": "boolean",
+            "description": "Нужны ли доработки поэмы"
+          }
+        },
+        "required": [
+          "user_feedback",
+          "satisfaction_level"
+        ]
+      },
+      "connections": {
+        "success": "check-satisfaction"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-satisfaction",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "satisfaction_level"
+        },
+        "right": 7
+      },
+      "connections": {
+        "true": "notify-success",
+        "false": "get-revision-details"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-revision-details",
+      "directive": "Пользователь хочет внести изменения в поэму (уровень удовлетворенности: {{satisfaction_level}}/10). \n\nОтзыв: {{user_feedback}}\n\nУточните, что именно нужно изменить или улучшить в поэме. Будьте внимательны к пожеланиям.",
+      "completionCondition": "Получены четкие указания о том, что нужно изменить в поэме",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "revision_requests": {
+            "type": "string",
+            "description": "Конкретные изменения, которые нужно внести"
+          }
+        },
+        "required": [
+          "revision_requests"
+        ]
+      },
+      "connections": {
+        "success": "revise-poem"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "revise-poem",
+      "directive": "Доработайте поэму согласно пожеланиям пользователя:\n\nИсходная поэма: {{poem}}\nПожелания к изменениям: {{revision_requests}}\n\nСоздайте улучшенную версию поэмы, учитывая все замечания.",
+      "completionCondition": "Поэма переработана согласно пожеланиям пользователя",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "revised_poem": {
+            "type": "string",
+            "description": "Переработанная версия поэмы"
+          },
+          "revision_notes": {
+            "type": "string",
+            "description": "Пояснения к внесенным изменениям"
+          }
+        },
+        "required": [
+          "revised_poem"
+        ]
+      },
+      "connections": {
+        "success": "present-revised-poem"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-revised-poem",
+      "directive": "Представьте пользователю переработанную поэму:\n\nНазвание: {{title}}\nПереработанная поэма:\n{{revised_poem}}\n\nВнесенные изменения: {{revision_notes}}\n\nПоздравьте пользователя с завершением работы над поэмой.",
+      "completionCondition": "Финальная версия поэмы представлена пользователю",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "final_feedback": {
+            "type": "string",
+            "description": "Финальный отзыв пользователя"
+          }
+        },
+        "required": [
+          "final_feedback"
+        ]
+      },
+      "connections": {
+        "success": "notify-revision-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-success",
+      "message": "🎉 Поэма успешно создана!\n\n📝 **{{title}}**\n\n{{poem}}\n\n⭐ Оценка пользователя: {{satisfaction_level}}/10",
+      "chatId": "{{user_chat_id}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-revision-complete",
+      "message": "✨ Поэма доработана и завершена!\n\n📝 **{{title}}**\n\n{{revised_poem}}\n\n🔄 Изменения: {{revision_notes}}",
+      "chatId": "{{user_chat_id}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "theme",
+        "title",
+        "poem",
+        "revised_poem",
+        "satisfaction_level",
+        "user_feedback"
+      ]
+    }
+  ]
+}

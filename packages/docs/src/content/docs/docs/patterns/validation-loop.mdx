@@ -1,0 +1,255 @@
+---
+title: Validation Loop Pattern
+description: Verify results and retry on failure
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Ensure quality by verifying results and retrying if they don't meet criteria. Prevents low-quality outputs from proceeding.
+
+## Structure
+
+```
+[action] → [check] → success → [next]
+              ↓
+           failure → [fix] → [increment-iteration] → [action]
+```
+
+## Implementation
+
+### Action Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "do-work",
+  "directive": "Complete the task. Iteration: {{current_iteration}}",
+  "completionCondition": "Task completed with quality standards met",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "string" },
+      "quality_check_passed": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["result", "quality_check_passed"]
+  },
+  "connections": { "success": "check-quality" }
+}
+```
+
+### Check Node
+
+```json
+{
+  "type": "condition",
+  "id": "check-quality",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "quality_check_passed" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "next-step",
+    "false": "fix-issues"
+  }
+}
+```
+
+### Fix Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "fix-issues",
+  "directive": "Fix issues found in iteration {{current_iteration}}. Previous result: {{result}}",
+  "connections": { "success": "increment-iteration" }
+}
+```
+
+### Iteration Counter
+
+Using expression node:
+
+```json
+{
+  "type": "expression",
+  "id": "increment-iteration",
+  "expressions": ["current_iteration = current_iteration + 1"],
+  "connections": { "default": "do-work" }
+}
+```
+
+<Aside type="caution">
+  Always include iteration counters to prevent infinite loops. Consider adding a max iteration
+  check.
+</Aside>
+
+## With Max Iterations
+
+Add check before retry:
+
+```json
+{
+  "type": "condition",
+  "id": "check-max-iterations",
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "current_iteration" },
+    "right": 5
+  },
+  "connections": {
+    "true": "do-work",
+    "false": "escalate-to-user"
+  }
+}
+```
+
+## Bounded Re-Validation Loop
+
+A re-validation or re-review loop revisits the SAME validate node on each round. Without a cue in the loop-entry directive, the agent can misread seeing the same node twice as the flow being stuck and report a loop to the user. Two requirements prevent this.
+
+### Counter is an Expression Node
+
+The round counter MUST be incremented by an expression node (flow-automatic), declared in `variableRegistry` with a numeric `default`. An agent-incremented counter is the anti-pattern — the agent is not asked to do arithmetic, and a missing or non-numeric value breaks the bound check.
+
+```json
+{
+  "variableRegistry": {
+    "validation_round": { "type": "number", "description": "Re-validation pass counter", "default": 0 },
+    "max_validation_rounds": { "type": "number", "description": "Re-validation bound", "default": 5 }
+  }
+}
+```
+
+```json
+{
+  "type": "expression",
+  "id": "increment-validation-round",
+  "expressions": ["validation_round = validation_round + 1"],
+  "connections": { "default": "re-validate" }
+}
+```
+
+### Loop-Entry Cue
+
+The loop-entry directive renders the round counter and states that the repetition is expected:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "re-validate",
+  "directive": "Re-validation pass {{validation_round}} of {{max_validation_rounds}} — a normal quality loop, expected to converge. This is NOT a bug and NOT a stuck flow; do not report a loop to the user.\n\nRe-check the work against the criteria and report whether all issues are resolved.",
+  "completionCondition": "Work re-checked against criteria",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "all_resolved": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["all_resolved"]
+  },
+  "connections": { "success": "check-resolved" }
+}
+```
+
+<Aside type="caution">
+  The cue text is exact. Re-validation passing through the same node is expected, not a bug — the
+  directive must say so, or the agent may stop and report a false loop.
+</Aside>
+
+## Numeric Quality Check
+
+For measurable quality:
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "quality_score": { "type": "number", "minimum": 0, "maximum": 10 }
+    },
+    "required": ["quality_score"]
+  }
+}
+```
+
+```json
+{
+  "condition": {
+    "operator": "gte",
+    "left": { "contextPath": "quality_score" },
+    "right": 8
+  }
+}
+```
+
+## Real Example
+
+From `development-flow.json`:
+
+```json
+{
+  "id": "verify-step-implementation",
+  "directive": "Verify step {{current_step_name}} implementation:\n- Expected: {{expected_outcome}}\n- Check actual matches expected",
+  "inputSchema": {
+    "properties": {
+      "step_verified": { "type": "string", "enum": ["yes", "no"] },
+      "verification_evidence": { "type": "string" }
+    },
+    "required": ["step_verified", "verification_evidence"]
+  }
+}
+```
+
+## Agent Behavior at Validation Gates
+
+When a workflow includes validation gates (nodes that ask user for approval), the agent must follow strict rules:
+
+### Validation Gate Directive Pattern
+
+Always include this instruction in validation gate directives:
+
+```
+CRITICALLY IMPORTANT - REACTION TO FEEDBACK:
+- If user said "yes" → approval = "yes"
+- If user gave ANY feedback or said "no" → approval = "no"
+- DO NOT fix yourself!
+- Reply approval = "no" and write user_feedback with feedback
+- Workflow will direct to fix branch itself
+- All fixes are done only through workflow, not independently
+```
+
+### Why This Matters
+
+Without explicit instructions, agents tend to:
+
+1. Interpret user feedback as minor corrections and self-fix
+2. Report `approval = "yes"` even when user gave feedback
+3. Skip the workflow's fix branch entirely
+
+This breaks the workflow's iteration loop and prevents proper quality control.
+
+### Example Validation Gate
+
+```json
+{
+  "type": "agent-directive",
+  "id": "approve-plan",
+  "directive": "Show user the plan and ask for confirmation.\n\nPlan: {{plan_summary}}\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself",
+  "completionCondition": "User confirmed or rejected plan",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "plan_approved": { "type": "string", "enum": ["yes", "no"] },
+      "user_feedback": { "type": "string" }
+    },
+    "required": ["plan_approved"]
+  },
+  "connections": { "success": "route-plan-approval" }
+}
+```
+
+## Related Patterns
+
+- [Step Verification](/docs/patterns/step-verification/) - Verify specific steps
+- [Escalation](/docs/patterns/escalation/) - Handle repeated failures

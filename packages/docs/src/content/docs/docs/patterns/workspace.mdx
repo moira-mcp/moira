@@ -1,0 +1,156 @@
+---
+title: Workspace Pattern
+description: Organize workflow files in a dedicated workspace directory
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Create a dedicated workspace directory for workflow execution. All working files (plans, results, reports, backups) are stored in one location, keeping the project clean.
+
+## Structure
+
+```
+./moira-ws/{workspace-name}/
+├── process-id.txt       # Workflow execution ID for recovery
+├── development-plan.md  # Plans and specifications
+├── step-1/              # Step-specific results
+│   └── step-results.md
+├── *.backup.json        # Backup files
+└── ...                  # Other working files
+```
+
+## Workspace Location
+
+All workspaces are created in `./moira-ws/` subdirectory of the **current project**:
+
+```
+./moira-ws/{workspace-name}/
+```
+
+<Aside type="caution">
+  Do NOT create workspaces in project root (`./feature-name/`) or other locations. Always use
+  `./moira-ws/` for consistency.
+</Aside>
+
+## Naming Convention
+
+Format: `{short-name}-{YYYYMMDD}-{HHMM}`
+
+- `short-name`: Brief task description (max 20 chars, kebab-case)
+- Date and time of creation
+
+Examples:
+
+- `wmf-edit-20251211-2145`
+- `auth-fix-20251212-0930`
+- `api-refactor-20251215-1400`
+
+## Implementation
+
+### Onboarding Node
+
+Collect workspace path at workflow start:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "create-workspace",
+  "directive": "Create workspace for this workflow execution.\n\n1. Generate workspace name: {task-short-name}-{YYYYMMDD}-{HHMM}\n2. Create directory: ./moira-ws/{workspace-name}/\n3. Create process-id.txt with execution ID: {{executionId}}\n4. Return workspace path",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_path": {
+        "type": "string",
+        "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
+        "description": "Path to created workspace"
+      }
+    },
+    "required": ["workspace_path"]
+  },
+  "connections": { "success": "next-step" }
+}
+```
+
+### Using Workspace Path
+
+Reference `{{workspace_path}}` in subsequent directives:
+
+```json
+{
+  "directive": "Save development plan to {{workspace_path}}development-plan.md"
+}
+```
+
+```json
+{
+  "directive": "Create step results in {{workspace_path}}step-{{current_step}}/step-results.md"
+}
+```
+
+## What Goes in Workspace
+
+**Include:**
+
+- `process-id.txt` - Execution ID for workflow recovery
+- Plans and specifications (`.md` files)
+- Step results and reports
+- Backup files before editing
+- Temporary analysis outputs
+
+**Exclude:**
+
+- Project source code
+- `node_modules` or dependencies
+- Large binary files
+- Sensitive credentials
+
+## Git Configuration
+
+Add `./moira-ws/` to `.gitignore`:
+
+```gitignore
+# Moira workflow workspaces
+moira-ws/
+```
+
+Workspaces are temporary working directories and should not be committed.
+
+## Recovery
+
+When workflow is interrupted, agent can:
+
+1. Read `process-id.txt` from workspace
+2. Resume execution using saved process ID
+3. Continue from last completed step
+
+```json
+{
+  "directive": "Check for existing workspace in ./moira-ws/\nIf found, read process-id.txt and resume workflow"
+}
+```
+
+## Real Example
+
+From `workflow-management-flow`:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "setup-workspace",
+  "directive": "Create workspace for workflow editing.\n\nFormat: ./moira-ws/{{workflow_id}}-edit-{YYYYMMDD}-{HHMM}/\nExample: ./moira-ws/development-flow-edit-20251211-2200/\n\n1. Create the directory\n2. Save process-id.txt with: {{executionId}}\n3. Return the workspace path",
+  "inputSchema": {
+    "properties": {
+      "workspace_path": { "type": "string" }
+    },
+    "required": ["workspace_path"]
+  }
+}
+```
+
+## Related Patterns
+
+- [Information Collection](/docs/patterns/information-collection/) - Collect workspace path in onboarding
+- [Dynamic Files](/docs/patterns/dynamic-files/) - Use `{{workspace_path}}` in file paths
+- [Step Verification](/docs/patterns/step-verification/) - Store verification results in workspace

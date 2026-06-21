@@ -1,0 +1,124 @@
+{
+  "slug": "artifacts-demo-report-publisher",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "b509e4ed-328c-4f39-bfed-2291b78efc2a",
+  "metadata": {
+    "name": "Artifacts Demo: Report Publisher",
+    "version": "1.2.0",
+    "description": "Demo workflow: generates a project analysis report and publishes it as a static HTML artifact. Demonstrates the Artifacts system for hosting workflow outputs as shareable web pages."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {}
+      },
+      "connections": {
+        "default": "gather-info"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "gather-info",
+      "directive": "Gather information for a project analysis report. Ask the user about:\n\n1. **Project name** — what project to analyze\n2. **Analysis focus** — choose one: architecture overview, code quality, security assessment, or performance review\n3. **Key findings** — ask user to describe 2-3 main observations or concerns\n4. **Recommendations** — what improvements they'd like to highlight\n\nCollect all information needed to generate a comprehensive report.",
+      "completionCondition": "Project name, analysis focus, key findings, and recommendations are collected.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "projectName",
+          "analysisFocus",
+          "keyFindings",
+          "recommendations"
+        ],
+        "globalInputs": [
+          "projectName",
+          "analysisFocus",
+          "keyFindings",
+          "recommendations"
+        ]
+      },
+      "connections": {
+        "success": "generate-and-publish-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-and-publish-report",
+      "directive": "Generate a professional HTML report and publish it as an artifact.\n\n**Project:** {{gather-info.projectName}}\n**Focus:** {{gather-info.analysisFocus}}\n**Findings:** {{gather-info.keyFindings}}\n**Recommendations:** {{gather-info.recommendations}}\n\nCreate a complete, self-contained HTML document with:\n- Professional styling (use inline CSS, dark theme preferred)\n- Clear header with project name and report type\n- Executive summary section\n- Detailed findings section with visual indicators (✓ ✗ ⚠)\n- Recommendations section with priority indicators\n- Footer with generation timestamp\n- Responsive design for mobile viewing\n\nThe HTML must be complete and render correctly as a standalone page.\n\nAfter generating the HTML, publish it using the `artifacts` MCP tool with:\n- **action:** \"upload\"\n- **name:** \"{{gather-info.projectName}}-{{gather-info.analysisFocus}}-report.html\"\n- **content:** The generated HTML\n\nReturn the artifact UUID and URL.",
+      "completionCondition": "Report HTML generated and published as artifact with URL received.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "artifactUuid",
+          "artifactUrl"
+        ],
+        "globalInputs": [
+          "artifactUuid",
+          "artifactUrl"
+        ]
+      },
+      "connections": {
+        "success": "present-result"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-result",
+      "directive": "Present the published report to the user.\n\n**Report Details:**\n- Project: {{gather-info.projectName}}\n- Analysis Type: {{gather-info.analysisFocus}}\n- Artifact ID: {{generate-and-publish-report.artifactUuid}}\n- **Public URL: {{generate-and-publish-report.artifactUrl}}**\n\nInform the user that:\n1. The report is now publicly accessible at the URL\n2. The artifact will be automatically deleted after 30 days (default retention)\n3. They can share this URL with team members\n4. The report can be updated using the artifacts MCP tool with the update action\n\nProvide the clickable URL prominently.",
+      "completionCondition": "User has been informed about the published report and its URL.",
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end-success",
+      "finalOutput": [
+        "artifactUrl",
+        "artifactUuid"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "analysisFocus": {
+      "type": "string",
+      "description": "Workflow-global analysisFocus",
+      "enum": [
+        "architecture",
+        "code-quality",
+        "security",
+        "performance"
+      ]
+    },
+    "artifactUrl": {
+      "type": "string",
+      "description": "Workflow-global artifactUrl"
+    },
+    "artifactUuid": {
+      "type": "string",
+      "description": "Workflow-global artifactUuid"
+    },
+    "keyFindings": {
+      "type": "array",
+      "description": "Workflow-global keyFindings",
+      "items": {
+        "type": "string"
+      }
+    },
+    "projectName": {
+      "type": "string",
+      "description": "Workflow-global projectName"
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "Workflow-global recommendations",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

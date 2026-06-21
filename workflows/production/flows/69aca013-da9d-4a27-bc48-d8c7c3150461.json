@@ -1,0 +1,365 @@
+{
+  "slug": "research",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "69aca013-da9d-4a27-bc48-d8c7c3150461",
+  "metadata": {
+    "name": "Research Workflow",
+    "version": "1.4.1",
+    "description": "Structured research process with guaranteed verified and reproducible sources: QUESTION → METHODOLOGY → GATHER → READ → ALTERNATIVE → SYNTHESIZE → LIMITATIONS → OUTPUT. Solves AI hallucination and fake source problems through mandatory link verification, alternative viewpoint search and binding conclusions to specific sources."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "question"
+      },
+      "initialData": {
+        "variables": {
+          "planning_standards": {
+            "description": "Research planning standards",
+            "value": "RESEARCH PLANNING STANDARDS:\n\n1. METHODOLOGY RIGOR:\n- Clear research question with measurable success criteria\n- Defined scope boundaries (in/out)\n- Systematic search strategy with keywords\n- Specified source types and time periods\n- Reproducible methodology\n\n2. SOURCE VERIFICATION:\n- Primary sources preferred over secondary\n- Author credentials verified\n- Publication date relevance checked\n- Cross-reference claims across sources\n- Note source limitations and biases\n\n3. BIAS CHECK:\n- Actively seek opposing viewpoints\n- Identify author affiliations and potential conflicts\n- Note funding sources where relevant\n- Check for cherry-picked data\n- Consider cultural/regional biases\n\n4. EVIDENCE QUALITY:\n- Distinguish fact from opinion\n- Note confidence levels for claims\n- Identify gaps in evidence\n- Flag contradictory findings\n- Prefer peer-reviewed sources"
+          },
+          "source_quality_criteria": {
+            "description": "Criteria for evaluating source quality and reliability",
+            "value": "SOURCE QUALITY CRITERIA:\n\n1. VERIFIABLE LINK required:\n   - URL must work (not 404)\n   - Content at link matches description\n   - Author/publication stated and verifiable\n\n2. Source types by reliability:\n   - Academic: peer-reviewed papers, journals (highest reliability)\n   - Industry: official documentation, whitepapers, company reports\n   - News: authoritative publications with editorial policy\n   - Community: expert blogs, Stack Overflow (requires verification)\n\n3. Currency:\n   - State publication date for each source\n   - For technical topics: prefer sources < 2-3 years old\n   - For fundamental concepts: classic works acceptable\n\n4. Relevance:\n   - Source directly answers research question\n   - Don't include loosely related materials"
+          },
+          "citation_requirements": {
+            "description": "Requirements for citing sources and formatting references",
+            "value": "CITATION REQUIREMENTS:\n\n1. EVERY conclusion must have source:\n   - 'Research shows that X'\n   + 'According to Smith et al. (2023) [1], X because Y'\n\n2. Source format:\n   - Title\n   - Author(s)\n   - Date (publication year)\n   - URL (verified, working)\n   - Type (academic/industry/news/community)\n\n3. Quotes:\n   - Direct quotes in quotation marks with page number if available\n   - Paraphrase with source reference\n   - DON'T invent quotes\n\n4. Bibliography:\n   - Full source list at end\n   - Numbering [1], [2], [3]...\n   - Inline references in text"
+          },
+          "common_mistakes": {
+            "description": "Common research mistakes to avoid",
+            "value": "COMMON RESEARCH MISTAKES:\n\n1. Fake sources — AI invents links:\n   → Solution: ALWAYS verify URL works\n   → Don't trust your memory about sources\n\n2. Confirmation bias — only seeking confirmation:\n   → Solution: MANDATORY step for alternative viewpoint search\n   → Minimum 2 opposing views\n\n3. Shallow research — superficial review:\n   → Solution: Critical reading with key quote extraction\n   → Analyze source methodology\n\n4. Unmarked assumptions — hidden assumptions:\n   → Solution: Explicit LIMITATIONS step\n   → State biases in sources AND in your approach\n\n5. Missing methodology:\n   → Solution: Define HOW you search BEFORE starting\n   → Keywords, source types, time period"
+          }
+        }
+      }
+    },
+    {
+      "id": "question",
+      "type": "agent-directive",
+      "directive": "Formulate research question.\n\nAsk user or determine from context:\n1. What do we want to know? (specific question, not vague)\n2. What criteria for good answer? (what counts as success)\n3. Scope: what we include, what we exclude\n4. Who will use the results?\n\nIMPORTANT: Question must be SPECIFIC and ANSWERABLE.",
+      "completionCondition": "Research question formulated specifically, success criteria defined, scope established",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "scope_out": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What we exclude"
+          },
+          "audience": {
+            "type": "string",
+            "description": "Who will use results"
+          }
+        },
+        "required": [
+          "research_question",
+          "success_criteria",
+          "scope_in"
+        ],
+        "globalInputs": [
+          "research_question",
+          "success_criteria",
+          "scope_in"
+        ]
+      },
+      "connections": {
+        "success": "methodology"
+      }
+    },
+    {
+      "id": "methodology",
+      "type": "agent-directive",
+      "directive": "Define research methodology.\n\nResearch question: {{research_question}}\nScope: {{scope_in}}\n\nUse planning standards: {{planning_standards}}\n\nDefine BEFORE starting search:\n1. What source types to use (academic, news, official, expert blogs)\n2. Time period for sources\n3. Keywords and search queries\n4. Success criteria for research\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave methodology issues to `{{workspace_path}}/methodology-issues.md` with format:\n```\n# Methodology Issues\n\n## REQUIREMENTS COVERAGE\n1. [Research question aspect not addressed]\n\n## METHODOLOGY RIGOR\n1. [Missing methodology element]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `methodology_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - methodology addresses all aspects of research question\n2. METHODOLOGY RIGOR - follows {{planning_standards}}\n3. Scope clearly defined\n4. Success criteria measurable\n\nReturn `issues_count` = number of issues found (0 if methodology complete).",
+      "completionCondition": "Methodology defined: source types, time period, keywords, quality criteria",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "quality_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Minimum source quality criteria"
+          }
+        },
+        "required": [
+          "source_types",
+          "keywords",
+          "quality_criteria",
+          "time_period"
+        ],
+        "globalInputs": [
+          "source_types",
+          "time_period",
+          "keywords"
+        ]
+      },
+      "connections": {
+        "success": "gather"
+      }
+    },
+    {
+      "id": "gather",
+      "type": "agent-directive",
+      "directive": "Gather sources following methodology.\n\nResearch question: {{research_question}}\nKeywords: {{keywords}}\nSource types: {{source_types}}\nTime period: {{time_period}}\n\nUse planning standards: {{planning_standards}}\n\nFor each source found:\n1. Verify author credentials\n2. Check publication date relevance\n3. Note potential biases\n4. Rate source quality (high/medium/low)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave gathering issues to `{{workspace_path}}/gather-issues.md` with format:\n```\n# Source Gathering Issues\n\n## SOURCE VERIFICATION\n1. [Unverified source]\n\n## COVERAGE GAPS\n1. [Missing source type]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `gather_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. SOURCE VERIFICATION - all sources verified per {{planning_standards}}\n2. Minimum sources per type met\n3. Time period coverage adequate\n4. Quality distribution acceptable\n\nReturn `issues_count` = number of issues found (0 if gathering complete).",
+      "completionCondition": "Minimum 5 sources gathered, all URLs verified and working",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "sources"
+        ],
+        "globalInputs": [
+          "sources"
+        ]
+      },
+      "connections": {
+        "success": "read"
+      }
+    },
+    {
+      "id": "read",
+      "type": "agent-directive",
+      "directive": "Conduct critical reading of key sources.\n\nSources: {{sources}}\nResearch question: {{research_question}}\n\nUse planning standards: {{planning_standards}}\n\nFor each key source extract:\n- source_id: source identifier\n- key_claims: main claims relevant to question\n- evidence_quality: strength of evidence (strong/moderate/weak)\n- potential_bias: identified biases\n- relevance: how it answers research question\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave reading issues to `{{workspace_path}}/read-issues.md` with format:\n```\n# Critical Reading Issues\n\n## STANDARDS COMPLIANCE\n1. [Standard not followed]\n\n## EVIDENCE QUALITY\n1. [Weak evidence accepted]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `read_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. STANDARDS COMPLIANCE - reading follows {{planning_standards}}\n2. EVIDENCE QUALITY - properly assessed per standards\n3. All key sources analyzed\n4. Biases identified\n\nReturn `issues_count` = number of issues found (0 if reading complete).",
+      "completionCondition": "Critical reading completed for key sources, findings and quotes extracted",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "readings"
+        ],
+        "globalInputs": [
+          "readings"
+        ]
+      },
+      "connections": {
+        "success": "alternative"
+      }
+    },
+    {
+      "id": "alternative",
+      "type": "agent-directive",
+      "directive": "Find alternative viewpoints.\n\nResearch question: {{research_question}}\nCurrent findings: {{readings}}\n\nUse planning standards: {{planning_standards}}\n\nMUST find:\n1. Opposing views — who DISAGREES with main findings and why\n2. Alternative interpretations — different ways to read the data\n3. Edge cases — when findings might not apply\n4. Criticism — what critics say about this topic/methodology\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave bias check issues to `{{workspace_path}}/alternative-issues.md` with format:\n```\n# Bias Check Issues\n\n## OPPOSING VIEWS\n1. [Missing opposing viewpoint]\n\n## BIAS IDENTIFICATION\n1. [Unaddressed bias]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `alternative_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. BIAS CHECK - actively sought opposing views per {{planning_standards}}\n2. At least 2 alternative viewpoints found\n3. Criticism addressed\n4. Own biases acknowledged\n\nReturn `issues_count` = number of issues found (0 if alternatives complete).",
+      "completionCondition": "Minimum 2 alternative viewpoints found with sources",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "controversies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Debates and disagreements in the field"
+          }
+        },
+        "required": [
+          "alternative_views"
+        ],
+        "globalInputs": [
+          "alternative_views"
+        ]
+      },
+      "connections": {
+        "success": "synthesize"
+      }
+    },
+    {
+      "id": "synthesize",
+      "type": "agent-directive",
+      "directive": "Synthesize findings into answer to research question.\n\nResearch question: {{research_question}}\nSuccess criteria: {{success_criteria}}\nFindings: {{readings}}\nAlternative views: {{alternative_views}}\n\nUse planning standards: {{planning_standards}}\n\nCreate synthesis that:\n1. Directly answers the research question\n2. Weighs evidence quality\n3. Acknowledges contradictions\n4. Notes confidence level\n5. Addresses alternative views\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave synthesis issues to `{{workspace_path}}/synthesis-issues.md` with format:\n```\n# Synthesis Issues\n\n## ANSWER COMPLETENESS\n1. [Research question aspect not answered]\n\n## EVIDENCE INTEGRATION\n1. [Finding not integrated]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `synthesis_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Research question fully answered\n2. All key findings integrated\n3. Contradictions addressed\n4. Confidence level stated\n\nReturn `issues_count` = number of issues found (0 if synthesis complete).",
+      "completionCondition": "Answer formulated, each conclusion has source, agreement/disagreement areas defined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agreements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Where sources agree"
+          },
+          "disagreements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Where sources differ"
+          }
+        },
+        "required": [
+          "answer",
+          "conclusions"
+        ],
+        "globalInputs": [
+          "answer",
+          "conclusions"
+        ]
+      },
+      "connections": {
+        "success": "limitations"
+      }
+    },
+    {
+      "id": "limitations",
+      "type": "agent-directive",
+      "directive": "Describe limitations and biases of research.\n\nMethodology: {{source_types}}, {{time_period}}, {{keywords}}\nSources: {{sources}}\n\nHonestly state:\n1. Gaps — what is NOT covered by research?\n2. Source biases — what biases do sources have?\n3. Methodology biases — what biases in our approach?\n4. Future research — what needs additional investigation?\n\n{{common_mistakes}}\n\nIMPORTANT: Honest statement of limitations increases trust in research.",
+      "completionCondition": "Limitations described: gaps, source biases, methodology biases, future research",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "future_research": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What to investigate further"
+          }
+        },
+        "required": [
+          "gaps",
+          "source_biases",
+          "methodology_biases"
+        ],
+        "globalInputs": [
+          "gaps",
+          "source_biases",
+          "methodology_biases"
+        ]
+      },
+      "connections": {
+        "success": "output"
+      }
+    },
+    {
+      "id": "output",
+      "type": "agent-directive",
+      "directive": "Generate final research report.\n\nUse all gathered data:\n- Question: {{research_question}}\n- Methodology: {{source_types}}, {{keywords}}, {{time_period}}\n- Sources: {{sources}}\n- Findings: {{readings}}\n- Alternative views: {{alternative_views}}\n- Answer: {{answer}}\n- Conclusions: {{conclusions}}\n- Limitations: {{gaps}}, {{source_biases}}, {{methodology_biases}}\n\nReport structure:\n1. Executive Summary (1-2 paragraphs)\n2. Research Question & Methodology\n3. Findings with Citations\n4. Alternative Perspectives\n5. Synthesis & Conclusions\n6. Limitations\n7. References (full list with URLs)\n\nShow report to user.",
+      "completionCondition": "Research report ready and shown to user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "report_delivered": {
+            "type": "string",
+            "enum": [
+              "yes"
+            ],
+            "description": "Report shown to user"
+          },
+          "sections_count": {
+            "type": "number",
+            "minimum": 5,
+            "description": "Number of sections in report"
+          },
+          "sources_cited": {
+            "type": "number",
+            "minimum": 5,
+            "description": "Number of sources cited"
+          }
+        },
+        "required": [
+          "report_delivered",
+          "sources_cited"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "variableRegistry": {
+    "planning_standards": {
+      "type": "string",
+      "description": "Research planning standards",
+      "default": "RESEARCH PLANNING STANDARDS:\n\n1. METHODOLOGY RIGOR:\n- Clear research question with measurable success criteria\n- Defined scope boundaries (in/out)\n- Systematic search strategy with keywords\n- Specified source types and time periods\n- Reproducible methodology\n\n2. SOURCE VERIFICATION:\n- Primary sources preferred over secondary\n- Author credentials verified\n- Publication date relevance checked\n- Cross-reference claims across sources\n- Note source limitations and biases\n\n3. BIAS CHECK:\n- Actively seek opposing viewpoints\n- Identify author affiliations and potential conflicts\n- Note funding sources where relevant\n- Check for cherry-picked data\n- Consider cultural/regional biases\n\n4. EVIDENCE QUALITY:\n- Distinguish fact from opinion\n- Note confidence levels for claims\n- Identify gaps in evidence\n- Flag contradictory findings\n- Prefer peer-reviewed sources"
+    },
+    "source_quality_criteria": {
+      "type": "string",
+      "description": "Criteria for evaluating source quality and reliability",
+      "default": "SOURCE QUALITY CRITERIA:\n\n1. VERIFIABLE LINK required:\n   - URL must work (not 404)\n   - Content at link matches description\n   - Author/publication stated and verifiable\n\n2. Source types by reliability:\n   - Academic: peer-reviewed papers, journals (highest reliability)\n   - Industry: official documentation, whitepapers, company reports\n   - News: authoritative publications with editorial policy\n   - Community: expert blogs, Stack Overflow (requires verification)\n\n3. Currency:\n   - State publication date for each source\n   - For technical topics: prefer sources < 2-3 years old\n   - For fundamental concepts: classic works acceptable\n\n4. Relevance:\n   - Source directly answers research question\n   - Don't include loosely related materials"
+    },
+    "citation_requirements": {
+      "type": "string",
+      "description": "Requirements for citing sources and formatting references",
+      "default": "CITATION REQUIREMENTS:\n\n1. EVERY conclusion must have source:\n   - 'Research shows that X'\n   + 'According to Smith et al. (2023) [1], X because Y'\n\n2. Source format:\n   - Title\n   - Author(s)\n   - Date (publication year)\n   - URL (verified, working)\n   - Type (academic/industry/news/community)\n\n3. Quotes:\n   - Direct quotes in quotation marks with page number if available\n   - Paraphrase with source reference\n   - DON'T invent quotes\n\n4. Bibliography:\n   - Full source list at end\n   - Numbering [1], [2], [3]...\n   - Inline references in text"
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Common research mistakes to avoid",
+      "default": "COMMON RESEARCH MISTAKES:\n\n1. Fake sources — AI invents links:\n   → Solution: ALWAYS verify URL works\n   → Don't trust your memory about sources\n\n2. Confirmation bias — only seeking confirmation:\n   → Solution: MANDATORY step for alternative viewpoint search\n   → Minimum 2 opposing views\n\n3. Shallow research — superficial review:\n   → Solution: Critical reading with key quote extraction\n   → Analyze source methodology\n\n4. Unmarked assumptions — hidden assumptions:\n   → Solution: Explicit LIMITATIONS step\n   → State biases in sources AND in your approach\n\n5. Missing methodology:\n   → Solution: Define HOW you search BEFORE starting\n   → Keywords, source types, time period"
+    },
+    "research_question": {
+      "type": "string",
+      "description": "Specific research question"
+    },
+    "scope_in": {
+      "type": "array",
+      "description": "What we include in research"
+    },
+    "has_file_access": {
+      "type": "string",
+      "description": "Global variable has_file_access"
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Global variable workspace_path"
+    },
+    "keywords": {
+      "type": "array",
+      "description": "Keywords for search"
+    },
+    "source_types": {
+      "type": "array",
+      "description": "Source types for search"
+    },
+    "time_period": {
+      "type": "string",
+      "description": "Time period (e.g. 'last 3 years')"
+    },
+    "sources": {
+      "type": "array",
+      "description": "Gathered sources with verified URLs"
+    },
+    "readings": {
+      "type": "array",
+      "description": "Critical reading results"
+    },
+    "success_criteria": {
+      "type": "array",
+      "description": "Criteria for good answer"
+    },
+    "alternative_views": {
+      "type": "array",
+      "description": "Alternative viewpoints"
+    },
+    "answer": {
+      "type": "string",
+      "description": "Answer to research question"
+    },
+    "conclusions": {
+      "type": "array",
+      "description": "Conclusions with sources"
+    },
+    "gaps": {
+      "type": "array",
+      "description": "What's not covered"
+    },
+    "source_biases": {
+      "type": "array",
+      "description": "Biases in sources"
+    },
+    "methodology_biases": {
+      "type": "array",
+      "description": "Biases in our approach"
+    }
+  }
+}

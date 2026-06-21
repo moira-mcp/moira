@@ -1,0 +1,1024 @@
+{
+  "slug": "smart-purchase-assistant",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "b33e227c-cc2c-4931-ae5d-2de69932e41e",
+  "metadata": {
+    "name": "Smart Purchase Assistant",
+    "version": "3.1.0",
+    "description": "Intelligent product analysis with persistent notes storage for session recovery, HTML reports via Moira artifacts, and Telegram notifications."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "check-agent-capabilities"
+      }
+    },
+    {
+      "id": "check-agent-capabilities",
+      "type": "agent-directive",
+      "directive": "Determine your technical capabilities for this session:\n\n1. **File Access**: Can you create/write local files? (Check for Write, Edit, or file tools)\n2. **Visual Artifacts**: Can you create visual artifacts? (Like Claude canvas in browser)\n\nCheck your available tools and answer honestly. These capabilities affect how results will be delivered.\n\nNote: Moira artifacts (for publishing HTML reports) is always available since you're using this workflow.",
+      "maxRetries": 1,
+      "connections": {
+        "success": "analyze-user-needs"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "can_create_files",
+          "can_create_artifacts"
+        ],
+        "properties": {
+          "can_create_files": {
+            "type": "boolean",
+            "description": "Agent can write local files"
+          }
+        },
+        "globalInputs": [
+          "can_create_artifacts"
+        ]
+      },
+      "completionCondition": "Agent capabilities determined: file access and artifact creation status known"
+    },
+    {
+      "id": "analyze-user-needs",
+      "type": "agent-directive",
+      "directive": "Analyze user's purchasing needs. Find out: what product is needed, budget, purchase purpose, important requirements and constraints. Ask clarifying questions to understand context.",
+      "maxRetries": 2,
+      "connections": {
+        "success": "write-note-01"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "product_type",
+          "budget_max",
+          "use_case"
+        ],
+        "properties": {
+          "budget_max": {
+            "type": "number",
+            "description": "Maximum budget"
+          },
+          "budget_min": {
+            "type": "number",
+            "description": "Minimum budget"
+          },
+          "product_type": {
+            "type": "string",
+            "description": "Type of product to purchase"
+          }
+        },
+        "globalInputs": [
+          "use_case",
+          "constraints",
+          "requirements"
+        ]
+      },
+      "completionCondition": "Complete information about needs obtained: product type, budget, purpose of use, key requirements"
+    },
+    {
+      "id": "write-note-01",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-01-user-needs",
+      "source": "{{analyze-user-needs}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "research-product-category"
+      }
+    },
+    {
+      "id": "research-product-category",
+      "type": "agent-directive",
+      "directive": "Research the product category based on user needs.\n\n**User needs data:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Part 1: Category expertise**\nDetermine: main types and kinds, key comparison parameters, technology trends, alternative solutions, price seasonality.\n\n**Part 2: Product variant map (REQUIRED)**\nCreate a comprehensive \"variant map\" for the category:\n\n1. **Device/product types**: List ALL distinct types/technologies in this category. For each type provide: name, operating principle (1-2 sentences), typical price range, best suited for whom.\n   Example for humidifiers: ultrasonic, evaporative, steam, air washer.\n\n2. **Form factors**: List physical form factors available. For each: name, typical dimensions, placement.\n   Example: portable, tabletop, floor-standing, wall-mounted.\n\n3. **Use cases with recommendations**: Identify common use cases/scenarios. For each: scenario description, which product type is best, what to prioritize.\n   Example: \"small bedroom 10-15m²\" → ultrasonic or evaporative, prioritize noise level <30dB.\n\n4. **Price segments**: Define budget/mid-range/premium boundaries for this category with typical feature differences between segments.\n\n5. **Buyer checklist**: List the TOP 8-12 parameters a buyer should evaluate when choosing in this category, ordered by importance. For each: parameter name, why it matters, what values are good/bad.",
+      "maxRetries": 2,
+      "connections": {
+        "success": "write-note-02"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "product_types",
+          "key_parameters",
+          "device_types",
+          "use_cases",
+          "price_segments",
+          "buyer_checklist"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "product_types",
+          "key_parameters",
+          "technology_trends",
+          "alternatives",
+          "seasonality",
+          "device_types",
+          "form_factors",
+          "use_cases",
+          "price_segments",
+          "buyer_checklist"
+        ]
+      },
+      "completionCondition": "Complete expert base AND product variant map created: types with descriptions, form factors, use cases with recommendations, price segments, buyer checklist"
+    },
+    {
+      "id": "write-note-02",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-02-category-research",
+      "source": "{{research-product-category}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "determine-search-sources"
+      }
+    },
+    {
+      "id": "determine-search-sources",
+      "type": "agent-directive",
+      "directive": "Determine optimal sources for searching products.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Category research:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\nInclude: marketplaces, specialized stores, manufacturers, regional chains. Consider category specifics and user's region.",
+      "maxRetries": 2,
+      "connections": {
+        "success": "write-note-03"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "marketplaces",
+          "search_priority"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "marketplaces",
+          "manufacturers",
+          "regional_stores",
+          "search_priority",
+          "specialized_stores"
+        ]
+      },
+      "completionCondition": "Prioritized list of search sources compiled with justification for each selection"
+    },
+    {
+      "id": "write-note-03",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-03-search-sources",
+      "source": "{{determine-search-sources}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "search-and-analyze"
+      }
+    },
+    {
+      "id": "search-and-analyze",
+      "type": "agent-directive",
+      "directive": "Search for products on identified sources.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Product variant map (types, use cases, segments):**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Search sources:**\n{{note:purchase-{{executionId}}-03-search-sources}}\n\nFind products within budget, filter by requirements and constraints.\n\n**CRITICAL RULES:**\n\n1. **Search across ALL product types** from the variant map. Do not limit to one type — cover at least the top 2-3 most relevant types for the user's use case.\n\n2. **Search for model line variations**: For EACH promising model found, check if line variations exist (Lite, Mini, Pro, Plus, Max, SE, Gen 2/3, etc.). If a variation fits user requirements — include it as a separate candidate. Different variations often have fundamentally different price/performance ratios.\n\n3. **Cover multiple price segments**: Include candidates from budget, mid-range, and premium segments.\n\n4. **Collect for EACH candidate:**\n   - Direct product URL (clickable link to product page)\n   - Store URLs where product can be purchased\n   - Current prices at each store\n   - Which product type/category it belongs to\n\nCreate initial candidate list with specifications and URLs.",
+      "maxRetries": 3,
+      "connections": {
+        "success": "write-note-04"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "candidates",
+          "search_summary"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "candidates",
+          "search_summary"
+        ]
+      },
+      "completionCondition": "List of candidate products found (10-20 items) covering multiple product types and price segments, with model line variations included, specifications, prices, and direct purchase URLs"
+    },
+    {
+      "id": "write-note-04",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-04-candidates",
+      "source": "{{search-and-analyze}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "deep-analysis"
+      }
+    },
+    {
+      "id": "deep-analysis",
+      "type": "agent-directive",
+      "directive": "Conduct deep analysis of top candidates.\n\n**Candidates list:**\n{{note:purchase-{{executionId}}-04-candidates}}\n\n**FOCUS ON REAL CUSTOMER REVIEWS:**\n- Prioritize reviews from verified purchasers over expert opinions\n- Count total reviews and percentage from verified buyers\n- Note review recency (latest review date)\n- Identify common complaints (repeated issues from multiple buyers)\n- Identify common praises (consistently mentioned positives)\n- Look for signs of fake reviews (generic language, suspicious patterns)\n\nAlso study: brand reputation, technical specifications comparison, expert reviews where helpful.\n\nIdentify pros, cons and real-world pitfalls of each option.",
+      "maxRetries": 2,
+      "connections": {
+        "success": "write-note-05"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "detailed_analysis"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "detailed_analysis"
+        ]
+      },
+      "completionCondition": "Detailed analysis conducted with focus on real customer reviews, verified purchases, and common feedback patterns"
+    },
+    {
+      "id": "write-note-05",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-05-analysis",
+      "source": "{{deep-analysis}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "analyze-purchase-conditions"
+      }
+    },
+    {
+      "id": "analyze-purchase-conditions",
+      "type": "agent-directive",
+      "directive": "Analyze purchase conditions for best options.\n\n**Detailed analysis:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\nCompare: total cost (product + delivery), warranty and return conditions, delivery times, availability, current promotions and discounts.",
+      "maxRetries": 2,
+      "connections": {
+        "success": "write-note-06"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "purchase_analysis"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "purchase_analysis"
+        ]
+      },
+      "completionCondition": "Complete purchase conditions analysis obtained with final cost calculation and conditions comparison"
+    },
+    {
+      "id": "write-note-06",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-06-purchase-conditions",
+      "source": "{{analyze-purchase-conditions}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "generate-recommendations"
+      }
+    },
+    {
+      "id": "generate-recommendations",
+      "type": "agent-directive",
+      "directive": "Create final recommendations based on all collected data.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Analysis:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Purchase conditions:**\n{{note:purchase-{{executionId}}-06-purchase-conditions}}\n\n**INCLUDE CLICKABLE LINKS:**\n- Direct product URL for each recommendation\n- Best store URL with price for immediate purchase\n- Alternative store URLs if available\n\n**RECOMMENDATIONS (5-8 options):**\nPresent recommendations grouped by profile/use case. Each recommendation must have a clear `best_for` label. Example categories:\n- \"Best value for money\" (цена/качество)\n- \"Best budget option\" (бюджетный)\n- \"Best premium\" (премиум)\n- \"Best for [specific use case from user needs]\"\n- \"Most compact / quiet / powerful\" (based on category specifics)\n\nFor EACH top recommendation: verify that all available model variations were checked. If a cheaper variation covers user requirements — recommend it instead of or alongside the more expensive model.\n\n**BUYER'S GUIDE (REQUIRED):**\nCreate a buyer's guide section for users who are not experts in this category:\n\n1. **Product types overview**: For each type from the variant map — 2-3 sentences explaining what it is, main pros/cons, who it's best for.\n2. **Selection checklist**: Ordered list of what to look for when buying, with brief explanations.\n3. **Decision matrix**: Table format — \"If you value X → choose type Y\" for 5-8 common priorities.\n4. **Common mistakes**: 3-5 frequent mistakes buyers make in this category and how to avoid them.",
+      "maxRetries": 1,
+      "connections": {
+        "success": "write-note-07"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "top_recommendations",
+          "comparison_table",
+          "purchase_plan",
+          "buyer_guide"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "top_recommendations",
+          "comparison_table",
+          "purchase_plan",
+          "alternative_options",
+          "buyer_guide"
+        ]
+      },
+      "completionCondition": "Final recommendations created with 5-8 options grouped by profile/use case, clickable purchase links, comparison table, buyer guide with product types overview, selection checklist, decision matrix and common mistakes, and action plan"
+    },
+    {
+      "id": "write-note-07",
+      "type": "write-note",
+      "key": "purchase-{{executionId}}-07-recommendations",
+      "source": "{{generate-recommendations}}",
+      "tags": [
+        "purchase-{{executionId}}",
+        "smart-purchase"
+      ],
+      "connections": {
+        "default": "check-can-create-files"
+      }
+    },
+    {
+      "id": "check-can-create-files",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "check-agent-capabilities.can_create_files"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "generate-html-report",
+        "false": "generate-and-upload-report"
+      }
+    },
+    {
+      "id": "generate-html-report",
+      "type": "agent-directive",
+      "directive": "Generate a beautiful, responsive HTML report for the purchase assistant results.\n\n**Recommendations (with buyer's guide):**\n{{note:purchase-{{executionId}}-07-recommendations}}\n\n**Analysis details:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Include sections:**\n1. Executive Summary - top recommendation with 'Buy Now' button\n2. Buyer's Guide - for users unfamiliar with the category:\n   - Product Types Overview (what types exist, pros/cons of each, who they're for)\n   - Selection Checklist (what to look for)\n   - Decision Matrix (if you value X → choose Y table)\n   - Common Mistakes (what to avoid)\n3. Product Comparison Table - all candidates with specs, prices, ratings\n4. TOP 5-8 Recommendations - detailed cards grouped by profile with key specs, price comparison, 'Buy Now' buttons\n5. Review Analysis Summary\n6. Purchase Plan steps\n\n**Design:**\n- Use modern CSS (Tailwind CDN or clean custom styles)\n- Responsive design (mobile-friendly)\n- Make all product and store links clickable\n- Use clear visual hierarchy\n- Buyer's Guide section should be visually distinct and easy to scan\n\nSave as: purchase-report.html",
+      "completionCondition": "HTML report file created with product comparison, clickable purchase links, and professional design",
+      "connections": {
+        "success": "upload-via-token"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "report_file_path",
+          "report_generated"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "report_file_path",
+          "report_generated"
+        ]
+      }
+    },
+    {
+      "id": "upload-via-token",
+      "type": "agent-directive",
+      "directive": "Upload the generated HTML report to Moira artifacts.\n\n**Steps:**\n\n1. Get upload token:\n   artifacts({ action: \"token\", ttlMinutes: 30 })\n   Returns: { token, uploadUrl, expiresAt }\n\n2. Read the HTML report file that was saved in the previous step (purchase-report.html in current working directory).\n\n3. Upload via HTTP POST to uploadUrl:\n   POST {uploadUrl}\n   Content-Type: application/json\n   Body: {\"name\": \"purchase-report.html\", \"content\": \"<html content>\"}\n\n   Use curl, fetch, or HTTP tool available to you.\n\n4. Response: { uuid, url, name, size, expiresAt }\n   Save the url field as report_url.\n\nIf upload fails with 5xx or network error, the system will retry automatically. If 4xx error, report the error.",
+      "completionCondition": "Report uploaded via artifacts token, public URL obtained",
+      "maxRetries": 2,
+      "connections": {
+        "success": "telegram-notification"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "report_url",
+          "uploaded"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "report_url",
+          "uploaded"
+        ]
+      }
+    },
+    {
+      "id": "generate-and-upload-report",
+      "type": "agent-directive",
+      "directive": "Generate and upload the purchase report in a single step.\n\n**Recommendations (with buyer's guide):**\n{{note:purchase-{{executionId}}-07-recommendations}}\n\n**Analysis details:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\nGenerate HTML report with:\n- Executive Summary with top recommendation\n- Buyer's Guide section:\n  - Product Types Overview (what types exist, pros/cons, who they're for)\n  - Selection Checklist (what to look for)\n  - Decision Matrix (if you value X → choose Y)\n  - Common Mistakes (what to avoid)\n- Product Comparison Table\n- TOP 5-8 Recommendations grouped by profile with 'Buy Now' links\n- Review Analysis Summary\n- Purchase Plan steps\n\nUse modern CSS (inline styles or Tailwind CDN). Make all product/store links clickable.\nBuyer's Guide should be visually distinct and easy to scan for non-experts.\n\nUpload directly:\nartifacts({\n  action: \"upload\",\n  name: \"purchase-report.html\",\n  content: \"<your generated HTML>\"\n})\n\nResponse: { uuid, url, name, size, expiresAt }\nSave `url` as report_url.",
+      "completionCondition": "HTML report generated and uploaded to artifacts, public URL obtained",
+      "connections": {
+        "success": "telegram-notification"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "report_url",
+          "uploaded"
+        ],
+        "properties": {},
+        "globalInputs": [
+          "report_url",
+          "uploaded"
+        ]
+      }
+    },
+    {
+      "id": "telegram-notification",
+      "type": "telegram-notification",
+      "message": "🛒 Purchase Report Ready!\n\nProduct: {{analyze-user-needs.product_type}}\nBudget: {{analyze-user-needs.budget_min}}-{{analyze-user-needs.budget_max}}\n\n📊 Full report: {{report_url}}",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "product_type",
+        "budget_min",
+        "budget_max",
+        "use_case",
+        "top_recommendations",
+        "comparison_table",
+        "purchase_plan",
+        "alternative_options",
+        "report_url"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "stage": {
+      "type": "string",
+      "description": "Stores stage",
+      "default": "initialization"
+    },
+    "alternative_options": {
+      "type": "array",
+      "description": "Workflow-global alternative_options",
+      "items": {
+        "type": "string"
+      }
+    },
+    "alternatives": {
+      "type": "array",
+      "description": "Workflow-global alternatives",
+      "items": {
+        "type": "string"
+      }
+    },
+    "buyer_checklist": {
+      "type": "array",
+      "description": "Workflow-global buyer_checklist",
+      "items": {
+        "type": "object",
+        "required": [
+          "parameter",
+          "why_matters"
+        ],
+        "properties": {
+          "parameter": {
+            "type": "string",
+            "description": "Parameter name to evaluate"
+          },
+          "why_matters": {
+            "type": "string",
+            "description": "Why this parameter is important"
+          },
+          "good_values": {
+            "type": "string",
+            "description": "What values are considered good"
+          },
+          "bad_values": {
+            "type": "string",
+            "description": "What values are concerning"
+          }
+        }
+      }
+    },
+    "buyer_guide": {
+      "type": "object",
+      "description": "Workflow-global buyer_guide",
+      "properties": {
+        "product_types_overview": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type_name",
+              "description",
+              "pros",
+              "cons",
+              "best_for"
+            ],
+            "properties": {
+              "type_name": {
+                "type": "string",
+                "description": "Product type name"
+              },
+              "description": {
+                "type": "string",
+                "description": "What it is in 2-3 sentences"
+              },
+              "pros": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Main advantages"
+              },
+              "cons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Main disadvantages"
+              },
+              "best_for": {
+                "type": "string",
+                "description": "Who this type is best for"
+              }
+            }
+          },
+          "description": "Overview of each product type for non-experts"
+        },
+        "selection_checklist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ordered list of what to look for when buying"
+        },
+        "decision_matrix": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "if_you_value",
+              "choose"
+            ],
+            "properties": {
+              "if_you_value": {
+                "type": "string",
+                "description": "What the buyer values (e.g. Quiet operation)"
+              },
+              "choose": {
+                "type": "string",
+                "description": "Recommended type/approach (e.g. Evaporative humidifier)"
+              }
+            }
+          },
+          "description": "Decision matrix: If you value X -> choose Y"
+        },
+        "common_mistakes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "mistake",
+              "how_to_avoid"
+            ],
+            "properties": {
+              "mistake": {
+                "type": "string",
+                "description": "Common buyer mistake"
+              },
+              "how_to_avoid": {
+                "type": "string",
+                "description": "How to avoid this mistake"
+              }
+            }
+          },
+          "description": "3-5 frequent mistakes buyers make in this category"
+        }
+      },
+      "required": [
+        "product_types_overview",
+        "selection_checklist",
+        "decision_matrix",
+        "common_mistakes"
+      ]
+    },
+    "can_create_artifacts": {
+      "type": "boolean",
+      "description": "Workflow-global can_create_artifacts"
+    },
+    "candidates": {
+      "type": "array",
+      "description": "Workflow-global candidates",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "price",
+          "source",
+          "product_url"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string"
+          },
+          "product_url": {
+            "type": "string",
+            "description": "Direct URL to product page"
+          },
+          "store_urls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "store_name": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "URLs in different stores with prices"
+          },
+          "key_specs": {
+            "type": "object"
+          },
+          "product_type_category": {
+            "type": "string",
+            "description": "Which product type from variant map this candidate belongs to (e.g. ultrasonic, evaporative)"
+          }
+        }
+      }
+    },
+    "comparison_table": {
+      "type": "string",
+      "description": "Workflow-global comparison_table"
+    },
+    "constraints": {
+      "type": "array",
+      "description": "Workflow-global constraints",
+      "items": {
+        "type": "string"
+      }
+    },
+    "detailed_analysis": {
+      "type": "array",
+      "description": "Workflow-global detailed_analysis",
+      "items": {
+        "type": "object",
+        "required": [
+          "product_name",
+          "pros",
+          "cons",
+          "rating_score",
+          "review_count"
+        ],
+        "properties": {
+          "product_name": {
+            "type": "string"
+          },
+          "pros": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rating_score": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "review_count": {
+            "type": "number",
+            "description": "Total number of reviews"
+          },
+          "verified_purchase_percent": {
+            "type": "number",
+            "description": "Percentage of reviews from verified buyers"
+          },
+          "latest_review_date": {
+            "type": "string",
+            "description": "Date of most recent review"
+          },
+          "common_complaints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Frequently mentioned issues"
+          },
+          "common_praises": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Frequently mentioned positives"
+          },
+          "review_summary": {
+            "type": "string"
+          },
+          "expert_opinion": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "device_types": {
+      "type": "array",
+      "description": "Workflow-global device_types",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "principle",
+          "price_range",
+          "best_for"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Device type name (e.g. ultrasonic, evaporative)"
+          },
+          "principle": {
+            "type": "string",
+            "description": "How it works in 1-2 sentences"
+          },
+          "price_range": {
+            "type": "string",
+            "description": "Typical price range (e.g. 3000-8000 RUB)"
+          },
+          "best_for": {
+            "type": "string",
+            "description": "Who this type is best suited for"
+          }
+        }
+      }
+    },
+    "form_factors": {
+      "type": "array",
+      "description": "Workflow-global form_factors",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Form factor name"
+          },
+          "dimensions": {
+            "type": "string",
+            "description": "Typical dimensions/size"
+          },
+          "placement": {
+            "type": "string",
+            "description": "Where it is typically placed"
+          }
+        }
+      }
+    },
+    "key_parameters": {
+      "type": "array",
+      "description": "Workflow-global key_parameters",
+      "items": {
+        "type": "string"
+      }
+    },
+    "manufacturers": {
+      "type": "array",
+      "description": "Workflow-global manufacturers",
+      "items": {
+        "type": "string"
+      }
+    },
+    "marketplaces": {
+      "type": "array",
+      "description": "Workflow-global marketplaces",
+      "items": {
+        "type": "string"
+      }
+    },
+    "price_segments": {
+      "type": "object",
+      "description": "Workflow-global price_segments",
+      "properties": {
+        "budget": {
+          "type": "string",
+          "description": "Budget segment range and typical features"
+        },
+        "mid_range": {
+          "type": "string",
+          "description": "Mid-range segment range and typical features"
+        },
+        "premium": {
+          "type": "string",
+          "description": "Premium segment range and typical features"
+        }
+      }
+    },
+    "product_types": {
+      "type": "array",
+      "description": "Workflow-global product_types",
+      "items": {
+        "type": "string"
+      }
+    },
+    "purchase_analysis": {
+      "type": "array",
+      "description": "Workflow-global purchase_analysis",
+      "items": {
+        "type": "object",
+        "required": [
+          "product_name",
+          "total_cost"
+        ],
+        "properties": {
+          "product_name": {
+            "type": "string"
+          },
+          "total_cost": {
+            "type": "number"
+          },
+          "delivery_cost": {
+            "type": "number"
+          },
+          "delivery_time": {
+            "type": "string"
+          },
+          "warranty": {
+            "type": "string"
+          },
+          "return_policy": {
+            "type": "string"
+          },
+          "availability": {
+            "type": "string"
+          },
+          "current_offers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "purchase_plan": {
+      "type": "array",
+      "description": "Workflow-global purchase_plan",
+      "items": {
+        "type": "string"
+      }
+    },
+    "regional_stores": {
+      "type": "array",
+      "description": "Workflow-global regional_stores",
+      "items": {
+        "type": "string"
+      }
+    },
+    "report_file_path": {
+      "type": "string",
+      "description": "Workflow-global report_file_path"
+    },
+    "report_generated": {
+      "type": "boolean",
+      "description": "Workflow-global report_generated"
+    },
+    "report_url": {
+      "type": "string",
+      "description": "Workflow-global report_url"
+    },
+    "requirements": {
+      "type": "array",
+      "description": "Workflow-global requirements",
+      "items": {
+        "type": "string"
+      }
+    },
+    "search_priority": {
+      "type": "array",
+      "description": "Workflow-global search_priority",
+      "items": {
+        "type": "string"
+      }
+    },
+    "search_summary": {
+      "type": "string",
+      "description": "Workflow-global search_summary"
+    },
+    "seasonality": {
+      "type": "string",
+      "description": "Workflow-global seasonality"
+    },
+    "specialized_stores": {
+      "type": "array",
+      "description": "Workflow-global specialized_stores",
+      "items": {
+        "type": "string"
+      }
+    },
+    "technology_trends": {
+      "type": "array",
+      "description": "Workflow-global technology_trends",
+      "items": {
+        "type": "string"
+      }
+    },
+    "top_recommendations": {
+      "type": "array",
+      "description": "Workflow-global top_recommendations",
+      "items": {
+        "type": "object",
+        "required": [
+          "rank",
+          "product_name",
+          "why_recommended",
+          "total_cost",
+          "product_url",
+          "best_for"
+        ],
+        "properties": {
+          "rank": {
+            "type": "number"
+          },
+          "product_name": {
+            "type": "string"
+          },
+          "why_recommended": {
+            "type": "string"
+          },
+          "total_cost": {
+            "type": "number"
+          },
+          "product_url": {
+            "type": "string",
+            "description": "Direct link to product"
+          },
+          "best_store_url": {
+            "type": "string",
+            "description": "Best place to buy (price/reliability)"
+          },
+          "store_urls": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "store_name": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number"
+                }
+              }
+            },
+            "description": "All store options with prices"
+          },
+          "key_advantages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "best_for": {
+            "type": "string",
+            "description": "Profile/use case this recommendation is best for (e.g. Best budget option, Best for quiet bedroom)"
+          },
+          "product_type": {
+            "type": "string",
+            "description": "Product type category (e.g. evaporative, ultrasonic)"
+          }
+        }
+      },
+      "minItems": 5,
+      "maxItems": 8
+    },
+    "uploaded": {
+      "type": "boolean",
+      "description": "Workflow-global uploaded"
+    },
+    "use_case": {
+      "type": "string",
+      "description": "Workflow-global use_case"
+    },
+    "use_cases": {
+      "type": "array",
+      "description": "Workflow-global use_cases",
+      "items": {
+        "type": "object",
+        "required": [
+          "scenario",
+          "recommended_type",
+          "priority_params"
+        ],
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "description": "Usage scenario description"
+          },
+          "recommended_type": {
+            "type": "string",
+            "description": "Which product type is best for this scenario"
+          },
+          "priority_params": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Parameters to prioritize for this use case"
+          }
+        }
+      }
+    }
+  }
+}

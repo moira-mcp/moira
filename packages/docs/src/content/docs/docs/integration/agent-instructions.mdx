@@ -1,0 +1,33 @@
+---
+title: Agent Instructions
+description: System instructions for AI agents working with MCP Moira
+sidebar:
+  order: 3
+---
+
+import { Content as SystemPromptContent } from "../SYSTEM-PROMPT.md";
+
+This page describes system instructions automatically provided to AI agents when they connect to MCP Moira server.
+
+## How Instructions Are Delivered
+
+MCP Moira delivers instructions through two mechanisms:
+
+1. **MCP `instructions` field** - Sent during server initialization for compliant MCP clients
+2. **Tool description fallback** - Included in `help` tool description for clients that don't support the `instructions` field
+
+## Source of Truth
+
+The instructions content is stored in `docs/SYSTEM-PROMPT.md` in the project repository.
+
+This single file is:
+
+- Read by MCP server at runtime for `instructions` field
+- Included in `help` tool description as fallback
+- Rendered on this documentation page (below)
+
+---
+
+## Full System Prompt
+
+<SystemPromptContent />

@@ -1,0 +1,68 @@
+# Node modules (will be installed on server)
+node_modules
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE and editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# Test files and artifacts
+tests
+test-results
+coverage
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+jest.config.*
+playwright.config.*
+
+# Development files
+.env.local
+.env.remote
+.env.remote-tests
+.env.ci
+.env.inspector
+
+# Build artifacts (will be built on server)
+packages/web-frontend/dist
+*.tsbuildinfo
+
+# Documentation (not needed for runtime, but keep config/*.md for migrations)
+docs
+CLAUDE.md
+README.md
+SYSTEM_PROMPT.md
+CHANGELOG.md
+
+# Claude temp files
+claude-temp-files
+
+# Deploy configs and logs
+.deploy-config.*.json
+deploy-logs
+
+# Data directory (bind mounted separately)
+data
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local development
+scripts/docker-build-and-run.sh
+scripts/test-*.sh
+http-final
+test-workflows*
+
+# Load testing
+load-tests
+
+# Worktree and shared configs
+.worktrees

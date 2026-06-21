@@ -1,0 +1,1205 @@
+---
+title: MCP Tools Reference
+description: Complete reference for all MCP tools available in Moira
+---
+
+Moira exposes workflow execution capabilities through MCP tools. This reference documents all available tools with parameters, return values, and examples.
+
+## Tool Categories
+
+### Workflow Management
+
+- `list` - List available workflow templates
+- `manage` - Create, edit, or get workflow details
+- `start` - Start new workflow execution
+- `step` - Advance workflow with agent input
+
+### Session & Settings
+
+- `session` - Get user, executions, or step info
+- `settings` - Manage user settings
+- `notes` - Persistent note storage with versioning
+
+### Content & Artifacts
+
+- `artifacts` - Static HTML artifacts hosting with quota enforcement
+
+### Large Files
+
+- `token` - Generate upload/download tokens
+
+### Help
+
+- `help` - Get documentation and help
+
+---
+
+## list
+
+Lists all available workflow templates with validation status.
+
+**Parameters:** None
+
+**Returns:**
+
+- Array of workflow objects with metadata
+- Validation status for each workflow
+- File paths and last modified timestamps
+
+**Example:**
+
+```json
+list()
+→ [{ id: "example", name: "Example Workflow", valid: true, ... }]
+```
+
+---
+
+## start
+
+Starts new workflow execution.
+
+**Parameters:**
+
+- `workflowId` (string, required) - ID of workflow to execute
+- `note` (string, optional) - Short note to identify this execution (max 500 chars)
+- `parentExecutionId` (string, required) - Parent execution ID for linking workflows. Use `"none"` for standalone workflows, or provide parent execution UUID to link child workflows
+- `skipTelegramCheck` (boolean, optional) - Skip Telegram configuration pre-flight check. When a workflow contains telegram-notification nodes and the user has not configured Telegram, start returns setup instructions instead of starting the workflow. Set to `true` to bypass this check.
+
+**Returns:**
+
+- Process ID for tracking execution
+- First agent directive with instructions
+- Completion condition and input schema
+
+**Example:**
+
+```json
+start({ workflowId: "example", note: "Feature implementation task" })
+→ { processId: "abc-123", directive: "...", ... }
+```
+
+**Parent Execution Linking:**
+
+```json
+start({ workflowId: "sub-workflow", parentExecutionId: "parent-abc-123" })
+```
+
+When child workflow completes, system returns continuation info for the parent execution.
+
+---
+
+## step
+
+Advances workflow execution with agent input.
+
+**Parameters:**
+
+- `processId` (string, required) - Process ID from start
+- `input` (any) - Agent response matching inputSchema
+
+**Returns:**
+
+- Next agent directive (if workflow continues)
+- Completion status (if workflow finished)
+- Updated context and state
+
+**Example:**
+
+```json
+step({
+  processId: "abc-123",
+  input: { result: "completed", confidence: 9 }
+})
+→ { directive: "Next task...", ... }
+```
+
+**Magic Variable - execution_note:**
+
+When input contains `execution_note` field, it updates the execution's note for tracking:
+
+```json
+step({
+  processId: "abc-123",
+  input: { task_name: "Auth feature", execution_note: "Implementing OAuth" }
+})
+```
+
+The updated note appears in execution lists (`session({ action: "executions" })`).
+
+---
+
+## manage
+
+Unified tool for workflow CRUD operations.
+
+### Action: create
+
+Creates new workflow from JSON definition with validation.
+
+**Parameters:**
+
+- `action`: `"create"` (required)
+- `workflow` (object, required) - Workflow definition
+  - `systemReminder` (string, optional) - Per-workflow system reminder that overrides global setting
+- `overwrite` (boolean, optional) - Allow overwriting existing workflow
+
+**Returns:**
+
+- Success status
+- Workflow ID
+- Validation results with errors/warnings
+
+**Example:**
+
+```json
+manage({
+  action: "create",
+  workflow: {
+    id: "my-workflow",
+    metadata: { name: "My Workflow", version: "1.0.0", description: "..." },
+    nodes: [...]
+  }
+})
+→ { success: true, workflowId: "my-workflow", validation: {...} }
+```
+
+### Action: edit
+
+Edits existing workflow with partial updates.
+
+**Parameters:**
+
+- `action`: `"edit"` (required)
+- `workflowId` (string, required) - ID of workflow to edit
+- `changes` (object, required) - Changes to apply
+  - `metadata` - Update name, version, description
+  - `addNodes` - Array of nodes to add
+  - `removeNodes` - Array of node IDs to remove
+  - `updateNodes` - Array of objects with nodeId and changes properties
+  - `systemReminder` - Per-workflow system reminder (set to empty string to clear)
+
+**Returns:**
+
+- Success status
+- Change summary
+- Validation results
+
+**Example:**
+
+```json
+manage({
+  action: "edit",
+  workflowId: "my-workflow",
+  changes: {
+    metadata: { description: "Updated description" },
+    addNodes: [{ type: "end", id: "new-end", ... }]
+  }
+})
+→ { success: true, changesSummary: {...}, validation: {...} }
+```
+
+### Action: get
+
+Retrieves workflow information with metadata and validation.
+
+**Parameters:**
+
+- `action`: `"get"` (required)
+- `workflowId` (string, required) - ID of workflow to retrieve
+- `includeNodes` (boolean, optional, default: true) - Include node definitions
+- `includeValidation` (boolean, optional, default: true) - Include validation info
+- `offset` (number, optional) - Pagination: starting node index
+- `limit` (number, optional) - Pagination: number of nodes to return
+
+**Returns:**
+
+- Workflow metadata
+- Structure analysis
+- Nodes (if includeNodes=true)
+- Validation status (if includeValidation=true)
+
+**Example:**
+
+```json
+manage({
+  action: "get",
+  workflowId: "my-workflow",
+  includeNodes: true,
+  includeValidation: true
+})
+→ { metadata: {...}, nodes: [...], validation: {...} }
+```
+
+### Action: get-structure
+
+Gets workflow structure (metadata + node graph) without full node content. Useful for understanding workflow layout.
+
+**Parameters:**
+
+- `action`: `"get-structure"` (required)
+- `workflowId` (string, required) - ID of workflow to analyze
+- `graph` (boolean, optional) - Include ASCII flow visualization
+- `detailed` (boolean, optional) - Include directive previews for each node
+
+**Returns:**
+
+- Workflow metadata
+- Node graph with connections
+- ASCII visualization (if graph=true)
+- Node previews (if detailed=true)
+
+**Example:**
+
+```json
+manage({ action: "get-structure", workflowId: "my-workflow", graph: true, detailed: true })
+→ { metadata: {...}, graph: "start → step-1 → step-2 → end", nodesPreview: [...] }
+```
+
+### Action: get-node
+
+Gets specific node by ID with full content.
+
+**Parameters:**
+
+- `action`: `"get-node"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `nodeId` (string, required) - Node ID to retrieve
+
+**Returns:**
+
+- Full node definition
+- Connections
+- Input schema
+
+**Example:**
+
+```json
+manage({ action: "get-node", workflowId: "my-workflow", nodeId: "step-1" })
+→ { id: "step-1", type: "agent-directive", directive: "...", ... }
+```
+
+### Action: search-nodes
+
+Searches nodes by text in directive, completionCondition, or ID. Supports regex patterns.
+
+**Parameters:**
+
+- `action`: `"search-nodes"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `query` (string, required) - Search text or regex pattern
+- `includeVariables` (boolean, optional) - Search in workflow variables
+- `snippetMode` (boolean, optional) - Return matched text with context only
+- `limit` (number, optional) - Max results
+- `offset` (number, optional) - Pagination offset
+
+**Returns:**
+
+- Array of matching nodes
+- Match context (where text was found)
+- Variable matches (if includeVariables=true)
+
+**Example:**
+
+```json
+manage({ action: "search-nodes", workflowId: "my-workflow", query: "validation", includeVariables: true, snippetMode: true })
+→ { results: [{ nodeId: "validate-step", matches: ["directive"], snippet: "...run validation..." }] }
+```
+
+### Action: validate
+
+Validates workflow structure and returns errors/warnings.
+
+**Parameters:**
+
+- `action`: `"validate"` (required)
+- `workflowId` (string, required) - Workflow ID
+
+**Returns:**
+
+- Validation status (valid/invalid)
+- Errors array (blocking issues)
+- Warnings array (non-blocking issues)
+
+**Example:**
+
+```json
+manage({ action: "validate", workflowId: "my-workflow" })
+→ { valid: true, errors: [], warnings: ["Node 'old-step' is unreachable"] }
+```
+
+### Action: list-variables
+
+Lists all declared global variables from the workflow `variableRegistry`.
+
+**Parameters:**
+
+- `action`: `"list-variables"` (required)
+- `workflowId` (string, required) - Workflow ID
+
+**Returns:**
+
+- Variable count
+- Array of variables with name, type, and preview
+
+**Example:**
+
+```json
+manage({ action: "list-variables", workflowId: "my-workflow" })
+→ { variableCount: 3, variables: [{ name: "test_directive", type: "string", preview: "Run npm test" }] }
+```
+
+### Action: get-variable
+
+Gets a specific declared global variable from the workflow `variableRegistry`.
+
+**Parameters:**
+
+- `action`: `"get-variable"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `variableName` (string, required) - Variable name
+
+**Returns:**
+
+- Variable name and value
+
+**Example:**
+
+```json
+manage({ action: "get-variable", workflowId: "my-workflow", variableName: "test_directive" })
+→ { variableName: "test_directive", value: "Run npm test" }
+```
+
+### Action: set-variable
+
+Sets or creates a declared global variable in the workflow `variableRegistry`.
+
+**Parameters:**
+
+- `action`: `"set-variable"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `variableName` (string, required) - Variable name
+- `variableValue` (any, required) - Variable value
+
+**Returns:**
+
+- Old and new values
+- Success message
+
+**Example:**
+
+```json
+manage({ action: "set-variable", workflowId: "my-workflow", variableName: "test_directive", variableValue: "Run npm test -- --coverage" })
+→ { variableName: "test_directive", oldValue: "Run npm test", newValue: "Run npm test -- --coverage" }
+```
+
+### Action: delete-variable
+
+Deletes a declared global variable from the workflow `variableRegistry`.
+
+**Parameters:**
+
+- `action`: `"delete-variable"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `variableName` (string, required) - Variable name
+
+**Returns:**
+
+- Deleted value
+- Success message
+
+**Example:**
+
+```json
+manage({ action: "delete-variable", workflowId: "my-workflow", variableName: "unused_var" })
+→ { variableName: "unused_var", deletedValue: "old value" }
+```
+
+### Action: diff
+
+Compares two workflows and shows differences in metadata and nodes.
+
+**Parameters:**
+
+- `action`: `"diff"` (required)
+- `workflowId` (string, required) - First workflow ID
+- `compareWorkflowId` (string, required) - Second workflow ID to compare against
+
+**Returns:**
+
+- Metadata differences
+- Added nodes (in second but not first)
+- Removed nodes (in first but not second)
+- Modified nodes with change details
+
+**Example:**
+
+```json
+manage({ action: "diff", workflowId: "workflow-v1", compareWorkflowId: "workflow-v2" })
+→ { metadataDiff: { version: { old: "1.0.0", new: "2.0.0" } }, addedNodes: ["new-step"], removedNodes: [], modifiedNodes: [...] }
+```
+
+### Action: copy
+
+Creates a copy of existing workflow with new ID.
+
+**Parameters:**
+
+- `action`: `"copy"` (required)
+- `workflowId` (string, required) - Source workflow ID
+- `newName` (string, optional) - Name for copied workflow
+
+**Returns:**
+
+- New workflow ID
+- Success status
+
+**Example:**
+
+```json
+manage({ action: "copy", workflowId: "template-workflow", newName: "My Copy" })
+→ { newWorkflowId: "template-workflow-copy-123", success: true }
+```
+
+### Action: list-nodes
+
+Gets compact list of workflow nodes without full content.
+
+**Parameters:**
+
+- `action`: `"list-nodes"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `typeFilter` (string, optional) - Filter by node type
+- `includePreview` (boolean, optional) - Include directive preview
+- `previewLength` (number, optional) - Preview character limit
+
+**Returns:**
+
+- Node count
+- Array of compact nodes (id, type, connections)
+
+**Example:**
+
+```json
+manage({ action: "list-nodes", workflowId: "my-workflow", typeFilter: "agent-directive" })
+→ { nodeCount: 5, nodes: [{ id: "step-1", type: "agent-directive", connections: ["step-2"] }] }
+```
+
+### Action: get-nodes
+
+Gets multiple nodes by ID array in single request.
+
+**Parameters:**
+
+- `action`: `"get-nodes"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `nodeIds` (string[], required) - Array of node IDs
+
+**Returns:**
+
+- Found nodes
+- Not found node IDs
+
+**Example:**
+
+```json
+manage({ action: "get-nodes", workflowId: "my-workflow", nodeIds: ["step-1", "step-2"] })
+→ { foundCount: 2, nodes: [...], notFound: [] }
+```
+
+### Action: analyze-variables
+
+Analyzes variable sources and usages across workflow.
+
+**Parameters:**
+
+- `action`: `"analyze-variables"` (required)
+- `workflowId` (string, required) - Workflow ID
+
+**Returns:**
+
+- Variable count
+- Analysis with sources and usages per variable
+
+**Example:**
+
+```json
+manage({ action: "analyze-variables", workflowId: "my-workflow" })
+→ { variableCount: 3, analysis: { "task_name": { sources: [...], usages: [...] } } }
+```
+
+### Action: set-visibility
+
+Changes workflow visibility (public/private).
+
+**Parameters:**
+
+- `action`: `"set-visibility"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `visibility` (string, required) - "public" or "private"
+
+**Returns:**
+
+- Previous and new visibility
+
+**Example:**
+
+```json
+manage({ action: "set-visibility", workflowId: "my-workflow", visibility: "public" })
+→ { previousVisibility: "private", newVisibility: "public" }
+```
+
+---
+
+## session
+
+Unified tool for session and execution information.
+
+### Action: user
+
+Get information about the currently authenticated user.
+
+**Parameters:**
+
+- `action`: `"user"` (required)
+
+**Returns:**
+
+- Email
+- Name
+
+**Example:**
+
+```json
+session({ action: "user" })
+→ { email: "user@example.com", name: "John" }
+```
+
+### Action: executions
+
+List active workflow executions for current user.
+
+**Parameters:**
+
+- `action`: `"executions"` (required)
+
+**Returns:**
+
+- Array of active execution objects
+- Status, workflow ID, start time for each
+
+**Example:**
+
+```json
+session({ action: "executions" })
+→ [{ executionId: "abc-123", workflowId: "example", status: "waiting", note: "Feature task", ... }]
+```
+
+### Action: execution_context
+
+Get full execution state including context variables.
+
+**Parameters:**
+
+- `action`: `"execution_context"` (required)
+- `executionId` (string, required) - Execution ID to inspect
+
+**Returns:**
+
+- Execution status (running, waiting, completed, failed)
+- Current node information
+- Context variables
+- Node execution history
+
+**Example:**
+
+```json
+session({ action: "execution_context", executionId: "abc-123" })
+→ { status: "waiting", currentNodeId: "task-1", context: {...}, ... }
+```
+
+### Action: current_step
+
+Repeats current workflow step without advancing execution.
+
+**Parameters:**
+
+- `action`: `"current_step"` (required)
+- `executionId` (string, required) - ID of the execution to check
+
+**Returns:**
+
+- Current directive
+- Completion condition
+- Input schema
+- Context information
+
+**Example:**
+
+```json
+session({ action: "current_step", executionId: "abc-123" })
+→ { directive: "Complete task...", completionCondition: "...", inputSchema: {...} }
+```
+
+### Action: update-note
+
+Updates execution note for easier identification in execution lists.
+
+**Parameters:**
+
+- `action`: `"update-note"` (required)
+- `executionId` (string, required) - Execution ID to update
+- `note` (string, required) - New note (max 500 chars)
+
+**Returns:**
+
+- Success status
+- Updated execution ID and note
+
+**Example:**
+
+```json
+session({ action: "update-note", executionId: "abc-123", note: "Step 5: Integration tests" })
+→ { success: true, executionId: "abc-123", note: "Step 5: Integration tests" }
+```
+
+---
+
+## settings
+
+Unified tool for user settings management.
+
+### Action: get
+
+Get user settings by category or all settings.
+
+**Parameters:**
+
+- `action`: `"get"` (required)
+- `category` (string, optional) - Filter by category (telegram, ui, profile, etc.)
+
+**Returns:**
+
+- Settings object with values
+- Encrypted fields shown as [encrypted]
+
+**Example:**
+
+```json
+settings({ action: "get", category: "ui" })
+→ { "ui.theme": "dark", "ui.language": "en" }
+```
+
+### Action: set
+
+Set user setting value with validation.
+
+**Parameters:**
+
+- `action`: `"set"` (required)
+- `key` (string, required) - Setting key (e.g., ui.theme, telegram.bot_token)
+- `value` (any, required) - Setting value
+
+**Returns:**
+
+- Success status
+- Updated value (encrypted if applicable)
+
+**Example:**
+
+```json
+settings({
+  action: "set",
+  key: "ui.theme",
+  value: "dark"
+})
+→ { success: true, key: "ui.theme", value: "dark" }
+```
+
+### Action: list
+
+List available setting definitions.
+
+**Parameters:**
+
+- `action`: `"list"` (required)
+- `category` (string, optional) - Category filter
+
+**Returns:**
+
+- Array of setting definitions with key and description
+
+**Example:**
+
+```json
+settings({ action: "list", category: "telegram" })
+→ [{ key: "telegram.bot_token", description: "Your Telegram bot token" }]
+```
+
+---
+
+## notes
+
+Persistent note storage with versioning, tags, and user isolation. Notes allow agents to store and retrieve user preferences, analysis results, and data between workflow executions.
+
+### Action: list
+
+List notes with optional filtering by tag or key.
+
+**Parameters:**
+
+- `action`: `"list"` (required)
+- `tag` (string, optional) - Filter by tag
+- `keySearch` (string, optional) - Search notes by key pattern
+- `limit` (number, optional) - Max notes to return (1-100, default 50)
+- `offset` (number, optional) - Pagination offset
+
+**Returns:**
+
+- Array of notes with id, key, version, tags, size, preview, timestamps
+- Total count
+- All unique tags (for autocomplete)
+
+**Example:**
+
+```json
+notes({ action: "list", tag: "preferences" })
+→ {
+    notes: [{ id: "abc", key: "commit-style", version: 2, tags: ["preferences"], ... }],
+    total: 1,
+    allTags: ["preferences", "analysis"]
+  }
+```
+
+### Action: get
+
+Get note content by key.
+
+**Parameters:**
+
+- `action`: `"get"` (required)
+- `key` (string, required) - Note key
+- `version` (number, optional) - Specific version to retrieve
+
+**Returns:**
+
+- Full note with value, version, tags, size, timestamps
+
+**Example:**
+
+```json
+notes({ action: "get", key: "commit-style" })
+→ {
+    id: "abc",
+    key: "commit-style",
+    value: "conventional",
+    version: 2,
+    tags: ["preferences"],
+    size: 12,
+    createdAt: "2024-01-15T10:00:00Z",
+    updatedAt: "2024-01-15T11:00:00Z"
+  }
+```
+
+### Action: save
+
+Create or update a note.
+
+**Parameters:**
+
+- `action`: `"save"` (required)
+- `key` (string, required) - Note key (1-100 chars, alphanumeric/underscore/hyphen)
+- `value` (string, required) - Note content (max 100 KB)
+- `tags` (string[], optional) - Tags (max 10, each 1-50 chars)
+
+**Returns:**
+
+- Note ID, key, version, and whether created or updated
+
+**Example:**
+
+```json
+notes({
+  action: "save",
+  key: "commit-style",
+  value: "conventional",
+  tags: ["preferences"]
+})
+→ { id: "abc", key: "commit-style", version: 1, created: true }
+```
+
+### Action: delete
+
+Soft delete a note.
+
+**Parameters:**
+
+- `action`: `"delete"` (required)
+- `key` (string, required) - Note key
+
+**Returns:**
+
+- Success status
+
+**Example:**
+
+```json
+notes({ action: "delete", key: "old-note" })
+→ { deleted: true, key: "old-note" }
+```
+
+### Action: history
+
+Get version history for a note.
+
+**Parameters:**
+
+- `action`: `"history"` (required)
+- `key` (string, required) - Note key
+
+**Returns:**
+
+- Array of versions with version number, size, preview, timestamp
+
+**Example:**
+
+```json
+notes({ action: "history", key: "commit-style" })
+→ [
+    { version: 2, size: 12, preview: "conventional", createdAt: "2024-01-15T11:00:00Z" },
+    { version: 1, size: 8, preview: "standard", createdAt: "2024-01-15T10:00:00Z" }
+  ]
+```
+
+### Action: stats
+
+Get user's note usage statistics.
+
+**Parameters:**
+
+- `action`: `"stats"` (required)
+
+**Returns:**
+
+- Total notes count
+- Total size used
+- Size limit (1 MB per user)
+- Usage percentage
+
+**Example:**
+
+```json
+notes({ action: "stats" })
+→ { totalNotes: 5, totalSize: 2048, limit: 1048576, usedPercent: 0.2 }
+```
+
+---
+
+## artifacts
+
+Static HTML artifacts hosting with quota enforcement. Artifacts allow agents to upload HTML content (reports, visualizations, dashboards) and receive public URLs for sharing.
+
+### Action: upload
+
+Create a new HTML artifact and receive public URL.
+
+**Parameters:**
+
+- `action`: `"upload"` (required)
+- `name` (string, required) - Artifact name (e.g., "report.html")
+- `content` (string, required) - HTML content
+- `executionId` (string, optional) - Link artifact to workflow execution
+
+**Returns:**
+
+- `uuid` - Unique artifact identifier
+- `url` - Public URL for the artifact
+- `name` - Artifact name
+- `size` - Content size in bytes
+- `expiresAt` - ISO 8601 expiration timestamp
+
+**Example:**
+
+```json
+artifacts({
+  action: "upload",
+  name: "analysis-report.html",
+  content: "<html><body><h1>Report</h1></body></html>"
+})
+→ {
+    uuid: "abc-123",
+    url: "https://{STATIC_DOMAIN}/abc-123.html",
+    name: "analysis-report.html",
+    size: 48,
+    expiresAt: "2024-02-15T10:00:00Z"
+  }
+```
+
+### Action: update
+
+Update existing artifact content.
+
+**Parameters:**
+
+- `action`: `"update"` (required)
+- `uuid` (string, required) - Artifact UUID
+- `content` (string, required) - New HTML content
+- `name` (string, optional) - New name
+
+**Returns:**
+
+- `uuid` - Artifact UUID
+- `updated` - Success status
+
+**Example:**
+
+```json
+artifacts({
+  action: "update",
+  uuid: "abc-123",
+  content: "<html><body><h1>Updated Report</h1></body></html>"
+})
+→ { uuid: "abc-123", updated: true }
+```
+
+### Action: delete
+
+Delete an artifact (soft delete).
+
+**Parameters:**
+
+- `action`: `"delete"` (required)
+- `uuid` (string, required) - Artifact UUID
+
+**Returns:**
+
+- `uuid` - Deleted artifact UUID
+- `deleted` - Success status
+
+**Example:**
+
+```json
+artifacts({ action: "delete", uuid: "abc-123" })
+→ { uuid: "abc-123", deleted: true }
+```
+
+### Action: list
+
+List user's artifacts with pagination.
+
+**Parameters:**
+
+- `action`: `"list"` (required)
+- `limit` (number, optional) - Max artifacts to return (1-100, default 50)
+- `offset` (number, optional) - Pagination offset
+
+**Returns:**
+
+- `artifacts` - Array of artifact objects with uuid, url, name, size, mimeType, expiresAt, createdAt, updatedAt
+- `total` - Total count
+
+**Example:**
+
+```json
+artifacts({ action: "list", limit: 10 })
+→ {
+    artifacts: [{
+      uuid: "abc-123",
+      url: "https://{STATIC_DOMAIN}/abc-123.html",
+      name: "report.html",
+      size: 1024,
+      mimeType: "text/html",
+      expiresAt: "2024-02-15T10:00:00Z",
+      createdAt: "2024-01-15T10:00:00Z",
+      updatedAt: "2024-01-15T10:00:00Z"
+    }],
+    total: 1
+  }
+```
+
+### Action: stats
+
+Get quota usage statistics.
+
+**Parameters:**
+
+- `action`: `"stats"` (required)
+
+**Returns:**
+
+- `totalArtifacts` - Number of artifacts
+- `totalSize` - Total storage used in bytes
+- `storageLimit` - Max storage (100 MB per user)
+- `countLimit` - Max artifacts (50 per user)
+- `storageUsedPercent` - Storage usage percentage
+- `countUsedPercent` - Count usage percentage
+
+**Example:**
+
+```json
+artifacts({ action: "stats" })
+→ {
+    totalArtifacts: 5,
+    totalSize: 51200,
+    storageLimit: 104857600,
+    countLimit: 50,
+    storageUsedPercent: 0.05,
+    countUsedPercent: 10
+  }
+```
+
+### Action: token
+
+Generate one-time upload token for HTTP API.
+
+**Parameters:**
+
+- `action`: `"token"` (required)
+- `ttlMinutes` (number, optional) - Token TTL in minutes (1-1440, default 60)
+
+**Returns:**
+
+- `token` - One-time upload token
+- `expiresAt` - ISO 8601 expiration timestamp
+- `uploadUrl` - URL for HTTP upload
+
+**Example:**
+
+```json
+artifacts({ action: "token", ttlMinutes: 30 })
+→ {
+    token: "xyz-789",
+    expiresAt: "2024-01-15T10:30:00Z",
+    uploadUrl: "https://{MOIRA_HOST}/api/public/artifacts/upload/xyz-789"
+  }
+```
+
+### Quotas
+
+- Max file size: 5 MB per artifact
+- Max total storage: 100 MB per user
+- Max artifact count: 50 per user
+- Default TTL: 30 days
+
+---
+
+## token
+
+Generate temporary tokens for large workflow file operations.
+
+### Action: upload
+
+Generate token for uploading large workflows via HTTP.
+
+**Parameters:**
+
+- `action`: `"upload"` (required)
+- `ttlMinutes` (number, optional, default: 60) - Token TTL in minutes
+
+**Returns:**
+
+- `token` - Upload token
+- `uploadUrl` - Full URL for upload
+- `expiresAt` - ISO 8601 expiration timestamp
+- `uploadInstructions` - Upload details:
+  - `method`: `"POST"`
+  - `contentType`: `"multipart/form-data"`
+  - `fieldName`: `"workflow"`
+  - `fileFormat`: `"JSON file with workflow definition"`
+  - `example`: curl command example
+
+**Upload Request:**
+
+```bash
+curl -X POST "${uploadUrl}" -F "workflow=@your-workflow.json"
+```
+
+**Example:**
+
+```json
+token({ action: "upload", ttlMinutes: 30 })
+→ {
+    token: "abc123",
+    uploadUrl: "https://{MOIRA_HOST}/api/public/workflows/upload/abc123",
+    expiresAt: "2024-01-15T12:00:00.000Z",
+    uploadInstructions: {
+      method: "POST",
+      contentType: "multipart/form-data",
+      fieldName: "workflow",
+      fileFormat: "JSON file with workflow definition",
+      example: "curl -X POST '...' -F 'workflow=@your-workflow.json'"
+    }
+  }
+```
+
+### Action: download
+
+Generate token for downloading workflows.
+
+**Parameters:**
+
+- `action`: `"download"` (required)
+- `workflowId` (string, required) - Workflow ID to download
+- `ttlMinutes` (number, optional, default: 60) - Token TTL in minutes
+
+**Returns:**
+
+- Download token
+- Download URL
+- Expiration timestamp
+
+**Example:**
+
+```json
+token({
+  action: "download",
+  workflowId: "my-workflow",
+  ttlMinutes: 30
+})
+→ { token: "abc123", downloadUrl: "https://.../download", expiresAt: "..." }
+```
+
+---
+
+## help
+
+Get documentation and help for the workflow system.
+
+**Parameters:**
+
+- `topic` (string | string[], optional) - Help topic(s), single or array
+
+**Topics:**
+
+- `overview`, `introduction` - System overview
+- `quickstart` - Getting started guide
+- `nodes` - Node types reference
+- `workflows` - Workflow structure
+- `templates` - Template variables
+- `tools` - This tools reference
+- `validation` - Validation system
+- `claude-code` - Claude Code integration
+- `mcp-clients` - Other MCP clients
+- `examples` - Pattern examples with code snippets
+- `pattern-*` - Workflow patterns (e.g., pattern-workspace, pattern-skip)
+
+**Single Topic Example:**
+
+```json
+help({ topic: "nodes" })
+→ "# Node Types\n\nMoira supports these node types..."
+```
+
+**Multiple Topics Example:**
+
+```json
+help({ topic: ["pattern-workspace", "pattern-skip"] })
+→ "# Workspace Pattern\n...\n\n---\n\n# Skip Pattern\n..."
+```
+
+Multiple topics are concatenated with separators for combined documentation lookup.
+
+## Related
+
+- [MCP Agent Guide](/docs/integration/agent-guide/) - How to use MCP tools
+- [Troubleshooting](/docs/integration/troubleshooting/) - Common issues

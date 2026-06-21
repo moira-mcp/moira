@@ -1,0 +1,55 @@
+{
+  "slug": "test-templates",
+  "metadata": {
+    "name": "Test Templates",
+    "version": "1.0.0",
+    "description": "Template processing test"
+  },
+  "variableRegistry": {
+    "userName": {
+      "type": "string",
+      "description": "User name produced by get-name, used in the greeting"
+    }
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-name"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-name",
+      "directive": "Enter your name",
+      "completionCondition": "Name provided",
+      "connections": {
+        "success": "greet"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "userName"
+        ],
+        "globalInputs": [
+          "userName"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "greet",
+      "directive": "Hello {{userName}}! How are you?",
+      "completionCondition": "Greeting completed",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

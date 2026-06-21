@@ -1,0 +1,18 @@
+{
+  "name": "@mcp-moira/mcp-server",
+  "version": "0.4.2",
+  "description": "MCP HTTP protocol server",
+  "main": "./src/server.ts",
+  "type": "module",
+  "bin": {
+    "mcp-moira": "./src/server.ts",
+    "moira-cli": "./src/cli.ts"
+  },
+  "scripts": {},
+  "dependencies": {
+    "@mcp-moira/workflow-engine": "*",
+    "@mcp-moira/shared": "*"
+  },
+  "devDependencies": {},
+  "private": true
+}

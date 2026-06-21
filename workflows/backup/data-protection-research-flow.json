@@ -1,0 +1,399 @@
+{
+  "slug": "data-protection-research-flow",
+  "metadata": {
+    "name": "Исследование защиты персональных данных",
+    "version": "1.0.0",
+    "description": "Комплексное исследование проблем защиты ПД в организациях: причины, следствия, уязвимости и рекомендации"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "collect-breach-statistics"
+      },
+      "initialData": {
+        "research_topic": "Защита персональных данных в организациях",
+        "target_period": "2023-2025",
+        "focus_areas": [
+          "технические проблемы",
+          "человеческий фактор",
+          "экономические последствия",
+          "отраслевая специфика"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-breach-statistics",
+      "directive": "Найди и проанализируй актуальную статистику утечек персональных данных за 2023-2025 годы. Используй отчеты Роскомнадзора, ENISA, Verizon DBIR, IBM Cost of Data Breach. Сосредоточься на количестве инцидентов, размерах штрафов, пострадавших отраслях.",
+      "completionCondition": "Собрана статистика утечек с цифрами по регионам, отраслям и годам + краткий саммари основных трендов",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "breach_statistics": {
+            "type": "object",
+            "properties": {
+              "total_incidents_2023": {
+                "type": "number"
+              },
+              "total_incidents_2024": {
+                "type": "number"
+              },
+              "average_fine_amount": {
+                "type": "number"
+              },
+              "top_affected_industries": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "geographical_distribution": {
+                "type": "object"
+              }
+            }
+          },
+          "key_insights_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "breach_statistics",
+          "key_insights_summary"
+        ]
+      },
+      "connections": {
+        "success": "analyze-major-incidents"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-major-incidents",
+      "directive": "Исследуй топ-10 крупнейших утечек персональных данных за последние 3 года. Для каждого случая определи механизм утечки, количество пострадавших записей, финансовые последствия и время обнаружения. Выяви общие паттерны и повторяющиеся причины.",
+      "completionCondition": "Проанализированы крупнейшие инциденты с выявлением общих паттернов + краткий саммари основных причин",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "major_incidents": {
+            "type": "array",
+            "minItems": 5,
+            "items": {
+              "type": "object",
+              "properties": {
+                "company": {
+                  "type": "string"
+                },
+                "year": {
+                  "type": "number"
+                },
+                "records_affected": {
+                  "type": "number"
+                },
+                "breach_method": {
+                  "type": "string"
+                },
+                "financial_impact": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "common_patterns_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "major_incidents",
+          "common_patterns_summary"
+        ]
+      },
+      "connections": {
+        "success": "research-technical-vulnerabilities"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "research-technical-vulnerabilities",
+      "directive": "Проведи техническую экспертизу уязвимостей в системах обработки персональных данных. Изучи CVE базу, отчеты Kaspersky, Positive Technologies. Найди топ уязвимостей в СУБД, веб-приложениях, системах обмена данными. Классифицируй по критичности.",
+      "completionCondition": "Собрана информация о технических уязвимостях с классификацией по критичности + краткий саммари топ-угроз",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "technical_vulnerabilities": {
+            "type": "array",
+            "minItems": 5,
+            "items": {
+              "type": "object",
+              "properties": {
+                "vulnerability_type": {
+                  "type": "string"
+                },
+                "cvss_score": {
+                  "type": "number"
+                },
+                "affected_systems": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "exploitation_complexity": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "technical_threats_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "technical_vulnerabilities",
+          "technical_threats_summary"
+        ]
+      },
+      "connections": {
+        "success": "analyze-human-factor"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-human-factor",
+      "directive": "Исследуй роль человеческого фактора в инцидентах с персональными данными. Найди статистику по ошибкам сотрудников, эффективности обучения, уровню культуры безопасности. Используй отчеты Ponemon Institute, Proofpoint, корпоративные исследования.",
+      "completionCondition": "Собрана статистика по человеческому фактору с анализом типов ошибок + краткий саммари влияния на безопасность",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "human_factor_stats": {
+            "type": "object",
+            "properties": {
+              "percentage_human_error_incidents": {
+                "type": "number"
+              },
+              "top_error_types": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "training_effectiveness": {
+                "type": "number"
+              },
+              "security_culture_level": {
+                "type": "string"
+              }
+            }
+          },
+          "human_factor_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "human_factor_stats",
+          "human_factor_summary"
+        ]
+      },
+      "connections": {
+        "success": "economic-impact-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "economic-impact-analysis",
+      "directive": "Проанализируй экономические последствия утечек персональных данных. Рассчитай прямые и косвенные затраты, изучи ROI инвестиций в защиту ПД. Используй финансовые отчеты, страховые выплаты, отчеты Gartner. Сравни затраты на превенцию и стоимость инцидентов.",
+      "completionCondition": "Собраны данные по экономическому ущербу и ROI защитных мер + краткий саммари финансовых рисков",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "economic_impact": {
+            "type": "object",
+            "properties": {
+              "average_incident_cost": {
+                "type": "number"
+              },
+              "prevention_investment_roi": {
+                "type": "number"
+              },
+              "direct_costs_percentage": {
+                "type": "number"
+              },
+              "indirect_costs_percentage": {
+                "type": "number"
+              }
+            }
+          },
+          "economic_risks_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "economic_impact",
+          "economic_risks_summary"
+        ]
+      },
+      "connections": {
+        "success": "industry-specific-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "industry-specific-analysis",
+      "directive": "Проведи отраслевой анализ проблем защиты ПД. Исследуй специфику финансов, здравоохранения, ритейла, госсектора, образования. Найди типовые нарушения, специфические угрозы и требования для каждой отрасли.",
+      "completionCondition": "Собраны данные по отраслевой специфике с выявлением уникальных рисков + краткий саммари по секторам",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "industry_analysis": {
+            "type": "object",
+            "properties": {
+              "finance_sector_risks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "healthcare_vulnerabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "retail_challenges": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "government_issues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "industry_specifics_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "industry_analysis",
+          "industry_specifics_summary"
+        ]
+      },
+      "connections": {
+        "success": "emerging-threats-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "emerging-threats-research",
+      "directive": "Исследуй emerging threats и будущие вызовы в защите персональных данных. Изучи влияние AI/ML, IoT, облачных технологий на безопасность ПД. Найди новые векторы атак и прогнозы развития угроз на 2-3 года.",
+      "completionCondition": "Выявлены новые угрозы и технологические вызовы + краткий саммари трендов и прогнозов",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "emerging_threats": {
+            "type": "object",
+            "properties": {
+              "ai_related_risks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "iot_vulnerabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cloud_security_challenges": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "future_attack_vectors": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "future_trends_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "emerging_threats",
+          "future_trends_summary"
+        ]
+      },
+      "connections": {
+        "success": "generate-final-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-final-report",
+      "directive": "Создай современный, профессиональный отчет в темной теме на основе всех собранных данных. Структурируй информацию логично: текущее состояние, основные проблемы, причины и следствия, уязвимости, экономические риски, отраслевая специфика, будущие угрозы, рекомендации. Используй визуальные элементы, графики, современный дизайн.",
+      "completionCondition": "Создан полный аналитический отчет в виде HTML-артефакта с современным дизайном в темной теме, включающий все аспекты исследования",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "report_created": {
+            "type": "boolean"
+          },
+          "report_sections_count": {
+            "type": "number",
+            "minimum": 7
+          },
+          "executive_summary": {
+            "type": "string",
+            "minLength": 200,
+            "maxLength": 800
+          }
+        },
+        "required": [
+          "report_created",
+          "report_sections_count",
+          "executive_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "breach_statistics",
+        "major_incidents",
+        "technical_vulnerabilities",
+        "human_factor_stats",
+        "economic_impact",
+        "industry_analysis",
+        "emerging_threats",
+        "executive_summary"
+      ]
+    }
+  ]
+}

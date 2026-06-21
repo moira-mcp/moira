@@ -1,0 +1,85 @@
+{
+  "slug": "simple-linear-test",
+  "metadata": {
+    "name": "simple-linear-test",
+    "version": "1.0.0",
+    "description": "Simple linear flow test - no conditionals"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "step1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step1",
+      "directive": "ПЕРВЫЙ ШАГ: Введи свое имя",
+      "completionCondition": "Имя получено",
+      "connections": {
+        "success": "step2"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step2",
+      "directive": "ВТОРОЙ ШАГ: Поприветствуй пользователя по имени",
+      "completionCondition": "Приветствие сделано",
+      "connections": {
+        "success": "step3"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "greeting": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "greeting"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step3",
+      "directive": "ТРЕТИЙ ШАГ: Попрощайся с пользователем",
+      "completionCondition": "Прощание сделано",
+      "connections": {
+        "success": "end"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "farewell": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "farewell"
+        ]
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "name",
+        "greeting"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1766953584820,
+      "tag": "0000_eminent_kronos",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1767102010184,
+      "tag": "0001_new_wong",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1769271231107,
+      "tag": "0002_vengeful_tigra",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1769636003618,
+      "tag": "0003_add_artifact_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1769903880000,
+      "tag": "0004_admin_artifact_quotas",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1770000000000,
+      "tag": "0005_whole_silver_surfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1770000001000,
+      "tag": "0006_needy_christian_walker",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1769897622195,
+      "tag": "0007_add_validation_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1772752482138,
+      "tag": "0008_fast_captain_midlands",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1772870400000,
+      "tag": "0008_add_execution_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1772956800000,
+      "tag": "0009_add_lock_pin",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1773043200000,
+      "tag": "0010_simplify_lock",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1773129600000,
+      "tag": "0011_artifact_abuse_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1773216000000,
+      "tag": "0012_self_host_quotas_retention",
+      "breakpoints": true
+    }
+  ]
+}

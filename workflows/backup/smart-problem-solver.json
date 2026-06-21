@@ -1,0 +1,312 @@
+{
+  "slug": "smart-problem-solver",
+  "metadata": {
+    "name": "Умный анализатор и решатель проблем",
+    "version": "1.0.0",
+    "description": "Структурированный подход к анализу любой проблемы с поиском оптимального решения"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-problem-description"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-problem-description",
+      "directive": "Опишите проблему, которую нужно решить. Будьте максимально конкретны: что именно не работает, когда это происходит, какие есть ограничения, каких результатов вы хотите добиться.",
+      "completionCondition": "Получено детальное описание проблемы с контекстом и желаемым результатом",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "problem": {
+            "type": "string",
+            "description": "Описание проблемы"
+          },
+          "context": {
+            "type": "string",
+            "description": "Контекст и обстоятельства"
+          },
+          "desired_outcome": {
+            "type": "string",
+            "description": "Желаемый результат"
+          }
+        },
+        "required": [
+          "problem",
+          "desired_outcome"
+        ]
+      },
+      "connections": {
+        "success": "analyze-problem"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-problem",
+      "directive": "Проведите глубокий анализ проблемы: {{problem}}. Контекст: {{context}}. Желаемый результат: {{desired_outcome}}. Определите: 1) Корневые причины проблемы 2) Заинтересованные стороны 3) Ограничения и ресурсы 4) Критерии успеха 5) Возможные риски",
+      "completionCondition": "Выполнен структурированный анализ с выделением корневых причин, стейкхолдеров, ограничений и критериев успеха",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root_causes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Корневые причины проблемы"
+          },
+          "stakeholders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Заинтересованные стороны"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ограничения и доступные ресурсы"
+          },
+          "success_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Критерии успешного решения"
+          },
+          "risks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Возможные риски"
+          }
+        },
+        "required": [
+          "root_causes",
+          "success_criteria"
+        ]
+      },
+      "connections": {
+        "success": "generate-solutions"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-solutions",
+      "directive": "На основе анализа корневых причин: {{root_causes}}, создайте 3-5 различных подходов к решению проблемы. Для каждого решения укажите: 1) Краткое описание 2) Необходимые ресурсы 3) Временные рамки 4) Плюсы и минусы 5) Вероятность успеха (1-10)",
+      "completionCondition": "Сгенерированы минимум 3 различных подхода к решению с детальным описанием каждого",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "solutions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "resources_needed": {
+                  "type": "string"
+                },
+                "timeframe": {
+                  "type": "string"
+                },
+                "pros": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "cons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "success_probability": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "title",
+                "description",
+                "success_probability"
+              ]
+            },
+            "minItems": 3
+          }
+        },
+        "required": [
+          "solutions"
+        ]
+      },
+      "connections": {
+        "success": "notify-analysis-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-analysis-complete",
+      "message": "🧠 *Анализ проблемы завершен*\n\nПроблема: {{problem}}\nНайдено {{solutions.length}} вариантов решения\nПереходим к выбору оптимального подхода...",
+      "connections": {
+        "default": "evaluate-solutions"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "evaluate-solutions",
+      "directive": "Проанализируйте все предложенные решения с учетом ограничений: {{constraints}} и критериев успеха: {{success_criteria}}. Выберите ОДНО наиболее подходящее решение и обоснуйте выбор. Учтите реалистичность выполнения, соотношение затрат и результата, минимизацию рисков.",
+      "completionCondition": "Выбрано одно оптимальное решение с детальным обоснованием выбора",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chosen_solution": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "reasoning": {
+                "type": "string",
+                "description": "Подробное обоснование выбора"
+              }
+            },
+            "required": [
+              "title",
+              "reasoning"
+            ]
+          }
+        },
+        "required": [
+          "chosen_solution"
+        ]
+      },
+      "connections": {
+        "success": "create-action-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-action-plan",
+      "directive": "Создайте детальный план действий для реализации выбранного решения: {{chosen_solution.title}}. План должен включать: 1) Конкретные шаги (что именно делать) 2) Временные рамки для каждого шага 3) Необходимые ресурсы 4) Ответственных (если применимо) 5) Контрольные точки для проверки прогресса 6) План действий при возникновении проблем",
+      "completionCondition": "Создан подробный пошаговый план реализации с временными рамками, ресурсами и контрольными точками",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action_plan": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step": {
+                  "type": "string"
+                },
+                "timeline": {
+                  "type": "string"
+                },
+                "resources": {
+                  "type": "string"
+                },
+                "responsible": {
+                  "type": "string"
+                },
+                "checkpoint": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step",
+                "timeline"
+              ]
+            },
+            "minItems": 3
+          },
+          "contingency_plan": {
+            "type": "string",
+            "description": "План действий при возникновении проблем"
+          }
+        },
+        "required": [
+          "action_plan"
+        ]
+      },
+      "connections": {
+        "success": "create-monitoring-system"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-monitoring-system",
+      "directive": "Создайте систему мониторинга прогресса. Определите: 1) Ключевые метрики для отслеживания 2) Частоту проверок 3) Критерии, когда нужно корректировать план 4) Способы измерения результатов 5) Конкретные даты для оценки промежуточных результатов",
+      "completionCondition": "Определена система мониторинга с конкретными метриками, датами проверок и критериями корректировки",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ключевые метрики для отслеживания"
+          },
+          "check_frequency": {
+            "type": "string",
+            "description": "Как часто проверять прогресс"
+          },
+          "adjustment_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Когда нужно корректировать план"
+          },
+          "review_dates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Конкретные даты для оценки"
+          }
+        },
+        "required": [
+          "metrics",
+          "check_frequency"
+        ]
+      },
+      "connections": {
+        "success": "notify-plan-ready"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-plan-ready",
+      "message": "✅ *План решения готов!*\n\n🎯 Выбранное решение: {{chosen_solution.title}}\n📋 Создан план из {{action_plan.length}} шагов\n📊 Настроен мониторинг прогресса\n\nВремя действовать! 🚀",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "problem",
+        "chosen_solution",
+        "action_plan",
+        "metrics",
+        "review_dates"
+      ]
+    }
+  ]
+}

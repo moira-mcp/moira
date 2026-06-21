@@ -1,0 +1,393 @@
+{
+  "slug": "bug-hunting-workflow",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "5b15dacb-4423-4ad2-8b96-18f984c9e1a9",
+  "metadata": {
+    "name": "Bug Hunting Workflow",
+    "version": "2.3.0",
+    "description": "Comprehensive bug investigation and fixing workflow with iterative hypothesis validation"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "formulate-bug"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "formulate-bug",
+      "directive": "BUG FORMULATION: Describe the problem clearly and specifically. What doesn't work? What is the expected behavior? What is the actual behavior? Identify the feature/component name and create file ./[feature_name]/bug-description.md with the problem description.",
+      "completionCondition": "Bug is clearly formulated and documented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "feature_name": {
+            "type": "string",
+            "description": "Name of the feature/component with the bug",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "feature_name",
+          "bug_description_file",
+          "bug_severity"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "bug_description_file",
+          "bug_severity"
+        ]
+      },
+      "connections": {
+        "success": "create-hypotheses"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-hypotheses",
+      "directive": "CREATE HYPOTHESES: Analyze possible bug causes from ./{{formulate-bug.feature_name}}/bug-description.md. Create 2-3 specific hypotheses indicating files and code lines where the problem might be. CREATE FILE ./{{formulate-bug.feature_name}}/hypotheses.md with the list of hypotheses, their probability, and verification plan.",
+      "completionCondition": "Well-reasoned hypotheses about bug causes are created with verification plan",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "hypotheses_file",
+          "primary_hypothesis",
+          "investigation_plan"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "hypotheses_file",
+          "primary_hypothesis",
+          "investigation_plan"
+        ]
+      },
+      "connections": {
+        "success": "validate-hypotheses"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validate-hypotheses",
+      "directive": "VALIDATE HYPOTHESES: Delegate task to sonnet agent with FULL CONTEXT. In the prompt give the agent: 1) Full bug description from ./{{formulate-bug.feature_name}}/bug-description.md 2) All hypotheses from ./{{formulate-bug.feature_name}}/hypotheses.md 3) Explain this is MCP Moira workflow engine 4) INSTRUCT AGENT: find EXACT location in code where the problem is, create isolated test to reproduce, confirm root cause. IMPORTANT: DO NOT FIX CODE! Diagnostics only. SAVE: results in ./{{formulate-bug.feature_name}}/hypothesis-validation.md, confirmed problem in ./{{formulate-bug.feature_name}}/confirmed-issue.md.",
+      "completionCondition": "Hypotheses validated, root cause found and confirmed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Diagnostics quality score (4pts accuracy + 3pts testing + 3pts technical spec)"
+          },
+          "confirmed_hypothesis": {
+            "type": "string",
+            "description": "Confirmed hypothesis"
+          },
+          "validation_feedback": {
+            "type": "string",
+            "description": "Feedback for hypothesis improvement"
+          }
+        },
+        "required": [
+          "score",
+          "confirmed_hypothesis",
+          "root_cause_file",
+          "validation_feedback"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "root_cause_file"
+        ]
+      },
+      "connections": {
+        "success": "check-validation-score"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-validation-score",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "validate-hypotheses.score"
+        },
+        "right": 8
+      },
+      "connections": {
+        "true": "implement-bug-fix",
+        "false": "increment-hypothesis-iteration"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "increment-hypothesis-iteration",
+      "expressions": [
+        "hypothesis_iteration = hypothesis_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-hypothesis-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-hypothesis-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "hypothesis_iteration"
+        },
+        "right": {
+          "contextPath": "max_hypothesis_iterations"
+        }
+      },
+      "connections": {
+        "true": "improve-hypotheses",
+        "false": "escalate-to-user"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "escalate-to-user",
+      "directive": "ESCALATION: Hypothesis validation failed after {{max_hypothesis_iterations}} attempts. Present to user: 1) Original bug from ./{{formulate-bug.feature_name}}/bug-description.md 2) All hypotheses from ./{{formulate-bug.feature_name}}/hypotheses.md 3) Validation feedback: {{validate-hypotheses.validation_feedback}} 4) Ask user for guidance: provide additional context, suggest different approach, or manually investigate.\n5) Reset counter and try validating hypotheses again",
+      "completionCondition": "User provided guidance for next steps",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "retry",
+              "manual_fix",
+              "reset"
+            ],
+            "description": "User action: provide guidance, skip, or reset counter and retry"
+          }
+        },
+        "required": [
+          "user_guidance",
+          "action"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "user_guidance"
+        ]
+      },
+      "connections": {
+        "success": "route-hypothesis-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-escalation",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "escalate-to-user.action"
+        },
+        "right": "retry"
+      },
+      "connections": {
+        "true": "reset-hypothesis-iteration",
+        "false": "implement-bug-fix"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "reset-hypothesis-iteration",
+      "expressions": [
+        "hypothesis_iteration = 0"
+      ],
+      "connections": {
+        "default": "improve-hypotheses"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "improve-hypotheses",
+      "directive": "REFINE HYPOTHESES: Based on validation results {{validate-hypotheses.validation_feedback}}, adjust hypotheses. Update file ./{{formulate-bug.feature_name}}/hypotheses.md with obtained data and create more accurate hypotheses.",
+      "completionCondition": "Hypotheses improved based on feedback",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "hypotheses_file",
+          "improvement_notes"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "hypotheses_file",
+          "improvement_notes"
+        ]
+      },
+      "connections": {
+        "success": "validate-hypotheses"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "implement-bug-fix",
+      "directive": "QUALITY BUG FIX: Delegate task to mcp-moira-lead-developer agent. IMPORTANT: Pass path to folder ./{{formulate-bug.feature_name}}/ and file ./{{formulate-bug.feature_name}}/confirmed-issue.md with EXACT problem description. DO NOT DICTATE HOW TO FIX! Tell agent: 1) Study the problem from confirmed-issue.md 2) Find ROOT CAUSE in architecture 3) Propose QUALITY solution without hacks 4) Implement fix and create tests 5) Verify all tests pass. SAVE: architectural analysis, fix plan, fix report.",
+      "completionCondition": "Bug fixed with quality, with architectural analysis, without hacks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "test_passes": {
+            "type": "boolean",
+            "description": "All tests pass"
+          },
+          "fix_summary": {
+            "type": "string",
+            "description": "Brief fix description",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "fix_files",
+          "test_passes",
+          "fix_summary"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "fix_files",
+          "architecture_impact"
+        ]
+      },
+      "connections": {
+        "success": "present-results"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-results",
+      "directive": "PRESENT RESULTS: Present full work report from files ./{{formulate-bug.feature_name}}/ to user. Show: what was wrong ({{validate-hypotheses.confirmed_hypothesis}}), how the problem was diagnosed, what was fixed ({{implement-bug-fix.fix_summary}}), test results ({{implement-bug-fix.test_passes}}). REMIND about the need to commit the fix.",
+      "completionCondition": "Full bug fix report presented to user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "presentation_complete"
+        ],
+        "additionalProperties": false,
+        "globalInputs": [
+          "presentation_complete",
+          "user_satisfied"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "feature_name",
+        "bug_severity",
+        "confirmed_hypothesis",
+        "fix_summary",
+        "test_passes"
+      ]
+    },
+    {
+      "type": "condition",
+      "id": "route-hypothesis-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "escalate-to-user.action"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-hypothesis-counter",
+        "false": "route-escalation"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-hypothesis-counter",
+      "expressions": [
+        "hypothesis_iteration = 0"
+      ],
+      "connections": {
+        "default": "improve-hypotheses"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "hypothesis_iteration": {
+      "type": "number",
+      "description": "Current hypothesis validation iteration count",
+      "default": 0
+    },
+    "max_hypothesis_iterations": {
+      "type": "number",
+      "description": "Maximum hypothesis validation attempts before escalation",
+      "default": 3
+    },
+    "architecture_impact": {
+      "type": "string",
+      "description": "Workflow-global architecture_impact"
+    },
+    "bug_description_file": {
+      "type": "string",
+      "description": "Workflow-global bug_description_file"
+    },
+    "bug_severity": {
+      "type": "string",
+      "description": "Workflow-global bug_severity",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "fix_files": {
+      "type": "array",
+      "description": "Workflow-global fix_files",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hypotheses_file": {
+      "type": "string",
+      "description": "Workflow-global hypotheses_file"
+    },
+    "improvement_notes": {
+      "type": "string",
+      "description": "Workflow-global improvement_notes"
+    },
+    "investigation_plan": {
+      "type": "array",
+      "description": "Workflow-global investigation_plan",
+      "items": {
+        "type": "string"
+      }
+    },
+    "presentation_complete": {
+      "type": "boolean",
+      "description": "Workflow-global presentation_complete"
+    },
+    "primary_hypothesis": {
+      "type": "string",
+      "description": "Workflow-global primary_hypothesis"
+    },
+    "root_cause_file": {
+      "type": "string",
+      "description": "Workflow-global root_cause_file"
+    },
+    "user_guidance": {
+      "type": "string",
+      "description": "Workflow-global user_guidance"
+    },
+    "user_satisfied": {
+      "type": "boolean",
+      "description": "Workflow-global user_satisfied"
+    }
+  }
+}

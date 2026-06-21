@@ -1,0 +1,2259 @@
+{
+  "slug": "workflow-management-flow",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "5727de67-30e6-40ac-806a-75a4c055da47",
+  "metadata": {
+    "name": "Workflow Management Flow",
+    "version": "3.12.0",
+    "description": "META-WORKFLOW for creating and editing workflows. Contains complete knowledge base: node types, patterns, templates, writing directives for other agents, domain knowledge guidelines. Research-first approach with best practices analysis before design.",
+    "author": "mcp-moira-team",
+    "tags": [
+      "workflow",
+      "creation",
+      "editing",
+      "meta",
+      "proactive"
+    ]
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-action-type"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-action-type",
+      "directive": "**FOR AGENT (do NOT ask user about this):**\nDetermine YOUR OWN technical capabilities:\n- `has_file_access`: Can you read/write local files? (Check if you have file tools available)\n- `has_web_access`: Can you make HTTP requests? (Check if you have web/fetch tools)\n\n**FOR USER (ask this):**\nWhat would you like to do?\n1. **Create new workflow** — build from scratch\n2. **Edit existing workflow** — modify or improve\n\nJust ask the simple question, don't overwhelm with technical details.\n\nReturn action_type: \"create\" to build a new workflow, or \"edit\" to modify an existing one.",
+      "completionCondition": "User selected action (create/edit), agent capabilities determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "action_type",
+          "has_file_access",
+          "has_web_access"
+        ],
+        "globalInputs": [
+          "action_type",
+          "has_file_access",
+          "has_web_access"
+        ]
+      },
+      "connections": {
+        "success": "route-action-type"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-action-type",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "get-action-type.action_type"
+        },
+        "right": "create"
+      },
+      "connections": {
+        "true": "gather-workflow-requirements",
+        "false": "select-workflow-to-edit-online"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "gather-workflow-requirements",
+      "directive": "Collect the workflow GOAL from the user.\n\n**ASK USER:**\n1. **Workflow name** - in kebab-case (e.g.: quick-task)\n2. **Workflow goal** - what it should do, what problem it solves (in detail)\n3. **Visibility** - public or private\n\nDO NOT ask about validations, stages, notifications, or patterns - you will decide those YOURSELF.\n\n**AFTER getting user's goal, DECIDE PATTERNS (do NOT ask user):**\n\nBased on the workflow_purpose and {{available_patterns}}, decide which patterns are needed:\n- `use_pattern_validation_loop`: Does output need quality verification before proceeding?\n- `use_pattern_info_collection`: Need to gather data at workflow start for later reuse?\n- `use_pattern_skip`: Are there optional steps user might want to skip?\n- `use_pattern_workspace`: Need organized file structure for artifacts?\n- `use_pattern_subagent_review`: Need independent review of complex outputs?\n- `use_pattern_step_validation`: Need verification after each individual step?\n\nSet each to true/false based on the task nature. Do NOT ask user about patterns.",
+      "completionCondition": "Workflow goal obtained from user, patterns decided by agent",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_name",
+          "workflow_purpose",
+          "visibility",
+          "use_pattern_validation_loop",
+          "use_pattern_info_collection",
+          "use_pattern_skip",
+          "use_pattern_workspace",
+          "use_pattern_subagent_review",
+          "use_pattern_step_validation",
+          "use_pattern_artifacts_publishing",
+          "use_pattern_notes_persistence"
+        ],
+        "globalInputs": [
+          "workflow_name",
+          "workflow_purpose",
+          "visibility",
+          "use_pattern_validation_loop",
+          "use_pattern_info_collection",
+          "use_pattern_skip",
+          "use_pattern_workspace",
+          "use_pattern_subagent_review",
+          "use_pattern_step_validation",
+          "use_pattern_artifacts_publishing",
+          "use_pattern_notes_persistence"
+        ]
+      },
+      "connections": {
+        "success": "research-domain-practices"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "research-domain-practices",
+      "directive": "Before designing the structure, RESEARCH best practices for the domain: {{workflow_purpose}}\n\n1. **Web search** (if you can search the internet):\n   - Search '[domain] workflow best practices'\n   - '[domain] automation patterns'\n   - 'AI agent [domain] process'\n\n2. **Existing workflows** (always):\n   - Call mcp__moira__list() for workflow list\n   - If similar ones exist by purpose - study their structure via mcp__moira__manage({ action: 'get', workflowId: '...', includeNodes: true })\n   - Pay attention to their variableRegistry - what domain knowledge (declared globals with default values) they contain\n\n3. **Determine if domain knowledge is needed**:\n   {{domain_knowledge_guide}}\n\nIn response indicate:\n- What best practices you found\n- Is domain knowledge needed as declared globals in variableRegistry\n- If yes - what type (quality_standards, process_requirements, etc.)",
+      "completionCondition": "Research completed, domain understanding obtained, domain knowledge need determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "domain_research_summary": {
+            "type": "string",
+            "minLength": 50,
+            "description": "Brief description of found best practices"
+          },
+          "domain_knowledge_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Domain knowledge types if needed (quality_standards, process_requirements, validation_criteria, common_mistakes)"
+          }
+        },
+        "required": [
+          "domain_research_summary",
+          "needs_domain_knowledge"
+        ],
+        "globalInputs": [
+          "needs_domain_knowledge",
+          "similar_workflows_found"
+        ]
+      },
+      "connections": {
+        "success": "analyze-and-propose"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "analyze-and-propose",
+      "directive": "Analyze the workflow goal ({{workflow_purpose}}) and research results ({{research-domain-practices.domain_research_summary}}) and propose which patterns to use.\n\nAvailable patterns are described in {{available_patterns}}.\n\nFor each pattern:\n1. Think if it's needed for THIS SPECIFIC task\n2. If yes - explain WHY for this task\n3. If no - don't propose\n\nExample:\n'For workflow \"automatic deploy to staging\":\n\n- **Validation loop**: yes, because need to check that tests pass before deploy\n- **User approval**: yes, because deploy changes production-like environment\n- **Error handling**: yes, because deploy can fail for various reasons\n- **Notifications**: yes, so team knows the result\n\nDo you agree? Or want to change?'\n\nDO NOT propose template options A/B/C. Analyze the specific task.\n\nReturn patterns_confirmed: \"yes\" if the user confirms the patterns as proposed, or \"no\" if they want changes.",
+      "completionCondition": "User agreed with proposed patterns or corrected them",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "patterns_confirmed"
+        ],
+        "globalInputs": [
+          "use_pattern_validation_loop",
+          "use_pattern_info_collection",
+          "use_pattern_skip",
+          "use_pattern_workspace",
+          "use_pattern_subagent_review",
+          "use_pattern_step_validation",
+          "use_pattern_artifacts_publishing",
+          "use_pattern_notes_persistence",
+          "patterns_confirmed"
+        ]
+      },
+      "connections": {
+        "success": "route-patterns-confirmed"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-patterns-confirmed",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "patterns_confirmed"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "define-main-stages",
+        "false": "revise-patterns"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "revise-patterns",
+      "directive": "User wants to change the proposed patterns.\n\nAsk what exactly to change:\n- Which patterns to add?\n- Which to remove?\n- Why?\n\nUpdate the list and show again.\n\nReturn patterns_confirmed: \"yes\" if the user now confirms the revised patterns, or \"no\" to revise again.",
+      "completionCondition": "Patterns corrected",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "patterns_confirmed"
+        ],
+        "globalInputs": [
+          "use_pattern_validation_loop",
+          "use_pattern_info_collection",
+          "use_pattern_skip",
+          "use_pattern_workspace",
+          "use_pattern_subagent_review",
+          "use_pattern_step_validation",
+          "use_pattern_artifacts_publishing",
+          "use_pattern_notes_persistence",
+          "patterns_confirmed"
+        ]
+      },
+      "connections": {
+        "success": "route-patterns-confirmed"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "define-main-stages",
+      "directive": "Define main workflow stages to achieve the goal: {{workflow_purpose}}\n\nConsidering selected patterns:\n- Validation loop: {{use_pattern_validation_loop}}\n- Info collection: {{use_pattern_info_collection}}\n- Skip optional: {{use_pattern_skip}}\n- Workspace: {{use_pattern_workspace}}\n- Subagent review: {{use_pattern_subagent_review}}\n- Step validation: {{use_pattern_step_validation}}\n\nPropose stages as logical steps toward the goal. For each stage indicate which patterns apply (if any).\n\nExample:\n'Stages for {{workflow_name}}:\n1. Gather requirements\n2. Create plan → user approval\n3. Implementation → validation loop\n4. Testing → validation loop\n5. Deploy → user approval, notification on success/error\n\nDo you confirm?'\n\nReturn stages_approved: \"yes\" if the user approves the stages as proposed, or \"no\" if they want changes.",
+      "completionCondition": "Stages defined and confirmed by user",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "main_stages",
+          "stages_approved"
+        ],
+        "globalInputs": [
+          "main_stages",
+          "stages_approved"
+        ]
+      },
+      "connections": {
+        "success": "route-stages-approval"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-stages-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "stages_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "review-stages-completeness",
+        "false": "refine-stages"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "refine-stages",
+      "directive": "Refine stages based on user feedback.\n\nAsk what exactly needs to change:\n- Add stages?\n- Remove stages?\n- Change order?\n- Change validation/approval locations?\n\nUpdate the stage list and show again.\n\nReturn stages_approved: \"yes\" if the user now approves the refined stages, or \"no\" to refine again.",
+      "completionCondition": "Stages corrected",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "main_stages",
+          "stages_approved"
+        ],
+        "globalInputs": [
+          "main_stages",
+          "stages_with_validation",
+          "stages_with_approval",
+          "stages_with_notification",
+          "stages_approved"
+        ]
+      },
+      "connections": {
+        "success": "route-stages-approval"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "design-workflow-structure",
+      "directive": "Design workflow structure based on stages: {{main_stages}}\n\nPatterns to use:\n- Validation loop: {{use_pattern_validation_loop}}\n- Info collection: {{use_pattern_info_collection}}\n- Skip optional: {{use_pattern_skip}}\n- Workspace: {{use_pattern_workspace}}\n- Subagent review: {{use_pattern_subagent_review}}\n- Step validation: {{use_pattern_step_validation}}\n- Artifacts publishing: {{use_pattern_artifacts_publishing}}\n- Notes persistence: {{use_pattern_notes_persistence}}\n\nUse {{node_types_reference}} for node format.\n\nPatterns for use (showing only selected):\n\n{{#if use_pattern_validation_loop}}\n**VALIDATION LOOP:**\n{{pattern_validation_loop_detail}}\n{{/if}}\n\n{{#if use_pattern_info_collection}}\n**INFORMATION COLLECTION:**\n{{pattern_info_collection_detail}}\n{{/if}}\n\n{{#if use_pattern_skip}}\n**SKIP PATTERN:**\n{{pattern_skip_detail}}\n{{/if}}\n\n{{#if use_pattern_workspace}}\n**WORKSPACE:**\n{{pattern_workspace_detail}}\n{{/if}}\n\n{{#if use_pattern_subagent_review}}\n**SUBAGENT REVIEW:**\n{{pattern_subagent_review_detail}}\n{{/if}}\n\n{{#if use_pattern_step_validation}}\n**STEP VALIDATION:**\n{{pattern_step_validation_detail}}\n{{/if}}\n\n{{#if use_pattern_artifacts_publishing}}\n**ARTIFACTS PUBLISHING:**\n{{pattern_artifacts_publishing_detail}}\n{{/if}}\n\n{{#if use_pattern_notes_persistence}}\n**NOTES PERSISTENCE:**\n{{pattern_notes_persistence_detail}}\n{{/if}}\n\n**DATA BALANCE (always applies):**\n{{data_balance_guidelines}}\n\nCreate a text diagram of the graph showing:\n- Node sequence\n- Where loops are (validation loops)\n- Where branches are (conditions)\n- Where approvals and notifications are\n\nExample:\n```\nstart → gather-info → create-plan → [approval] → implement → [validation-loop] → deploy → [notify] → end\n```",
+      "completionCondition": "Workflow structure designed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_graph",
+          "node_count"
+        ],
+        "globalInputs": [
+          "workflow_graph",
+          "node_count"
+        ]
+      },
+      "connections": {
+        "success": "approve-structure"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "approve-structure",
+      "directive": "Show the designed workflow structure to the user and get confirmation.\n\nShow:\n1. Graph diagram: {{workflow_graph}}\n2. Node count: {{node_count}}\n\nAsk: 'Do you confirm the structure? (yes/no)'\n\nIf no - find out what changes are needed.",
+      "completionCondition": "Structure confirmed or feedback received for refinement",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "structure_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Structure confirmation"
+          },
+          "structure_feedback": {
+            "type": "string",
+            "description": "Feedback on structure (if not confirmed)"
+          }
+        },
+        "required": [
+          "structure_approved"
+        ]
+      },
+      "connections": {
+        "success": "route-structure-approval"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-structure-approval",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-structure.structure_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "create-workflow-json",
+        "false": "refine-structure"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "refine-structure",
+      "directive": "Refine workflow structure based on feedback: {{approve-structure.structure_feedback}}\n\nUse {{best_practices}} for improvement.\n\nUpdate the graph diagram and present the new version.",
+      "completionCondition": "Structure refined based on feedback",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_graph",
+          "node_count",
+          "changes_made"
+        ],
+        "globalInputs": [
+          "workflow_graph",
+          "node_count",
+          "changes_made"
+        ]
+      },
+      "connections": {
+        "success": "approve-structure"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-workflow-json",
+      "directive": "Create complete JSON workflow based on the approved structure.\n\nUse:\n- {{node_types_reference}} - for correct node format\n- {{input_schema_patterns}} - for inputSchema\n- {{condition_operators}} - for condition nodes\n- {{best_practices}} - for quality\n- {{directive_authoring_guide}} - HOW to write directives for another agent\n- {{template_usage_guide}} - HOW to use templates in directives\n\n{{#if has_file_access}}**FILE SYSTEM MODE:**\n\n1. Create directory ./{{workflow_name}}/\n2. Create process-id.txt with content: {{executionId}}\n3. Save workflow to ./{{workflow_name}}/workflow.json\n\nJSON structure:\n- id: {{workflow_name}}\n- metadata: name, version \"1.0.0\", description from {{workflow_purpose}}\n- variableRegistry: all declared global variables (top-level, see variable model guide)\n- nodes: all nodes according to diagram {{workflow_graph}}\n{{else}}Create workflow directly on server:\n\n1. Prepare JSON structure:\n   - id: {{workflow_name}}\n   - metadata: name, version \"1.0.0\", description from {{workflow_purpose}}\n   - variableRegistry: all declared global variables (top-level, see variable model guide)\n   - nodes: all nodes according to diagram {{workflow_graph}}\n\n2. Create workflow on server:\n   mcp__moira__manage({ action: \"create\", workflow: <prepared_json>, overwrite: true })\n\n3. Verify creation:\n   mcp__moira__manage({ action: \"get-structure\", workflowId: \"{{workflow_name}}\" })\n\nWorkflow must exist on server before proceeding to validation.{{/if}}\n\n{{#if needs_domain_knowledge}}**DOMAIN KNOWLEDGE REQUIRED:**\n- Declare domain knowledge as globals in variableRegistry (with default values) of types: {{research-domain-practices.domain_knowledge_types}}\n- Formulate rules based on research: {{research-domain-practices.domain_research_summary}}\n- Reference these globals in directives via bare-name template syntax\n{{/if}}\n\nIMPORTANT: Remember that directives are read by ANOTHER agent without context. {{directive_authoring_guide}}\n\n**IMPORTANT - Workflow Identification:**\n{{workflow_id_slug_guide}}\n\n**IMPORTANT - Variable Model (declare once, route explicitly):**\n{{initialdata_structure_guide}}\n\n**Template Syntax Reference:**\n{{template_syntax_examples}}\n\nCheck that all connections are correct before saving.",
+      "completionCondition": "JSON workflow created, all nodes defined, connections verified",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_json_created",
+          "total_nodes"
+        ],
+        "globalInputs": [
+          "workflow_json_created",
+          "total_nodes",
+          "workspace_path"
+        ]
+      },
+      "connections": {
+        "success": "review-implementation-completeness"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "load-workflow-for-edit",
+      "directive": "Load workflow for editing.\n\n{{#if has_file_access}}**FILE SYSTEM MODE:**\n\nWorkspace already created: {{workspace_path}}\n\n{{#if offline_mode}}**OFFLINE MODE** - Server unavailable, working with local files only.{{/if}}\n\n1. **Prepare working copy:**\n   {{#if local_workflow_path}}\n   - Local file found in repository: {{local_workflow_path}}\n   - Copy {{local_workflow_path}} → {{workspace_path}}/workflow-local.json\n   {{else}}\n   - Local file NOT found in repository\n   {{/if}}\n   {{#unless offline_mode}}\n   - Download server version: mcp__moira__token({ action: \"download\", workflowId: \"{{workflow_id_to_edit}}\" })\n   - Save as {{workspace_path}}/workflow-server.json\n   {{/unless}}\n\n2. **Compare versions (if both exist):**\n   {{#if local_workflow_path}}\n   {{#unless offline_mode}}\n   - Compare metadata.version in workflow-local.json and workflow-server.json\n   - If versions DIFFER and both are non-empty: version_conflict = \"yes\"\n   - Report conflict details: local_version and server_version\n   {{else}}\n   - Offline mode: use local version only\n   - version_conflict = \"no\"\n   {{/unless}}\n   {{else}}\n   {{#unless offline_mode}}\n   - Copy workflow-server.json → {{workspace_path}}/workflow.json\n   - Report: \"Editing version X.Y.Z (source: server)\"\n   {{/unless}}\n   - version_conflict = \"no\"\n   {{/if}}\n\n3. **Analysis:**\n   - Read JSON from {{workspace_path}}/workflow.json\n   - Analyze structure\n{{else}}1. **Get workflow structure:**\n   mcp__moira__manage({ action: \"get-structure\", workflowId: \"{{workflow_id_to_edit}}\" })\n\n2. **For detailed view of specific nodes:**\n   mcp__moira__manage({ action: \"get-node\", workflowId: \"{{workflow_id_to_edit}}\", nodeId: \"<id>\" })\n\n3. **For text search:**\n   mcp__moira__manage({ action: \"search-nodes\", workflowId: \"{{workflow_id_to_edit}}\", query: \"<text>\" })\n\n- version_conflict = \"no\"{{/if}}\n\nAnalyze the structure of the loaded workflow.",
+      "completionCondition": "Workflow loaded and analyzed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "version_conflict": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether local and server versions differ"
+          },
+          "local_version": {
+            "type": "string",
+            "description": "Local workflow version (if exists)"
+          },
+          "server_version": {
+            "type": "string",
+            "description": "Server workflow version (if fetched)"
+          }
+        },
+        "required": [
+          "workflow_loaded",
+          "current_node_count",
+          "version_conflict"
+        ],
+        "globalInputs": [
+          "workflow_loaded",
+          "current_node_count",
+          "workflow_structure_summary"
+        ]
+      },
+      "connections": {
+        "success": "route-version-conflict"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "gather-edit-requirements",
+      "directive": "Find out what needs to be changed in the workflow.\n\n{{#if workflow_structure_summary}}Show current structure: {{workflow_structure_summary}}{{/if}}\n\nAsk the user:\n1. Which nodes to add?\n2. Which nodes to change?\n3. Which nodes to delete?\n4. Change metadata (name, description, version)?\n\nFormulate the change plan.",
+      "completionCondition": "Edit requirements collected",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "globalInputs": [
+          "nodes_to_add",
+          "nodes_to_update",
+          "nodes_to_remove",
+          "metadata_changes"
+        ]
+      },
+      "connections": {
+        "success": "create-edit-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "apply-workflow-changes",
+      "directive": "Apply changes to the workflow.\n\nUse:\n- {{node_types_reference}} for new node format\n- {{validation_loop_pattern}} if adding validations\n- {{best_practices}} for quality\n\n{{#if has_file_access}}\n**FILE MODE:**\n\n1. Read plan from `{{workspace_path}}/edit-plan.md`\n2. Open `{{workspace_path}}/workflow.json`\n3. Make changes according to the plan\n4. Save updated JSON\n{{else}}\n**CONTEXT MODE:**\n\nApply changes according to the plan:\n\n{{edit_plan}}\n\nUse mcp__moira__manage({ action: \"edit\" }) with:\n1. **To add nodes:** changes.addNodes: [{ full node definition }]\n2. **To update nodes:** changes.updateNodes: [{ nodeId: \"id\", changes: { fields to change } }]\n3. **To delete nodes:** changes.removeNodes: [\"node-id\"]\n4. **To update metadata:** changes.metadata: { name, version, description }\n{{/if}}",
+      "completionCondition": "Changes applied to workflow",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "changes_applied",
+          "new_node_count"
+        ],
+        "globalInputs": [
+          "changes_applied",
+          "new_node_count"
+        ]
+      },
+      "connections": {
+        "success": "review-changes-before-upload"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validate-workflow",
+      "connections": {
+        "success": "route-validation-result"
+      },
+      "directive": "Delegate workflow validation to subagent via Task tool.\n\n{{#if has_file_access}}1) Pass to subagent:\n   - Path to workflow JSON: {{#eq action_type 'create'}}./{{workflow_name}}/workflow.json{{else}}{{workspace_path}}/workflow.json{{/eq}}\n   - Validation checklist: {{validation_checklist}}\n\n2) Subagent prompt: YOU ARE workflow validator. READ the file. CHECK structure, reachability, directives quality, connections. CHECK against anti-patterns: {{anti_pattern_catalog}} Return validation_passed and validation_errors list.\n\n3) Pass result to validation_passed and validation_errors\n{{else}}1) Pass to subagent:\n   - Workflow ID: {{#eq action_type 'create'}}{{workflow_name}}{{else}}{{workflow_id_to_edit}}{{/eq}}\n   - Validation checklist: {{validation_checklist}}\n\n2) Subagent prompt:\n   YOU ARE workflow validator.\n   GET workflow: mcp__moira__manage({ action: \"get\", workflowId: \"{{#eq action_type 'create'}}{{workflow_name}}{{else}}{{workflow_id_to_edit}}{{/eq}}\" })\n   CHECK structure, reachability, directives quality, connections. CHECK against anti-patterns: {{anti_pattern_catalog}}\n   Return validation_passed and validation_errors list.\n\n3) Pass result to validation_passed and validation_errors{{/if}}",
+      "completionCondition": "Validation completed, result known",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "validation_passed": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Validation result"
+          },
+          "validation_errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of validation errors"
+          }
+        },
+        "required": [
+          "validation_passed"
+        ]
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-validation-result",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-workflow.validation_passed"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "review-workflow-quality",
+        "false": "fix-validation-errors"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-validation-errors",
+      "directive": "FIX found validation errors: {{validate-workflow.validation_errors}}\n\nFor each error:\n1. Find the cause\n2. Fix the problem\n3. Make sure the fix doesn't create new problems\n\nUse {{node_types_reference}} for correct format.",
+      "completionCondition": "Validation errors fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "errors_fixed"
+        ],
+        "globalInputs": [
+          "errors_fixed",
+          "fixes_description"
+        ]
+      },
+      "connections": {
+        "success": "expr-inc-validation-count"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "user-final-review",
+      "connections": {
+        "success": "route-save-decision"
+      },
+      "directive": "Present completion report to the user.\n\nShow:\n1. **Work completed:** summary of all changes made\n2. **Original requirements:**\n{{#eq action_type 'create'}}- Workflow: {{workflow_name}}\n- Purpose: {{workflow_purpose}}\n- Visibility: {{visibility}}{{else}}{{#if has_file_access}}\nRead from {{workspace_path}}/edit-plan.md\n{{else}}\n{{edit_plan}}\n{{/if}}{{/eq}}\n3. **Verification:** how requirements were fulfilled\n4. **Current state:** metadata, node count, structure diagram\n\nAsk user: \"Does this work match your original requirements? (yes/no)\"\n\nIf user confirms → work_approved = \"yes\"\nIf user wants changes → work_approved = \"no\", capture feedback in final_feedback",
+      "completionCondition": "User confirmed work matches requirements",
+      "inputSchema": {
+        "properties": {
+          "work_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "User approved the work?"
+          }
+        },
+        "required": [
+          "work_approved"
+        ],
+        "type": "object",
+        "globalInputs": [
+          "final_feedback"
+        ]
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-save-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "user-final-review.work_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "ask-upload",
+        "false": "gather-edit-requirements"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end-cancelled",
+      "finalOutput": [
+        "workflow_name",
+        "action_type"
+      ]
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "workflow_name",
+        "action_type"
+      ]
+    },
+    {
+      "type": "condition",
+      "id": "route-upload-skip",
+      "connections": {
+        "true": "save-workflow-to-target",
+        "false": "sync-local-file"
+      },
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-upload.upload_confirmed"
+        },
+        "right": true
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-workflow-to-target",
+      "directive": "Upload the workflow to the Moira server you are currently connected to.\n\nThe upload token is issued for your active connection — do not assume or hardcode a server or URL.\nUse: mcp__moira__token({ action: \"upload\" }) — it returns the uploadUrl for the current server.\n\n1. Get upload token\n2. Upload workflow via curl POST with:\n   - workflow file\n   - visibility parameter\n   - forceNew=true if upload_force_new is true\n   - adminOverride=true if upload_admin_override is true\n3. Check upload success\n\ncurl example with optional parameters:\n```\ncurl -X POST \"$uploadUrl\" \\\n  -F \"workflow=@workflow.json\" \\\n  -F \"visibility=public\" \\\n  [-F \"forceNew=true\"]       # if upload_force_new is set\n  [-F \"adminOverride=true\"]  # if upload_admin_override is set\n```\n\nThis is an automatic step - DO NOT ask the user, just execute.",
+      "completionCondition": "Workflow uploaded to server or error received",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "upload_success": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Upload successful?"
+          },
+          "upload_error": {
+            "type": "string",
+            "description": "Upload error (if any)"
+          }
+        },
+        "required": [
+          "upload_success"
+        ]
+      },
+      "connections": {
+        "success": "route-upload-result"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-upload-result",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "save-workflow-to-target.upload_success"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "route-has-file-access-for-sync",
+        "false": "handle-upload-error"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "handle-upload-error",
+      "directive": "Error occurred while uploading workflow.\n\nError: {{save-workflow-to-target.upload_error}}\n\n**Analyze the error and offer appropriate options:**\n\nIf error contains \"owned by another user\" or \"Access denied\":\n- This means the workflow ID in JSON file belongs to another user\n- Offer options: **copy_new** (create copy with new ID) or **admin_override** (admin only - overwrite original)\n\nFor other errors:\n- Offer standard options: **retry**, **skip**, **cancel**\n\nOptions explanation:\n1. **copy_new** - Create a new workflow with fresh ID (ignores ID from JSON, your copy)\n2. **admin_override** - Overwrite the original workflow (requires admin privileges)\n3. **retry** - Try upload again\n4. **skip** - Skip upload, keep workflow saved locally only\n5. **cancel** - Cancel everything\n\nPresent only relevant options based on error type.",
+      "completionCondition": "User selected action",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "error_action": {
+            "type": "string",
+            "enum": [
+              "copy_new",
+              "admin_override",
+              "retry",
+              "skip",
+              "cancel"
+            ],
+            "description": "How to handle the error"
+          }
+        },
+        "required": [
+          "error_action"
+        ]
+      },
+      "connections": {
+        "success": "route-error-action-new"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-error-action-new",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "handle-upload-error.error_action"
+            },
+            "right": "retry"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "handle-upload-error.error_action"
+            },
+            "right": "copy_new"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "handle-upload-error.error_action"
+            },
+            "right": "admin_override"
+          }
+        ]
+      },
+      "connections": {
+        "true": "prepare-retry-upload",
+        "false": "route-error-skip-or-cancel"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-error-skip-or-cancel",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "handle-upload-error.error_action"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "route-has-file-access-for-sync",
+        "false": "end-cancelled"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "search-local-workflow-file",
+      "directive": "Search for local workflow file in repository.\n\n1. Execute glob search: `workflows/**/*.json`\n2. For each found file check the `id` field inside JSON\n3. Find file where `id` == \"{{workflow_id_to_edit}}\"\n\nIf found:\n- Save path in `local_workflow_path`\n- Report: \"Local file found: {path}\"\n\nIf not found:\n- `local_workflow_path` = empty string\n- Report: \"Local workflow file not found in repository\"",
+      "completionCondition": "Local file search completed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "local_workflow_path"
+        ],
+        "globalInputs": [
+          "local_workflow_path"
+        ]
+      },
+      "connections": {
+        "success": "route-local-file-found"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "setup-workspace",
+      "directive": "Create workspace for editing workflow.\n\n**Format:** `./moira-ws/{{workflow_id_to_edit}}-edit-{YYYYMMDD}-{HHMM}`\n**Example:** `./moira-ws/workflow-management-flow-edit-20251212-0930`\n\n1. Generate workspace name with current date/time\n2. Create directory\n3. Create process-id.txt file with content: {{executionId}}\n4. Create file `[your-new-workspace]/planning-standards.md` with content:\n   {{planning_standards}}\n5. Return the full workspace path in `workspace_path` field",
+      "completionCondition": "Workspace created, process-id.txt written",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workspace_path"
+        ],
+        "globalInputs": [
+          "workspace_path"
+        ]
+      },
+      "connections": {
+        "success": "load-workflow-for-edit"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "sync-local-file",
+      "directive": "{{#if local_workflow_path}}Sync local workflow file in repository.\n\n{{#if has_file_access}}\n1. Copy `{{workspace_path}}/workflow.json` → `{{local_workflow_path}}`\n2. Report: \"Local file updated: {{local_workflow_path}}\"\n{{else}}\n1. Get workflow via mcp__moira__manage({ action: \"get\", workflowId: \"{{#if workflow_id_to_edit}}{{workflow_id_to_edit}}{{else}}{{workflow_name}}{{/if}}\" })\n2. Save to `{{local_workflow_path}}`\n{{/if}}\n{{else}}Local file was not found at start, sync not required.\n\nIf you want to save workflow to repository:\n1. Ask user where to save (e.g. workflows/production/private/{{#if workflow_id_to_edit}}{{workflow_id_to_edit}}{{else}}{{workflow_name}}{{/if}}.json)\n{{#if has_file_access}}\n2. Copy `{{workspace_path}}/workflow.json` there\n{{else}}\n2. Get workflow and save to specified path\n{{/if}}{{/if}}",
+      "completionCondition": "Sync completed or skipped",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "sync_result"
+        ],
+        "globalInputs": [
+          "sync_result"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "create-edit-plan",
+      "directive": "Create edit plan based on user request.\n\n{{#if workspace_path}}\n**Workspace:** {{workspace_path}}\n\nRead file `{{workspace_path}}/planning-standards.md` for planning standards reference.\n{{/if}}\n\n{{#if workflow_id_to_edit}}\nAnalyze what changes are needed to workflow `{{workflow_id_to_edit}}`.\n{{else}}\nAnalyze what changes are needed to workflow `{{workflow_name}}`.\n{{/if}}\nCurrent workflow is loaded in context from previous step.\n\n{{#if workspace_path}}\nCreate edit plan in `{{workspace_path}}/edit-plan.md`:\n{{else}}\nCreate edit plan with this structure:\n{{/if}}\n\n## Target Workflow\n- ID: {{#if workflow_id_to_edit}}{{workflow_id_to_edit}}{{else}}{{workflow_name}}{{/if}}\n- Current version: [read from workflow]\n\n## Edit Requirements\n[Extract specific requirements from user request]\n\n## Planned Changes\n[List each change with affected nodes]\n\n## Validation Checklist\n- [ ] All changes align with planning standards\n- [ ] Node connections are valid\n- [ ] No orphan nodes created\n\n{{#if workspace_path}}\n**FILE MODE:**\nAdditionally, create `{{workspace_path}}/edit-requirements.md` with extracted requirements:\n```\n# Edit Requirements for {{#if workflow_id_to_edit}}{{workflow_id_to_edit}}{{else}}{{workflow_name}}{{/if}}\n\n## User Request Summary\n[Summarize what user asked for]\n\n## Specific Requirements\n1. [Requirement 1]\n2. [Requirement 2]\n...\n\n## Success Criteria\n- [Criterion 1]\n- [Criterion 2]\n```\n{{else}}\n**CONTEXT MODE:**\nReturn the full edit plan in the `edit_plan` field.\n{{/if}}",
+      "completionCondition": "Change plan created and saved/stored",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "plan_created",
+          "planned_changes_count"
+        ],
+        "globalInputs": [
+          "plan_created",
+          "planned_changes_count",
+          "edit_plan"
+        ]
+      },
+      "connections": {
+        "success": "validate-edit-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validate-edit-plan",
+      "directive": "Delegate edit plan validation to subagent via Task tool.\n\n**CONTEXT:**\n- Workflow: {{#if workflow_id_to_edit}}{{workflow_id_to_edit}}{{else}}{{workflow_name}}{{/if}}\n{{#if workspace_path}}\n- Workspace: {{workspace_path}}\n- Files to validate:\n  - `{{workspace_path}}/edit-plan.md` - the edit plan\n  - `{{workspace_path}}/planning-standards.md` - planning standards\n  - `{{workspace_path}}/edit-requirements.md` - requirements\n{{else}}\n- Edit plan: {{edit_plan}}\n{{/if}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE an edit plan validator.\n\nTASK: Validate the edit plan against requirements and standards.\n\n{{#if workspace_path}}\nREAD these files:\n1. `{{workspace_path}}/edit-plan.md` - the edit plan\n2. `{{workspace_path}}/planning-standards.md` - planning standards\n3. `{{workspace_path}}/edit-requirements.md` - requirements\n{{else}}\nEDIT PLAN TO VALIDATE:\n{{edit_plan}}\n{{/if}}\n\nCHECK:\n\n## 1. REQUIREMENTS COVERAGE\nFor EACH requirement:\n- Is it addressed in the plan?\n- Which specific change addresses it?\n- Is the solution complete?\n\n## 2. STANDARDS COMPLIANCE\nFor EACH planned change, verify:\n- Node structure correct (id, directive, completionCondition, inputSchema)\n- Connections valid (point to existing nodes)\n- Directive quality (clear action, context via variables, success criteria)\n- InputSchema design (enums, required fields, types)\n\n## 3. WORKFLOW INTEGRITY\n- No orphan nodes created\n- All paths lead to end node\n- Cycles are intentional\n\nOUTPUT:\n- List of requirements not covered (if any)\n- List of standards violations (if any)\n- List of integrity issues (if any)\n- issues_count: total number of issues found\n\nReturn issues_count = 0 if plan is valid.\"\n\n**IMPORTANT:** Pass subagent result honestly to output. Do NOT modify or filter issues.\n\n{{#if workspace_path}}\nSave validation issues to `{{workspace_path}}/plan-validation-issues.md`\n{{/if}}",
+      "completionCondition": "Plan validated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "validation_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of found issues (0 = plan is valid)"
+          },
+          "validation_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of issues"
+          }
+        },
+        "required": [
+          "validation_issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-edit-plan-valid"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-edit-plan-valid",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-edit-plan.validation_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "present-edit-plan",
+        "false": "expr-inc-editplan-fix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-edit-plan",
+      "directive": "Fix issues in edit plan for workflow {{workflow_id_to_edit}}.\n\n{{#if has_file_access}}\n**Workspace:** {{workspace_path}}\n\n1. Read `{{workspace_path}}/plan-validation-issues.md` - list of issues to fix\n2. Read `{{workspace_path}}/edit-plan.md` - current plan\n3. Read `{{workspace_path}}/edit-requirements.md` - requirements to cover\n4. Read `{{workspace_path}}/planning-standards.md` - standards to follow\n{{else}}\n**CONTEXT MODE:**\nCurrent plan:\n{{edit_plan}}\n\nIssues to fix:\n{{validate-edit-plan.validation_issues}}\n{{/if}}\n\n**FIX PROCESS:**\n\nAddress EACH issue one by one:\n\n1. **Requirements Coverage Issues:**\n   - Add missing changes to address uncovered requirements\n   - Expand partial solutions to fully cover requirements\n\n2. **Standards Compliance Issues:**\n   - Fix node structure (add missing fields)\n   - Fix directive quality (add context, success criteria)\n   - Fix inputSchema design\n\n3. **Integrity Issues:**\n   - Fix orphan nodes (add connections or remove)\n   - Ensure all paths reach end node\n\n**OUTPUT:**\n{{#if has_file_access}}\nUpdate `{{workspace_path}}/edit-plan.md` with fixes.\n{{else}}\nReturn the updated full plan in `edit_plan` field.\n{{/if}}",
+      "completionCondition": "Issues fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied"
+        ],
+        "globalInputs": [
+          "fixes_applied",
+          "edit_plan"
+        ]
+      },
+      "connections": {
+        "success": "validate-edit-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-edit-plan",
+      "directive": "Show change plan to the user.\n\n{{#if has_file_access}}\nRead `{{workspace_path}}/edit-plan.md` and present the plan.\n{{else}}\nPresent the plan:\n\n{{edit_plan}}\n{{/if}}\n\nShow:\n1. **Current structure** of workflow\n2. **Planned changes** (add/change/delete)\n3. **Diagram after changes**\n\nAsk user: \"Do you approve the plan? (yes/no)\"\n\nCRITICALLY IMPORTANT:\n- If user says \"no\" or has feedback → plan_approval = \"no\"\n- DO NOT fix the plan yourself - workflow will route to refinement branch",
+      "completionCondition": "User gave response",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_approval": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "User approved the plan?"
+          },
+          "user_feedback": {
+            "type": "string",
+            "description": "User feedback (if any)"
+          }
+        },
+        "required": [
+          "plan_approval"
+        ]
+      },
+      "connections": {
+        "success": "route-edit-plan-approved"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-edit-plan-approved",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-edit-plan.plan_approval"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "apply-workflow-changes",
+        "false": "revise-edit-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "revise-edit-plan",
+      "directive": "Revise plan considering user feedback.\n\nFeedback: {{present-edit-plan.user_feedback}}\n\n{{#if has_file_access}}\n1. Read current plan from `{{workspace_path}}/edit-plan.md`\n2. Revise considering feedback\n3. Update `{{workspace_path}}/edit-plan.md` with revised plan\n{{else}}\nCurrent plan:\n{{edit_plan}}\n\nRevise the plan and return updated version in `edit_plan` field.\n{{/if}}",
+      "completionCondition": "Plan revised",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "plan_revised"
+        ],
+        "globalInputs": [
+          "plan_revised",
+          "edit_plan"
+        ]
+      },
+      "connections": {
+        "success": "validate-edit-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-changes-before-upload",
+      "directive": "Delegate changes review to subagent via Task tool.\n\n**CONTEXT:**\n- Workflow: {{#if workflow_id_to_edit}}{{workflow_id_to_edit}}{{else}}{{workflow_name}}{{/if}}\n{{#if workspace_path}}\n- Workspace: {{workspace_path}}\n- Files to review:\n  - `{{workspace_path}}/workflow.json` - modified workflow\n  - `{{workspace_path}}/edit-plan.md` - what was planned\n  - `{{workspace_path}}/edit-requirements.md` - original requirements\n  - `{{workspace_path}}/planning-standards.md` - standards to follow\n{{else}}\n- Edit plan: {{edit_plan}}\n{{/if}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE a workflow changes reviewer.\n\nTASK: Review all changes before upload - verify implementation matches the plan.\n\n{{#if workspace_path}}\nREAD these files:\n1. `{{workspace_path}}/workflow.json` - modified workflow\n2. `{{workspace_path}}/edit-plan.md` - what was planned\n3. `{{workspace_path}}/edit-requirements.md` - original requirements\n4. `{{workspace_path}}/planning-standards.md` - standards to follow\n{{else}}\nEDIT PLAN:\n{{edit_plan}}\n{{/if}}\n\nCHECK:\n\n## 1. REQUIREMENTS COVERAGE\nFor EACH requirement from the plan:\n- Is it implemented in workflow changes?\n- Does implementation match what was planned?\n- Is implementation complete?\n\n## 2. STANDARDS COMPLIANCE\nFor EACH modified node, verify against planning-standards:\n- Node structure correct\n- Directive quality (clear, contextual, has success criteria)\n- InputSchema properly designed\n- Connections valid\n\n## 3. TECHNICAL VALIDATION\n- No syntax errors in workflow JSON\n- All variable references valid\n- No orphan nodes\n- All paths lead to end\n\n## 4. OVERALL QUALITY\n- Changes are minimal and focused\n- No unrelated modifications\n- Version appropriately incremented\n\nOUTPUT:\n- List of unimplemented requirements (if any)\n- List of standards violations (if any)\n- List of technical issues (if any)\n- List of quality concerns (if any)\n- issues_count: total number of issues found\n\nReturn issues_count = 0 if ready for upload.\"\n\n**IMPORTANT:** Pass subagent result honestly to output. Do NOT modify or filter issues.\n\n{{#if workspace_path}}\nSave review issues to `{{workspace_path}}/review-issues.md`\n{{/if}}",
+      "completionCondition": "Review completed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "review_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of issues (0 = ready for upload)"
+          }
+        },
+        "required": [
+          "review_issues_count"
+        ],
+        "globalInputs": [
+          "review_issues"
+        ]
+      },
+      "connections": {
+        "success": "route-review-issues"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-review-issues",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-changes-before-upload.review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "validate-workflow",
+        "false": "expr-inc-review-fix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-review-issues",
+      "directive": "Fix review issues for workflow {{workflow_id_to_edit}}.\n\n**Workspace:** {{workspace_path}}\n\n{{#if has_file_access}}\n**FILE MODE:**\n1. Read `{{workspace_path}}/review-issues.md` - list of issues to fix\n2. Read `{{workspace_path}}/workflow.json` - current workflow\n3. Read `{{workspace_path}}/edit-requirements.md` - requirements reference\n4. Read `{{workspace_path}}/planning-standards.md` - standards reference\n{{else}}\n**CONTEXT MODE:**\nUse `review_issues` array from previous step.\n{{/if}}\n\n**FIX PROCESS:**\n\nAddress EACH issue one by one:\n\n1. **Requirements Coverage Issues:**\n   - Implement missing requirements\n   - Complete partial implementations\n\n2. **Standards Compliance Issues:**\n   - Fix node structure problems\n   - Improve directive quality\n   - Fix inputSchema issues\n   - Repair invalid connections\n\n3. **Technical Issues:**\n   - Fix JSON syntax errors\n   - Fix invalid variable references\n   - Remove orphan nodes\n   - Ensure paths reach end\n\n4. **Quality Issues:**\n   - Remove unrelated changes\n   - Focus modifications\n\n**UPDATE:**\n{{#if has_file_access}}\nUpdate `{{workspace_path}}/workflow.json` with fixes.\nUse workflow CLI tool for changes.\n{{else}}\nApply fixes and return summary of changes made.\n{{/if}}\n\nReturn `issues_fixed` = number of issues addressed.",
+      "completionCondition": "Issues fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied"
+        ],
+        "globalInputs": [
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "review-changes-before-upload"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-local-file-found",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "local_workflow_path"
+        },
+        "right": ""
+      },
+      "connections": {
+        "true": "setup-workspace",
+        "false": "download-workflow-from-server"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "download-workflow-from-server",
+      "directive": "Download workflow from server since no local file exists.\n\n**Workflow ID:** {{workflow_id_to_edit}}\n\n1. Download workflow from server:\n   - mcp__moira__manage({ action: \"get\", workflowId: \"{{workflow_id_to_edit}}\", includeNodes: true })\n\n2. Save result as `local_workflow_path`:\n   - Create file: `workflows/downloaded/{{workflow_id_to_edit}}.json`\n   - Note: This is a temporary path for editing\n\n3. Report: \"Downloaded {{workflow_id_to_edit}} from server (no local file found)\"",
+      "completionCondition": "Workflow downloaded from server and saved locally",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "local_workflow_path"
+        ],
+        "globalInputs": [
+          "local_workflow_path"
+        ]
+      },
+      "connections": {
+        "success": "setup-workspace"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-version-conflict",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "load-workflow-for-edit.version_conflict"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "resolve-version-conflict",
+        "false": "gather-edit-requirements"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "resolve-version-conflict",
+      "directive": "Version conflict detected between local and server versions.\n\n**Local version:** {{load-workflow-for-edit.local_version}}\n**Server version:** {{load-workflow-for-edit.server_version}}\n\nAsk the user how to resolve:\n\n1. **Use local** - Keep local version, overwrite server later\n2. **Use server** - Use server version, discard local changes\n3. **Merge** - Manually merge differences (advanced)\n\nAfter user choice:\n- Copy chosen version to {{workspace_path}}/workflow.json\n- Report chosen resolution",
+      "completionCondition": "Version conflict resolved, working copy prepared",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "resolution"
+        ],
+        "globalInputs": [
+          "resolution"
+        ]
+      },
+      "connections": {
+        "success": "gather-edit-requirements"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "select-workflow-to-edit-online",
+      "directive": "Help the user select a workflow to edit (ONLINE mode).\n\n1. Get workflow list via mcp__moira__list()\n2. Show the list to the user\n3. Ask which workflow to edit\n\nOR user can specify ID directly.",
+      "completionCondition": "Workflow for editing selected",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_id_to_edit"
+        ],
+        "globalInputs": [
+          "workflow_id_to_edit"
+        ]
+      },
+      "connections": {
+        "success": "route-has-file-access"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-has-file-access",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "get-action-type.has_file_access"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "search-local-workflow-file",
+        "false": "load-workflow-for-edit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-has-file-access-for-sync",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "get-action-type.has_file_access"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "sync-local-file",
+        "false": "end"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-upload",
+      "directive": "Ask the user if they want to upload the workflow to the server.\n\nQuestion: \"Do you want to upload this workflow to the server? (yes/no)\"\n\n- If yes → upload_confirmed = true\n- If no → upload_confirmed = false (workflow will be saved locally only)",
+      "completionCondition": "User confirmed upload decision",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "upload_confirmed": {
+            "type": "boolean",
+            "description": "true if user wants to upload, false otherwise"
+          }
+        },
+        "required": [
+          "upload_confirmed"
+        ]
+      },
+      "connections": {
+        "success": "route-upload-skip"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-stages-completeness",
+      "directive": "Delegate stages completeness review to subagent via Task tool.\n\n**CONTEXT:**\n- Workflow purpose: {{workflow_purpose}}\n- Proposed stages: {{main_stages}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE a stages completeness reviewer.\n\nTASK: Verify that ALL requirements from workflow purpose are covered by the proposed stages.\n\nWORKFLOW PURPOSE:\n{{workflow_purpose}}\n\nPROPOSED STAGES:\n{{main_stages}}\n\nCHECK:\n1. Is EACH aspect of the purpose addressed by at least one stage?\n2. Are there any gaps - requirements not covered?\n3. Is the stage order logical for achieving the purpose?\n4. Are there redundant stages that could be merged?\n\nOUTPUT:\n- List of coverage gaps (if any)\n- List of concerns about stage order (if any)\n- issues_count: total number of issues found\n\nReturn issues_count = 0 if stages fully cover the purpose.\"\n\n**IMPORTANT:** Pass subagent result honestly to output. Do NOT modify or filter issues.",
+      "completionCondition": "Subagent review completed, issues_count determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "stages_review_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of issues found (0 = stages are complete)"
+          },
+          "stages_review_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of issues found"
+          }
+        },
+        "required": [
+          "stages_review_issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-stages-review"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-stages-review",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-stages-completeness.stages_review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "design-workflow-structure",
+        "false": "expr-inc-stages-fix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-stages-issues",
+      "directive": "Fix stages completeness issues.\n\n**ISSUES FOUND:**\n{{review-stages-completeness.stages_review_issues}}\n\n**CURRENT STAGES:**\n{{main_stages}}\n\n**WORKFLOW PURPOSE:**\n{{workflow_purpose}}\n\nFor each issue:\n1. Analyze what's missing or wrong\n2. Add/modify/reorder stages to address the issue\n3. Explain the fix\n\nUpdate main_stages with the corrected list.",
+      "completionCondition": "Stages issues fixed, main_stages updated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "main_stages"
+        ],
+        "globalInputs": [
+          "main_stages",
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "review-stages-completeness"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-implementation-completeness",
+      "directive": "Delegate implementation completeness review to subagent via Task tool.\n\n**CONTEXT:**\n- Planned stages: {{main_stages}}\n- Workflow file: {{#if has_file_access}}{{#eq action_type 'create'}}./{{workflow_name}}/workflow.json{{else}}{{workspace_path}}/workflow.json{{/eq}}{{else}}Use mcp__moira__manage to get workflow{{/if}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE an implementation completeness reviewer.\n\nTASK: Verify that ALL planned stages are implemented in the workflow nodes.\n\nPLANNED STAGES:\n{{main_stages}}\n\n{{#if has_file_access}}\nREAD the workflow file and analyze nodes.\n{{else}}\nGET workflow: mcp__moira__manage({ action: 'get', workflowId: '{{#eq action_type 'create'}}{{workflow_name}}{{else}}{{workflow_id_to_edit}}{{/eq}}' })\n{{/if}}\n\nCHECK:\n1. Is EACH planned stage represented by one or more nodes?\n2. Do node directives match what the stage intended?\n3. Are there nodes that don't correspond to any planned stage?\n4. Is anything from the plan missing in implementation?\n\nOUTPUT:\n- List of unimplemented stages (if any)\n- List of mismatched implementations (if any)\n- List of unexpected additions (if any)\n- issues_count: total number of issues found\n\nReturn issues_count = 0 if implementation matches the plan.\"\n\n**IMPORTANT:** Pass subagent result honestly to output.",
+      "completionCondition": "Subagent review completed, issues_count determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "implementation_review_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of issues found (0 = implementation complete)"
+          },
+          "implementation_review_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of issues found"
+          }
+        },
+        "required": [
+          "implementation_review_issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-implementation-review"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-implementation-review",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-implementation-completeness.implementation_review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "validate-workflow",
+        "false": "expr-inc-impl-fix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-implementation-issues",
+      "directive": "Fix implementation completeness issues.\n\n**ISSUES FOUND:**\n{{review-implementation-completeness.implementation_review_issues}}\n\n**PLANNED STAGES:**\n{{main_stages}}\n\nFor each issue:\n1. If stage not implemented: add missing nodes\n2. If implementation mismatched: fix the nodes\n3. If unexpected additions: remove or justify\n\n{{#if has_file_access}}\nUpdate {{#eq action_type 'create'}}./{{workflow_name}}/workflow.json{{else}}{{workspace_path}}/workflow.json{{/eq}}\n{{else}}\nUse mcp__moira__manage({ action: 'edit' }) to fix issues\n{{/if}}",
+      "completionCondition": "Implementation issues fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied"
+        ],
+        "globalInputs": [
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "review-implementation-completeness"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-workflow-quality",
+      "directive": "Delegate workflow quality review to subagent via Task tool.\n\n**CONTEXT:**\n- Workflow file: {{#if has_file_access}}{{#eq action_type 'create'}}./{{workflow_name}}/workflow.json{{else}}{{workspace_path}}/workflow.json{{/eq}}{{else}}Use mcp__moira__manage to get workflow{{/if}}\n- Directive authoring guide: {{directive_authoring_guide}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE a workflow quality reviewer.\n\nTASK: Review the quality of workflow implementation.\n\n{{#if has_file_access}}\nREAD the workflow file.\n{{else}}\nGET workflow: mcp__moira__manage({ action: 'get', workflowId: '{{#eq action_type 'create'}}{{workflow_name}}{{else}}{{workflow_id_to_edit}}{{/eq}}' })\n{{/if}}\n\nCHECK EACH agent-directive node for:\n\n1. DIRECTIVE QUALITY:\n   - Written for ANOTHER agent without context?\n   - Clear action verb at start?\n   - All needed context provided via template variables?\n   - No assumptions about agent knowledge?\n\n2. COMPLETION CONDITION:\n   - Explicit success criteria?\n   - Objectively verifiable?\n   - Not vague ('done', 'completed')?\n\n3. INPUT SCHEMA:\n   - All expected outputs captured?\n   - Appropriate types (enum for choices, number for counts)?\n   - Required fields marked?\n   - Descriptions provided?\n   - globalInputs lists only registry-declared global names; properties describe node-local outputs?\n\n4. PATTERN USAGE:\n   - Validation loops use issues_count (number) not is_valid (boolean)?\n   - Subagent reviews pass file paths, not content?\n   - Conditions have both true and false paths?\n\n5. VARIABLE MODEL:\n   - Every template reference resolves to a declared global (variableRegistry), a node-id.name local, or a system variable?\n   - Each global declared once in variableRegistry; a node writes a global only via inputSchema.globalInputs?\n   - No initialData.variables, no implicit name-match promotion, no 'runtime' bucket?\n\n6. ANTI-PATTERN COMPLIANCE (check all 16 patterns):\n   - No data roundtrips (directive collects data, inputSchema asks for same data)?\n   - No empty inputSchema on nodes with side effects?\n   - No undeclared variables or reliance on implicit promotion (a bare name must be in variableRegistry; a local is reachable only as node-id.name)?\n   - No review loops using only inputSchema text (should use files)?\n   - No implicit fix loops ('retry until done' without graph loop)?\n   - No unbounded cycles (all loops have iteration limits, except human-in-the-loop)?\n   - No SILENT SKIP on bounded loops (when iteration limit exceeded, false branch must route to ask-user node with continue/reset options, NOT directly to next phase)?\n   - No dynamic data abuse in variables (data generated during execution stored in variables and injected into directives)? NOTE: static config declared as a variableRegistry default is CORRECT — see Static Workflow Configuration pattern.\n   - No manual index management by agent (use expression nodes)?\n   - No critical instructions externalized to files (should be declared as a variableRegistry default for guaranteed delivery)?\n   - Reference: {{anti_pattern_catalog}}\n   - Correct patterns: {{correct_patterns}}\n   - Canonical example: {{canonical_workflow_example}}\n\nOUTPUT:\n- List of directive quality issues (if any)\n- List of inputSchema issues (if any)\n- List of pattern issues (if any)\n- issues_count: total number of BLOCKING issues (minor style issues don't count)\n\nReturn issues_count = 0 if quality is acceptable.\"\n\n**IMPORTANT:** Pass subagent result honestly to output.",
+      "completionCondition": "Subagent review completed, issues_count determined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "quality_review_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of blocking issues found (0 = quality acceptable)"
+          },
+          "quality_review_issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of issues found"
+          }
+        },
+        "required": [
+          "quality_review_issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-quality-review"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-quality-review",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-workflow-quality.quality_review_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "user-final-review",
+        "false": "expr-inc-quality-fix"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-quality-issues",
+      "directive": "Fix workflow quality issues.\n\n**ISSUES FOUND:**\n{{review-workflow-quality.quality_review_issues}}\n\n**QUALITY STANDARDS:**\n- {{directive_authoring_guide}}\n- {{best_practices}}\n\nFor each issue:\n1. Locate the problematic node\n2. Fix the specific quality problem\n3. Verify fix doesn't break connections\n\n{{#if has_file_access}}\nUpdate {{#eq action_type 'create'}}./{{workflow_name}}/workflow.json{{else}}{{workspace_path}}/workflow.json{{/eq}}\n{{else}}\nUse mcp__moira__manage({ action: 'edit' }) to fix issues\n{{/if}}",
+      "completionCondition": "Quality issues fixed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied"
+        ],
+        "globalInputs": [
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "review-workflow-quality"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "prepare-retry-upload",
+      "directive": "Prepare for retry upload based on error_action.\n\nIf error_action is:\n- **copy_new**: Set upload_force_new = true (will use forceNew=true parameter)\n- **admin_override**: Set upload_admin_override = true (will use adminOverride=true parameter)\n- **retry**: Keep both false (standard retry)\n\nThis is automatic - just set the variables based on error_action.",
+      "completionCondition": "Variables set based on error_action",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "upload_force_new",
+          "upload_admin_override"
+        ],
+        "globalInputs": [
+          "upload_force_new",
+          "upload_admin_override"
+        ]
+      },
+      "connections": {
+        "success": "save-workflow-to-target"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-validation-count",
+      "expressions": [
+        "validation_fix_counter = validation_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-validation-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-validation-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "validation_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_validation_fixes"
+        }
+      },
+      "connections": {
+        "true": "validate-workflow",
+        "false": "ask-user-validation-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-stages-fix",
+      "expressions": [
+        "stages_fix_counter = stages_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-stages-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-stages-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "stages_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_stages_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-stages-issues",
+        "false": "ask-user-stages-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-impl-fix",
+      "expressions": [
+        "impl_fix_counter = impl_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-impl-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-impl-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "impl_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_impl_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-implementation-issues",
+        "false": "ask-user-impl-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-quality-fix",
+      "expressions": [
+        "quality_fix_counter = quality_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-quality-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-quality-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "quality_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_quality_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-quality-issues",
+        "false": "ask-user-quality-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-review-fix",
+      "expressions": [
+        "review_fix_counter = review_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-review-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-review-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "review_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_review_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-review-issues",
+        "false": "ask-user-review-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-editplan-fix",
+      "expressions": [
+        "editplan_fix_counter = editplan_fix_counter + 1"
+      ],
+      "connections": {
+        "default": "check-editplan-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-editplan-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "editplan_fix_counter"
+        },
+        "right": {
+          "contextPath": "max_editplan_fixes"
+        }
+      },
+      "connections": {
+        "true": "fix-edit-plan",
+        "false": "ask-user-editplan-limit-reached"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-validation-limit-reached",
+      "directive": "The workflow validation fix loop has reached its maximum iteration limit ({{max_validation_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_validation_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-validation-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-validation-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-validation-counter",
+        "false": "review-workflow-quality"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-validation-counter",
+      "expressions": [
+        "validation_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "validate-workflow"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-stages-limit-reached",
+      "directive": "The workflow stages design fix loop has reached its maximum iteration limit ({{max_stages_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_stages_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-stages-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-stages-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-stages-counter",
+        "false": "design-workflow-structure"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-stages-counter",
+      "expressions": [
+        "stages_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-stages-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-impl-limit-reached",
+      "directive": "The workflow implementation fix loop has reached its maximum iteration limit ({{max_impl_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_impl_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-impl-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-impl-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-impl-counter",
+        "false": "validate-workflow"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-impl-counter",
+      "expressions": [
+        "impl_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-implementation-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-quality-limit-reached",
+      "directive": "The workflow quality fix loop has reached its maximum iteration limit ({{max_quality_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_quality_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-quality-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-quality-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-quality-counter",
+        "false": "user-final-review"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-quality-counter",
+      "expressions": [
+        "quality_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-quality-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-review-limit-reached",
+      "directive": "The workflow review fix loop has reached its maximum iteration limit ({{max_review_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_review_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-review-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-review-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-review-counter",
+        "false": "validate-workflow"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-review-counter",
+      "expressions": [
+        "review_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-review-issues"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-editplan-limit-reached",
+      "directive": "The edit plan fix loop has reached its maximum iteration limit ({{max_editplan_fixes}} attempts).\n\nSome issues may remain unresolved after {{max_editplan_fixes}} fix attempts.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing issues again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-editplan-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-editplan-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-editplan-counter",
+        "false": "present-edit-plan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-editplan-counter",
+      "expressions": [
+        "editplan_fix_counter = 0"
+      ],
+      "connections": {
+        "default": "fix-edit-plan"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "current_iteration": {
+      "type": "number",
+      "description": "Stores current iteration",
+      "default": 1
+    },
+    "node_types_reference": {
+      "type": "string",
+      "description": "Stores node types reference",
+      "default": "Node types: start (entry point, exactly one per workflow), end (completion, no outgoing connections), agent-directive (agent work with directive and completionCondition), condition (branching via structured conditions with true/false connections), expression (compute values using arithmetic), subgraph (call another workflow), telegram-notification (send notifications), teleport (jump target reachable only via explicit teleport — not via normal connections).\n\nteleport: Jump target only reachable via explicit teleport. Behaves like agent-directive (pauses for input, validates schema).\n  Required: hint (human-readable description of when to use), directive, completionCondition, connections.success\n  Optional: inputSchema (JSON Schema for response validation), connections.error\n  Validation: Must NOT have incoming connections from other nodes. Excluded from unreachable node warnings.\n  Runtime: Hints shown in each step response under \"Available Teleport Jumps\". Agent uses teleportTo parameter in step() to jump.\n  Example: { \"type\": \"teleport\", \"id\": \"teleport-replan\", \"hint\": \"Use when plan needs restructuring\", \"directive\": \"Rewrite the plan\", \"completionCondition\": \"New plan created\", \"connections\": { \"success\": \"plan-node\" } }\n\nNote nodes (automatic, execute without agent interaction):\n\nread-note: Reads notes into context variable.\n  Required: outputVariable (string), connections.default\n  Optional: filter.tag, filter.keyPattern, filter.keySearch, singleMode (boolean)\n  Example: { \"type\": \"read-note\", \"outputVariable\": \"loadedNotes\", \"filter\": { \"keyPattern\": \"purchase-{executionId}\" }, \"connections\": { \"default\": \"next\" } }\n\nwrite-note: Writes context data to note.\n  Required: source (template), connections.default\n  Single mode: key (template for note key)\n  Batch mode: batchMode: true, source is array of {key, value, tags?}\n  Optional: tags (array of templates), connections.error\n  Example: { \"type\": \"write-note\", \"key\": \"data-{executionId}-01\", \"source\": \"{step-output}\", \"tags\": [\"tag-{executionId}\"], \"connections\": { \"default\": \"next\" } }\n\nupsert-note: Update existing note or create new if not found.\n  Required: keyTemplate, value (template), connections.default\n  Optional: search.tag, search.keyPattern, tags, outputVariable, connections.error\n  Example: { \"type\": \"upsert-note\", \"search\": { \"tag\": \"prefs\" }, \"keyTemplate\": \"prefs-{userId}\", \"value\": \"{data}\", \"connections\": { \"default\": \"next\" } }\n\nAll nodes require unique id and type fields.\n\nexpression node — counters/flags it writes (e.g. 'counter = counter + 1') MUST be declared in variableRegistry WITH a numeric default; an undefaulted counter is undefined at runtime (NaN arithmetic, an UNDEFINED_VARIABLE placeholder cue). Use the teleport node (above) as the target of step teleportTo for anytime replan; its outbound chain (e.g. an expr node that resets counters) is reached only via the jump."
+    },
+    "available_patterns": {
+      "type": "string",
+      "description": "Stores available patterns with usage hints",
+      "default": "Patterns:\n- validation-loop: action → verify → fix loop. USE WHEN: output quality must be verified before proceeding (code review, document editing, test generation).\n- info-collection: gather data at start for later reuse. USE WHEN: workflow needs user input upfront that will be referenced in multiple steps.\n- skip: optional steps via flag. USE WHEN: some steps are situational and user should decide whether to include them.\n- workspace: organized file structure (e.g. ./task-name/). USE WHEN: workflow produces multiple artifacts that need structured storage.\n- subagent-review: independent review of complex outputs. USE WHEN: critical decisions need second opinion or outputs need quality gate.\n- step-validation: verification after each step. USE WHEN: each intermediate result must be checked before continuing.\n- branching: condition-based routing. USE WHEN: workflow has different paths based on input or state.\n- escalation: after N fails → ask user. USE WHEN: automated retries may fail and human decision needed.\n- planning: understand → decompose → approve → execute. USE WHEN: complex tasks need upfront planning and user approval.\n- notes-persistence: save/load data between workflow runs via Notes. USE WHEN: workflow output must persist for other workflows or future executions. Nodes: write-note (save), read-note (load), upsert-note (update-or-create). Template: {note:KEY} injects note content into directives.\n- artifacts-publishing: publish HTML content with public URL via Artifacts. USE WHEN: workflow needs to generate shareable reports, dashboards, or visualizations accessible via link. MCP tool: artifacts({ action: \"upload\", name: \"report.html\", content: \"<html>...\" }). Integrates with telegram-notification for sharing URLs."
+    },
+    "validation_loop_pattern": {
+      "type": "string",
+      "description": "Stores validation loop pattern",
+      "default": "Validation loop: action → check → [ok: next] / [fail: fix → retry]. Structure: execute-step → verify-step (SEPARATE node) → condition (issues_count == 0) → fix-issues → loop back. MANDATORY: use issues_count (number) not is_valid (boolean) for objective metrics.\n\nBOUNDED LOOP LIMIT: When validation loop has iteration limit, the false branch (counter >= max) MUST route to ask-user node with options (continue as-is / reset counter and retry / accept). NEVER route false directly to next phase — this is the SILENT SKIP anti-pattern.\n\nAGENT-FACING CUE (MANDATORY): the loop-entry (review/validate) directive MUST render the round counter and state: \"Re-validation pass N of M — a normal quality loop, expected to converge, NOT a bug and NOT a stuck flow; do not report a loop to the user.\" This stops the agent misreporting a bounded re-validation loop as stuck.\n\nFLAT ISSUE LIST (MANDATORY): the review/validate subagent returns a FLAT list of issues — every issue mandatory. NO BLOCKING/MAJOR/MINOR severity tiers."
+    },
+    "input_schema_patterns": {
+      "type": "string",
+      "description": "Input data",
+      "default": "Common patterns: yes/no enum {\"type\":\"string\",\"enum\":[\"yes\",\"no\"]}, numeric {\"type\":\"number\",\"minimum\":0}, array {\"type\":\"array\",\"items\":{\"type\":\"string\"}}, file path with pattern validation."
+    },
+    "condition_operators": {
+      "type": "string",
+      "description": "Stores condition operators",
+      "default": "Operators: eq (equal), neq (not equal), lt/gt/lte/gte (comparison), and/or (logical), not (negation), exists (defined check), isEmpty (empty string/array/null)."
+    },
+    "best_practices": {
+      "type": "string",
+      "description": "Stores best practices",
+      "default": "1) One node = one responsibility 2) Explicit directives with action verb 3) inputSchema for response validation 4) Error handling paths 5) Iteration tracking for loops: counter via EXPRESSION node (flow-auto, never agent-incremented), declared in variableRegistry with default 0; render the round in the loop directive with the \"expected re-validation, not a bug\" cue 6) User approval gates for critical decisions. 7) Validation Gate Nodes: When creating nodes that ask user for approval (inputSchema with approval/approved/*_approved fields), ALWAYS include in directive: \"CRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback. Workflow will direct to fix branch itself. All fixes are done only through workflow, not independently.\" 8) Variable model: declare every global once in variableRegistry (single source of truth: type + required description, optional default); reference globals by bare name and node-local outputs as the node id dot the output name; a node writes a global only by listing its name in inputSchema.globalInputs (no initialData, no implicit name-match promotion, no \"runtime\" bucket). 9) Anti-pattern awareness: Check all nodes against the 16 anti-patterns in {{anti_pattern_catalog}}. Reference {{canonical_workflow_example}} for correct pattern examples. Use {{correct_patterns}} for iteration and review patterns. 10) Advisory volume: plan/step/task arrays use advisory wording (e.g. \"as many steps as the task needs; large tasks may have 20-40\"), NOT hard minItems/maxItems. 11) Atomicity (S9): each plan item is self-contained — restate cross-cutting actions (progress report, run tests, commit) in EVERY item; there is no shared/global scope, redundancy across items is required."
+    },
+    "validation_checklist": {
+      "type": "string",
+      "description": "Stores validation checklist",
+      "default": "Check: Structure (one start, at least one end, unique ids, valid connections), Reachability (no orphan nodes), Agent-directive (directive + completionCondition + success connection), Condition (true/false connections, valid operator). Anti-patterns: Check workflow against all 11 anti-patterns in {{anti_pattern_catalog}}. Verify no data roundtrips, no implicit fix loops, no unbounded cycles, no variable abuse for large data."
+    },
+    "directive_authoring_guide": {
+      "type": "string",
+      "description": "Stores directive authoring guide",
+      "default": "Write for ANOTHER agent without your context. Structure: WHAT to do (verb) → CONTEXT (via template variables) → HOW to verify (completionCondition). Be explicit, don't assume knowledge. For loop-entry directives, render the round counter and add the \"expected re-validation, not a bug; do not report a loop\" cue. Never echo a bare double-brace template into data the agent returns via step() — it is re-interpolated and renders an UNDEFINED_VARIABLE placeholder."
+    },
+    "template_usage_guide": {
+      "type": "string",
+      "description": "Stores template usage guide",
+      "default": "Templates: double-brace variable syntax for substitution from context, if/else blocks for conditionals, each blocks for iteration. Variables resolve from the two declared scopes: a BARE name (e.g. double-brace around my_global) resolves from a global declared in the workflow variableRegistry; a DOTTED name (double-brace around node-id then dot then name) resolves from the local output of that node. System variables: executionId, workflowId, userId (each in double braces). There is no initialData and no \"runtime\" bucket — every referenced name must be a declared global or a valid node-id dot name local, or validation fails. Note references: {note:KEY} injects stored note content into directive or completionCondition fields. Missing notes show [NOTE NOT FOUND: KEY]."
+    },
+    "domain_knowledge_guide": {
+      "type": "string",
+      "description": "Stores domain knowledge guide",
+      "default": "When needed: specialized domain, repeating quality rules, consistency between steps. Types: quality_standards, process_requirements, validation_criteria, common_mistakes."
+    },
+    "pattern_validation_loop_detail": {
+      "type": "string",
+      "description": "Stores pattern validation loop detail",
+      "default": "VALIDATION LOOP PATTERN:\nValidation loop: action → check → [ok: next] / [fail: fix → retry]\n\nStructure:\n- execute-step: perform action\n- verify-step: SEPARATE node for verification (DO NOT combine with execute)\n- route-verification: condition node (issues_count == 0)\n- fix-issues: if problems found\n\nIMPORTANT: Use issues_count (number) instead of is_valid (boolean) - objective metric.\n\nExample:\nexecute-task → verify-task → [issues_count == 0: next] / [else: fix-issues → execute-task]\n\nBOUNDED LOOP LIMIT HANDLING (MANDATORY):\nWhen adding iteration limits to validation loops:\n1. Expression node: counter = counter + 1 (increment BEFORE condition check)\n2. Condition node: counter < max_counter\n   - true → fix-issues (continue loop)\n   - false → ask-user-limit-reached (NEVER directly to next phase!)\n3. ask-user-limit-reached node: agent-directive asking user what to do\n   - inputSchema with enum: [\"continue\", \"reset\"]\n   - 'continue' → proceed to next phase (accept despite issues)\n   - 'reset' → expression node (counter = 0) → back to fix step\n4. This ensures user ALWAYS knows when iteration limit was reached and can decide\n\nANTI-PATTERN: check-limit false → next-step (silent skip — user never knows issues were unresolved!)\nCORRECT: check-limit false → ask-user → user decides (continue/reset)\n\nSTEP 0 — DECLARE THE COUNTER FIRST:\nDeclare BOTH the counter and its max in variableRegistry with NUMERIC defaults (counter default 0, max default e.g. 5-10). A counter without a default is undefined at runtime: 'counter + 1' yields NaN and the {counter} cue renders an UNDEFINED_VARIABLE placeholder.\n\nAGENT-FACING CUE (MANDATORY): the loop-entry directive must render the round (e.g. 'Re-validation pass {counter} of {max}') and state it is a normal quality loop, expected to converge, NOT a bug and NOT a stuck flow — do not report a loop to the user.\n\nFLAT ISSUE LIST (MANDATORY): the review returns a FLAT list of issues, every one mandatory; NO BLOCKING/MAJOR/MINOR severity tiers."
+    },
+    "pattern_info_collection_detail": {
+      "type": "string",
+      "description": "Stores pattern info collection detail",
+      "default": "INFORMATION COLLECTION (ONBOARDING) PATTERN:\nInformation collection at start for use in subsequent nodes.\n\nWhen to use:\n- Information needed in MULTIPLE nodes (not just one)\n- Agent would otherwise search/ask repeatedly\n- Data doesn't change during execution\n\nStructure:\n- collect-info node with inputSchema for all fields\n- Reference collected variables in subsequent directives using template syntax\n- Use conditional blocks for optional logic\n\nExample fields: has_file_access, test_command, project_docs_path, documentation_standards"
+    },
+    "pattern_skip_detail": {
+      "type": "string",
+      "description": "Stores pattern skip detail",
+      "default": "SKIP PATTERN:\nSkip optional steps via condition by flag.\n\nStructure:\n- inputSchema with enum ['yes'] or boolean for skip flag\n- condition node checks flag\n- true path → skip to next stage\n- false path → execute optional step\n\nExample:\noptional-step (skip: yes/no) → route-skip → [skip == yes: next-stage] / [else: do-optional → next-stage]"
+    },
+    "pattern_workspace_detail": {
+      "type": "string",
+      "description": "Stores pattern workspace detail",
+      "default": "WORKSPACE PATTERN:\nOrganize workflow files in dedicated directory.\n\nFormat: ./moira-ws/workflow-name-edit-YYYYMMDD-HHMM/\n\nContents:\n- process-id.txt: execution ID for recovery\n- workflow.json: working copy (for edit)\n- edit-plan.md: change plan\n- step-N/: results by steps\n\nUsage: reference workspace_path variable in directives\n\nIMPORTANT: Add moira-ws/ to .gitignore"
+    },
+    "pattern_subagent_review_detail": {
+      "type": "string",
+      "description": "Stores pattern subagent review detail",
+      "default": "SUBAGENT REVIEW PATTERN:\nDelegate review to independent subagent via Task tool.\n\nWhy: Avoid self-review bias - agent tends to confirm own work.\n\nDirective structure:\n1) Pass to subagent: file paths, success criteria, context\n2) Prompt: YOU ARE reviewer. CHECK files. VERIFY by reading. Return BLOCKING issues only.\n3) Honestly pass result to output\n\nIMPORTANT: Subagent must READ files itself, not receive content in prompt."
+    },
+    "pattern_step_validation_detail": {
+      "type": "string",
+      "description": "Stores pattern step validation detail",
+      "default": "STEP VALIDATION PATTERN:\nVerify step completion before transitioning to next.\n\nStructure:\n- execute-step: perform action, record expected_output\n- verify-step: check actual vs expected\n- condition: step_verified == yes\n- fix or escalate if not\n\nInputSchema for verify:\n- step_verified: enum ['yes', 'no']\n- verification_evidence: string (proof)\n\nPrevents skipping incomplete steps."
+    },
+    "data_balance_guidelines": {
+      "type": "string",
+      "description": "Stores data balance guidelines",
+      "default": "DATA BALANCE GUIDELINES:\n\n1) ONBOARDING vs SELF-REQUEST:\n- Onboarding: information needed in MULTIPLE nodes, doesn't change\n- Self-request: information for ONE node, dynamic\n\n2) INPUT/OUTPUT SIZE:\n| Data type | In directive | Reason |\n|-----------|--------------|--------|\n| Text <500 chars | Yes | Context for agent |\n| Text >500 chars | Summary | Noise reduction |\n| Lists <10 items | Yes | Actionable |\n| Lists >10 items | Count + first 3 | Prevent overload |\n| File paths | Yes | Direct use |\n| File contents | No | Read via tools |\n\n3) CONTEXT ACCUMULATION:\n- DO: Set once, use many; descriptive names\n- DON'T: Re-collect; overwrite with different meaning; generic names"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "No description",
+      "default": "WORKFLOW EDITING PLANNING STANDARDS:\n\n1. NODE STRUCTURE:\n- Each node must have unique id in kebab-case\n- agent-directive nodes require: directive, completionCondition, inputSchema\n- condition nodes require: condition with operator, true/false connections\n- All connections must point to existing nodes\n\n2. CONNECTION INTEGRITY:\n- No orphan nodes (all nodes reachable from start)\n- No dangling connections (all targets exist)\n- Cycles must be intentional (validation loops, retries)\n- Every path must lead to an end node\n\n3. DIRECTIVE QUALITY:\n- Written for ANOTHER agent without context\n- Clear action verb at start\n- All needed context via template variables (bare name for globals, node-id.name for locals)\n- Explicit success criteria in completionCondition\n\n4. INPUT SCHEMA DESIGN:\n- Use enum for constrained choices\n- Required fields for mandatory data\n- Descriptive field descriptions\n- Appropriate types (string, number, boolean, array)\n- inputSchema.properties describes the node's LOCAL outputs; inputSchema.globalInputs lists (by name) the registry globals the node writes — every such name must exist in variableRegistry\n\n5. VALIDATION PATTERNS:\n- Use issues_count (number) not is_valid (boolean)\n- Separate verify and fix nodes\n- Include iteration limits for loops\n- Save issues to file for reliable fix cycles\n\n6. VARIABLE DECLARATION:\n- Declare every global once in variableRegistry (single source of truth: type + required description, optional default)\n- Static domain knowledge / standards / checklists: declare as a registry global with a default value, reference via bare-name template syntax in directives\n- A node writes a global only by listing its name in inputSchema.globalInputs; node-local outputs are addressed node-id.name\n- Group related knowledge logically; keep individual variables focused\n\n7. DIRECTIVE / VARIABLE SAFETY:\n- Every template variable used in a directive/condition MUST be declared in variableRegistry WITH a default (counters/flags), else it renders an UNDEFINED_VARIABLE placeholder at runtime and expression arithmetic reads undefined.\n- NEVER put a bare double-brace template into data the agent returns via step() — the engine re-interpolates returned values, so a literal template becomes an UNDEFINED_VARIABLE placeholder in a later directive (template-injection class; see anti-patterns #15/#16).\n\n8. ATOMICITY (S9) — for generated flows that themselves produce task plans:\n- Each plan item is fully self-contained: restate the nuances it needs, repeat the relevant original requirements, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope across items — redundancy is REQUIRED, not a smell."
+    },
+    "initialdata_structure_guide": {
+      "type": "string",
+      "description": "Guide for correct initialData placement in workflow JSON",
+      "default": "VARIABLE MODEL (declare once, route explicitly):\n\nA workflow has exactly two kinds of variables. There is NO start-node initialData.variables and NO \"runtime\" bucket — those are removed.\n\n1) GLOBAL declared variables — declared ONCE at the TOP LEVEL of the workflow JSON in variableRegistry. This is the single source of truth for each global's type and description. A directive/condition/template references a global by BARE name (the name wrapped in double braces).\n\nvariableRegistry shape (a flat map: name -> object with type, description, optional default):\n{\n  \"nodes\": [ ... ],\n  \"variableRegistry\": {\n    \"report_template\": { \"type\": \"string\", \"description\": \"HTML template for reports\", \"default\": \"<html>...</html>\" },\n    \"max_retries\":     { \"type\": \"number\", \"description\": \"Loop iteration limit\", \"default\": 3 }\n  }\n}\n- type: one of string, number, boolean, object, array\n- description: REQUIRED, short purpose of the variable\n- default: OPTIONAL initial value (static config, counters' start value, templates)\n\n2) LOCAL node outputs — values a node produces into its OWN scope. They are addressed ONLY as the producing node's id, a dot, and the output name (wrapped in double braces). A node fully describes its locals in inputSchema.properties.\n\nOUTPUT-SCOPE DECLARATION (agent-directive / teleport nodes) — a node declares what it writes:\n- inputSchema.globalInputs: an array of NAMES (only) of registry globals this node WRITES. Each name MUST already exist in variableRegistry; the node does NOT redescribe it (type/description come from the registry).\n- inputSchema.properties: full JSON Schema of the node's LOCAL outputs (each addressed later as the node id dot the output name).\n\nExample agent-directive writing one global plus one local:\n{\n  \"type\": \"agent-directive\",\n  \"id\": \"analyze\",\n  \"directive\": \"Analyze the purpose and report findings.\",\n  \"completionCondition\": \"Findings produced\",\n  \"inputSchema\": {\n    \"type\": \"object\",\n    \"globalInputs\": [\"analysis_done\"],\n    \"properties\": { \"summary\": { \"type\": \"string\", \"description\": \"Short analysis summary\" } },\n    \"required\": [\"analysis_done\", \"summary\"]\n  },\n  \"connections\": { \"success\": \"next\" }\n}\nHere analysis_done must be in variableRegistry (readable later by its bare name), and summary is local (readable later as analyze dot summary).\n\nRULES:\n- A globalInputs name that is not in variableRegistry is a BLOCKING validation error.\n- A name cannot be BOTH a global write and a local output (no shadowing).\n- Every reference in any directive/completionCondition/telegram message and every condition contextPath root must resolve to a declared global, a valid node-id dot name local, or a system variable (executionId, workflowId, userId). Otherwise: BLOCKING validation error.\n- There is NO implicit promotion: a local output is NOT made global just because its name matches a registry name. Direction is explicit via globalInputs.\n\nAGENT-FACING NOTE: the agent answering a step submits ONE flat object containing both its global writes and its local outputs; the engine inlines globalInputs into the schema the agent sees, so the agent just matches one ordinary object and never distinguishes global vs local."
+    },
+    "template_syntax_examples": {
+      "type": "string",
+      "description": "Examples of correct and incorrect template syntax",
+      "default": "TEMPLATE SYNTAX:\n\nCORRECT PATTERNS (use double curly braces):\n- Simple substitution: variable_name in braces\n- Equals condition: #eq status 'active' ... /eq\n- Not equals: #neq status 'done' ... /neq\n- Iteration: #each items ... this ... /each\n- Truthy check: #if variable ... /if\n\nINCORRECT (not supported):\n- Nested helper syntax like #if (eq ...) is NOT supported\n- JavaScript syntax like status === 'active' does NOT work\n- Ternary operators are NOT supported\nAlways use simple helpers: #eq, #neq, #if with variable names only."
+    },
+    "workflow_id_slug_guide": {
+      "type": "string",
+      "description": "Guide for workflow id and slug fields",
+      "default": "WORKFLOW ID AND SLUG:\n\nTwo identification fields in workflow JSON:\n\n1. slug (top-level field)\n   - Human-readable identifier in kebab-case\n   - Used in URL: {MOIRA_HOST}/workflows/{owner}/{slug}\n   - For PUBLIC workflows\n   - Example: \"test-planning\", \"content-creation\"\n\n2. id (internal, auto-generated)\n   - UUID generated by system on first upload\n   - Used internally for UPDATE vs CREATE detection\n   - Stored in database as primary key\n\nWORKFLOW UPLOAD BEHAVIOR:\n- System checks if graph.id exists in database\n- If EXISTS: UPDATE existing workflow\n- If NOT EXISTS: CREATE new workflow with new UUID\n- Each upload of \"new\" workflow = NEW workflow with new UUID\n\nUPLOAD API PARAMETERS:\n- forceNew=true: Ignore id in JSON, always create new workflow (useful for copying templates)\n- adminOverride=true: Allow admin to update workflow owned by another user (requires admin privileges)\n- visibility=public|private: Set workflow visibility (default: private)\n\nRECOMMENDATION:\n- For new workflow: don't worry about id, system generates it\n- For updating: keep the id from server version (download first)\n- To copy a template: use forceNew=true parameter\n- To check if workflow exists: mcp__moira__list({ search: \"name\" })\n\nAVOIDING DUPLICATES:\n- Always download current version before editing\n- The id in downloaded workflow ensures UPDATE not CREATE\n- Use forceNew=true to intentionally create copy"
+    },
+    "pattern_notes_persistence_detail": {
+      "type": "string",
+      "description": "No description",
+      "default": "NOTES PERSISTENCE PATTERN:\n\nUse notes for persistent storage of structured data that survives workflow restarts or is shared between steps.\n\nWHEN TO USE:\n- Session recovery: store intermediate results for resume after interruption\n- Cross-step data sharing: pass complex data via {note:KEY} template injection\n- User preferences: remember choices, settings, configuration\n- Analysis results: store research findings, comparisons, recommendations\n\nWHEN NOT TO USE:\n- Temporary calculations → use context variables\n- Data for next step only → use inputSchema/output mapping\n- Very large data (>1MB) → use artifacts\n- Binary data → use artifacts\n\nMCP TOOL ACTIONS:\n- notes({ action: \"save\", key: \"my-key\", value: \"content\", tags: [\"tag1\"] }) → create/update note\n- notes({ action: \"get\", key: \"my-key\" }) → retrieve note with value, version, tags\n- notes({ action: \"list\", tag: \"filter-tag\" }) → list notes by tag\n- notes({ action: \"list\", keySearch: \"prefix\" }) → list notes by key pattern\n- notes({ action: \"history\", key: \"my-key\" }) → get version history\n- notes({ action: \"delete\", key: \"my-key\" }) → soft delete\n- notes({ action: \"stats\" }) → quota usage (totalNotes, totalSize, usedPercent)\n\nWORKFLOW NODES:\n\nwrite-note (automatic, stores data):\n{\n  \"type\": \"write-note\",\n  \"key\": \"purchase-{executionId}-01-user-needs\",\n  \"source\": \"{previous-step-output}\",\n  \"tags\": [\"purchase-{executionId}\"],\n  \"connections\": { \"default\": \"next\", \"error\": \"handle-error\" }\n}\nBatch mode: \"batchMode\": true, source is array of {key, value, tags}\n\nread-note (automatic, loads data):\n{\n  \"type\": \"read-note\",\n  \"outputVariable\": \"loadedData\",\n  \"filter\": { \"keyPattern\": \"purchase-{executionId}\" },\n  \"singleMode\": false,\n  \"connections\": { \"default\": \"next\" }\n}\nsingleMode: true returns object instead of array when exactly one match\n\nupsert-note (automatic, update-or-create):\n{\n  \"type\": \"upsert-note\",\n  \"search\": { \"tag\": \"user-prefs\", \"keyPattern\": \"prefs-{userId}\" },\n  \"keyTemplate\": \"prefs-{userId}-new\",\n  \"value\": \"{collected-preferences}\",\n  \"tags\": [\"user-prefs\"],\n  \"outputVariable\": \"saveResult\",\n  \"connections\": { \"default\": \"next\" }\n}\n\nTEMPLATE INJECTION:\nIn directive: \"Use this data:\\n{{note:purchase-{executionId}-01-user-needs}}\"\nSyntax: {note:KEY} - injects note content directly into text\n\nKEY NAMING CONVENTION:\n{domain}-{scope}-{sequence}-{description}\nExample: purchase-{executionId}-01-user-needs\n- domain: workflow area (purchase, research)\n- scope: isolation ({executionId}, {userId})\n- sequence: ordering (01, 02, 03)\n- description: content hint (user-needs, analysis)\n\nBEST PRACTICES:\n- Use {executionId} in keys for execution isolation\n- Use consistent tags for grouping: \"purchase-{executionId}\", \"smart-purchase\"\n- Objects/arrays auto-serialize to JSON\n- Include error connection for critical writes\n\nANTI-PATTERNS:\n- Don't use notes for simple counters → use expression node\n- Don't skip execution isolation → always include {executionId} or {userId}\n- Don't store binary/large data → use artifacts instead\n- Don't forget cleanup → delete temporary notes after workflow completion"
+    },
+    "pattern_artifacts_publishing_detail": {
+      "type": "string",
+      "description": "No description",
+      "default": "ARTIFACTS PUBLISHING PATTERN:\n\nUse artifacts for publishing static HTML content accessible via public URL.\n\nWHEN TO USE:\n- Reports: purchase analysis, research results, comparison tables\n- Dashboards: status pages, metrics visualization\n- Shareable content: documents, presentations, portfolios\n- Integration with notifications: generate report + send URL via Telegram\n\nWHEN NOT TO USE:\n- Structured data storage → use notes\n- Frequently changing content → use APIs\n- Content requiring authentication → use protected endpoints\n\nMCP TOOL ACTIONS:\n- artifacts({ action: \"upload\", name: \"report.html\", content: \"<html>...</html>\", executionId: \"opt\" }) → returns { uuid, url, name, size, expiresAt }\n- artifacts({ action: \"update\", uuid: \"...\", content: \"new content\" }) → update existing\n- artifacts({ action: \"delete\", uuid: \"...\" }) → delete artifact\n- artifacts({ action: \"list\", limit: 20 }) → list user's artifacts\n- artifacts({ action: \"stats\" }) → quota: { totalArtifacts, totalSize, storageLimit, countLimit, usedPercent }\n- artifacts({ action: \"token\", ttlMinutes: 30 }) → { token, uploadUrl, expiresAt } for HTTP upload\n\nQUOTAS:\n- Storage: 100 MB per user\n- File count: 50 artifacts max\n- Max file size: 5 MB\n- Expiration: 30 days (auto-cleanup)\n\nHTML GENERATION TIPS:\n1. Use Tailwind CDN: <script src=\"https://cdn.tailwindcss.com\"></script>\n2. Responsive design: class=\"container mx-auto px-4\", grid classes\n3. Product cards: bg-white rounded-lg shadow-md p-6\n4. Comparison tables: w-full border-collapse, hover:bg-gray-50\n5. Clickable links: target=\"_blank\" rel=\"noopener noreferrer\"\n\nWORKFLOW INTEGRATION:\n\nPattern 1 - Direct Upload (no file access):\n{\n  \"directive\": \"Generate HTML and upload:\\nartifacts({ action: 'upload', name: 'report.html', content: '<html>...' })\\nSave returned url as report_url\",\n  \"inputSchema\": { \"properties\": { \"report_url\": { \"type\": \"string\" }, \"uploaded\": { \"type\": \"boolean\" } } }\n}\n\nPattern 2 - Token Upload (with file access):\nStep 1: Generate HTML file locally\nStep 2: artifacts({ action: \"token\", ttlMinutes: 30 }) → get uploadUrl\nStep 3: POST to uploadUrl with { name, content }\nStep 4: Save returned url\n\nPattern 3 - Conditional by Capabilities:\n{\n  \"type\": \"condition\",\n  \"condition\": { \"operator\": \"eq\", \"left\": { \"contextPath\": \"can_create_files\" }, \"right\": true },\n  \"connections\": { \"true\": \"file-based-upload\", \"false\": \"direct-upload\" }\n}\n\nPattern 4 - Link to Execution:\nartifacts({ action: \"upload\", ..., executionId: context.executionId })\nBenefits: track which execution created artifact, query by execution, cleanup on archive\n\nBEST PRACTICES:\n- Descriptive names: \"purchase-analysis-2025-01-31.html\" not \"report.html\"\n- Check quota before upload: artifacts({ action: \"stats\" })\n- Handle upload errors (quota exceeded)\n- Clean up old artifacts periodically\n\nANTI-PATTERNS:\n- Don't use artifacts for JSON data storage → use notes\n- Don't upload without checking quotas\n- Don't generate non-responsive HTML (use Tailwind/media queries)\n- Don't assume upload always succeeds → handle errors"
+    },
+    "anti_pattern_catalog": {
+      "type": "string",
+      "description": "Catalog of 12 workflow anti-patterns with detection heuristics and correct alternatives",
+      "default": "WORKFLOW ANTI-PATTERN CATALOG (16 patterns)\n\nAnti-patterns are common mistakes in workflow design that lead to broken, inefficient, or unmaintainable workflows. Check EVERY workflow against ALL patterns.\n\n=== ANTI-PATTERN #1: Data Roundtrip ===\nPROBLEM: Directive tells agent to collect data, then inputSchema asks agent to return that same data as structured output. Agent acts as data-entry clerk copying from tool output to schema fields.\nDETECTION: inputSchema mirrors the structure of data the agent was told to collect (e.g., directive says \"get project info\" and inputSchema has project_name, project_version, etc.)\nCORRECT: Use expression nodes or template variables to extract data. If agent needs to analyze data, inputSchema should capture the ANALYSIS, not the raw data.\n\n=== ANTI-PATTERN #2: Empty InputSchema with Side Effects ===\nPROBLEM: Node has no inputSchema but directive tells agent to perform side effects (create files, run commands). No way to verify what was done.\nDETECTION: Agent-directive node without inputSchema where directive describes actions with observable outcomes.\nCORRECT: Always include inputSchema that captures evidence of completion (file paths created, command output, verification results).\n\n=== ANTI-PATTERN #3: Undeclared Variable / Expecting Implicit Promotion ===\nPROBLEM: Referencing a variable that is not declared, or expecting a node's local output to become a global just because its name matches. Both fail the explicit-scope model. A bare-name reference that is not in variableRegistry is a blocking validation error; a node output only becomes global if the node lists that name in inputSchema.globalInputs.\nDETECTION: A bare-name template reference in a directive/completionCondition/condition that is not declared in variableRegistry and is not a system variable; a directive that reads a value by bare name expecting another node to have produced it, without that node declaring the name in globalInputs (it would only be reachable as the producing node's id dot the name).\nCORRECT: Declare every global once in variableRegistry. A node that writes a global lists its name in inputSchema.globalInputs. Reference globals by bare name; reference a node's local output as the node id dot the name. Never rely on name-match promotion.\n\n=== ANTI-PATTERN #4: Review Loop via InputSchema Instead of Files ===\nPROBLEM: Review feedback passed through inputSchema text fields instead of structured file-based review. Agent loses context between iterations because inputSchema content is ephemeral.\nDETECTION: Review/fix cycle where fix node receives feedback only via inputSchema text, not via persistent file.\nCORRECT: Reviewer writes findings to a file (e.g., review.md). Fix node reads the file. Results persist across iterations.\n\n=== ANTI-PATTERN #5: Implicit Fix Loops ===\nPROBLEM: Directive says \"fix until done\" or \"keep trying\" without explicit loop structure in the graph. Agent retries internally without workflow control.\nDETECTION: Words like \"retry\", \"keep trying\", \"fix until\" in directive without corresponding condition node creating a graph loop.\nCORRECT: Use explicit validation-loop pattern: action → check → condition → [fix → retry] / [success → next].\n\n=== ANTI-PATTERN #6: Unbounded Cycles Without Iteration Limits ===\nPROBLEM: Validation loops that can run forever. No maximum iteration count, no escalation path after N failures.\nDETECTION: Cycle in graph without iteration counter variable or without condition checking iteration limit.\nALSO DETECTED: Bounded loop where false branch (limit exceeded) routes directly to next phase — this is a SILENT SKIP anti-pattern. User never knows issues were left unresolved.\nCORRECT: Track iterations via expression node (increment counter). Add condition: if counter >= max → ask-user-limit-reached node.\nThe ask-user node MUST present options: (1) continue/accept — proceed despite unresolved issues, (2) reset — reset counter to 0 and retry fix loop. Route 'reset' to expression node that zeros counter then loops back to fix step. Route 'continue'/'accept' to next phase.\nANTI-PATTERN: false branch → next-phase directly (silent skip). CORRECT: false branch → ask-user → user decides.\nEXCEPTION: Human-in-the-loop cycles (user approval loops) are acceptable without bounds since the user naturally terminates them.\n\n=== ANTI-PATTERN #7: Dynamic Data in Workflow Variables ===\nPROBLEM: Storing DYNAMIC data generated during workflow execution (file contents, API responses, HTML output, extraction results) as global writes that get injected into every directive via templates, bloating context with potentially unbounded content.\nDETECTION: globalInputs/local outputs that receive large dynamic content during execution, especially content >1KB or content that grows unboundedly, which is then referenced in subsequent directives via template syntax.\nCORRECT: Store dynamic data in files or notes. Pass file paths via variables. Agent reads files when needed.\nSCOPE: This applies to DATA FLOWING BETWEEN STEPS — NOT to static configuration declared as a variableRegistry default at workflow start. Static instructional content (rules, standards, checklists) declared with a registry default is a CORRECT PATTERN (see #12 for the opposite anti-pattern).\nEXCEPTION: Static instructional content declared in variableRegistry with a default (planning_standards, code_quality_principles, validation_checklists) is deliberately placed for consistent agent behavior. This is the Static Workflow Configuration pattern, NOT variable abuse.\n\n=== ANTI-PATTERN #8: SystemReminder Modification ===\nPROBLEM: Workflow tries to modify systemReminder dynamically or stores instructions in systemReminder that should be in directives. SystemReminder is static and applied to ALL steps.\nDETECTION: References to changing systemReminder during execution, or systemReminder containing step-specific instructions.\nCORRECT: systemReminder = global rules that apply to every step. Step-specific instructions go in individual node directives.\n\n=== ANTI-PATTERN #9: Manual Index Management by Agent ===\nPROBLEM: Agent manually tracks array indices, counters, or pagination through inputSchema. Error-prone and breaks on retry.\nDETECTION: InputSchema with fields like \"current_index\", \"next_item_number\", \"page\" that agent must calculate. Also: directive asking agent to \"increment X by 1\" and return the value via inputSchema.\nCORRECT: Use expression nodes for arithmetic. Use dynamic array index pattern for iteration: array_items[{current_index}] with expression node incrementing current_index.\n\n=== ANTI-PATTERN #10: File Upload via Content Instead of Token ===\nPROBLEM: Uploading workflow JSON by passing entire content through MCP tool parameters. Hits size limits, unreliable for large workflows.\nDETECTION: manage({ action: \"create\", workflow: <large JSON> }) with workflow >50KB.\nCORRECT: Use token-based upload: token({ action: \"upload\" }) → get URL → HTTP PUT with file content.\n\n=== ANTI-PATTERN #11: Context Duplication into Workflow Variables ===\nPROBLEM: Copying information that's already available in agent's context (project structure, file contents, prior analysis results) into workflow variables. Doubles token usage without benefit.\nDETECTION: inputSchema that captures data the agent already has in conversation context (e.g., directory listings, project info from prior analysis step).\nCORRECT: Agent re-reads current data when needed. Store only stable references (paths, IDs, names) in variables.\n\n=== ANTI-PATTERN #12: Externalizing Critical Instructions to Files ===\nPROBLEM: Moving essential agent instructions and standards out of the workflow into external files, expecting the agent to read them each time. Creates hallucination risk and adds unnecessary I/O.\nDETECTION: Directive says \"read rules/standards from file X\" for content that should be consistently available. Critical behavioral instructions stored outside the workflow.\nCORRECT: Declare curated instructions in variableRegistry with a default value. The workflow engine injects them into directives via templates — guaranteed delivery, no I/O, no hallucination.\nEXCEPTION: Large reference data the agent only needs occasionally (e.g., 100KB dataset) is fine in files. This anti-pattern applies to INSTRUCTIONS the agent must follow consistently.\n\n=== ANTI-PATTERN #13: False-Loop Misreport ===\nPROBLEM: The agent sees the same review/validate directive a second time and tells the user the flow is looping or stuck, then abandons the run.\nDETECTION: A re-validate back-edge to an identical node whose directive has no round counter, no \"expected, not a bug\" cue, and (often) no iteration bound.\nCORRECT: Bounded loop (#6) PLUS a visible round counter (expression node, declared+default) rendered in the directive PLUS the cue \"Re-validation pass N of M — normal quality loop, expected to converge, NOT a bug; do not report a loop to the user.\" Bound exceeded -> ask-user (continue/reset).\n\n=== ANTI-PATTERN #14: Declared-but-No-Default Variable ===\nPROBLEM: A template var renders an UNDEFINED_VARIABLE placeholder even though it is in variableRegistry; an expression 'var = var + 1' yields NaN/undefined.\nDETECTION: A registry declaration without a default, and the variable is not seeded at the start node and not written by any upstream node's globalInputs before first use.\nCORRECT: Give every counter/flag a default (counter 0, max 5-10, flag false or empty). The validator emits a declared-but-no-default warning for these.\n\n=== ANTI-PATTERN #15: Template-in-Data ===\nPROBLEM: A template placeholder that the agent put into returned data (e.g. a steps item, evidence, notes) renders an UNDEFINED_VARIABLE placeholder when that value is later interpolated into a directive.\nDETECTION: A directive/CC instructs the agent to return free text, and that text is later interpolated into another directive; the agent included a literal double-brace placeholder in it.\nCORRECT: Never write a bare double-brace template into step() data. Templates belong only in static node directive/message fields. The engine treats substituted DATA values as literal (does not re-execute them as templates).\n\n=== ANTI-PATTERN #16: Template Injection (SSTI) ===\nPROBLEM: Untrusted data (agent step() input, user free-text, note content) that contains template syntax — a context.variables dump, an each/if helper, or a node-id.field traversal — is interpolated into a directive and EXECUTED by the renderer: it can dump the whole variable bag, run loops/conditionals, or traverse another node's scope.\nDETECTION: A directive interpolates a variable whose value originates from untrusted input, and the renderer would re-scan substituted values as templates.\nCORRECT: Interpolated VALUES are literal — never re-parsed as templates (the engine neutralizes brace syntax originating from substituted data). Do not echo untrusted template syntax into directives; prefer explicit named vars over a context.variables full-dump."
+    },
+    "canonical_workflow_example": {
+      "type": "string",
+      "description": "Reference to canonical workflow as example of correct patterns",
+      "default": "moira/software-development-flow — Reference this workflow as the canonical example of correct workflow patterns. It demonstrates: validation loops with iteration limits, file-based review cycles, expression nodes for counters, proper inputSchema design, escalation paths, and user approval gates."
+    },
+    "correct_patterns": {
+      "type": "string",
+      "description": "Correct design patterns including dynamic array index iteration",
+      "default": "CORRECT PATTERNS:\n\n=== Dynamic Array Index Pattern (#478) ===\nUse for iterating over array items in workflow:\n1. Declare array global in variableRegistry: items default [\"a\", \"b\", \"c\"]\n2. Declare index global in variableRegistry: current_index default 0\n3. Agent directive: \"Process item {{items[{current_index}]}}\"\n4. Expression node: current_index = {current_index} + 1\n5. Condition: {current_index} < items.length → loop back / → continue\nThis is the CORRECT way to iterate arrays. NOT an anti-pattern.\n\n=== File-Based Review Pattern ===\nReviewer writes findings to file → Fix node reads file → Results persist across iterations.\n\n=== Token-Based Upload Pattern ===\nFor large workflows: token({ action: \"upload\" }) → HTTP PUT → confirm.\n\n=== Static Workflow Configuration Pattern ===\nDeclare curated rules, standards, and checklists as variableRegistry globals with a `default` value. These are injected into directives via templates (referenced by bare name), ensuring the agent sees them consistently.\nWHEN TO USE: Instructions agent must follow across multiple steps. Curated content that doesn't change per execution.\nWHY NOT FILES: External files risk agent skipping reads or hallucinating from memory. A registry default provides engine-guaranteed delivery.\nEXAMPLES: planning_standards, code_quality_principles, validation_checklists, anti_pattern_catalog.\nDISTINCTION FROM #7: Static config is set at design time (registry default) and bounded. Dynamic data (#7) is generated during execution and potentially unbounded.\n\n=== Bounded Loop Limit with User Decision Pattern ===\nWhen a validation/fix loop has iteration limits, the limit-exceeded path MUST ask user:\n1. Expression node: fix_counter = fix_counter + 1\n2. Condition: fix_counter < max_fixes\n   - true → fix-issues (continue loop)\n   - false → ask-user-limit-reached\n3. ask-user-limit-reached (agent-directive):\n   Directive: \"Fix loop reached maximum (max_fixes variable via template syntax) iterations. Issues may remain unresolved.\\nAsk user: continue with current result, or reset counter and try again?\"\n   inputSchema: { \"type\": \"object\", \"properties\": { \"decision\": { \"type\": \"string\", \"enum\": [\"continue\", \"reset\"] } }, \"required\": [\"decision\"] }\n4. Condition on decision:\n   - decision == \"reset\" → expression (fix_counter = 0) → back to fix step\n   - else → proceed to next phase\nNEVER route check-limit false directly to next phase (silent skip anti-pattern).\n\n=== Replan / Teleport / Extend Pattern ===\nFor any flow that builds a multi-step plan, give the agent three ways to revise it:\n1. DISPATCHER: registry var plan_change_target (default empty) selects refine|extend|update; an expression chain sets the target, increments plan_iteration, then a condition chain routes to the matching branch.\n2. THREE BRANCHES (refine|extend|update): each = build/refine node -> subagent review -> BOUNDED fix loop (expr increment -> check limit (lt counter max) -> fix -> review; else ask-user-limit-reached -> reset) -> user confirm -> tracking reinit. All counters declared with defaults; cue rendered.\n3. ENTRY POINTS: (a) a teleport node teleport-replan (no incoming connections) -> expr-reset-for-replan (zero the loop counters) -> plan-build node, reachable anytime via step teleportTo; (b) a step-validation branch when a step review says the PLAN must change -> approve-current-step -> update branch; (c) post-final: validate-requirements-coverage -> check-requirements-gaps (eq requirements_gaps_count 0) -> false -> extend branch, true -> deliver.\n\n=== Variable-Declaration Pattern ===\nEvery template variable referenced in a directive/condition MUST be either a registry global declared WITH a default (counters/flags) or a node-local addressed as node-id.name. Never reference an undeclared/undefaulted name (renders an UNDEFINED_VARIABLE placeholder; breaks expression arithmetic). Never echo a bare double-brace template into data the agent returns via step() — the engine re-interpolates returned values and a literal {x} becomes an UNDEFINED_VARIABLE placeholder (see anti-patterns #14/#15).\n\n=== Completeness Self-Review Pattern ===\nA flow that produces a deliverable from explicit requirements MUST, before final delivery, run a completeness self-review (see the Completeness Self-Review standard below): read the FROZEN original requirements, verify each against the REAL artifact (code/files/tests, not claims), one check per requirement (optionally via a child moira/todo-list), count gaps; gaps>0 routes to a bounded fix/extend path (NEVER deliver with gaps>0 silently); persist a coverage report."
+    },
+    "validation_fix_counter": {
+      "type": "number",
+      "description": "Counter for validation fix loop",
+      "default": 0
+    },
+    "stages_fix_counter": {
+      "type": "number",
+      "description": "Counter for stages fix loop",
+      "default": 0
+    },
+    "max_stages_fixes": {
+      "type": "number",
+      "description": "Max iterations for stages fix loop",
+      "default": 3
+    },
+    "impl_fix_counter": {
+      "type": "number",
+      "description": "Counter for impl fix loop",
+      "default": 0
+    },
+    "max_impl_fixes": {
+      "type": "number",
+      "description": "Max iterations for impl fix loop",
+      "default": 3
+    },
+    "quality_fix_counter": {
+      "type": "number",
+      "description": "Counter for quality fix loop",
+      "default": 0
+    },
+    "max_quality_fixes": {
+      "type": "number",
+      "description": "Max iterations for quality fix loop",
+      "default": 3
+    },
+    "review_fix_counter": {
+      "type": "number",
+      "description": "Counter for review fix loop",
+      "default": 0
+    },
+    "max_review_fixes": {
+      "type": "number",
+      "description": "Max iterations for review fix loop",
+      "default": 3
+    },
+    "editplan_fix_counter": {
+      "type": "number",
+      "description": "Counter for editplan fix loop",
+      "default": 0
+    },
+    "max_editplan_fixes": {
+      "type": "number",
+      "description": "Max iterations for editplan fix loop",
+      "default": 3
+    },
+    "max_validation_fixes": {
+      "type": "number",
+      "description": "Max iterations for validation fix loop",
+      "default": 3
+    },
+    "changes_applied": {
+      "type": "string",
+      "description": "Workflow-global changes_applied",
+      "enum": [
+        "yes"
+      ]
+    },
+    "changes_made": {
+      "type": "string",
+      "description": "Workflow-global changes_made"
+    },
+    "current_node_count": {
+      "type": "number",
+      "description": "Workflow-global current_node_count"
+    },
+    "decision": {
+      "type": "string",
+      "description": "Iteration-limit decision: \"continue\" accepts the current result, \"reset\" restarts the fix counter",
+      "enum": [
+        "continue",
+        "reset"
+      ]
+    },
+    "edit_plan": {
+      "type": "string",
+      "description": "Workflow-global edit_plan"
+    },
+    "errors_fixed": {
+      "type": "string",
+      "description": "Workflow-global errors_fixed",
+      "enum": [
+        "yes"
+      ]
+    },
+    "final_feedback": {
+      "type": "string",
+      "description": "Workflow-global final_feedback"
+    },
+    "fixes_applied": {
+      "type": "string",
+      "description": "Workflow-global fixes_applied"
+    },
+    "fixes_description": {
+      "type": "string",
+      "description": "Workflow-global fixes_description"
+    },
+    "has_web_access": {
+      "type": "boolean",
+      "description": "Workflow-global has_web_access"
+    },
+    "local_workflow_path": {
+      "type": "string",
+      "description": "Workflow-global local_workflow_path"
+    },
+    "main_stages": {
+      "type": "array",
+      "description": "Workflow-global main_stages",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 2
+    },
+    "metadata_changes": {
+      "type": "string",
+      "description": "Workflow-global metadata_changes"
+    },
+    "needs_domain_knowledge": {
+      "type": "boolean",
+      "description": "Workflow-global needs_domain_knowledge"
+    },
+    "new_node_count": {
+      "type": "number",
+      "description": "Workflow-global new_node_count"
+    },
+    "node_count": {
+      "type": "number",
+      "description": "Workflow-global node_count"
+    },
+    "nodes_to_add": {
+      "type": "array",
+      "description": "Workflow-global nodes_to_add",
+      "items": {
+        "type": "string"
+      }
+    },
+    "nodes_to_remove": {
+      "type": "array",
+      "description": "Workflow-global nodes_to_remove",
+      "items": {
+        "type": "string"
+      }
+    },
+    "nodes_to_update": {
+      "type": "array",
+      "description": "Workflow-global nodes_to_update",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patterns_confirmed": {
+      "type": "string",
+      "description": "Whether the proposed patterns are confirmed as-is (\"yes\") or need changes (\"no\")",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "plan_created": {
+      "type": "string",
+      "description": "Workflow-global plan_created",
+      "enum": [
+        "yes"
+      ]
+    },
+    "plan_revised": {
+      "type": "string",
+      "description": "Workflow-global plan_revised",
+      "enum": [
+        "yes"
+      ]
+    },
+    "planned_changes_count": {
+      "type": "number",
+      "description": "Workflow-global planned_changes_count"
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Workflow-global resolution",
+      "enum": [
+        "local",
+        "server",
+        "merge"
+      ]
+    },
+    "review_issues": {
+      "type": "array",
+      "description": "Workflow-global review_issues",
+      "items": {
+        "type": "string"
+      }
+    },
+    "similar_workflows_found": {
+      "type": "array",
+      "description": "Workflow-global similar_workflows_found",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stages_approved": {
+      "type": "string",
+      "description": "Whether the proposed main stages are approved as-is (\"yes\") or need changes (\"no\")",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "stages_with_approval": {
+      "type": "array",
+      "description": "Workflow-global stages_with_approval",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stages_with_notification": {
+      "type": "array",
+      "description": "Workflow-global stages_with_notification",
+      "items": {
+        "type": "string"
+      }
+    },
+    "stages_with_validation": {
+      "type": "array",
+      "description": "Workflow-global stages_with_validation",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sync_result": {
+      "type": "string",
+      "description": "Workflow-global sync_result",
+      "enum": [
+        "synced",
+        "skipped",
+        "manual"
+      ]
+    },
+    "total_nodes": {
+      "type": "number",
+      "description": "Workflow-global total_nodes"
+    },
+    "upload_admin_override": {
+      "type": "boolean",
+      "description": "Workflow-global upload_admin_override"
+    },
+    "upload_force_new": {
+      "type": "boolean",
+      "description": "Workflow-global upload_force_new"
+    },
+    "use_pattern_artifacts_publishing": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_artifacts_publishing"
+    },
+    "use_pattern_info_collection": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_info_collection"
+    },
+    "use_pattern_notes_persistence": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_notes_persistence"
+    },
+    "use_pattern_skip": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_skip"
+    },
+    "use_pattern_step_validation": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_step_validation"
+    },
+    "use_pattern_subagent_review": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_subagent_review"
+    },
+    "use_pattern_validation_loop": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_validation_loop"
+    },
+    "use_pattern_workspace": {
+      "type": "boolean",
+      "description": "Workflow-global use_pattern_workspace"
+    },
+    "visibility": {
+      "type": "string",
+      "description": "Workflow-global visibility",
+      "enum": [
+        "public",
+        "private"
+      ]
+    },
+    "workflow_graph": {
+      "type": "string",
+      "description": "Workflow-global workflow_graph",
+      "minLength": 30
+    },
+    "workflow_id_to_edit": {
+      "type": "string",
+      "description": "Workflow-global workflow_id_to_edit"
+    },
+    "workflow_json_created": {
+      "type": "string",
+      "description": "Workflow-global workflow_json_created",
+      "enum": [
+        "yes"
+      ]
+    },
+    "workflow_loaded": {
+      "type": "string",
+      "description": "Workflow-global workflow_loaded",
+      "enum": [
+        "yes"
+      ]
+    },
+    "workflow_name": {
+      "type": "string",
+      "description": "Workflow-global workflow_name",
+      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
+    },
+    "workflow_purpose": {
+      "type": "string",
+      "description": "Workflow-global workflow_purpose",
+      "minLength": 20
+    },
+    "workflow_structure_summary": {
+      "type": "string",
+      "description": "Workflow-global workflow_structure_summary"
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Workflow-global workspace_path"
+    },
+    "action_type": {
+      "type": "string",
+      "description": "Routing flag: \"create\" for a new workflow, \"edit\" for modifying an existing one",
+      "enum": [
+        "create",
+        "edit"
+      ]
+    },
+    "has_file_access": {
+      "type": "boolean",
+      "description": "Agent can read/write local files (routing flag from get-action-type)"
+    },
+    "offline_mode": {
+      "type": "boolean",
+      "description": "Run without network/server access"
+    },
+    "self_review_completeness_pattern": {
+      "type": "string",
+      "description": "Completeness Self-Review standard (verify every requirement against the real artifact before delivery)",
+      "default": "COMPLETENESS SELF-REVIEW STANDARD:\nA flow that produces a deliverable from a set of requirements MUST, before final delivery, run a completeness self-review.\n1. SOURCE OF TRUTH: read the FROZEN original requirements (e.g. the workspace_path/task-requirements.md file or the success_criteria captured at intake) — not the current plan, not the agent's memory.\n2. VERIFY AGAINST THE ARTIFACT, NOT CLAIMS: for each requirement find concrete evidence it is satisfied (code path, file, test, output). For code tasks: check REAL CODE / run tests, not documentation.\n3. ONE CHECK PER REQUIREMENT: delegate to a child moira/todo-list (one task per requirement) OR an inline per-requirement loop; return requirements_gaps_count + total_requirements.\n4. GAPS ROUTE TO FIX, BOUNDED: check-requirements-gaps (eq requirements_gaps_count 0) -> true deliver / false -> fix/extend, with a validation_attempt_count counter + bound + escalation (bounded-loop rule). NEVER deliver with gaps>0 silently.\n5. EVIDENCE PERSISTED: write a requirements-coverage-report-v{attempt}.md (versioned by validation_attempt_count).\nReusable vars (declared with defaults): validation_attempt_count (number, default 1), requirements_gaps_count (number, default 0), total_requirements (number, default 0). Node set: validate-requirements-coverage (agent) + check-requirements-gaps (condition) + fix/extend path."
+    }
+  }
+}

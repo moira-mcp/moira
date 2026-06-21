@@ -1,0 +1,322 @@
+{
+  "slug": "universal-research-workflow",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "8057a74f-8ef1-4b19-b54f-0abe8a8627fe",
+  "metadata": {
+    "name": "Universal Research Workflow",
+    "version": "1.4.0",
+    "description": "Universal workflow for conducting research with iterative quality improvement"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {
+          "workflow_version": {
+            "description": "Stores workflow version",
+            "value": "1.0.0"
+          },
+          "iteration_count": {
+            "description": "Stores iteration count",
+            "value": 1
+          },
+          "max_iterations": {
+            "description": "Stores max iterations",
+            "value": 5
+          },
+          "research_generation_prompt": {
+            "description": "Stores research generation prompt",
+            "value": "RESEARCH GENERATION TASK:\n\nTOPIC: {{research_topic}}\nDEPTH LEVEL: {{depth_level}}\nAUDIENCE: {{target_audience}}\nLANGUAGE: {{output_language}}\n\nDEPTH STANDARDS:\n- quick: 5-8 quality sources, 1500-2500 words, focused validation, rapid overview for immediate understanding\n- normal: 12-20 quality sources, 3000-5000 words, systematic validation, practical guidance with implementation focus\n- deep: 25-35 authoritative sources, 6000-10000 words, comprehensive analysis, strategic analysis with detailed trade-offs\n- scientific: 40+ peer-reviewed sources, 10000+ words, publication-quality analysis, academic rigor with systematic methodology\n\nRESEARCH METHODOLOGY:\n1. SOURCE STRATEGY: Identify most credible and authoritative sources through intellectual reasoning. Use WebSearch and WebFetch tools for systematic investigation. Verify source quality - never assume without independent verification.\n\n2. MULTI-PERSPECTIVE ANALYSIS: Combine insights from multiple sources intelligently. Address all significant aspects through reasoned analysis. Include contradictory information and acknowledge limitations.\n\n3. PUBLICATION QUALITY: Create self-contained report that can be understood without prior context. Define ALL specialized terms. Provide historical evolution and current state context. Clear scope and boundaries.\n\n4. VISUAL FORMATTING: Structure with clear sections and logical hierarchy. Use visual elements for scannable content:\n   - Notice blocks for key information (:::info, :::warning, :::success)\n   - Tables for comparisons and metrics (max 6-8 columns)\n   - Code blocks with syntax highlighting\n   - Diagrams for process visualization (Mermaid support)\n   - Visual breaks: max 7-10 lines of text without visual elements\n\n5. DOCUMENT STRUCTURE:\n   - Title with descriptive subtitle\n   - Metadata block: category, date, status, tags\n   - Executive summary with key findings (3-5 bullet points)\n   - Clear section headings with emoji markers for grouping\n   - Introduction: context, goals, scope\n   - Methodology: approach, data sources, evaluation criteria\n   - Results: key findings in notice blocks, comparative tables, diagrams\n   - Recommendations: actionable steps, priority matrix\n   - Conclusion: summary in success block, future work\n\n6. CITATION EXCELLENCE: Every claim supported by sources. Complete source attribution with URL, author, date accessed. Inline citations [1][2] with full bibliography.\n\n7. PROFESSIONAL STANDARDS: Publication-ready writing. Appropriate academic tone. Logical flow from simple to complex. Technical accuracy in examples.\n\nOUTPUT: Save research to appropriate location. Return file path."
+          },
+          "research_critique_prompt": {
+            "description": "Stores research critique prompt",
+            "value": "RESEARCH QUALITY ASSESSMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nDECLARED LEVEL: {{depth_level}}\nITERATION: {{iteration_count}}\n\nEVALUATION DIMENSIONS:\n\n1. FACTUAL ACCURACY: Analyze claims for logical consistency. Evaluate source quality and relevance. Identify contradictions or unsupported assertions. Assess information currency and appropriateness.\n\n2. SOURCE COVERAGE (Level-Specific Standards):\n   - quick: Validate 5-8 sources minimum\n   - normal: Assess 12-20 quality sources\n   - deep: Evaluate 25-35 authoritative sources\n   - scientific: Review 40+ academic sources\n   Judgment: Does source coverage match declared level?\n\n3. COMPLETENESS: Analyze if all significant aspects addressed. Evaluate depth appropriateness for declared level. Identify missing perspectives. Assess scope coverage.\n\n4. FORMATTING QUALITY:\n   - Notice blocks: Check frequency (1 per 3-5 sections), type distribution (info/warning/success), effectiveness\n   - Visual elements: Tables (6-8 column limit), diagrams (Mermaid syntax), code blocks (language specification)\n   - Visual breaks: Max 7-10 lines without elements\n   - Navigation: Clear headers, cross-references (min 3-5 internal links), no manual TOC\n   - Metadata: Category, date, status, tags completeness\n   - Executive summary: Notice blocks with key results\n\n5. CITATION QUALITY: Evaluate source attribution completeness. Assess source authority and relevance. Review bibliography formatting. Check integration into narrative flow.\n\n6. PROFESSIONAL STANDARDS: Writing quality and tone consistency. Structural integrity. Argumentation quality and logical progression.\n\nISSUE CLASSIFICATION:\n- CRITICAL: Fundamental flaws, factual inaccuracies, missing essential components, significant gaps affecting validity\n- MAJOR: Important aspects needing substantial enhancement, clarity problems, source attribution gaps\n- MODERATE: Depth enhancement opportunities, alternative perspectives worth exploring, structural improvements\n- MINOR: Polish opportunities, formatting consistency, style refinements\n\nOUTPUT: Provide quality_level, formatting_score (0-10), critical_issues_count, major_issues_count, moderate_issues_count, minor_issues_count, detailed critique_feedback."
+          },
+          "research_improvement_prompt": {
+            "description": "Stores research improvement prompt",
+            "value": "RESEARCH IMPROVEMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nITERATION: {{iteration_count}} of {{max_iterations}}\n\nCRITIQUE RECEIVED:\n{{critique_feedback}}\n\nIMPROVEMENT PROTOCOL:\n\n1. UNDERSTAND FEEDBACK: Analyze criticism to identify root issues. Prioritize by impact: critical > major > moderate > minor.\n\n2. TARGETED RESEARCH: Conduct additional investigation for weak areas identified. Add authoritative sources where gaps exist. Deepen analysis in areas marked insufficient.\n\n3. CRITICAL ISSUES (Must Address):\n   - Fix fundamental flaws immediately with focused additional research\n   - Resolve factual inaccuracies through verification\n   - Add missing essential components\n   - Fill significant gaps affecting research validity\n\n4. MAJOR ISSUES (Should Address):\n   - Expand analysis in identified weak areas\n   - Improve clarity in problematic sections\n   - Strengthen source attribution and citations\n   - Add missing perspectives\n\n5. MODERATE & MINOR (Based on Time):\n   - Enhance depth where suggested\n   - Polish formatting and structure\n   - Refine style and readability\n\n6. FORMATTING IMPROVEMENTS:\n   - Add/improve notice blocks if frequency insufficient\n   - Enhance tables and visual elements\n   - Improve navigation and cross-references\n   - Fix metadata completeness issues\n\n7. CONTENT INTEGRATION: Seamlessly integrate improvements into existing work. Maintain research coherence and flow. Ensure revisions enhance rather than fragment.\n\n8. QUALITY VERIFICATION: Self-assess improvements through intellectual analysis. Verify all critical and major issues resolved. Check formatting compliance improved.\n\nOUTPUT: Save improved version."
+          }
+        }
+      },
+      "connections": {
+        "default": "setup-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "setup-research",
+      "directive": "RESEARCH PROCESS CONFIGURATION: Check if research-config.md file exists with information about research agents, project structure and publication process. If exists - use data from it. If not - ask user where to get configuration or let them specify everything needed (where to store research, which agents to use, how to publish). RESEARCH PARAMETERS: Get from user: topic, depth_level (quick/normal/deep/scientific), audience, language. PREPARATION: Create workspace. If research index exists - check for duplicates.",
+      "completionCondition": "Configuration defined, parameters obtained, workspace ready",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workspace_path": {
+            "type": "string",
+            "description": "Path to workspace for storing research"
+          }
+        },
+        "required": [
+          "research_topic",
+          "depth_level",
+          "target_audience",
+          "output_language"
+        ],
+        "globalInputs": [
+          "research_topic",
+          "depth_level",
+          "target_audience",
+          "output_language"
+        ]
+      },
+      "connections": {
+        "success": "generate-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-research",
+      "directive": "Generate research on the specified topic. If research_specialist agent is specified in config - run it as subagent. If no specialized agent but subagents capability available - run general-purpose subagent with prompt from {{research_generation_prompt}}. If subagents unavailable - perform research directly using {{research_generation_prompt}}. Save result.",
+      "completionCondition": "Research generated and saved to file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "research_file_path"
+        ],
+        "globalInputs": [
+          "research_file_path"
+        ]
+      },
+      "connections": {
+        "success": "critique-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "critique-research",
+      "directive": "Assess research quality. If research_critic agent is specified in config - run it as subagent. If no specialized agent but subagents capability available - run general-purpose subagent with prompt from {{research_critique_prompt}}. If subagents unavailable - perform critique directly using {{research_critique_prompt}}. MANDATORY provide numerical values for all metrics. Current iteration: {{iteration_count}}.",
+      "completionCondition": "Critique completed, all metrics obtained with numerical values",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "critical_issues_count",
+          "major_issues_count",
+          "formatting_score",
+          "critique_feedback"
+        ],
+        "globalInputs": [
+          "critical_issues_count",
+          "major_issues_count",
+          "formatting_score",
+          "critique_feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-quality-gates"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-quality-gates",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "critical_issues_count"
+            },
+            "right": 0
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "major_issues_count"
+            },
+            "right": 0
+          },
+          {
+            "operator": "gte",
+            "left": {
+              "contextPath": "formatting_score"
+            },
+            "right": 8
+          }
+        ]
+      },
+      "connections": {
+        "true": "prepare-publication",
+        "false": "check-iteration-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-iteration-limit",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "iteration_count"
+        },
+        "right": 5
+      },
+      "connections": {
+        "true": "force-completion",
+        "false": "improve-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "improve-research",
+      "directive": "Improve research based on critique. If research_specialist available - run it in revision mode with parameter critique_feedback={{critique_feedback}}. If no specialized agent - use general-purpose subagent or direct execution with prompt {{research_improvement_prompt}}. Iteration {{iteration_count}} of {{max_iterations}}.",
+      "completionCondition": "Improvements applied and saved",
+      "connections": {
+        "success": "increment-iteration"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "increment-iteration",
+      "directive": "Increment iteration_count by 1. Current value: {{iteration_count}}. Return new value.",
+      "completionCondition": "Iteration counter incremented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "iteration_count"
+        ],
+        "globalInputs": [
+          "iteration_count"
+        ]
+      },
+      "connections": {
+        "success": "critique-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "force-completion",
+      "directive": "Iteration limit reached ({{iteration_count}}). Research completing forcefully. Current quality: formatting {{formatting_score}}/10, Critical: {{critical_issues_count}}, Major: {{major_issues_count}}. Warn user that quality may be suboptimal. Ask whether to proceed to publication or stop workflow.",
+      "completionCondition": "Decision about forced completion obtained",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_decision"
+        ],
+        "globalInputs": [
+          "user_decision"
+        ]
+      },
+      "connections": {
+        "success": "route-force-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-force-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "user_decision"
+        },
+        "right": "publish"
+      },
+      "connections": {
+        "true": "prepare-publication",
+        "false": "end"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "prepare-publication",
+      "directive": "Prepare research for publication. If publication process is described in research-config.md - follow it (upload via outline-manager.js, update index). If publication process not configured - notify user about ready research. Optionally send Telegram notification if configured.",
+      "completionCondition": "Publication completed or user notified about readiness",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ],
+  "variableRegistry": {
+    "workflow_version": {
+      "type": "string",
+      "description": "Stores workflow version",
+      "default": "1.0.0"
+    },
+    "iteration_count": {
+      "type": "number",
+      "description": "Stores iteration count",
+      "default": 1
+    },
+    "max_iterations": {
+      "type": "number",
+      "description": "Stores max iterations",
+      "default": 5
+    },
+    "research_generation_prompt": {
+      "type": "string",
+      "description": "Stores research generation prompt",
+      "default": "RESEARCH GENERATION TASK:\n\nTOPIC: {{research_topic}}\nDEPTH LEVEL: {{depth_level}}\nAUDIENCE: {{target_audience}}\nLANGUAGE: {{output_language}}\n\nDEPTH STANDARDS:\n- quick: 5-8 quality sources, 1500-2500 words, focused validation, rapid overview for immediate understanding\n- normal: 12-20 quality sources, 3000-5000 words, systematic validation, practical guidance with implementation focus\n- deep: 25-35 authoritative sources, 6000-10000 words, comprehensive analysis, strategic analysis with detailed trade-offs\n- scientific: 40+ peer-reviewed sources, 10000+ words, publication-quality analysis, academic rigor with systematic methodology\n\nRESEARCH METHODOLOGY:\n1. SOURCE STRATEGY: Identify most credible and authoritative sources through intellectual reasoning. Use WebSearch and WebFetch tools for systematic investigation. Verify source quality - never assume without independent verification.\n\n2. MULTI-PERSPECTIVE ANALYSIS: Combine insights from multiple sources intelligently. Address all significant aspects through reasoned analysis. Include contradictory information and acknowledge limitations.\n\n3. PUBLICATION QUALITY: Create self-contained report that can be understood without prior context. Define ALL specialized terms. Provide historical evolution and current state context. Clear scope and boundaries.\n\n4. VISUAL FORMATTING: Structure with clear sections and logical hierarchy. Use visual elements for scannable content:\n   - Notice blocks for key information (:::info, :::warning, :::success)\n   - Tables for comparisons and metrics (max 6-8 columns)\n   - Code blocks with syntax highlighting\n   - Diagrams for process visualization (Mermaid support)\n   - Visual breaks: max 7-10 lines of text without visual elements\n\n5. DOCUMENT STRUCTURE:\n   - Title with descriptive subtitle\n   - Metadata block: category, date, status, tags\n   - Executive summary with key findings (3-5 bullet points)\n   - Clear section headings with emoji markers for grouping\n   - Introduction: context, goals, scope\n   - Methodology: approach, data sources, evaluation criteria\n   - Results: key findings in notice blocks, comparative tables, diagrams\n   - Recommendations: actionable steps, priority matrix\n   - Conclusion: summary in success block, future work\n\n6. CITATION EXCELLENCE: Every claim supported by sources. Complete source attribution with URL, author, date accessed. Inline citations [1][2] with full bibliography.\n\n7. PROFESSIONAL STANDARDS: Publication-ready writing. Appropriate academic tone. Logical flow from simple to complex. Technical accuracy in examples.\n\nOUTPUT: Save research to appropriate location. Return file path."
+    },
+    "research_critique_prompt": {
+      "type": "string",
+      "description": "Stores research critique prompt",
+      "default": "RESEARCH QUALITY ASSESSMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nDECLARED LEVEL: {{depth_level}}\nITERATION: {{iteration_count}}\n\nEVALUATION DIMENSIONS:\n\n1. FACTUAL ACCURACY: Analyze claims for logical consistency. Evaluate source quality and relevance. Identify contradictions or unsupported assertions. Assess information currency and appropriateness.\n\n2. SOURCE COVERAGE (Level-Specific Standards):\n   - quick: Validate 5-8 sources minimum\n   - normal: Assess 12-20 quality sources\n   - deep: Evaluate 25-35 authoritative sources\n   - scientific: Review 40+ academic sources\n   Judgment: Does source coverage match declared level?\n\n3. COMPLETENESS: Analyze if all significant aspects addressed. Evaluate depth appropriateness for declared level. Identify missing perspectives. Assess scope coverage.\n\n4. FORMATTING QUALITY:\n   - Notice blocks: Check frequency (1 per 3-5 sections), type distribution (info/warning/success), effectiveness\n   - Visual elements: Tables (6-8 column limit), diagrams (Mermaid syntax), code blocks (language specification)\n   - Visual breaks: Max 7-10 lines without elements\n   - Navigation: Clear headers, cross-references (min 3-5 internal links), no manual TOC\n   - Metadata: Category, date, status, tags completeness\n   - Executive summary: Notice blocks with key results\n\n5. CITATION QUALITY: Evaluate source attribution completeness. Assess source authority and relevance. Review bibliography formatting. Check integration into narrative flow.\n\n6. PROFESSIONAL STANDARDS: Writing quality and tone consistency. Structural integrity. Argumentation quality and logical progression.\n\nISSUE CLASSIFICATION:\n- CRITICAL: Fundamental flaws, factual inaccuracies, missing essential components, significant gaps affecting validity\n- MAJOR: Important aspects needing substantial enhancement, clarity problems, source attribution gaps\n- MODERATE: Depth enhancement opportunities, alternative perspectives worth exploring, structural improvements\n- MINOR: Polish opportunities, formatting consistency, style refinements\n\nOUTPUT: Provide quality_level, formatting_score (0-10), critical_issues_count, major_issues_count, moderate_issues_count, minor_issues_count, detailed critique_feedback."
+    },
+    "research_improvement_prompt": {
+      "type": "string",
+      "description": "Stores research improvement prompt",
+      "default": "RESEARCH IMPROVEMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nITERATION: {{iteration_count}} of {{max_iterations}}\n\nCRITIQUE RECEIVED:\n{{critique_feedback}}\n\nIMPROVEMENT PROTOCOL:\n\n1. UNDERSTAND FEEDBACK: Analyze criticism to identify root issues. Prioritize by impact: critical > major > moderate > minor.\n\n2. TARGETED RESEARCH: Conduct additional investigation for weak areas identified. Add authoritative sources where gaps exist. Deepen analysis in areas marked insufficient.\n\n3. CRITICAL ISSUES (Must Address):\n   - Fix fundamental flaws immediately with focused additional research\n   - Resolve factual inaccuracies through verification\n   - Add missing essential components\n   - Fill significant gaps affecting research validity\n\n4. MAJOR ISSUES (Should Address):\n   - Expand analysis in identified weak areas\n   - Improve clarity in problematic sections\n   - Strengthen source attribution and citations\n   - Add missing perspectives\n\n5. MODERATE & MINOR (Based on Time):\n   - Enhance depth where suggested\n   - Polish formatting and structure\n   - Refine style and readability\n\n6. FORMATTING IMPROVEMENTS:\n   - Add/improve notice blocks if frequency insufficient\n   - Enhance tables and visual elements\n   - Improve navigation and cross-references\n   - Fix metadata completeness issues\n\n7. CONTENT INTEGRATION: Seamlessly integrate improvements into existing work. Maintain research coherence and flow. Ensure revisions enhance rather than fragment.\n\n8. QUALITY VERIFICATION: Self-assess improvements through intellectual analysis. Verify all critical and major issues resolved. Check formatting compliance improved.\n\nOUTPUT: Save improved version."
+    },
+    "critical_issues_count": {
+      "type": "number",
+      "description": "Global variable critical_issues_count"
+    },
+    "major_issues_count": {
+      "type": "number",
+      "description": "Global variable major_issues_count"
+    },
+    "formatting_score": {
+      "type": "number",
+      "description": "Global variable formatting_score"
+    },
+    "critique_feedback": {
+      "type": "string",
+      "description": "Global variable critique_feedback"
+    },
+    "user_decision": {
+      "type": "string",
+      "description": "Global variable user_decision",
+      "enum": [
+        "publish",
+        "stop"
+      ]
+    },
+    "research_topic": {
+      "type": "string",
+      "description": "Topic of research"
+    },
+    "depth_level": {
+      "type": "string",
+      "description": "Depth level of research"
+    },
+    "target_audience": {
+      "type": "string",
+      "description": "Target audience for the research"
+    },
+    "output_language": {
+      "type": "string",
+      "description": "Language for the research output"
+    },
+    "research_file_path": {
+      "type": "string",
+      "description": "Path to the generated research file"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# Pre-push hook для защиты от случайного пуша backup веток и веток с секретами
+# MCP Moira Project
+
+echo "🔍 Checking branches for push safety..."
+
+# Block direct pushes to master
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$CURRENT_BRANCH" = "master" ]; then
+    echo ""
+    echo "❌ Direct pushes to master branch are not allowed."
+    echo ""
+    echo "Please create a PR from your feature branch instead."
+    echo ""
+    exit 1
+fi
+
+# Запрещённые паттерны веток
+FORBIDDEN_PATTERNS="backup/ feature/complete-auth-system"
+
+# Читаем все ветки в массив
+branches_to_check=()
+while read local_ref local_sha remote_ref remote_sha; do
+    if [[ "$local_ref" =~ refs/heads/(.+) ]]; then
+        branches_to_check+=("${BASH_REMATCH[1]}")
+    fi
+done
+
+# Проверяем каждую ветку
+for branch in "${branches_to_check[@]}"; do
+    # Проверка на запрещённые паттерны
+    for pattern in $FORBIDDEN_PATTERNS; do
+        if [[ "$branch" == $pattern* ]]; then
+            echo ""
+            echo "❌ PUSH BLOCKED!"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Branch: $branch"
+            echo "Reason: Contains sensitive information (Telegram token leak)"
+            echo ""
+            echo "This branch contains leaked credentials in commit history."
+            echo "It should NEVER be pushed to remote repository."
+            echo ""
+            exit 1
+        fi
+    done
+
+    echo "✅ Branch '$branch' is safe to push"
+done
+
+echo "✅ All checks passed. Proceeding with push..."
+exit 0

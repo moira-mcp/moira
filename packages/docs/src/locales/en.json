@@ -1,0 +1,1172 @@
+{
+  "metadata": {
+    "title": "MCP Moira - Agent Workflow Engine with Control & Validation"
+  },
+  "problem": {
+    "title": "Sound Familiar?",
+    "items": {
+      "forgetTests": {
+        "command": "\"Write code\"",
+        "issue": "Agent forgets tests"
+      },
+      "research": {
+        "command": "\"Research topic\"",
+        "issue": "Agent invents facts, no sources"
+      },
+      "prd": {
+        "command": "\"Create PRD\"",
+        "issue": "Agent misses edge cases"
+      },
+      "content": {
+        "command": "\"Write content\"",
+        "issue": "Agent loses structure halfway"
+      },
+      "tests": {
+        "command": "\"Generate tests\"",
+        "issue": "Agent covers only happy paths"
+      }
+    },
+    "conclusion": {
+      "line1": "You end up micromanaging every step.",
+      "line2": "Reminding. Checking. Repeating.",
+      "solution": "There's a better way."
+    }
+  },
+  "whatIsMcp": {
+    "title": "Works With Your Tools. Changes Nothing.",
+    "description": "MCP is a standard protocol already built into Cursor, Claude, ChatGPT, VS Code and other AI tools. It lets them connect to external services — like Moira.",
+    "setup": {
+      "title": "Setup: Add one line to your settings. That's it.",
+      "workflow": "Your workflow stays the same.",
+      "tools": "Your tools stay the same.",
+      "nothing": "Nothing breaks."
+    },
+    "tagline": "All supported via MCP"
+  },
+  "readyWorkflows": {
+    "title": "Start With Ready-Made Workflows",
+    "items": {
+      "developmentFlow": {
+        "title": "Development Flow",
+        "description": "Full dev cycle: plan → code → tests → docs → git → notifications"
+      },
+      "research": {
+        "title": "Research",
+        "description": "Structured research with verified sources and citations"
+      },
+      "codeReview": {
+        "title": "Code Review",
+        "description": "Security, performance, and quality checks with actionable feedback"
+      },
+      "testGeneration": {
+        "title": "Test Generation",
+        "description": "Unit, integration, and E2E tests with coverage validation"
+      }
+    },
+    "cta": {
+      "prefix": "Just say:",
+      "command": "\"Start development flow\""
+    }
+  },
+  "findYourWorkflow": {
+    "title": "Find Your Workflow",
+    "problemLabel": "Problem:",
+    "solutionLabel": "Solution:",
+    "roles": {
+      "developer": {
+        "name": "Developer",
+        "problem": "AI writes code but forgets tests and documentation",
+        "solution": "Development workflow — full cycle from plan to commit",
+        "benefit": "Tests, docs, git — nothing gets skipped"
+      },
+      "qaTester": {
+        "name": "QA/Tester",
+        "problem": "Tests written chaotically, coverage gaps everywhere",
+        "solution": "Test generation workflow — structured test creation",
+        "benefit": "Unit, integration, E2E with coverage validation"
+      },
+      "dataAnalyst": {
+        "name": "Data Analyst",
+        "problem": "Research without source verification, hallucinations",
+        "solution": "Research workflow — verified sources, citations required",
+        "benefit": "No claims without evidence"
+      },
+      "productManager": {
+        "name": "Product Manager",
+        "problem": "PRDs incomplete, missing edge cases and requirements",
+        "solution": "PRD creation workflow — structured requirements gathering",
+        "benefit": "Task breakdown with validation at each step"
+      },
+      "marketing": {
+        "name": "Marketing",
+        "problem": "Content lacks structure, inconsistent messaging",
+        "solution": "Content creation workflow — from outline to publication",
+        "benefit": "Consistent tone, verified facts, proper formatting"
+      }
+    }
+  },
+  "createYourOwn": {
+    "title": "Need Something Custom?",
+    "tagline": "NO diagrams to draw. NO code to write. Just describe it.",
+    "subtitle": "Three ways to create your workflow:",
+    "methods": {
+      "template": {
+        "title": "Use a template",
+        "description": "Start with a ready workflow, customize it for your needs",
+        "example": "Example: \"Take Code Review workflow, add security check\""
+      },
+      "describe": {
+        "title": "Describe in plain words",
+        "description": "Tell the agent what you need — it creates the workflow",
+        "example": "Example: \"Create workflow for PR review with security checks\""
+      },
+      "scratch": {
+        "title": "Build from scratch",
+        "description": "Full control over every step if you want it",
+        "example": "Example: Define each step manually in the workflow editor"
+      }
+    },
+    "conversation": {
+      "title": "Example conversation:",
+      "you": "You",
+      "agent": "Agent",
+      "userMessage": "I want a workflow for code review that first checks security, then performance, then tests.",
+      "agentResponse": "Done. Created 'Custom Code Review' workflow with 3 steps. Say 'start custom code review' to use it."
+    }
+  },
+  "workflowPatterns": {
+    "title": "What You Can Build",
+    "subtitle": "Workflows are built from simple patterns. Combine them as needed.",
+    "patterns": {
+      "sequential": {
+        "title": "Sequential Steps",
+        "diagram": "Step 1 → Step 2 → Step 3 → Done",
+        "example": "Plan → Code → Test → Document → Commit"
+      },
+      "validation": {
+        "title": "Validation Loop (Critic Cycle)",
+        "diagram": "Create → Review → Issues? → Fix → Review again",
+        "example": "Agent reviews own work, repeats until perfect."
+      },
+      "branching": {
+        "title": "Branching",
+        "diagram": "Check → Path A or Path B → Continue",
+        "example": "Different flows based on conditions."
+      },
+      "schema": {
+        "title": "Schema Validation",
+        "diagram": "Agent provides data → Check format → Retry if wrong",
+        "example": "Agent can't proceed with wrong structure."
+      }
+    },
+    "tagline": "Mix and match patterns to build workflows that fit your needs."
+  },
+  "builtWithMoira": {
+    "title": "Built With Moira",
+    "subtitle": "Moira was built using Moira's own Development Workflow. Hundreds of iterations on real production code.",
+    "steps": {
+      "plan": "PLAN",
+      "code": "CODE",
+      "test": "TEST",
+      "docs": "DOCS",
+      "git": "GIT",
+      "notify": "NOTIFY"
+    },
+    "tagline": "Every step validated. Nothing skipped.",
+    "cta": "See Development Workflow in action →"
+  },
+  "solution": {
+    "title": "How Moira Fixes This",
+    "items": {
+      "stepByStep": {
+        "title": "Step-by-step control",
+        "description": "Agent completes each step before moving to the next. No skipping. No shortcuts."
+      },
+      "builtInValidation": {
+        "title": "Built-in validation",
+        "description": "Each step has success criteria. Agent proves it's done before proceeding."
+      },
+      "noForgottenTasks": {
+        "title": "No forgotten tasks",
+        "description": "Tests, docs, commits — nothing gets skipped. The workflow remembers even when agent doesn't."
+      },
+      "consistentResults": {
+        "title": "Consistent results",
+        "description": "Same workflow, same quality. Every time. No more \"it worked yesterday\"."
+      }
+    }
+  },
+  "hero": {
+    "title": "Make Your AI Agent Follow Instructions",
+    "subtitle": {
+      "line1": "Stop repeating yourself.",
+      "line2": "Define the workflow once — your AI follows it step by step, every time."
+    },
+    "compatibility": "Works with Claude Code, Cursor, ChatGPT, and any MCP client.",
+    "actions": {
+      "getStarted": "Get Started",
+      "viewGitHub": "View on GitHub"
+    }
+  },
+  "quickStart": {
+    "title": "Quick Start",
+    "subtitle": "Connect to MCP Moira in under 2 minutes",
+    "whatHappensNext": {
+      "title": "What Happens Next?",
+      "steps": {
+        "step1": {
+          "text": "Simply type in your AI chat:",
+          "code": "\"Start user onboarding flow\""
+        },
+        "step2": {
+          "text": "The agent will guide you through an interactive onboarding that explains Moira by demonstrating a workflow in action",
+          "code": ""
+        },
+        "step3": "You'll learn about available workflows and get started with your first real task!"
+      }
+    },
+    "tabs": {
+      "claude-web": {
+        "label": "Claude Web",
+        "description": "claude.ai - Browser chat (most popular)",
+        "content": "# On claude.ai (Pro/Max/Team/Enterprise):\n\n# 1. Go to Settings → Connectors\n# 2. Click \"Add custom connector\"\n# 3. Enter:\n#    Server URL: {{mcpUrl}}\n# 4. Click \"Connect\"\n# 5. Complete OAuth authentication in browser\n# 6. Tools appear in chat\n\n# Requires paid plan"
+      },
+      "chatgpt": {
+        "label": "ChatGPT",
+        "description": "chat.openai.com - Browser chat",
+        "content": "# On chat.openai.com (Plus/Pro required):\n\n# 1. Profile → Settings\n# 2. Go to \"Connectors\" or \"Integrations\"\n# 3. Click \"Add connector\"\n# 4. Enter:\n#    Name: MCP Moira\n#    URL: {{mcpUrl}}\n# 5. Complete OAuth authentication\n# 6. Tools available in chat\n\n# Free tier doesn't support MCP"
+      },
+      "claude-code": {
+        "label": "Claude Code",
+        "recommended": "Recommended: Use CLI command",
+        "primaryContent": "claude mcp add --transport http moira {{mcpUrl}}",
+        "authIntro": "Then authenticate:",
+        "authContent": "# After adding, authenticate within claude\n/mcp\n# → Select \"moira\"\n# → Click \"Authenticate\"\n# → Browser opens for OAuth",
+        "alternativeTitle": "Alternative: Manual JSON config",
+        "alternativeContent": "# Alternative: Manual JSON config\n# ~/.config/claude/mcp.json\n{\n  \"mcpServers\": {\n    \"moira\": {\n      \"type\": \"http\",\n      \"url\": \"{{mcpUrl}}\"\n    }\n  }\n}\n\n# Then: /mcp → Authenticate"
+      },
+      "copilot-cli": {
+        "label": "Copilot CLI",
+        "recommended": "Recommended: Config file",
+        "primaryContent": "# ~/.copilot/mcp-config.json\n{\n  \"mcpServers\": {\n    \"moira\": {\n      \"type\": \"http\",\n      \"url\": \"{{mcpUrl}}\"\n    }\n  }\n}",
+        "authIntro": "Then authenticate:",
+        "authContent": "# After saving the config:\n# 1. Start a Copilot CLI session\n# 2. Type /mcp\n# 3. Select \"moira\" → Authenticate\n# → Browser opens for OAuth",
+        "alternativeTitle": "Alternative: Interactive setup",
+        "alternativeContent": "# In Copilot CLI:\n/mcp\n# → Click \"Add server\"\n# → Enter server URL\n# → Complete OAuth\n\n# Project-level config:\n# .copilot/mcp-config.json (same format)"
+      },
+      "claude-desktop": {
+        "label": "Claude Desktop",
+        "description": "Desktop app: GUI method",
+        "content": "# In Claude Desktop app:\n\n# 1. Open Settings (⌘+,)\n# 2. Go to \"Connectors\" tab\n# 3. Click \"Add custom connector\"\n# 4. Enter:\n#    Server URL: {{mcpUrl}}\n# 5. Click \"Connect\"\n# 6. Browser opens → OAuth → Done\n\n# No file editing"
+      },
+      "cursor": {
+        "label": "Cursor",
+        "recommended": "Recommended: One-click install",
+        "deeplinkButton": "Add to Cursor",
+        "ariaLabel": "Install MCP Moira server in Cursor IDE",
+        "authIntro": "Then authenticate:",
+        "authContent": "# After clicking the button:\n# 1. Cursor opens with install prompt\n# 2. Click \"Install\" to add moira MCP server\n# 3. Settings → MCP Servers → Find \"moira\"\n# 4. Click \"Authenticate\" → Browser opens for OAuth",
+        "alternativeTitle": "Alternative: Manual JSON config",
+        "alternativeContent": "# ~/.cursor/mcp.json\n{\n  \"mcpServers\": {\n    \"moira\": {\n      \"url\": \"{{mcpUrl}}\"\n    }\n  }\n}"
+      },
+      "vscode": {
+        "label": "VS Code",
+        "recommended": "Recommended: One-click install",
+        "deeplinkButton": "Add to VS Code",
+        "ariaLabel": "Install MCP Moira server in VS Code",
+        "authIntro": "Then authenticate:",
+        "authContent": "# After clicking the button:\n# 1. VS Code opens with install prompt\n# 2. Click \"Install\" to add moira MCP server\n# 3. Settings → MCP Servers → Find \"moira\"\n# 4. Click \"Authenticate\" → Browser opens for OAuth",
+        "alternativeTitle": "Alternative: Manual configuration",
+        "alternativeContent": "# Install MCP extension:\n# ext install mcp-connector\n\n# Then in settings.json:\n{\n  \"mcp.servers\": {\n    \"moira\": {\n      \"url\": \"{{mcpUrl}}\",\n      \"transport\": \"http\"\n    }\n  }\n}\n\n# Or: Command Palette → \"MCP: Add Server\""
+      },
+      "perplexity": {
+        "label": "Perplexity",
+        "description": "Mac app: With helper",
+        "content": "# Perplexity Mac App:\n\n# 1. Install PerplexityXPC helper first:\n#    Settings → Connectors → Install Helper\n# 2. Click \"Add Connector\"\n# 3. Enter:\n#    Server Name: moira\n#    Command: npx\n#    Args: -y mcp-remote {{mcpUrl}}\n# 4. Complete OAuth authentication\n# 5. Ask Perplexity to use MCP Moira tools\n\n# Paid plan recommended"
+      },
+      "continue": {
+        "label": "Continue",
+        "description": "VS Code extension: Open-source AI assistant",
+        "content": "# Continue extension in VS Code:\n\n# 1. Install Continue extension\n# 2. Open config: Ctrl+Shift+P → \"Continue: Open config\"\n# 3. Add to config.yaml:\n#\n# mcp:\n#   servers:\n#     moira:\n#       url: {{mcpUrl}}\n#       transport: http\n#\n# 4. Restart VS Code\n# 5. Authenticate when prompted"
+      },
+      "zed": {
+        "label": "Zed",
+        "description": "Fast code editor with AI features",
+        "content": "# Zed editor:\n\n# 1. Open Settings (⌘+,)\n# 2. Add to settings.json under context_servers:\n#\n# \"context_servers\": {\n#   \"moira\": {\n#     \"url\": \"{{mcpUrl}}\"\n#   }\n# }\n#\n# 3. Restart Zed\n# 4. Authenticate when prompted"
+      },
+      "gemini-cli": {
+        "label": "Gemini CLI",
+        "description": "Google AI terminal assistant",
+        "content": "# Gemini CLI:\n\n# 1. Edit ~/.gemini/settings.json:\n#\n# \"mcpServers\": {\n#   \"moira\": {\n#     \"httpUrl\": \"{{mcpUrl}}\"\n#   }\n# }\n#\n# 2. Run: gemini auth\n# 3. Complete OAuth flow"
+      }
+    },
+    "tokenAuth": {
+      "sectionTitle": "Authentication without OAuth",
+      "description": "For CI/CD, Docker, or environments without a browser — use an API token instead of OAuth.",
+      "steps": "1. Log in to Moira web UI → Settings → API Tokens\n2. Create a token (starts with moira_)\n3. Replace moira_YOUR_TOKEN below with your token",
+      "learnMore": "Learn more about API tokens"
+    }
+  },
+  "useCases": {
+    "title": "Who Benefits?",
+    "subtitle": "See how MCP Moira transforms AI workflows",
+    "tabs": {
+      "taskManager": {
+        "label": "Task Manager",
+        "icon": "📋",
+        "title": "Task Breakdown with Validation",
+        "description": "Complex task? AI breaks it down, executes each step, and proves completion before moving forward.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI does some steps, skips others",
+            "No proof tasks are actually done",
+            "Lost track of what was completed"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Breaks into validated steps",
+            "Each step requires proof to proceed",
+            "Cannot skip or forget steps"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Set up CI/CD pipeline\"",
+          "steps": [
+            "Step 1: Setup tests → proof: \"npm test passes\"",
+            "Step 2: Configure build → proof: \"package.json updated\"",
+            "Step 3: Add CI workflow → proof: \".github/workflows/ci.yml\"",
+            "Step 4: Deploy config → proof: \"deployed to staging\"",
+            "Step 5: Monitoring → proof: \"metrics endpoint\""
+          ],
+          "output": "Complete CI/CD with all proofs verified"
+        },
+        "result": "Final report with all evidence - every step validated before proceeding"
+      },
+      "developer": {
+        "label": "Developer",
+        "icon": "💻",
+        "title": "Code Review Automation",
+        "description": "Ensure thorough code review with security, performance, and quality checks - nothing gets skipped.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI reviews code but misses critical checks",
+            "Inconsistent review depth across files",
+            "No structured output for tracking"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Step 1: Security check → validated report",
+            "Step 2: Performance analysis → metrics",
+            "Step 3: Code quality → structured JSON"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Review PR #123\"",
+          "steps": [
+            "Security check → {\"score\": 95, \"issues\": 2}",
+            "Performance → {\"rating\": \"good\", \"concerns\": []}",
+            "Code quality → {\"complexity\": \"low\", \"suggestions\": 3}"
+          ],
+          "output": "Complete review with scores and actionable fixes"
+        },
+        "result": "Security score 95/100, performance rating, 3 quality improvements - all validated"
+      },
+      "dataAnalyst": {
+        "label": "Data Analyst",
+        "icon": "📊",
+        "title": "Report Generation Pipeline",
+        "description": "Generate consistent reports with all required metrics - no missing data, guaranteed quality.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI analyzes data but skips validation",
+            "Incomplete reports missing key metrics",
+            "No guarantee on data quality"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Step 1: Data validation → schema check",
+            "Step 2: Analysis → required metrics",
+            "Step 3: Visualization → validated output"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Generate monthly sales report\"",
+          "steps": [
+            "Validate data → {\"valid\": true, \"rows\": 1250}",
+            "Analyze metrics → {\"revenue\": \"$125K\", \"growth\": \"12%\"}",
+            "Create charts → {\"charts\": 3, \"format\": \"svg\"}"
+          ],
+          "output": "Complete dashboard with validated metrics"
+        },
+        "result": "Revenue $125K, growth 12%, 3 visualizations - all data validated"
+      },
+      "qaTester": {
+        "label": "QA/Tester",
+        "icon": "🧪",
+        "title": "Test Case Generation",
+        "description": "Generate complete test suites with edge cases covered and execution verified.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI generates tests but misses edge cases",
+            "Inconsistent test coverage",
+            "No verification tests actually run"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Step 1: Test plan → validated coverage",
+            "Step 2: Generate tests → syntax verified",
+            "Step 3: Execute tests → pass/fail report"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Test login flow\"",
+          "steps": [
+            "Plan tests → {\"cases\": 15, \"coverage\": [\"valid\", \"invalid\", \"edge\"]}",
+            "Generate code → {\"files\": 3, \"syntax\": \"valid\"}",
+            "Run tests → {\"passed\": 15, \"failed\": 0}"
+          ],
+          "output": "15 passing tests with verified execution"
+        },
+        "result": "15/15 tests passing, edge cases covered, execution verified"
+      },
+      "marketing": {
+        "label": "Marketing",
+        "icon": "📣",
+        "title": "Marketing Campaign Automation",
+        "description": "Run multi-channel campaigns with A/B testing, performance tracking, and lead nurturing - all validated.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI creates campaign assets but misses channel requirements",
+            "No A/B variant tracking or performance metrics",
+            "Disconnected workflows across channels"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Step 1: Campaign brief → validated requirements",
+            "Step 2: Multi-channel assets → format verified",
+            "Step 3: Performance setup → metrics tracked"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Launch product campaign\"",
+          "steps": [
+            "Brief → {\"channels\": 4, \"audience\": \"validated\"}",
+            "Assets → {\"email\": 3, \"social\": 8, \"landing\": 1}",
+            "Tracking → {\"metrics\": 12, \"ab_variants\": 4}"
+          ],
+          "output": "Complete campaign with all channels configured"
+        },
+        "result": "4 channels, 12 assets, A/B testing ready - all performance tracked"
+      },
+      "rndDepartment": {
+        "label": "R&D",
+        "icon": "🔬",
+        "title": "Research Pipeline Automation",
+        "description": "Run experiment workflows with hypothesis validation, data collection, and reproducible results - all documented.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI conducts research but skips result validation",
+            "No experiment reproducibility",
+            "Scattered documentation and data"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Step 1: Hypothesis → methodology validated",
+            "Step 2: Experiment → data verification",
+            "Step 3: Report → structured conclusions"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Run A/B experiment on model performance\"",
+          "steps": [
+            "Hypothesis → {\"methodology\": \"validated\", \"variables\": 3}",
+            "Experiment → {\"samples\": 1250, \"control\": true}",
+            "Report → {\"conclusions\": 5, \"confidence\": \"95%\"}"
+          ],
+          "output": "Complete research report with validated methodology"
+        },
+        "result": "1250 samples, 95% confidence, 5 validated conclusions - all reproducible"
+      },
+      "productManager": {
+        "label": "Product Manager",
+        "icon": "📅",
+        "title": "Sprint Planning Automation",
+        "description": "Create complete sprint plans with dependencies mapped and realistic timelines validated.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "AI creates plan but misses dependencies",
+            "No capacity or timeline validation",
+            "Incomplete task breakdown"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Step 1: Scope → validated requirements",
+            "Step 2: Breakdown → dependencies mapped",
+            "Step 3: Timeline → realistic estimates"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Plan Q1 sprint\"",
+          "steps": [
+            "Define scope → {\"features\": 4, \"priority\": \"validated\"}",
+            "Break down → {\"tasks\": 12, \"dependencies\": 5}",
+            "Timeline → {\"duration\": \"2 weeks\", \"capacity\": \"ok\"}"
+          ],
+          "output": "Sprint plan with 12 tasks and dependencies"
+        },
+        "result": "12 tasks scheduled, 5 dependencies mapped, timeline validated for 2-week sprint"
+      },
+      "automationUser": {
+        "label": "Automation User",
+        "icon": "⚙️",
+        "title": "Daily Workflow Automation",
+        "description": "Automate repetitive tasks with consistent execution - same result every time.",
+        "problems": {
+          "title": "Problem:",
+          "items": [
+            "Repeat same prompts every day",
+            "AI interprets differently each time",
+            "Manual checklists to track progress"
+          ]
+        },
+        "solutions": {
+          "title": "Solution:",
+          "items": [
+            "Reusable workflow templates",
+            "Consistent execution every time",
+            "Automatic progress tracking"
+          ]
+        },
+        "example": {
+          "title": "Example Workflow:",
+          "input": "\"Daily standup preparation\"",
+          "steps": [
+            "Collect updates → {\"commits\": 8, \"prs\": 2}",
+            "Summarize → {\"progress\": \"3 features\", \"blockers\": 1}",
+            "Format report → {\"format\": \"markdown\", \"ready\": true}"
+          ],
+          "output": "5-minute standup report ready"
+        },
+        "result": "Standup report in 5 minutes: 8 commits, 2 PRs, 3 features progress, 1 blocker identified"
+      }
+    }
+  },
+  "howItWorks": {
+    "title": "How It Works",
+    "subtitle": "Four simple steps to controlled AI workflows",
+    "steps": {
+      "step1": {
+        "title": "Connect MCP Client",
+        "description": "Add MCP Moira server URL to your Claude Code, Cursor, or any MCP-compatible tool. One-time setup.",
+        "icon": "tabler:plug-connected"
+      },
+      "step2": {
+        "title": "Start Workflow",
+        "description": "Call start with your workflow ID. MCP Moira returns the first step with instructions and schema.",
+        "icon": "tabler:player-play"
+      },
+      "step3": {
+        "title": "Execute Steps",
+        "description": "Agent completes each step and calls step. Response is validated against JSON Schema before proceeding.",
+        "icon": "tabler:list-check"
+      },
+      "step4": {
+        "title": "Get Results",
+        "description": "Workflow completes with all data validated and context preserved. Every step executed in order.",
+        "icon": "tabler:circle-check"
+      }
+    }
+  },
+  "commonWorkflows": {
+    "title": "Common Workflows",
+    "subtitle": "Pre-built workflows for typical AI agent tasks",
+    "workflows": {
+      "softwareDevelopment": {
+        "title": "Software Development",
+        "description": "Full development cycle: requirements analysis, architecture design, implementation, testing, and deployment with validation at each stage.",
+        "steps": 7,
+        "icon": "tabler:code"
+      },
+      "productSelection": {
+        "title": "Product Selection",
+        "description": "Market research, feature comparison, price analysis, and recommendation generation for purchasing decisions.",
+        "steps": 5,
+        "icon": "tabler:shopping-cart"
+      },
+      "contentCreation": {
+        "title": "Content Creation",
+        "description": "Topic research, outline planning, draft writing, editing, and SEO optimization with quality gates.",
+        "steps": 5,
+        "icon": "tabler:book"
+      },
+      "researchPipeline": {
+        "title": "Research Pipeline",
+        "description": "Structured research process with source validation, competitor analysis, and report generation.",
+        "steps": 4,
+        "icon": "tabler:search"
+      },
+      "codeReview": {
+        "title": "Code Review",
+        "description": "Automated code review with security, performance, and quality checks validated before proceeding.",
+        "steps": 5,
+        "icon": "tabler:code-circle"
+      },
+      "dataAnalysis": {
+        "title": "Data Analysis",
+        "description": "Data validation, transformation, statistical analysis, and visualization with quality checks.",
+        "steps": 6,
+        "icon": "tabler:chart-line"
+      }
+    },
+    "stepsLabel": "steps"
+  },
+  "whatIsMoira": {
+    "title": "What is MCP Moira?",
+    "subtitle": "Agent Workflow Engine powered by MCP Protocol",
+    "items": {
+      "sequentialControl": {
+        "title": "Sequential Control",
+        "description": "Force step-by-step execution with control at each stage",
+        "icon": "tabler:arrow-right-circle"
+      },
+      "responseValidation": {
+        "title": "Response Validation",
+        "description": "JSON Schema validation before proceeding to next step",
+        "icon": "tabler:circle-check"
+      },
+      "stateManagement": {
+        "title": "State Management",
+        "description": "Automatic context tracking between steps",
+        "icon": "tabler:database"
+      },
+      "universalIntegration": {
+        "title": "Universal Integration",
+        "description": "Works with Claude Code, Cursor, VS Code and any MCP client",
+        "icon": "tabler:plug-connected"
+      }
+    },
+    "content": {
+      "paragraph1": "MCP Moira connects to any tool with MCP support in just a couple of clicks:",
+      "tools": {
+        "claudeCode": "Claude Code ✓",
+        "cursor": "Cursor ✓",
+        "vscode": "VS Code (via MCP extensions) ✓",
+        "custom": "Your custom tool ✓"
+      },
+      "tagline": "One server — multiple clients."
+    }
+  },
+  "features": {
+    "title": "Why Control Matters",
+    "subtitle": "Core capabilities that give you full control over AI agent behavior",
+    "items": {
+      "stepByStepControl": {
+        "title": "Step-by-Step Control",
+        "description": "Agent must complete each step properly before continuing. No uncontrolled execution.",
+        "icon": "tabler:timeline"
+      },
+      "responseValidation": {
+        "title": "Response Validation",
+        "description": "JSON Schema enforcement ensures agents return valid data structures every time.",
+        "icon": "tabler:shield-check"
+      },
+      "stateManagement": {
+        "title": "State Management",
+        "description": "Automatic context persistence between steps. State never gets lost.",
+        "icon": "tabler:database"
+      },
+      "retryLogic": {
+        "title": "Retry Logic",
+        "description": "Auto-retry failed validations with clear error messages to agent.",
+        "icon": "tabler:refresh"
+      },
+      "mcpNative": {
+        "title": "MCP Native",
+        "description": "Works with any MCP client. Not locked into one tool.",
+        "icon": "tabler:plug-connected"
+      },
+      "typeSafety": {
+        "title": "Type Safety",
+        "description": "Guaranteed data structures through JSON Schema validation.",
+        "icon": "tabler:code"
+      },
+      "notifications": {
+        "title": "Workflow Notifications",
+        "description": "Get notified when workflows complete. Telegram integration for real-time updates.",
+        "icon": "tabler:bell-ringing"
+      },
+      "readyTemplates": {
+        "title": "Ready-to-Use Templates",
+        "description": "Pre-built workflow templates. Agent handles technical details - you focus on results.",
+        "icon": "tabler:template"
+      }
+    }
+  },
+  "cta": {
+    "title": "Ready to Try It?",
+    "subtitle": "Stop micromanaging your AI agent. Let Moira handle the workflow.",
+    "actions": {
+      "getStarted": "Get Started",
+      "viewGitHub": "GitHub"
+    }
+  },
+  "betaBanner": {
+    "title": "Beta Version",
+    "message": "MCP Moira is currently in active development. Features may change without notice, data loss is possible during updates.",
+    "warning": "Some workflows may behave unexpectedly.",
+    "notice": "Not recommended for production-critical tasks.",
+    "closeLabel": "Close beta disclaimer"
+  },
+  "header": {
+    "links": {
+      "features": "Features",
+      "developers": "Developers",
+      "documentation": "Documentation",
+      "github": "GitHub"
+    },
+    "actions": {
+      "signIn": "Sign In",
+      "getStarted": "Get Started"
+    }
+  },
+  "footer": {
+    "sections": {
+      "product": {
+        "title": "Product",
+        "links": {
+          "features": "Features",
+          "openApp": "Open App"
+        }
+      },
+      "docs": {
+        "title": "Docs",
+        "links": {
+          "gettingStarted": "Getting Started",
+          "workflows": "Workflows",
+          "mcpProtocol": "MCP Protocol"
+        }
+      },
+      "support": {
+        "title": "Support",
+        "links": {
+          "discussions": "GitHub Discussions",
+          "reportIssue": "Report Issue",
+          "contact": "Contact"
+        }
+      }
+    },
+    "secondary": {
+      "terms": "Terms",
+      "privacy": "Privacy Policy"
+    },
+    "social": {
+      "githubLabel": "GitHub"
+    },
+    "footNote": "MCP Moira © 2025 • Agent Workflow Engine • Contact"
+  },
+  "telegramNotifications": {
+    "title": "Stay Informed via Telegram",
+    "subtitle": "Get notified when something needs your attention:",
+    "types": {
+      "decisionNeeded": {
+        "title": "Decision Needed",
+        "description": "Workflow paused — your input is required"
+      },
+      "stepCompleted": {
+        "title": "Step Completed",
+        "description": "Milestone reached — see the results"
+      },
+      "errorOccurred": {
+        "title": "Error Occurred",
+        "description": "Something went wrong — needs attention"
+      }
+    },
+    "example": {
+      "title": "Example notification:",
+      "workflow": "Development Flow",
+      "step": "Step 4/6 completed: Tests passed (42/42)",
+      "time": "Just now"
+    },
+    "tagline": "No more checking back. Moira tells you when it's done."
+  },
+  "faq": {
+    "title": "Frequently Asked Questions",
+    "items": {
+      "isFree": {
+        "question": "Is it free?",
+        "answer": "Yes. MCP Moira is free to use. We may introduce premium features in the future, but the core functionality will remain free."
+      },
+      "whatIsMcp": {
+        "question": "What is MCP?",
+        "answer": "MCP (Model Context Protocol) is a standard protocol for AI tools to connect to external services. It's already built into Cursor, Claude, ChatGPT, and other tools — no extra installation needed."
+      },
+      "needToCode": {
+        "question": "Do I need to code workflows?",
+        "answer": "No. You can use ready-made workflows, describe what you need in plain words, or customize existing templates. No programming required."
+      },
+      "betterThanPrompt": {
+        "question": "How is this better than a good prompt?",
+        "answer": "Prompts can be ignored or interpreted differently each time. Moira workflows have validation — the agent can't skip steps or produce wrong formats. Each step has success criteria that must be met before proceeding."
+      },
+      "howWorksWithCursor": {
+        "question": "How does it work with my Cursor/Claude?",
+        "answer": "Add one line to your settings (the MCP server URL). That's it. Your workflow stays the same — you just get more control over the agent's behavior."
+      },
+      "notDeveloper": {
+        "question": "I'm not a developer. Can I use Moira?",
+        "answer": "Yes. Workflows exist for research, content creation, project management. No coding required."
+      },
+      "createOwnWorkflow": {
+        "question": "Can I create my own workflow?",
+        "answer": "Yes. Three ways: start from a template and customize, describe what you need and let the agent create it, or build from scratch with full control over each step."
+      },
+      "setupTime": {
+        "question": "How long does setup take?",
+        "answer": "About 2 minutes. Add the server URL, authenticate once, and you're ready. No complex configuration or installation."
+      },
+      "agentMistake": {
+        "question": "What if the agent makes a mistake?",
+        "answer": "Two layers of protection: Schema validation ensures correct format, and Self-Review makes the agent check its own work. If issues are found, it fixes them before proceeding."
+      }
+    }
+  },
+  "developers": {
+    "metadata": {
+      "title": "Developers - MCP Moira | Agent Workflow Engine"
+    },
+    "hero": {
+      "tagline": "Built for AI Agents",
+      "title": "Agent workflow engine for AI agents",
+      "subtitle": "Define multi-step workflows with validation at every step. Your AI agent executes consistently, every time.",
+      "anchoring": "Think of it as CI/CD for AI agent tasks.",
+      "actions": {
+        "startBuilding": "Start Building",
+        "viewDocs": "View Docs"
+      }
+    },
+    "trustBar": {
+      "mcpNative": "MCP Protocol Native",
+      "openSource": "Open Source Workflows",
+      "jsonSchema": "JSON Schema Validation"
+    },
+    "terminal": {
+      "prompt1": "Start development workflow",
+      "output1": "Starting moira/software-development-flow-lite...",
+      "directive1": "Study project foundations",
+      "prompt2": "Project studied. Moving to planning...",
+      "directive2": "Create implementation plan",
+      "output2": "Plan created: 4 steps",
+      "prompt3": "Plan approved. Implementing step 1...",
+      "directive3": "Implement authentication layer",
+      "output3": "Step 1/4 complete. Tests: 42/42 passed",
+      "status": "Workflow: 25% complete"
+    },
+    "problem": {
+      "tagline": "The Problem",
+      "title": "What happens without structured workflows",
+      "items": {
+        "forgottenContext": {
+          "title": "Lost Context",
+          "description": "Long prompts that the agent forgets halfway through. Complex tasks break into pieces that never reconnect."
+        },
+        "noValidation": {
+          "title": "No Result Validation",
+          "description": "Agent says \"done\" but the code doesn't compile. No schema checks, no proof of completion."
+        },
+        "hallucinations": {
+          "title": "Hallucinated Results",
+          "description": "Agent invents files, functions, and test results that don't exist. Confident but wrong."
+        },
+        "incomplete": {
+          "title": "80% Done, 20% Forgotten",
+          "description": "Tests skipped. Documentation missing. Error handling ignored. The last mile never gets finished."
+        },
+        "reExplaining": {
+          "title": "Re-explaining Every Time",
+          "description": "Same process, different session. You explain the workflow from scratch because nothing persists."
+        },
+        "noControl": {
+          "title": "No Execution Control",
+          "description": "Agent skips steps, jumps ahead, takes shortcuts. No way to enforce a specific execution order."
+        }
+      }
+    },
+    "howItWorks": {
+      "tagline": "How It Works",
+      "title": "Three steps to structured execution",
+      "steps": {
+        "connect": {
+          "title": "Connect",
+          "description": "Add Moira as an MCP server to your AI agent. One config line in Claude Code, Cursor, or any MCP client."
+        },
+        "start": {
+          "title": "Start a Workflow",
+          "description": "Choose a workflow — built-in or custom. The engine loads the execution graph and begins step-by-step processing."
+        },
+        "execute": {
+          "title": "Agent Executes",
+          "description": "Each step has a clear directive and completion criteria. The agent works through the graph — validated, structured, complete."
+        }
+      }
+    },
+    "features": {
+      "tagline": "What You Get",
+      "title": "Built for Real Development Workflows",
+      "items": {
+        "autonomy": {
+          "title": "Agent Does the Work",
+          "description": "From planning to self-review. Define the task — get a working result. The workflow guides the agent through every phase: requirements → plan → implementation → tests → quality → review."
+        },
+        "validation": {
+          "title": "Hallucination Protection",
+          "description": "JSON Schema validation at every step. The agent cannot skip ahead — each response must match the expected structure. Completion conditions define what \"done\" actually means."
+        },
+        "codeQuality": {
+          "title": "Enforced Code Quality",
+          "description": "Mandatory code quality checks and agent self-validation. Bounded fix loops — if quality doesn't meet standards, the agent retries (up to 3 attempts), then escalates to you."
+        },
+        "testing": {
+          "title": "Automated Test Validation",
+          "description": "Test execution, failure analysis, and fix strategies — all inside the workflow. The agent doesn't just write code — it verifies that the code works."
+        },
+        "documentation": {
+          "title": "Docs and Tests Stay Current",
+          "description": "If your project has documentation and tests, the workflow includes their updates. The completion phase updates docs and generates a final report."
+        },
+        "gitWorkflow": {
+          "title": "Branch Isolation Built In",
+          "description": "Git workflow is part of the process — commits, PR creation, branch management. Everything is isolated from master until reviewed and approved."
+        },
+        "notifications": {
+          "title": "Telegram When You're Needed",
+          "description": "You don't sit in front of a screen. When the workflow needs your input — approve a plan, review code, resolve an issue — you get a Telegram notification."
+        }
+      }
+    },
+    "workflowShowcase": {
+      "tagline": "Production Workflows",
+      "title": "Ready-Made Development Workflows",
+      "subtitle": "Battle-tested workflows that cover the full software development lifecycle. Start using them today or customize to your needs.",
+      "tabs": {
+        "full": {
+          "label": "SDF Full",
+          "badge": "153 nodes",
+          "description": "Complete development workflow for features and complex tasks. Covers the entire lifecycle from requirements to deployment.",
+          "phases": {
+            "requirements": {
+              "name": "Requirements",
+              "description": "Gather requirements, study project, define task scope"
+            },
+            "planning": {
+              "name": "Planning",
+              "description": "Create plan + agent review + fix cycle (max 3 iterations)"
+            },
+            "approval": {
+              "name": "User Approval",
+              "description": "Review and approve the plan before implementation"
+            },
+            "implementation": {
+              "name": "Implementation",
+              "description": "Step-by-step execution with progress tracking"
+            },
+            "testing": {
+              "name": "Testing",
+              "description": "Run tests → analyze failures → fix strategy"
+            },
+            "quality": {
+              "name": "Code Quality",
+              "description": "Quality check + self-validation with bounded fix loops"
+            },
+            "browser": {
+              "name": "Browser Testing",
+              "description": "UI testing in browser (when applicable)"
+            },
+            "review": {
+              "name": "User Review",
+              "description": "Final review by developer with approval/rejection"
+            },
+            "completion": {
+              "name": "Completion",
+              "description": "Report, documentation update, notifications"
+            }
+          }
+        },
+        "lite": {
+          "label": "SDF Lite",
+          "badge": "42 nodes",
+          "description": "Streamlined workflow for quick tasks and smaller changes. Same quality guarantees, fewer ceremony steps.",
+          "phases": {
+            "requirements": {
+              "name": "Requirements",
+              "description": "Quick task definition and scope"
+            },
+            "planning": {
+              "name": "Planning",
+              "description": "Create plan with agent review"
+            },
+            "approval": {
+              "name": "User Approval",
+              "description": "Approve plan before work begins"
+            },
+            "implementation": {
+              "name": "Implementation",
+              "description": "Execute with progress tracking"
+            },
+            "testing": {
+              "name": "Testing",
+              "description": "Run and validate tests"
+            },
+            "quality": {
+              "name": "Code Quality",
+              "description": "Quality check and self-validation"
+            },
+            "review": {
+              "name": "Review & Commit",
+              "description": "Agent validation, commit, user review"
+            },
+            "completion": {
+              "name": "Completion",
+              "description": "Report and notifications"
+            }
+          }
+        }
+      },
+      "stats": {
+        "totalNodes": "Total Nodes",
+        "agentDirectives": "Agent Directives",
+        "conditions": "Condition Nodes",
+        "telegramAlerts": "Telegram Alerts",
+        "variables": "Workflow Variables"
+      },
+      "comparison": "Detailed comparison",
+      "docs": "Workflow documentation"
+    },
+    "gettingStarted": {
+      "tagline": "Quick Start",
+      "title": "Start in 3 Steps",
+      "steps": {
+        "connect": {
+          "title": "Connect MCP Server",
+          "description": "Add Moira as an MCP server in your AI client. One URL, OAuth authentication.",
+          "code": "# Claude Code (CLI)\nclaude mcp add moira https://{host}/mcp\n\n# Cursor / VS Code (settings.json)\n{\n  \"mcpServers\": {\n    \"moira\": {\n      \"url\": \"https://{host}/mcp\"\n    }\n  }\n}"
+        },
+        "start": {
+          "title": "Start a Workflow",
+          "description": "Tell your AI agent to start any workflow. Moira handles the rest.",
+          "code": "# In any MCP-compatible AI client:\n> Start the software development workflow\n  for issue #42\n\n# Agent calls:\nmcp__moira__start({\n  workflowId: \"moira/software-development-flow\",\n  parentExecutionId: \"none\"\n})"
+        },
+        "execute": {
+          "title": "Follow the Workflow",
+          "description": "Agent receives step-by-step directives with success criteria. Each step validated before proceeding.",
+          "code": "# Moira returns:\n{\n  \"directive\": \"Implement the feature\n    according to the approved plan\",\n  \"completionCondition\": \"All tests pass,\n    code follows project patterns\",\n  \"inputSchema\": { ... }\n}\n\n# Agent works → submits result\nmcp__moira__step({\n  processId: \"abc-123\",\n  input: { ... }\n})"
+        }
+      }
+    },
+    "customWorkflows": {
+      "tagline": "Extensible",
+      "title": "Build Your Own Workflows",
+      "subtitle": "Ready-made workflows are the starting point. Create custom workflows for your team's specific processes.",
+      "items": {
+        "webEditor": {
+          "title": "Visual Web Editor",
+          "description": "Create and edit workflows through the web interface. Node-graph editor with real-time validation."
+        },
+        "jsonFirst": {
+          "title": "JSON-first Design",
+          "description": "Workflows are JSON files. Version control, code review, CI/CD — standard developer workflow applies."
+        },
+        "templateVars": {
+          "title": "Template Variables",
+          "description": "Use {{variable}} syntax in directives and conditions. Context flows between steps automatically."
+        },
+        "schemaValidation": {
+          "title": "Schema Validation",
+          "description": "JSON Schema on every step input/output. Agent responses validated before workflow proceeds."
+        }
+      }
+    },
+    "useCases": {
+      "tagline": "Real-world Applications",
+      "title": "What Developers Build",
+      "items": {
+        "featureDev": {
+          "title": "Automated Feature Development",
+          "description": "Full cycle: issue analysis → planning → implementation → testing → code review → commit. With quality gates at each phase."
+        },
+        "codeReview": {
+          "title": "Structured Code Review",
+          "description": "Automated review with BLOCKING/MAJOR/MINOR classification. Consistent criteria across all PRs, no reviewer fatigue."
+        },
+        "bugFix": {
+          "title": "Bug Fixing with Root Cause Analysis",
+          "description": "Reproduce → diagnose root cause → implement fix → verify no regression. Prevents band-aid fixes."
+        },
+        "documentation": {
+          "title": "Documentation Generation",
+          "description": "Extract API docs from code, generate guides from usage patterns, keep docs in sync with implementation."
+        },
+        "research": {
+          "title": "Research with Iterative Improvement",
+          "description": "Source verification, cross-referencing, quality scoring. Multiple iterations until research meets quality threshold."
+        }
+      }
+    },
+    "socialProof": {
+      "tagline": "What Developers Say",
+      "title": "Built by developers, for developers",
+      "testimonials": {
+        "t1": {
+          "name": "Alex K.",
+          "role": "Senior Backend Engineer",
+          "text": "Moira turned our chaotic prompt engineering into repeatable workflows. Code review consistency went from random to reliable."
+        },
+        "t2": {
+          "name": "Sarah M.",
+          "role": "DevOps Lead",
+          "text": "The JSON-first approach means I can version control my workflows. Schema validation catches agent mistakes before they reach production."
+        },
+        "t3": {
+          "name": "Chen W.",
+          "role": "Full Stack Developer",
+          "text": "Three steps to get started, and it actually works. No sign-up wall, no sales call. Just MCP connect and go."
+        }
+      }
+    },
+    "finalCta": {
+      "title": "Ready to Build?",
+      "subtitle": "Stop micromanaging your AI agent. Define the workflow once, execute it consistently every time.",
+      "actions": {
+        "startBuilding": "Start Building",
+        "viewDocs": "View Docs"
+      }
+    }
+  }
+}

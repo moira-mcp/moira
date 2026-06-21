@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "moira-dev": {
+      "type": "http",
+      "url": "http://localhost:3031/mcp",
+      "tools": ["*"]
+    }
+  }
+}

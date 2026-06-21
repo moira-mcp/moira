@@ -1,0 +1,1845 @@
+{
+  "settings": {
+    "editFullscreen": "Редактировать на весь экран",
+    "history": "История",
+    "reset": "Сбросить",
+    "setting": "настройка",
+    "settings": "настроек",
+    "inheritance": {
+      "default": "По умолчанию",
+      "agent": "Переопределение агента",
+      "model": "Переопределение модели",
+      "inactive": "Неактивно (используется значение по умолчанию)"
+    }
+  },
+  "auth": {
+    "SIGN_IN": "Войти",
+    "SIGN_IN_ACTION": "Войти",
+    "SIGN_UP": "Зарегистрироваться",
+    "SIGN_UP_ACTION": "Создать аккаунт",
+    "SIGN_IN_DESCRIPTION": "Введите ваш email и пароль для входа",
+    "SIGN_UP_DESCRIPTION": "Создайте аккаунт, чтобы начать",
+    "SIGN_OUT": "Выйти",
+    "OR_CONTINUE_WITH": "Или продолжить с",
+    "SIGN_IN_WITH": "Войти через",
+    "EMAIL": "Email",
+    "EMAIL_PLACEHOLDER": "your@email.com",
+    "EMAIL_REQUIRED": "Необходимо указать email",
+    "PASSWORD": "Пароль",
+    "PASSWORD_PLACEHOLDER": "Пароль",
+    "PASSWORD_REQUIRED": "Необходимо указать пароль",
+    "FORGOT_PASSWORD": "Забыли пароль?",
+    "FORGOT_PASSWORD_LINK": "Забыли пароль?",
+    "FORGOT_PASSWORD_ACTION": "Отправить ссылку",
+    "FORGOT_PASSWORD_DESCRIPTION": "Введите ваш email, чтобы получить ссылку для сброса пароля",
+    "FORGOT_PASSWORD_EMAIL": "Проверьте вашу почту для ссылки на сброс пароля",
+    "RESET_PASSWORD": "Сброс пароля",
+    "RESET_PASSWORD_ACTION": "Сохранить новый пароль",
+    "RESET_PASSWORD_DESCRIPTION": "Введите ваш новый пароль ниже",
+    "RESET_PASSWORD_SUCCESS": "Пароль успешно сброшен",
+    "SEND_RESET_LINK": "Отправить ссылку",
+    "NEW_PASSWORD": "Новый пароль",
+    "NEW_PASSWORD_PLACEHOLDER": "Введите новый пароль",
+    "NEW_PASSWORD_REQUIRED": "Необходимо указать новый пароль",
+    "CONFIRM_PASSWORD": "Подтвердите пароль",
+    "CONFIRM_PASSWORD_PLACEHOLDER": "Подтвердите пароль",
+    "CONFIRM_PASSWORD_REQUIRED": "Необходимо подтвердить пароль",
+    "PASSWORDS_DO_NOT_MATCH": "Пароли не совпадают",
+    "SET_PASSWORD": "Установить пароль",
+    "DONT_HAVE_AN_ACCOUNT": "Нет аккаунта?",
+    "ALREADY_HAVE_AN_ACCOUNT": "Уже есть аккаунт?",
+    "CONTINUE": "Продолжить",
+    "CANCEL": "Отмена",
+    "GO_BACK": "Назад",
+    "REMEMBER_ME": "Запомнить меня"
+  },
+  "signUpForm": {
+    "acceptTerms": "Я принимаю",
+    "termsOfService": "Условия использования",
+    "and": "и",
+    "privacyPolicy": "Политику конфиденциальности",
+    "confirmNotRussianResident": "Я подтверждаю, что не являюсь резидентом Российской Федерации"
+  },
+  "layout": {
+    "sidebar": {
+      "collapse": "Свернуть боковую панель",
+      "expand": "Развернуть боковую панель",
+      "show": "Показать боковую панель"
+    },
+    "nav": {
+      "home": "Главная",
+      "workflows": "Воркфлоу",
+      "executions": "Запуски",
+      "notes": "Заметки",
+      "artifacts": "Артефакты",
+      "settings": "Настройки",
+      "docs": "Документация",
+      "admin": "Админка"
+    },
+    "adminNav": {
+      "dashboard": "Панель",
+      "analytics": "Аналитика",
+      "users": "Пользователи",
+      "executions": "Запуски",
+      "artifacts": "Артефакты",
+      "auditLog": "Журнал аудита",
+      "settingsManager": "Менеджер настроек",
+      "globalSettings": "Глобальные настройки",
+      "mcpPrompts": "MCP промпты",
+      "deletedWorkflows": "Удалённые воркфлоу",
+      "workflows": "Воркфлоу",
+      "monitoringTest": "Тест мониторинга",
+      "backToApp": "Назад в приложение",
+      "tokens": "API Токены",
+      "operational": "Операционные",
+      "reportedArtifacts": "Жалобы на артефакты"
+    },
+    "userMenu": {
+      "user": "Пользователь",
+      "theme": "Тема",
+      "language": "Язык",
+      "settings": "Настройки",
+      "logout": "Выход"
+    },
+    "languages": {
+      "en": "Английский",
+      "ru": "Русский"
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Панель управления",
+      "loading": "Загрузка данных...",
+      "error": "Не удалось загрузить данные панели",
+      "failedToLoad": "Ошибка загрузки данных",
+      "retry": "Повторить",
+      "stats": {
+        "totalWorkflows": "Всего воркфлоу",
+        "executions": "Запуски",
+        "notes": "Заметки",
+        "clickToView": "Нажмите для просмотра →",
+        "clickToConfigure": "Нажмите для настройки →"
+      },
+      "quickStart": {
+        "title": "Быстрый старт",
+        "description": "Добавьте MCP Moira в ваш AI-ассистент. Выберите клиент:",
+        "copy": "Копировать",
+        "copied": "Скопировано!",
+        "learnMore": "Нужна помощь?",
+        "documentation": "Читать документацию",
+        "clients": {
+          "claude-web": {
+            "description": "1. Откройте claude.ai → Настройки → Коннекторы\n2. Нажмите \"Add custom connector\"\n3. Введите URL сервера и нажмите \"Connect\"\n4. Завершите OAuth в браузере\n\nТребуется тариф Pro/Max/Team/Enterprise."
+          },
+          "chatgpt": {
+            "description": "1. Откройте chat.openai.com → Настройки → Коннекторы\n2. Нажмите \"Add connector\"\n3. Введите имя \"MCP Moira\" и URL сервера\n4. Завершите OAuth-аутентификацию\n\nТребуется тариф Plus или Pro."
+          },
+          "claude-code": {
+            "authIntro": "Затем авторизуйтесь в MCP Moira:",
+            "authContent": "Браузер откроется для OAuth-авторизации.\nАвторизуйтесь и вернитесь в терминал.",
+            "alternativeTitle": "Альтернатива: ручная настройка"
+          },
+          "claude-desktop": {
+            "description": "1. Откройте Настройки (⌘+,) → вкладка Connectors\n2. Нажмите \"Add custom connector\"\n3. Введите URL сервера и нажмите \"Connect\"\n4. Браузер откроется для OAuth → Готово\n\nРедактировать файлы не нужно."
+          },
+          "cursor": {
+            "deeplinkButton": "Добавить в Cursor",
+            "authIntro": "Затем авторизуйтесь в MCP Moira:",
+            "authContent": "Браузер откроется для OAuth-авторизации.\nАвторизуйтесь и вернитесь в Cursor.",
+            "alternativeTitle": "Альтернатива: ручная настройка"
+          },
+          "vscode": {
+            "deeplinkButton": "Добавить в VS Code",
+            "authIntro": "Затем авторизуйтесь в MCP Moira:",
+            "authContent": "Браузер откроется для OAuth-авторизации.\nАвторизуйтесь и вернитесь в VS Code.",
+            "alternativeTitle": "Альтернатива: ручная настройка"
+          },
+          "perplexity": {
+            "description": "1. Установите PerplexityXPC хелпер (Настройки → Connectors → Install Helper)\n2. Нажмите \"Add Connector\"\n3. Введите имя сервера и MCP-команду\n4. Завершите OAuth-аутентификацию\n\nРекомендуется платный тариф. Использует мост mcp-remote."
+          },
+          "continue": {},
+          "copilot-cli": {
+            "authIntro": "После сохранения конфигурации авторизуйтесь:",
+            "authContent": "1. Запустите сессию Copilot CLI\n2. Введите /mcp\n3. Выберите \"moira\" → Authenticate\n→ Откроется браузер для OAuth",
+            "alternativeTitle": "Альтернатива: интерактивная настройка /mcp"
+          },
+          "zed": {},
+          "gemini-cli": {}
+        }
+      },
+      "recentWorkflows": {
+        "title": "Недавние воркфлоу",
+        "empty": "Воркфлоу пока нет. Создайте первый воркфлоу, чтобы начать!"
+      },
+      "recentExecutions": {
+        "title": "Недавние запуски",
+        "empty": "Запусков пока нет. Запустите воркфлоу, чтобы увидеть историю!",
+        "execution": "Запуск",
+        "workflow": "Воркфлоу"
+      },
+      "time": {
+        "justNow": "Только что",
+        "minutesAgo": "{{count}} мин. назад",
+        "hoursAgo": "{{count}} ч. назад",
+        "daysAgo": "{{count}} д. назад",
+        "running": "Выполняется..."
+      }
+    },
+    "workflows": {
+      "title": "Воркфлоу",
+      "subtitle": "Просмотр и управление воркфлоу",
+      "explorer": {
+        "title": "Обозреватель воркфлоу",
+        "workflows": "Воркфлоу",
+        "loading": "Загрузка...",
+        "failedToLoad": "Не удалось загрузить воркфлоу",
+        "retry": "Повторить",
+        "noWorkflows": "Воркфлоу не найдены",
+        "noMatch": "Нет воркфлоу, соответствующих фильтрам",
+        "statistics": "Статистика",
+        "valid": "валидных",
+        "invalid": "невалидных",
+        "of": "из",
+        "resultsCount": "Найдено воркфлоу: {{count}}",
+        "sortBy": "Сортировка",
+        "sortByDate": "Дата",
+        "sortByName": "Имя",
+        "newest": "Новые",
+        "oldest": "Старые",
+        "page": "Страница"
+      },
+      "time": {
+        "today": "Сегодня",
+        "yesterday": "Вчера",
+        "daysAgo": "{{count}} дн. назад"
+      },
+      "confirmDelete": "Удалить воркфлоу \"{{name}}\"?"
+    },
+    "workflowDetail": {
+      "backToWorkflows": "← Назад к воркфлоу",
+      "deleteWorkflow": "Удалить воркфлоу",
+      "confirmDelete": "Удалить этот воркфлоу?",
+      "toggleVisibility": "Нажмите чтобы изменить видимость воркфлоу",
+      "useAsTemplate": "Использовать как шаблон",
+      "copyingWorkflow": "Создание копии...",
+      "copySuccess": "Воркфлоу успешно скопирован",
+      "hideSidebar": "Скрыть панель",
+      "showSidebar": "Показать панель",
+      "share": "Поделиться",
+      "sharing": {
+        "title": "Поделиться воркфлоу",
+        "description": "Поделитесь этим воркфлоу с другими, создав ссылку-приглашение",
+        "tabs": {
+          "invites": "Ссылки-приглашения",
+          "access": "Пользователи с доступом"
+        },
+        "generateInvite": "Создать ссылку",
+        "generating": "Создание...",
+        "inviteGenerated": "Ссылка создана",
+        "copyLink": "Копировать",
+        "copied": "Скопировано!",
+        "revoke": "Отозвать",
+        "revoking": "Отзыв...",
+        "noInvites": "Нет активных ссылок-приглашений",
+        "noAccess": "Пока нет пользователей с общим доступом",
+        "expiresIn": "Истекает через {{time}}",
+        "expired": "Истекло",
+        "used": "Использовано {{handle}}",
+        "grantedBy": "Предоставил {{handle}}",
+        "grantedAt": "Предоставлено {{time}}",
+        "confirmRevoke": "Отозвать эту ссылку-приглашение?",
+        "confirmRevokeAccess": "Отозвать доступ для {{name}}?",
+        "loadingInvites": "Загрузка приглашений...",
+        "loadingAccess": "Загрузка списка доступа...",
+        "revokeSuccess": "Успешно отозвано",
+        "revokeError": "Не удалось отозвать",
+        "revokeInvite": "Отозвать приглашение",
+        "revokeAccess": "Отозвать доступ",
+        "generateError": "Не удалось создать приглашение",
+        "clipboardError": "Не удалось скопировать в буфер обмена"
+      }
+    },
+    "inviteAccept": {
+      "title": "Приглашение к воркфлоу",
+      "loading": "Загрузка данных приглашения...",
+      "notFound": "Приглашение не найдено",
+      "notFoundDescription": "Эта ссылка недействительна или была отозвана",
+      "expired": "Приглашение истекло",
+      "expiredDescription": "Срок действия этой ссылки истёк",
+      "used": "Приглашение уже использовано",
+      "usedDescription": "Эта ссылка уже была использована",
+      "valid": "Вас пригласили!",
+      "validDescription": "{{handle}} приглашает вас получить доступ к воркфлоу",
+      "workflowName": "Воркфлоу",
+      "expiresAt": "Истекает",
+      "loginRequired": "Войдите, чтобы принять приглашение",
+      "signIn": "Войти",
+      "accept": "Принять приглашение",
+      "accepting": "Принятие...",
+      "acceptSuccess": "Доступ предоставлен! Перенаправление к воркфлоу...",
+      "acceptError": "Не удалось принять приглашение",
+      "selfInvite": "Вы не можете принять своё собственное приглашение",
+      "alreadyHaveAccess": "У вас уже есть доступ к этому воркфлоу",
+      "goToWorkflow": "Перейти к воркфлоу",
+      "backToDashboard": "На главную"
+    },
+    "notes": {
+      "title": "Заметки",
+      "subtitle": "Управление постоянными заметками для воркфлоу",
+      "loading": "Загрузка заметок...",
+      "retry": "Повторить",
+      "noNotes": "Заметок пока нет. Создайте первую заметку!",
+      "noResults": "Нет заметок по вашим фильтрам",
+      "resultsCount": "Найдено заметок: {{count}}",
+      "filters": {
+        "searchPlaceholder": "Поиск по ключу...",
+        "tag": "Тег"
+      },
+      "table": {
+        "key": "Ключ",
+        "tags": "Теги",
+        "preview": "Превью",
+        "size": "Размер",
+        "updated": "Обновлено",
+        "actions": "Действия"
+      },
+      "pagination": {
+        "showing": "Показано {{from}}-{{to}} из {{total}}",
+        "page": "{{current}} / {{total}}",
+        "previous": "Назад",
+        "next": "Далее"
+      },
+      "quota": {
+        "used": "Использовано",
+        "usedPercent": "занято"
+      },
+      "actions": {
+        "create": "Новая заметка",
+        "edit": "Редактировать",
+        "delete": "Удалить",
+        "history": "История"
+      },
+      "delete": {
+        "title": "Удаление заметки",
+        "description": "Вы уверены, что хотите удалить заметку \"{{key}}\"? Это действие можно отменить."
+      },
+      "editor": {
+        "titleCreate": "Создать заметку",
+        "titleEdit": "Редактировать заметку",
+        "descriptionCreate": "Создайте новую заметку с уникальным ключом",
+        "descriptionEdit": "Редактирование содержимого и тегов заметки",
+        "key": "Ключ",
+        "keyPlaceholder": "my-note-key",
+        "keyHint": "1-100 символов. Только буквы, цифры, подчёркивания и дефисы.",
+        "keyRequired": "Ключ обязателен",
+        "keyTooLong": "Ключ должен быть не более 100 символов",
+        "keyInvalidFormat": "Ключ может содержать только буквы, цифры, подчёркивания и дефисы",
+        "tags": "Теги",
+        "tagPlaceholder": "Добавить тег...",
+        "tagsHint": "{{count}}/{{max}} тегов. Нажмите Enter для добавления.",
+        "content": "Содержимое",
+        "contentPlaceholder": "Введите содержимое заметки...",
+        "contentTooLarge": "Содержимое превышает максимальный размер 100 КБ",
+        "preview": "Превью",
+        "edit": "Редактировать",
+        "noContent": "Нет содержимого для превью",
+        "version": "v{{version}}",
+        "currentVersion": "Текущая",
+        "olderVersion": "Просмотр v{{version}} (только чтение)",
+        "restoreVersion": "Восстановить",
+        "restoreConfirmTitle": "Восстановить версию",
+        "restoreConfirmDescription": "Будет создана новая версия с содержимым v{{version}}. Текущее содержимое не будет удалено.",
+        "compareVersions": "Сравнить",
+        "newNoteCard": "Новая заметка",
+        "newNoteHint": "Нажмите для создания новой заметки"
+      },
+      "history": {
+        "title": "История версий",
+        "description": "История версий заметки \"{{key}}\"",
+        "noVersions": "История версий недоступна",
+        "versions": "Версии",
+        "version": "Версия",
+        "current": "текущая",
+        "content": "Содержимое",
+        "selectVersion": "Выберите версию для просмотра содержимого",
+        "noContent": "Не удалось загрузить содержимое",
+        "diff": "Изменения",
+        "diffDescription": "Изменения от v{{from}} к v{{to}}",
+        "restore": "Восстановить",
+        "restoreTitle": "Восстановить версию",
+        "restoreDescription": "Будет создана новая версия с содержимым версии {{version}}. Текущая версия не будет удалена."
+      }
+    },
+    "artifacts": {
+      "title": "Артефакты",
+      "subtitle": "Управление HTML артефактами для публикации",
+      "loading": "Загрузка артефактов...",
+      "retry": "Повторить",
+      "noArtifacts": "Артефактов пока нет. Создайте первый артефакт!",
+      "resultsCount": "Найдено артефактов: {{count}}",
+      "table": {
+        "name": "Название",
+        "size": "Размер",
+        "created": "Создан",
+        "expires": "Истекает",
+        "actions": "Действия"
+      },
+      "pagination": {
+        "showing": "Показано {{from}}-{{to}} из {{total}}",
+        "page": "{{current}} / {{total}}",
+        "previous": "Назад",
+        "next": "Далее"
+      },
+      "quota": {
+        "storage": "Использовано",
+        "artifacts": "артефактов"
+      },
+      "actions": {
+        "create": "Новый артефакт",
+        "edit": "Редактировать",
+        "delete": "Удалить",
+        "preview": "Превью",
+        "copyUrl": "Копировать URL",
+        "copied": "Скопировано!",
+        "openInNewTab": "Открыть в новой вкладке"
+      },
+      "delete": {
+        "title": "Удаление артефакта",
+        "description": "Вы уверены, что хотите удалить артефакт \"{{name}}\"? Это действие нельзя отменить."
+      },
+      "editor": {
+        "titleCreate": "Создать артефакт",
+        "titleEdit": "Редактировать артефакт",
+        "descriptionCreate": "Создайте новый HTML артефакт для публикации",
+        "descriptionEdit": "Редактирование артефакта: {{name}}",
+        "name": "Название",
+        "namePlaceholder": "report.html",
+        "content": "HTML содержимое",
+        "contentPlaceholder": "<!DOCTYPE html>\n<html>\n<head>\n  <title>Мой отчёт</title>\n</head>\n<body>\n  <h1>Привет мир</h1>\n</body>\n</html>",
+        "contentHint": "HTML содержимое должно включать тег <html>",
+        "nameAndContentRequired": "Название и содержимое обязательны",
+        "contentRequired": "Содержимое обязательно",
+        "mustContainHtml": "Содержимое должно содержать тег <html>",
+        "loadingContent": "Загрузка содержимого...",
+        "loadError": "Не удалось загрузить содержимое артефакта"
+      }
+    },
+    "executions": {
+      "title": "Запуски",
+      "subtitle": "История запусков ваших воркфлоу",
+      "loading": "Загрузка запусков...",
+      "retry": "Повторить",
+      "noExecutions": "Запусков пока нет",
+      "noResults": "Нет запусков по вашим фильтрам",
+      "resultsCount": "Найдено запусков: {{count}}",
+      "filters": {
+        "searchPlaceholder": "Поиск по заметке...",
+        "status": "Статус",
+        "allStatuses": "Все статусы",
+        "active": "Активные",
+        "workflow": "Воркфлоу",
+        "allWorkflows": "Все воркфлоу",
+        "sortByCreated": "Создан",
+        "sortByUpdated": "Обновлён",
+        "newest": "Новые",
+        "oldest": "Старые"
+      },
+      "table": {
+        "executionId": "ID запуска",
+        "note": "Заметка",
+        "workflow": "Воркфлоу",
+        "status": "Статус",
+        "currentNode": "Текущий узел",
+        "created": "Создан",
+        "updated": "Обновлён"
+      },
+      "pagination": {
+        "showing": "{{from}}-{{to}} из {{total}}",
+        "page": "{{current}} / {{total}}",
+        "previous": "Назад",
+        "next": "Далее"
+      }
+    },
+    "executionInspector": {
+      "loading": "Загрузка запуска...",
+      "notFound": "Запуск не найден",
+      "backToExecutions": "Назад к запускам",
+      "back": "Назад к запускам",
+      "execution": "Запуск",
+      "workflow": "Воркфлоу",
+      "owner": "Владелец",
+      "selected": "Выбран",
+      "current": "Текущий",
+      "clearSelection": "Сбросить выбор",
+      "toolbar": {
+        "copyId": "Копировать ID запуска",
+        "copied": "Скопировано!",
+        "focusNode": "Перейти к текущему узлу",
+        "context": "Просмотр контекста",
+        "refresh": "Обновить",
+        "fullscreen": "На весь экран",
+        "lock": "Заблокировать"
+      },
+      "tabs": {
+        "context": "Контекст",
+        "errors": "Ошибки",
+        "steps": "Шаги",
+        "locks": "Блокировки"
+      },
+      "locks": {
+        "noHistory": "Нет истории блокировок для этого запуска",
+        "node": "Узел:",
+        "enterPin": "Введите PIN",
+        "submit": "Отправить",
+        "unlock": "Разблокировать",
+        "pinHint": "Передайте этот PIN агенту для разблокировки",
+        "created": "Создан:",
+        "unlocked": "Разблокирован:"
+      },
+      "context": {
+        "title": "Контекст выполнения",
+        "saving": "Сохранение...",
+        "fullscreen": "На весь экран",
+        "close": "Закрыть",
+        "editor": "Редактор контекста выполнения",
+        "editingNote": "Редактирование контекста доступно только для статусов running/waiting",
+        "save": "Сохранить",
+        "saveFailed": "Не удалось сохранить контекст",
+        "unsaved": "Не сохранено",
+        "filterPlaceholder": "Фильтр переменных...",
+        "filterField": {
+          "both": "Все",
+          "key": "Имя",
+          "value": "Значение"
+        },
+        "empty": "Нет переменных контекста",
+        "noMatches": "Нет переменных по фильтру",
+        "globalSection": "Глобальные переменные",
+        "nodeLocalSection": "Выходы нод",
+        "invalidJson": "Некорректный JSON",
+        "clickToEdit": "Нажмите для редактирования",
+        "emptyValue": "(пусто)",
+        "editLong": "Открыть в большом редакторе"
+      },
+      "errors": {
+        "title": "Ошибки"
+      },
+      "steps": {
+        "noSteps": "Шаги недоступны",
+        "current": "Текущий"
+      },
+      "lockDialog": {
+        "title": "Заблокировать выполнение",
+        "description": "Блокировка приостановит выполнение. Укажите причину блокировки.",
+        "reasonPlaceholder": "Причина блокировки...",
+        "confirm": "Заблокировать",
+        "success": "Выполнение заблокировано",
+        "successMessage": "Выполнение заблокировано. Поделитесь PIN-кодом с агентом для разблокировки."
+      }
+    },
+    "settings": {
+      "title": "Настройки",
+      "loading": "Загрузка настроек...",
+      "required": "обязательное поле",
+      "validation": {
+        "mustBeOneOf": "Должно быть одним из: {{values}}",
+        "minLength": "Минимальная длина: {{length}}",
+        "maxLength": "Максимальная длина: {{length}}"
+      },
+      "enable": "Включить",
+      "telegram": {
+        "testNotification": "Тестовое уведомление",
+        "sending": "Отправка...",
+        "testDescription": "Отправить тестовое сообщение для проверки конфигурации Telegram",
+        "setupGuide": "Нужна помощь с настройкой? См.",
+        "setupGuideLink": "Руководство по настройке Telegram",
+        "configureBotFirst": "Сначала настройте Bot Token и Chat ID",
+        "testSuccess": "Тестовое уведомление успешно отправлено",
+        "testFailed": "Не удалось отправить тестовое уведомление",
+        "errors": {
+          "invalid_token": "Токен бота недействителен. Получите новый токен у @BotFather.",
+          "invalid_chat_id": "Чат не найден. Сначала отправьте любое сообщение вашему боту, затем попробуйте снова.",
+          "network_error": "Не удалось подключиться к Telegram. Проверьте интернет-соединение.",
+          "rate_limit_exceeded": "Слишком много запросов. Подождите немного и попробуйте снова.",
+          "timeout_error": "Время ожидания ответа от Telegram истекло. Попробуйте снова.",
+          "message_too_long": "Тестовое сообщение слишком длинное.",
+          "template_error": "Ошибка шаблона сообщения. Проверьте конфигурацию.",
+          "api_error": "Ошибка API Telegram. Проверьте конфигурацию."
+        }
+      },
+      "saveChanges": "Сохранить изменения",
+      "saving": "Сохранение...",
+      "cancel": "Отмена",
+      "noSettings": "В этой категории нет настроек",
+      "editFullscreen": "Редактировать на весь экран",
+      "history": "История",
+      "setting": "настройка",
+      "settings": "настройки",
+      "saveSuccess": "Настройки успешно сохранены",
+      "saveFailed": "Не удалось сохранить настройки",
+      "fixErrors": "Исправьте ошибки валидации перед сохранением",
+      "tabs": {
+        "profile": "Профиль",
+        "security": "Безопасность",
+        "oauth": "OAuth авторизации",
+        "sessions": "Активные сессии",
+        "notifications": "Уведомления",
+        "connections": "Подключения и сессии",
+        "settings": "Настройки",
+        "apiTokens": "API Токены"
+      },
+      "profile": {
+        "title": "Информация профиля",
+        "name": "Имя",
+        "namePlaceholder": "Ваше имя",
+        "email": "Email",
+        "verified": "Подтверждён",
+        "notVerified": "Не подтверждён",
+        "memberSince": "Участник с",
+        "saveChanges": "Сохранить изменения",
+        "saving": "Сохранение...",
+        "updateSuccess": "Профиль успешно обновлён!",
+        "nameMaxLength": "Имя должно быть короче 100 символов",
+        "verificationWarning": "Ваш email не подтверждён. Проверьте почту и перейдите по ссылке для подтверждения.",
+        "resendVerification": "Отправить письмо повторно",
+        "sendingVerification": "Отправка...",
+        "verificationSent": "Письмо отправлено!",
+        "handleTitle": "Имя пользователя (Handle)",
+        "handle": "Handle",
+        "handlePlaceholder": "ваш-handle",
+        "handleHint": "3-30 символов. Только строчные буквы, цифры и дефисы. Не может начинаться или заканчиваться дефисом.",
+        "handleWarningTitle": "Внимание:",
+        "handleWarningText": "Ваш handle отображается во всех URL воркфлоу (например, ваш-handle/название-воркфлоу). Изменение приведёт к недействительности существующих ссылок.",
+        "handleLengthError": "Handle должен быть от 3 до 30 символов",
+        "handleFormatError": "Handle может содержать только строчные буквы, цифры и дефисы. Не может начинаться или заканчиваться дефисом.",
+        "handleChangeWarning": "Вы уверены, что хотите изменить handle с «{{currentHandle}}» на «{{handle}}»? Это изменит все URL ваших воркфлоу.",
+        "handleUpdateSuccess": "Handle успешно обновлён!",
+        "changeHandle": "Изменить Handle",
+        "savingHandle": "Сохранение..."
+      },
+      "security": {
+        "title": "Безопасность",
+        "currentPassword": "Текущий пароль",
+        "currentPasswordPlaceholder": "Введите текущий пароль",
+        "newPassword": "Новый пароль",
+        "newPasswordPlaceholder": "Введите новый пароль (мин. 6 символов)",
+        "confirmPassword": "Подтвердите пароль",
+        "confirmPasswordPlaceholder": "Подтвердите новый пароль",
+        "changePassword": "Изменить пароль",
+        "changingPassword": "Изменение...",
+        "passwordSuccess": "Пароль успешно изменён!",
+        "passwordStrength": "Надёжность пароля:",
+        "strength": {
+          "tooShort": "Слишком короткий",
+          "fair": "Средний",
+          "good": "Хороший",
+          "strong": "Надёжный"
+        },
+        "errors": {
+          "allRequired": "Все поля обязательны",
+          "minLength": "Новый пароль должен быть не менее 6 символов",
+          "maxLength": "Новый пароль должен быть не более 128 символов",
+          "noMatch": "Пароли не совпадают",
+          "samePassword": "Новый пароль должен отличаться от текущего"
+        }
+      },
+      "oauth": {
+        "title": "OAuth авторизации",
+        "loading": "Загрузка OAuth разрешений...",
+        "noConsents": "OAuth авторизации не найдены.",
+        "clientId": "ID клиента",
+        "permissions": "Разрешения:",
+        "authorized": "Авторизовано",
+        "revoke": "Отозвать",
+        "revoking": "Отзыв...",
+        "confirmRevoke": "Вы уверены, что хотите отозвать эту OAuth авторизацию? Все связанные токены доступа также будут отозваны.",
+        "revokeFailed": "Не удалось отозвать разрешение"
+      },
+      "sessions": {
+        "title": "Активные сессии",
+        "loading": "Загрузка сессий...",
+        "noSessions": "Активных сессий не найдено.",
+        "currentSession": "Текущая сессия",
+        "ipAddress": "IP адрес",
+        "location": "Местоположение",
+        "created": "Создана",
+        "expires": "Истекает",
+        "revoke": "Завершить",
+        "revoking": "Завершение...",
+        "cannotRevokeCurrent": "Нельзя завершить текущую сессию",
+        "confirmRevoke": "Вы уверены, что хотите завершить эту сессию? Пользователь будет разлогинен на этом устройстве.",
+        "revokeFailed": "Не удалось завершить сессию"
+      },
+      "apiTokens": {
+        "description": "Создание и управление API токенами для аутентификации MCP клиентов.",
+        "createToken": "Создать токен",
+        "createDescription": "Создайте новый API токен для аутентификации MCP клиентов. Токен будет показан только один раз.",
+        "tokenName": "Название токена",
+        "tokenNamePlaceholder": "напр., Claude Desktop, CI/CD Pipeline",
+        "expiration": "Срок действия",
+        "expiry30d": "30 дней",
+        "expiry90d": "90 дней",
+        "expiry365d": "1 год",
+        "expiryNever": "Без ограничения",
+        "tokenCreated": "Токен создан",
+        "tokenWarning": "Скопируйте токен сейчас. Вы больше не сможете его увидеть.",
+        "doneButton": "Готово",
+        "noTokens": "Нет API токенов",
+        "noTokensDescription": "Создайте токен для аутентификации MCP клиентов без OAuth.",
+        "statusActive": "Активен",
+        "statusExpired": "Истёк",
+        "statusRevoked": "Отозван",
+        "created": "Создан",
+        "expires": "Истекает",
+        "lastUsed": "Последнее использование",
+        "revoke": "Отозвать",
+        "confirmRevoke": "Вы уверены, что хотите отозвать этот токен? MCP клиенты, использующие его, немедленно потеряют доступ.",
+        "createFailed": "Не удалось создать токен",
+        "revokeFailed": "Не удалось отозвать токен"
+      }
+    },
+    "forcedPasswordReset": {
+      "title": "Требуется смена пароля",
+      "description": "Администратор требует сменить ваш пароль. Вы должны установить новый пароль для продолжения.",
+      "successTitle": "Пароль успешно изменён",
+      "successDescription": "Ваш пароль обновлён. Перенаправление в приложение...",
+      "currentPassword": "Текущий пароль",
+      "newPassword": "Новый пароль",
+      "confirmPassword": "Подтвердите новый пароль",
+      "minLength": "Минимум 8 символов",
+      "changePassword": "Изменить пароль",
+      "changingPassword": "Изменение пароля...",
+      "success": "Пароль успешно изменён. Перенаправление...",
+      "loginWithNew": "Пожалуйста, войдите с новым паролем",
+      "note": "После смены пароля все OAuth токены будут отозваны в целях безопасности. Возможно, потребуется повторная авторизация подключённых приложений.",
+      "errors": {
+        "allRequired": "Все поля обязательны",
+        "noMatch": "Новые пароли не совпадают",
+        "minLength": "Новый пароль должен быть не менее 8 символов",
+        "samePassword": "Новый пароль должен отличаться от текущего",
+        "failed": "Не удалось сменить пароль. Попробуйте снова."
+      }
+    },
+    "registrationSuccess": {
+      "title": "Регистрация успешна!",
+      "verifiedTitle": "Email подтверждён!",
+      "redirecting": "Перенаправление...",
+      "emailSent": "Мы отправили письмо для подтверждения на ваш адрес.",
+      "checkInbox": "Проверьте почту и перейдите по ссылке для активации аккаунта.",
+      "waitingVerification": "Ожидание подтверждения email...",
+      "checkSpam": "Не получили письмо? Проверьте папку спам.",
+      "goToLogin": "Перейти к входу",
+      "resendEmail": "Отправить письмо повторно",
+      "resendingEmail": "Отправка...",
+      "resendSuccess": "Письмо отправлено! Проверьте вашу почту.",
+      "resendError": "Не удалось отправить письмо. Попробуйте ещё раз.",
+      "resendCountdown": "Повторная отправка через {{seconds}} сек"
+    },
+    "authError": {
+      "title": "Ошибка авторизации"
+    },
+    "oauthAuthorize": {
+      "loading": "Загрузка...",
+      "authorizing": "Авторизация...",
+      "title": "Разрешить доступ",
+      "description": "Приложение запрашивает доступ к вашему аккаунту",
+      "signInTitle": "Разрешить доступ",
+      "signInDescription": "Войдите, чтобы авторизовать приложение",
+      "application": "Приложение",
+      "requestedPermissions": "Запрашиваемые разрешения",
+      "switch": "Сменить",
+      "deny": "Отклонить",
+      "allow": "Разрешить",
+      "unknownUser": "Неизвестный пользователь",
+      "scopes": {
+        "openid": "Подтвердить вашу личность",
+        "profile": "Доступ к информации профиля",
+        "email": "Доступ к вашему email адресу",
+        "offline_access": "Доступ к данным, когда вы не используете приложение",
+        "mcp_tools": "Выполнять MCP инструменты от вашего имени",
+        "mcp_read": "Читать данные ваших воркфлоу",
+        "mcp_write": "Создавать и изменять воркфлоу"
+      }
+    },
+    "oauthConsent": {
+      "loading": "Загрузка...",
+      "authorizing": "Авторизация...",
+      "title": "Разрешить доступ",
+      "description": "Приложение запрашивает доступ к вашему аккаунту",
+      "invalidRequest": "Неверный запрос",
+      "missingParams": "Отсутствуют обязательные параметры OAuth. Попробуйте авторизацию снова.",
+      "goToDashboard": "Перейти на главную",
+      "application": "Приложение",
+      "requestedPermissions": "Запрашиваемые разрешения",
+      "switch": "Сменить",
+      "deny": "Отклонить",
+      "allow": "Разрешить",
+      "unknownUser": "Неизвестный пользователь",
+      "missingConsentCode": "Отсутствует код согласия",
+      "consentFailed": "Не удалось обработать согласие",
+      "scopes": {
+        "openid": "Подтвердить вашу личность",
+        "profile": "Доступ к информации профиля",
+        "email": "Доступ к вашему email адресу",
+        "offline_access": "Доступ к данным, когда вы не используете приложение",
+        "mcp_tools": "Выполнять MCP инструменты от вашего имени",
+        "mcp_read": "Читать данные ваших воркфлоу",
+        "mcp_write": "Создавать и изменять воркфлоу"
+      }
+    },
+    "verifyEmail": {
+      "title": "Подтверждение Email",
+      "verifying": "Подтверждение вашего email...",
+      "success": "Ваш email успешно подтверждён!",
+      "invalidLink": "Недействительная ссылка подтверждения",
+      "failed": "Ошибка подтверждения. Возможно, срок действия ссылки истёк.",
+      "networkError": "Произошла ошибка при подтверждении",
+      "continueToLogin": "Продолжить к входу",
+      "backToLogin": "Вернуться к входу"
+    }
+  },
+  "admin": {
+    "panel": {
+      "title": "Панель администратора",
+      "tabs": {
+        "definitions": "Определения настроек",
+        "users": "Пользователи",
+        "stats": "Системная статистика",
+        "globalSettings": "Глобальные настройки"
+      },
+      "loading": "Загрузка...",
+      "definitions": {
+        "title": "Определения настроек",
+        "createNew": "Создать новое определение",
+        "keyPlaceholder": "Ключ (например, telegram.bot_token)",
+        "selectType": "Выберите тип",
+        "categoryPlaceholder": "Категория",
+        "labelPlaceholder": "Название",
+        "descriptionPlaceholder": "Описание (необязательно)",
+        "required": "Обязательное",
+        "adminOnly": "Только для админов",
+        "createButton": "Создать определение",
+        "type": "Тип",
+        "category": "Категория",
+        "delete": "Удалить",
+        "confirmDelete": "Удалить определение настройки \"{{key}}\"?",
+        "fillRequired": "Заполните все обязательные поля"
+      },
+      "users": {
+        "title": "Пользователи",
+        "table": {
+          "email": "Email",
+          "name": "Имя",
+          "role": "Роль",
+          "workflows": "Воркфлоу",
+          "created": "Создан"
+        },
+        "admin": "Админ",
+        "user": "Пользователь",
+        "noUsers": "Пользователи не найдены"
+      },
+      "stats": {
+        "title": "Системная статистика",
+        "totalWorkflows": "Всего воркфлоу",
+        "totalExecutions": "Всего запусков",
+        "settingDefinitions": "Определений настроек",
+        "failedToLoad": "Не удалось загрузить статистику"
+      },
+      "globalSettings": {
+        "title": "Глобальные настройки",
+        "description": "Системные настройки, влияющие на всех пользователей. Изменения применяются немедленно.",
+        "noSettings": "Глобальные настройки не настроены",
+        "save": "Сохранить",
+        "saving": "Сохранение..."
+      },
+      "mcpPrompts": {
+        "title": "MCP промпты",
+        "description": "Управление системными промптами и описаниями инструментов для различных AI-агентов и моделей.",
+        "howItWorks": "Как это работает",
+        "hint1": "Выберите область (Default, Claude, ChatGPT и т.д.) для просмотра/редактирования промптов для этого агента",
+        "hint2": "Выберите модель для создания переопределений, специфичных для модели внутри агента",
+        "hint3": "Пустое значение = используется резервное значение родительского уровня (Модель → Агент → По умолчанию)"
+      }
+    },
+    "globalSettings": {
+      "title": "Глобальные настройки",
+      "description": "Управление описаниями MCP-инструментов, системными промптами и другими текстами для агента.",
+      "loadError": "Не удалось загрузить настройки",
+      "retry": "Повторить",
+      "noSettings": "Настройки не сконфигурированы",
+      "otherSettings": "Другие настройки",
+      "save": "Сохранить",
+      "saving": "Сохранение...",
+      "cancel": "Отмена",
+      "saveAndClose": "Сохранить и закрыть",
+      "fullscreenEdit": "Редактировать на весь экран",
+      "characters": "символов",
+      "setting": "настройка",
+      "settings": "настроек",
+      "history": {
+        "button": "История",
+        "title": "История изменений",
+        "noHistory": "История изменений отсутствует",
+        "emptyValue": "(пусто)",
+        "system": "Система",
+        "oldValue": "Старое значение",
+        "newValue": "Новое значение",
+        "rollback": "Откатить",
+        "close": "Закрыть",
+        "confirmRollback": "Подтверждение отката",
+        "rollbackWarning": "Это восстановит настройку до предыдущего значения. Будет создана новая запись в журнале аудита.",
+        "restoreTo": "Восстановить до",
+        "confirmRollbackButton": "Откатить"
+      },
+      "export": {
+        "button": "Экспорт"
+      },
+      "import": {
+        "button": "Импорт",
+        "previewTitle": "Предпросмотр импорта",
+        "previewDescription": "Просмотрите изменения, которые будут применены при импорте настроек.",
+        "noChanges": "Нет изменений для применения",
+        "willOverwrite": "настроек будет перезаписано",
+        "confirm": "Применить импорт",
+        "addSkipped": "Невозможно добавить — определение не существует",
+        "type": {
+          "overwrite": "Перезапись",
+          "add": "Новый (пропущен)",
+          "unchanged": "Без изменений"
+        }
+      },
+      "schema": {
+        "exportButton": "Экспорт схемы",
+        "importButton": "Импорт схемы",
+        "previewTitle": "Предпросмотр импорта схемы",
+        "previewDescription": "Просмотрите изменения схемы, которые будут применены.",
+        "noChanges": "Нет изменений схемы для применения",
+        "willChange": "определений будет изменено",
+        "confirm": "Применить схему",
+        "typeChangeWarning": "Изменение типа повлияет на существующие значения",
+        "confirmTypeChange": "Я понимаю, что изменения типа могут повлиять на существующие значения настроек",
+        "type": {
+          "new": "Новый",
+          "changed": "Изменён",
+          "type_changed": "Тип изменён",
+          "unchanged": "Без изменений"
+        }
+      },
+      "reset": {
+        "confirmTitle": "Сбросить переопределение",
+        "confirmDescription": "Это сбросит переопределение для использования значения по умолчанию. Настройка вернётся к родительскому уровню (агент или по умолчанию).",
+        "key": "Ключ настройки",
+        "confirmButton": "Сбросить переопределение"
+      }
+    },
+    "mcpPrompts": {
+      "title": "MCP Промпты",
+      "description": "Управление системными промптами и описаниями инструментов для различных AI агентов и моделей.",
+      "howItWorks": "Как это работает",
+      "hint1": "Выберите область (Default, Claude, ChatGPT и т.д.) для просмотра/редактирования промптов агента",
+      "hint2": "Выберите модель для создания переопределений на уровне модели внутри агента",
+      "hint3": "Пустое значение = используется значение родительского уровня (Модель → Агент → По умолчанию)",
+      "systemPrompts": "Системные промпты",
+      "toolDescriptions": "Описания инструментов",
+      "history": {
+        "button": "История",
+        "version": "Версия:",
+        "selectVersion": "Выберите версию...",
+        "apply": "Применить",
+        "noEntries": "Нет записей истории",
+        "diffCurrent": "vs Текущий",
+        "diffChanges": "Изменения"
+      }
+    },
+    "dashboard": {
+      "title": "Панель администратора",
+      "loading": "Загрузка панели...",
+      "failedToLoad": "Не удалось загрузить панель",
+      "stats": {
+        "totalWorkflows": "Всего воркфлоу",
+        "totalExecutions": "Всего запусков",
+        "activeExecutions": "Активных запусков",
+        "settingDefinitions": "Определений настроек"
+      },
+      "systemHealth": {
+        "title": "Состояние системы",
+        "backendStatus": "Статус бэкенда",
+        "databaseSize": "Размер базы данных"
+      },
+      "logoutAll": {
+        "title": "Управление сессиями",
+        "button": "Разлогинить всех",
+        "confirmTitle": "Разлогинить всех пользователей?",
+        "confirmDescription": "Все сессии пользователей будут завершены, кроме вашей текущей сессии. Всем пользователям потребуется войти заново.",
+        "confirm": "Разлогинить всех"
+      },
+      "recentActivity": {
+        "title": "Недавняя активность",
+        "workflow": "Воркфлоу"
+      },
+      "quickLinks": {
+        "title": "Быстрые ссылки",
+        "userManagement": "Управление пользователями",
+        "userManagementDesc": "Управление пользователями и правами",
+        "deletedWorkflows": "Удалённые воркфлоу",
+        "deletedWorkflowsDesc": "Восстановление или окончательное удаление",
+        "systemSettings": "Системные настройки",
+        "systemSettingsDesc": "Управление определениями настроек",
+        "allExecutions": "Все запуски",
+        "allExecutionsDesc": "Мониторинг запусков всех пользователей"
+      }
+    },
+    "analytics": {
+      "title": "Панель аналитики",
+      "loading": "Загрузка аналитики...",
+      "selectTimeRange": "Выберите период",
+      "timeRanges": {
+        "today": "Сегодня",
+        "week": "Последние 7 дней",
+        "month": "Последние 30 дней",
+        "year": "Последний год",
+        "all": "Всё время"
+      },
+      "cards": {
+        "totalExecutions": "Всего запусков",
+        "successRate": "Успешность",
+        "activeUsers": "Всего пользователей",
+        "activeWorkflows": "Всего воркфлоу"
+      },
+      "status": {
+        "completed": "Завершено",
+        "active": "Активные",
+        "failed": "Ошибки"
+      },
+      "executionsOverTime": "Запуски по времени",
+      "topWorkflows": "Топ 10 воркфлоу",
+      "noWorkflowData": "Нет данных о воркфлоу за выбранный период",
+      "table": {
+        "workflow": "Воркфлоу",
+        "executions": "Запуски",
+        "completed": "Завершено",
+        "failed": "Ошибки",
+        "successRate": "Успешность",
+        "avgDuration": "Ср. время"
+      },
+      "userActivity": {
+        "title": "Активность пользователей",
+        "activeUsers": "Активные пользователи",
+        "newUsers": "Новые пользователи",
+        "topUsers": "Самые активные",
+        "executions": "запусков",
+        "noData": "Нет данных об активности пользователей"
+      }
+    },
+    "executions": {
+      "title": "Все запуски",
+      "subtitle": "Мониторинг запусков воркфлоу всех пользователей",
+      "loading": "Загрузка запусков...",
+      "retry": "Повторить",
+      "filters": {
+        "user": "Пользователь",
+        "allUsers": "Все пользователи",
+        "status": "Статус",
+        "allStatuses": "Все статусы",
+        "running": "Выполняется",
+        "waiting": "Ожидает",
+        "completed": "Завершён",
+        "failed": "Ошибка",
+        "search": "Поиск",
+        "searchPlaceholder": "ID запуска или воркфлоу",
+        "clearFilters": "Сбросить фильтры"
+      },
+      "resultsCount": "Найден {{count}} запуск",
+      "resultsCountPlural": "Найдено {{count}} запусков",
+      "noExecutions": "Запуски не найдены",
+      "table": {
+        "executionId": "ID запуска",
+        "user": "Пользователь",
+        "workflow": "Воркфлоу",
+        "status": "Статус",
+        "currentNode": "Текущий узел",
+        "created": "Создан"
+      }
+    },
+    "executionInspector": {
+      "loading": "Загрузка запуска...",
+      "notFound": "Запуск не найден",
+      "backToExecutions": "← Назад к запускам администратора",
+      "execution": "Запуск",
+      "workflow": "Воркфлоу",
+      "owner": "Владелец",
+      "selected": "Выбран",
+      "current": "Текущий",
+      "clearSelection": "Сбросить выбор",
+      "tabs": {
+        "context": "Контекст",
+        "errors": "Ошибки",
+        "steps": "Шаги"
+      },
+      "context": {
+        "title": "Контекст выполнения (только чтение)",
+        "fullscreen": "На весь экран",
+        "close": "Закрыть",
+        "viewer": "Просмотр контекста выполнения"
+      },
+      "errors": {
+        "title": "Ошибки",
+        "executionError": "Ошибка выполнения",
+        "nodeErrors": "Ошибки узлов",
+        "noErrors": "Нет ошибок",
+        "nodeId": "Узел"
+      },
+      "steps": {
+        "noSteps": "Шаги недоступны",
+        "current": "Текущий"
+      }
+    },
+    "artifacts": {
+      "title": "Управление артефактами",
+      "subtitle": "Просмотр и управление артефактами всех пользователей",
+      "loading": "Загрузка артефактов...",
+      "retry": "Повторить",
+      "noArtifacts": "Артефакты не найдены",
+      "resultsCount": "Найдено артефактов: {{count}}",
+      "stats": {
+        "totalArtifacts": "Всего артефактов",
+        "totalSize": "Общий размер",
+        "totalUsers": "Пользователей",
+        "expiredArtifacts": "Истекших",
+        "deletedArtifacts": "Удалённых"
+      },
+      "filters": {
+        "title": "Фильтры",
+        "userPlaceholder": "Фильтр по ID или email...",
+        "includeExpired": "Включая истекшие",
+        "includeDeleted": "Включая удалённые",
+        "clear": "Сбросить"
+      },
+      "table": {
+        "user": "Пользователь",
+        "name": "Название",
+        "size": "Размер",
+        "created": "Создан",
+        "status": "Статус",
+        "actions": "Действия"
+      },
+      "status": {
+        "active": "Активен",
+        "expired": "Истёк",
+        "deleted": "Удалён"
+      },
+      "actions": {
+        "openInNewTab": "Открыть в новой вкладке",
+        "delete": "Удалить"
+      },
+      "delete": {
+        "title": "Удалить артефакт",
+        "description": "Вы уверены, что хотите удалить \"{{name}}\" пользователя {{user}}? Это действие нельзя отменить.",
+        "deleting": "Удаление..."
+      },
+      "pagination": {
+        "showing": "Показано с {{from}} по {{to}} из {{total}}",
+        "page": "Страница {{current}} из {{total}}",
+        "previous": "Назад",
+        "next": "Далее"
+      },
+      "errors": {
+        "loadFailed": "Не удалось загрузить артефакты",
+        "deleteFailed": "Не удалось удалить артефакт"
+      }
+    },
+    "userDetail": {
+      "loading": "Загрузка пользователя...",
+      "notFound": "Пользователь не найден",
+      "backToUsers": "Назад к пользователям",
+      "status": {
+        "blocked": "Заблокирован",
+        "verified": "Подтверждён",
+        "unverified": "Не подтверждён",
+        "admin": "Администратор"
+      },
+      "stats": {
+        "workflows": "Воркфлоу",
+        "activeSessions": "Активных сессий",
+        "emailsSent": "Отправлено писем"
+      },
+      "actions": {
+        "title": "Действия",
+        "blockUser": "Заблокировать",
+        "unblockUser": "Разблокировать",
+        "verifyEmail": "Подтвердить email",
+        "sendVerification": "Отправить подтверждение",
+        "sendPasswordReset": "Сбросить пароль",
+        "revokeAllSessions": "Завершить все сессии",
+        "processing": "Обработка...",
+        "sending": "Отправка...",
+        "revoking": "Завершение...",
+        "blockReason": "Укажите причину блокировки (необязательно):",
+        "confirmUnblock": "Разблокировать этого пользователя?",
+        "confirmSendVerification": "Отправить письмо подтверждения этому пользователю?",
+        "confirmVerifyEmail": "Вручную подтвердить email этого пользователя? Это позволит ему войти в систему.",
+        "confirmSendReset": "Отправить письмо для сброса пароля этому пользователю?",
+        "confirmRevokeSessions": "Завершить все сессии этого пользователя? Он будет выйдет из системы везде."
+      },
+      "blocked": {
+        "label": "Заблокирован",
+        "reason": "Причина"
+      },
+      "userInfo": {
+        "title": "Информация о пользователе",
+        "userId": "ID пользователя",
+        "email": "Email",
+        "created": "Создан",
+        "updated": "Обновлён"
+      },
+      "sessions": {
+        "title": "Активные сессии",
+        "noSessions": "Нет активных сессий",
+        "ip": "IP",
+        "unknown": "Неизвестно",
+        "created": "Создана",
+        "expires": "Истекает"
+      },
+      "emailHistory": {
+        "title": "История писем",
+        "noEmails": "Письма не отправлялись",
+        "type": "Тип",
+        "to": "Кому"
+      },
+      "security": {
+        "title": "Действия безопасности",
+        "activeSessions": "Активных сессий",
+        "oauthTokens": "OAuth токенов",
+        "forcePasswordReset": "Принудительный сброс пароля",
+        "forcePasswordResetProcessing": "Обработка...",
+        "revokeAllOAuth": "Отозвать все OAuth токены",
+        "revokeAllOAuthProcessing": "Отзыв...",
+        "confirmForcePasswordReset": "Принудительно сбросить пароль для этого пользователя? Он будет обязан сменить пароль при следующем входе.",
+        "confirmClearPasswordReset": "Отменить требование сброса пароля? Пользователь больше не будет обязан менять пароль.",
+        "clearReset": "Отменить сброс",
+        "clearResetProcessing": "Отмена...",
+        "passwordResetRequired": "Требуется сброс пароля",
+        "passwordResetRequestedAt": "Запрошен",
+        "passwordResetRequestedBy": "Запрошен"
+      },
+      "webSessions": {
+        "title": "Веб-сессии",
+        "revokeAll": "Завершить все сессии",
+        "ip": "IP",
+        "country": "Страна",
+        "created": "Создана",
+        "expires": "Истекает",
+        "revoke": "Завершить",
+        "confirmRevokeSession": "Завершить эту сессию?"
+      },
+      "oauthConnections": {
+        "title": "OAuth подключения",
+        "revokeAll": "Отозвать все OAuth",
+        "noConnections": "Нет OAuth подключений",
+        "scopes": "Разрешения",
+        "connected": "Подключено",
+        "tokens": "Токенов",
+        "revoke": "Отозвать",
+        "confirmRevokeProvider": "Отозвать OAuth токены для провайдера {{provider}}?",
+        "confirmRevokeAll": "Отозвать все OAuth токены этого пользователя? Все его OAuth приложения потеряют доступ."
+      },
+      "artifactQuota": {
+        "title": "Квота артефактов",
+        "storage": "Хранилище",
+        "files": "Файлы",
+        "used": "использовано",
+        "override": "Переопределить",
+        "overrideQuotaMb": "Лимит хранилища (МБ)",
+        "overrideMaxFiles": "Максимум файлов",
+        "resetToDefault": "Сбросить",
+        "save": "Сохранить",
+        "saving": "Сохранение...",
+        "usingDefault": "Используется глобальное значение",
+        "customQuota": "Пользовательская квота",
+        "nullHint": "Оставьте пустым для использования глобального значения"
+      },
+      "tooltips": {
+        "revokeAllSessions": "Завершить все веб-сессии и OAuth токены"
+      },
+      "blockedBy": "Заблокировал",
+      "errors": {
+        "actionFailed": "Не удалось выполнить действие: {{action}}",
+        "loadFailed": "Не удалось загрузить пользователя",
+        "revokeSessionFailed": "Не удалось завершить сессию",
+        "revokeSessionsFailed": "Не удалось завершить сессии",
+        "revokeOAuthFailed": "Не удалось отозвать OAuth токены"
+      }
+    },
+    "auditLog": {
+      "title": "Журнал аудита",
+      "subtitle": "Журнал системных событий и действий пользователей",
+      "loading": "Загрузка журнала аудита...",
+      "filters": {
+        "user": "Пользователь",
+        "allUsers": "Все пользователи",
+        "actionType": "Тип действия",
+        "selectActions": "Выберите действия...",
+        "selected": "{{count}} выбрано",
+        "searchActions": "Поиск действий...",
+        "resource": "Ресурс",
+        "resourcePlaceholder": "например, workflow, user",
+        "source": "Источник",
+        "allSources": "Все источники",
+        "clearFilters": "Сбросить фильтры",
+        "fromDate": "Дата от",
+        "toDate": "Дата до"
+      },
+      "table": {
+        "timestamp": "Время",
+        "user": "Пользователь",
+        "action": "Действие",
+        "resource": "Ресурс",
+        "source": "Источник",
+        "ipCountry": "IP / Страна"
+      },
+      "system": "Система",
+      "noEntries": "Записи в журнале аудита не найдены",
+      "pagination": {
+        "page": "Страница {{page}} ({{count}} записей)",
+        "previous": "Назад",
+        "next": "Вперёд"
+      },
+      "detail": {
+        "title": "Детали записи аудита",
+        "id": "ID",
+        "timestamp": "Время",
+        "user": "Пользователь",
+        "action": "Действие",
+        "resource": "Ресурс",
+        "resourceId": "ID ресурса",
+        "source": "Источник",
+        "ipAddress": "IP адрес",
+        "country": "Страна",
+        "userAgent": "User Agent",
+        "metadata": "Метаданные",
+        "changes": "Изменения",
+        "workflowId": "ID воркфлоу",
+        "fromNode": "От узла",
+        "toNode": "К узлу",
+        "nodeId": "ID узла",
+        "totalSteps": "Всего шагов",
+        "duration": "Длительность",
+        "error": "Ошибка",
+        "validationError": "Ошибка валидации",
+        "input": "Входные данные шага"
+      }
+    },
+    "settingsUnified": {
+      "title": "Настройки",
+      "tabs": {
+        "definitions": "Определения",
+        "values": "Значения",
+        "maintenance": "Обслуживание"
+      }
+    },
+    "systemSettings": {
+      "title": "Системные настройки",
+      "createNew": "Создать новое определение",
+      "keyPlaceholder": "Ключ (например, telegram.bot_token)",
+      "selectType": "Выберите тип",
+      "categoryPlaceholder": "Категория",
+      "labelPlaceholder": "Название",
+      "descriptionPlaceholder": "Описание (необязательно)",
+      "required": "Обязательное",
+      "adminOnly": "Только для админов",
+      "protected": "Защищённое",
+      "createButton": "Создать определение",
+      "loading": "Загрузка определений...",
+      "type": "Тип",
+      "category": "Категория",
+      "delete": "Удалить",
+      "confirmDelete": "Удалить определение настройки \"{{key}}\"?",
+      "fillRequired": "Заполните все обязательные поля",
+      "cancel": "Отмена",
+      "schema": {
+        "exportButton": "Экспорт схемы",
+        "importButton": "Импорт схемы",
+        "previewTitle": "Предпросмотр импорта схемы",
+        "previewDescription": "Просмотрите изменения схемы, которые будут применены.",
+        "noChanges": "Нет изменений схемы для применения",
+        "willChange": "определений будет изменено",
+        "confirm": "Применить схему",
+        "typeChangeWarning": "Изменение типа повлияет на существующие значения",
+        "confirmTypeChange": "Я понимаю, что изменения типа могут повлиять на существующие значения настроек",
+        "type": {
+          "new": "Новый",
+          "changed": "Изменён",
+          "type_changed": "Тип изменён",
+          "unchanged": "Без изменений"
+        }
+      },
+      "dbMaintenance": {
+        "title": "Обслуживание базы данных",
+        "vacuum": {
+          "title": "Оптимизация базы данных",
+          "description": "Оптимизировать базу данных, удалив неиспользуемое пространство",
+          "button": "Оптимизировать",
+          "confirm": "Оптимизировать базу данных? Это может занять несколько секунд.",
+          "success": "База данных успешно оптимизирована",
+          "error": "Не удалось оптимизировать базу данных"
+        },
+        "backup": {
+          "title": "Резервное копирование",
+          "description": "Создать резервную копию базы данных",
+          "button": "Создать копию",
+          "confirm": "Создать резервную копию базы данных?",
+          "success": "Резервная копия создана: {{path}}",
+          "error": "Не удалось создать резервную копию"
+        }
+      }
+    },
+    "userManagement": {
+      "title": "Управление пользователями",
+      "loading": "Загрузка пользователей...",
+      "searchPlaceholder": "Поиск по email или имени...",
+      "table": {
+        "email": "Email",
+        "name": "Имя",
+        "status": "Статус",
+        "role": "Роль",
+        "workflows": "Воркфлоу",
+        "created": "Создан",
+        "actions": "Действия"
+      },
+      "status": {
+        "blocked": "Заблокирован",
+        "verified": "Подтверждён",
+        "unverified": "Не подтверждён"
+      },
+      "role": {
+        "admin": "Админ",
+        "user": "Пользователь"
+      },
+      "actions": {
+        "view": "Просмотр",
+        "edit": "Редактировать",
+        "delete": "Удалить",
+        "save": "Сохранить",
+        "cancel": "Отмена"
+      },
+      "confirmDelete": "Удалить пользователя \"{{email}}\"? Это также удалит все его воркфлоу.",
+      "noUsers": "Пользователи не найдены",
+      "noSearchResults": "Нет пользователей, соответствующих поиску",
+      "resultsCount": "{{count}} пользователей найдено",
+      "pagination": {
+        "previous": "Назад",
+        "next": "Вперёд",
+        "page": "Страница {{current}} из {{total}}"
+      }
+    },
+    "monitoringTest": {
+      "title": "Тест мониторинга",
+      "description": "Генерация тестовых событий для валидации пайплайна мониторинга. Каждая кнопка создаёт события, которые должны появиться в логах, метриках и дашбордах Grafana.",
+      "loading": "Загрузка...",
+      "frontendErrors": {
+        "title": "Ошибки фронтенда",
+        "description": "Тест логирования ошибок на клиенте (отправляются на /api/logs/client)",
+        "reactError": "React ошибка (ErrorBoundary)",
+        "windowError": "Window ошибка (onerror)",
+        "promiseError": "Promise rejection"
+      },
+      "backendErrors": {
+        "title": "События бэкенда",
+        "description": "Тест логирования и генерации метрик на бэкенде",
+        "apiError": "API ошибка (500)",
+        "slowRequest": "Медленный запрос (3с)",
+        "logLevels": "Сгенерировать все уровни логов"
+      },
+      "eventHistory": {
+        "title": "История событий",
+        "clear": "Очистить",
+        "empty": "События ещё не сгенерированы. Нажмите кнопку выше для генерации тестовых событий."
+      },
+      "verification": {
+        "title": "Команды проверки",
+        "dockerLogs": "Docker логи (MonitoringTest)",
+        "metricsEndpoint": "Эндпоинт метрик (после Этапа 3)",
+        "clientLogs": "Логи ошибок клиента"
+      },
+      "workflowTest": {
+        "title": "Запуск воркфлоу",
+        "description": "Тест метрик выполнения воркфлоу (для валидации после Этапа 4)",
+        "startWorkflow": "Запустить тестовый воркфлоу"
+      },
+      "mcpTest": {
+        "title": "Вызовы MCP",
+        "description": "Симуляция вызовов MCP tool для тестирования метрик",
+        "successCall": "MCP вызов (Успех)",
+        "errorCall": "MCP вызов (Ошибка)"
+      }
+    },
+    "workflows": {
+      "title": "Все воркфлоу",
+      "subtitle": "Просмотр воркфлоу всех пользователей",
+      "loading": "Загрузка воркфлоу...",
+      "retry": "Повторить",
+      "noWorkflows": "Воркфлоу не найдены",
+      "nodes": "узлов",
+      "public": "Публичный",
+      "private": "Приватный",
+      "filters": {
+        "searchPlaceholder": "Поиск по имени или описанию...",
+        "allUsers": "Все пользователи",
+        "visibility": "Видимость",
+        "allVisibility": "Все",
+        "validation": "Валидация",
+        "allValidation": "Все",
+        "valid": "Валидный",
+        "invalid": "Невалидный",
+        "unknown": "Неизвестно"
+      }
+    },
+    "deletedWorkflows": {
+      "title": "Удалённые воркфлоу",
+      "loading": "Загрузка удалённых воркфлоу...",
+      "searchPlaceholder": "Поиск по имени или ID воркфлоу...",
+      "filters": {
+        "from": "От",
+        "to": "До",
+        "clearDates": "Сбросить даты"
+      },
+      "table": {
+        "workflowId": "ID воркфлоу",
+        "name": "Название",
+        "deletedDate": "Дата удаления",
+        "deletedBy": "Удалён",
+        "actions": "Действия"
+      },
+      "actions": {
+        "restore": "Восстановить",
+        "permanentDelete": "Удалить навсегда"
+      },
+      "confirmRestore": "Восстановить воркфлоу \"{{name}}\"?",
+      "confirmPermanentDelete": "НАВСЕГДА удалить воркфлоу \"{{name}}\"? Это действие нельзя отменить.",
+      "noDeletedWorkflows": "Удалённых воркфлоу нет",
+      "noMatchingWorkflows": "Воркфлоу по фильтрам не найдены",
+      "resultsCount": "{{count}} удалённых воркфлоу найдено",
+      "pagination": {
+        "previous": "Назад",
+        "next": "Вперёд",
+        "page": "Страница {{current}} из {{total}}"
+      }
+    },
+    "tokens": {
+      "title": "API Токены",
+      "subtitle": "Просмотр и управление API токенами всех пользователей",
+      "searchPlaceholder": "Поиск по имени токена или email пользователя",
+      "allStatuses": "Все статусы",
+      "statusActive": "Активный",
+      "statusExpired": "Истёк",
+      "statusRevoked": "Отозван",
+      "created": "Создан",
+      "expires": "Истекает",
+      "lastUsed": "Последнее использование",
+      "revoke": "Отозвать",
+      "revokeSuccess": "Токен успешно отозван",
+      "revokeError": "Не удалось отозвать токен",
+      "revokeConfirmTitle": "Отзыв API токена",
+      "revokeConfirmDescription": "Вы уверены, что хотите отозвать токен \"{{name}}\" пользователя {{email}}? Это действие нельзя отменить.",
+      "noTokens": "API токены не найдены",
+      "retry": "Повторить"
+    },
+    "businessAnalytics": {
+      "title": "Бизнес-аналитика",
+      "conversionFunnel": {
+        "title": "Воронка конверсии пользователей",
+        "registered": "Зарегистрированы",
+        "verified": "Email подтверждён",
+        "firstWorkflow": "Запустили workflow",
+        "active": "Активные (2+ запуска)",
+        "registrationTrend": "Тренд регистраций"
+      },
+      "topWorkflows": {
+        "title": "Топ Workflows",
+        "executions": "Запуски",
+        "successRate": "Успешность",
+        "noData": "Нет данных о workflows"
+      },
+      "engagement": {
+        "title": "Вовлечённость пользователей",
+        "returningUsers": "Вернувшиеся пользователи",
+        "avgExecutionsPerUser": "Среднее запусков / пользователь",
+        "timeToFirstWorkflow": "Время до первого workflow",
+        "activeUsersTrend": "Тренд активных пользователей",
+        "days": "дней",
+        "noData": "Нет данных о вовлечённости"
+      }
+    },
+    "operational": {
+      "title": "Операционные метрики",
+      "autoRefreshOn": "Автообновление ВКЛ",
+      "autoRefreshOff": "Автообновление",
+      "lastUpdated": "Обновлено: {{time}}",
+      "unavailable": "Недоступно",
+      "trend": "Тренд",
+      "timeSeriesTitle": "Временные ряды",
+      "multiSeriesTitle": "Сравнение метрик",
+      "multiSeries": {
+        "workflowComparison": "Workflows: запуски vs завершения",
+        "rateComparison": "Сравнение частот вызовов"
+      },
+      "granularity": {
+        "auto": "Авто",
+        "hourly": "По часам",
+        "daily": "По дням"
+      },
+      "breakdowns": {
+        "byAction": "Топ действий",
+        "bySource": "По источнику",
+        "byResource": "По ресурсу",
+        "name": "Название",
+        "count": "Количество"
+      },
+      "metrics": {
+        "unique_users_per_day": "Уникальные пользователи / день",
+        "total_calls_per_day": "Всего вызовов / день",
+        "calls_per_second": "Вызовов / секунда",
+        "workflows_started_per_day": "Запущено workflow / день",
+        "workflows_completed_per_day": "Завершено workflow / день",
+        "mcp_calls_per_second": "MCP вызовов / секунда"
+      },
+      "filters": {
+        "action": "Действие",
+        "source": "Источник",
+        "resource": "Ресурс",
+        "allActions": "Все действия",
+        "allSources": "Все источники",
+        "allResources": "Все ресурсы",
+        "clear": "Сбросить фильтры"
+      },
+      "chartType": {
+        "area": "Диаграмма с областями",
+        "line": "Линейная диаграмма",
+        "bar": "Столбчатая диаграмма"
+      }
+    },
+    "reportedArtifacts": {
+      "title": "Артефакты с жалобами",
+      "subtitle": "Просмотр артефактов, на которые пожаловались, и блокировка вредоносного контента",
+      "loading": "Загрузка артефактов с жалобами...",
+      "retry": "Повторить",
+      "resultsCount": "Артефактов с жалобами: {{count}}",
+      "noReports": "Нет артефактов с жалобами",
+      "owner": "Владелец",
+      "takenDownBadge": "Заблокирован",
+      "defaultReason": "Заблокирован администратором после жалобы",
+      "takedownSuccess": "Артефакт заблокирован",
+      "actions": {
+        "preview": "Просмотр",
+        "takedown": "Заблокировать",
+        "takedownUser": "Заблокировать все у пользователя"
+      },
+      "takedown": {
+        "title": "Заблокировать артефакт",
+        "description": "Заблокировать «{{name}}»? Он немедленно перестанет отдаваться публично."
+      },
+      "takedownUser": {
+        "title": "Заблокировать все артефакты пользователя",
+        "description": "Заблокировать ВСЕ артефакты пользователя {{user}}? Они немедленно перестанут отдаваться публично."
+      },
+      "errors": {
+        "loadFailed": "Не удалось загрузить артефакты с жалобами",
+        "takedownFailed": "Не удалось заблокировать артефакт"
+      }
+    }
+  },
+  "components": {
+    "workflowCard": {
+      "valid": "Валидный",
+      "invalid": "Невалидный",
+      "unknown": "Неизвестно",
+      "public": "Публичный",
+      "private": "Приватный",
+      "sharedWithYou": "Общий",
+      "delete": "Удалить",
+      "deleteWorkflow": "Удалить воркфлоу"
+    },
+    "searchFilters": {
+      "searchPlaceholder": "Поиск воркфлоу...",
+      "status": "Статус",
+      "statusLabel": "Статус",
+      "all": "Все",
+      "valid": "Валидные",
+      "invalid": "Невалидные",
+      "warning": "С предупреждениями",
+      "visibility": "Видимость",
+      "visibilityLabel": "Видимость",
+      "public": "Публичные",
+      "private": "Приватные",
+      "sortLabel": "Сортировка",
+      "sortByDate": "Дата",
+      "sortByName": "Название",
+      "newest": "Новые",
+      "oldest": "Старые",
+      "reset": "Сбросить",
+      "clear": "Очистить",
+      "page": "Страница",
+      "of": "из",
+      "prev": "Назад",
+      "next": "Далее"
+    },
+    "betaWarningBanner": {
+      "title": "Бета-версия:",
+      "message": "Система находится в разработке. Возможна потеря данных, изменение функциональности или условий использования. Мы делаем всё возможное, чтобы этого не произошло. Спасибо за понимание.",
+      "dismiss": "Скрыть предупреждение"
+    },
+    "betaAgreementModal": {
+      "title": "Соглашение о бета-версии",
+      "description": "Пожалуйста, прочитайте и примите условия перед использованием MCP Moira",
+      "aboutSystem": "О системе",
+      "aboutSystemText": "MCP Moira находится в <strong>стадии активной разработки</strong>. Система развивается, добавляются новые возможности.",
+      "importantInfo": "Важная информация",
+      "dataWarning": "<strong>Данные:</strong> Возможна потеря данных при обновлениях системы. Мы делаем всё возможное, чтобы этого не произошло.",
+      "functionalityWarning": "<strong>Функциональность:</strong> Возможны изменения в работе системы. Мы стремимся минимизировать неудобства.",
+      "termsWarning": "<strong>Условия использования:</strong> Могут быть изменены по мере развития проекта.",
+      "recommendations": "Рекомендации",
+      "backupWorkflows": "Делайте резервные копии важных workflows",
+      "reportIssues": "Сообщайте о проблемах через GitHub Issues",
+      "helpImprove": "Помогайте нам улучшать систему вашими отзывами",
+      "acceptance": "Принимая условия, вы подтверждаете",
+      "understandDevelopment": "Понимание что система находится в разработке",
+      "readyForChanges": "Готовность к возможным изменениям",
+      "agreeToTerms": "Согласие с указанными выше условиями",
+      "thankYou": "Спасибо за понимание и участие в развитии проекта! 🙏",
+      "decline": "Отклонить",
+      "acceptAndContinue": "Принять и продолжить"
+    },
+    "errorBoundary": {
+      "title": "Что-то пошло не так",
+      "subtitle": "Веб-интерфейс MCP Moira столкнулся с неожиданной ошибкой",
+      "errorId": "ID ошибки",
+      "error": "Ошибка",
+      "technicalDetails": "Технические детали",
+      "tryAgain": "Попробовать снова",
+      "reloadPage": "Перезагрузить страницу",
+      "goHome": "На главную",
+      "copyErrorDetails": "Скопировать детали ошибки",
+      "errorCopied": "Детали ошибки скопированы в буфер обмена",
+      "helpTitle": "Если ошибка повторяется:",
+      "helpRefresh": "Попробуйте обновить страницу",
+      "helpBackend": "Проверьте, работает ли сервер",
+      "helpReport": "Скопируйте детали ошибки и сообщите о проблеме"
+    },
+    "workflowSidebar": {
+      "description": "Описание",
+      "tags": "Теги",
+      "nodes": "Узлы",
+      "totalNodes": "всего узлов",
+      "philosophy": "Философия",
+      "nodeDetails": "Детали узла",
+      "workflowInfo": "Информация о воркфлоу",
+      "showWorkflowInfo": "← Воркфлоу",
+      "nodeId": "ID узла",
+      "from": "Откуда",
+      "to": "Куда"
+    },
+    "workflowGraph": {
+      "loading": "Расчёт раскладки...",
+      "controls": {
+        "fitView": "По размеру",
+        "fitViewTitle": "Вписать в окно",
+        "vertical": "Вертикально",
+        "verticalTitle": "Вертикальная раскладка",
+        "horizontal": "Горизонтально",
+        "horizontalTitle": "Горизонтальная раскладка"
+      },
+      "nodeDetails": {
+        "title": "Детали ноды",
+        "nodeSuffix": "Нода",
+        "id": "ID",
+        "type": "Тип",
+        "label": "Название",
+        "directive": "Директива",
+        "completionCondition": "Условие завершения",
+        "message": "Сообщение",
+        "condition": "Условие",
+        "expressions": "Выражения",
+        "subgraphId": "ID подграфа",
+        "validation": "Валидация",
+        "inputSchema": "Схема ввода",
+        "connections": "Связи"
+      }
+    },
+    "executionErrors": {
+      "title": "История ошибок",
+      "noErrors": "Ошибки не зафиксированы",
+      "node": "Узел",
+      "timestamp": "Время",
+      "message": "Сообщение",
+      "input": "Входные данные",
+      "copy": "Копировать",
+      "copied": "Скопировано!",
+      "copyTooltip": "Копировать детали ошибки для отладки",
+      "errorTypes": {
+        "validation": "Валидация",
+        "handler": "Обработчик",
+        "system": "Системная"
+      }
+    }
+  },
+  "common": {
+    "save": "Сохранить",
+    "saving": "Сохранение...",
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "loading": "Загрузка...",
+    "enabled": "Включено",
+    "disabled": "Отключено",
+    "status": {
+      "completed": "Завершён",
+      "failed": "Ошибка",
+      "running": "Выполняется",
+      "waiting": "Ожидает",
+      "pending": "В очереди",
+      "cancelled": "Отменён",
+      "locked": "Заблокирован"
+    },
+    "errors": {
+      "failedToLoad": "Не удалось загрузить данные",
+      "failedToSave": "Не удалось сохранить",
+      "failedToDelete": "Не удалось удалить",
+      "actionFailed": "Действие не выполнено",
+      "unknownError": "Произошла неизвестная ошибка"
+    },
+    "units": {
+      "mb": "МБ",
+      "kb": "КБ",
+      "gb": "ГБ"
+    },
+    "pagination": {
+      "showing": "Показано {{from}}-{{to}} из {{total}}",
+      "page": "{{current}} / {{total}}",
+      "firstPage": "Перейти на первую страницу",
+      "previousPage": "Предыдущая страница",
+      "nextPage": "Следующая страница",
+      "lastPage": "Перейти на последнюю страницу",
+      "pageEntries": "Страница {{page}} ({{count}} записей)"
+    },
+    "listView": "Список",
+    "gridView": "Сетка",
+    "errorsLabel": "ошибок",
+    "filters": {
+      "search": "Поиск",
+      "reset": "Сбросить",
+      "sort": "Сортировка",
+      "status": "Статус",
+      "user": "Пользователь",
+      "visibility": "Видимость",
+      "workflow": "Воркфлоу",
+      "action": "Действие",
+      "source": "Источник",
+      "dateFrom": "От",
+      "dateTo": "До"
+    }
+  },
+  "lockedWidget": {
+    "title": "{{count}} заблокированных выполнений",
+    "showLess": "Показать меньше",
+    "showMore": "Показать ещё {{count}}"
+  }
+}

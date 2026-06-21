@@ -1,0 +1,460 @@
+{
+  "slug": "marketing-campaign",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "46c0d99f-70ec-4eec-9aa5-a4782cffc8f6",
+  "metadata": {
+    "name": "Marketing Campaign Workflow",
+    "version": "1.5.0",
+    "description": "Structured process for creating marketing materials with guaranteed differentiation and conversion-focus: PRODUCT → AUDIENCE → COMPETITIVE → POSITIONING → PROOF → BRAND → CREATE → REVIEW. Solves the problem of generic AI-generated copy through mandatory proof points and competitive differentiation."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "product"
+      }
+    },
+    {
+      "id": "product",
+      "type": "agent-directive",
+      "directive": "Gather product information.\n\nAsk user or find in documentation:\n1. What are we selling? (features, capabilities)\n2. What problem do we solve? (specifically)\n3. Real USPs — not buzzwords, but specific advantages\n4. What do we do better than competitors?\n\n{{quality_standards}}\n\nIMPORTANT: USPs must be SPECIFIC and MEASURABLE.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave product validation issues to `{{workspace_path}}/product-issues.md` with format:\n```\n# Product Issues\n\n## USP SPECIFICITY\n1. [Generic USP without metrics]\n\n## COMPLETENESS\n1. [Missing product information]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `product_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USPs specific and measurable\n2. Problem clearly defined\n3. Competitive advantage stated\n4. No generic buzzwords\n\nReturn `issues_count` = number of issues found (0 if product info complete).",
+      "completionCondition": "Gathered: product description, problem solved, minimum 2 specific USPs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "product_description": {
+            "type": "string",
+            "description": "Product description"
+          },
+          "problem_solved": {
+            "type": "string",
+            "description": "What problem we solve"
+          },
+          "usps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "description": "Unique selling points (specific, not generic)"
+          }
+        },
+        "required": [
+          "product_description",
+          "problem_solved",
+          "usps"
+        ],
+        "globalInputs": [
+          "competitive_advantage"
+        ]
+      },
+      "connections": {
+        "success": "audience"
+      }
+    },
+    {
+      "id": "audience",
+      "type": "agent-directive",
+      "directive": "Define target audience.\n\nUse planning standards: {{planning_standards}}\n\nProduct: {{product.product_description}}\nSolves problem: {{product.problem_solved}}\n\nGather information:\n1. Who buys? (persona: name, role, company)\n2. What pain points? (specific problems)\n3. What is important when choosing? (decision criteria)\n4. Where are they? (communication channels)\n\nFor each persona specify ALL fields.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave audience validation issues to `{{workspace_path}}/audience-issues.md` with format:\n```\n# Audience Issues\n\n## TARGET AUDIENCE FIT\n1. [Missing persona element]\n\n## PAIN POINTS\n1. [Vague pain point]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `audience_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. TARGET AUDIENCE FIT per {{planning_standards}}\n2. Minimum 1 complete persona\n3. Pain points specific\n4. Decision criteria documented\n\nReturn `issues_count` = number of issues found (0 if audience complete).",
+      "completionCondition": "Minimum 1 persona with pain points, decision criteria and channels",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "primary_persona": {
+            "type": "string",
+            "description": "Primary persona name"
+          }
+        },
+        "required": [
+          "personas",
+          "primary_persona"
+        ],
+        "globalInputs": [
+          "personas"
+        ]
+      },
+      "connections": {
+        "success": "competitive"
+      }
+    },
+    {
+      "id": "competitive",
+      "type": "agent-directive",
+      "directive": "Analyze competitors.\n\nUse planning standards: {{planning_standards}}\n\nOur product: {{product.product_description}}\nOur USPs: {{product.usps}}\n\nFor each competitor determine:\n1. Name\n2. How do they position themselves?\n3. Examples of their messaging (headlines, claims)\n4. Where are they weak? (positioning gaps)\n\nGOAL: find gaps we can occupy with our positioning.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave competitive analysis issues to `{{workspace_path}}/competitive-issues.md` with format:\n```\n# Competitive Issues\n\n## DIFFERENTIATION\n1. [Gap not exploited]\n\n## ANALYSIS COMPLETENESS\n1. [Missing competitor data]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `competitive_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. DIFFERENTIATION per {{planning_standards}}\n2. Minimum 2 competitors analyzed\n3. Positioning gaps identified\n4. Weaknesses documented\n\nReturn `issues_count` = number of issues found (0 if competitive analysis complete).",
+      "completionCondition": "Minimum 2 competitors analyzed, positioning gaps found",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "market_gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Competitor positioning gaps we can occupy"
+          }
+        },
+        "required": [
+          "competitors",
+          "market_gaps"
+        ],
+        "globalInputs": [
+          "competitors"
+        ]
+      },
+      "connections": {
+        "success": "positioning"
+      }
+    },
+    {
+      "id": "positioning",
+      "type": "agent-directive",
+      "directive": "Create product positioning.\n\nUse planning standards: {{planning_standards}}\n\nOur USPs: {{product.usps}}\nProblem we solve: {{product.problem_solved}}\nPrimary persona: {{audience.primary_persona}}\nMarket gaps: {{competitive.market_gaps}}\n\nDefine:\n1. Positioning statement — one sentence describing unique value\n2. Key messages (3-5) — main messages for communication\n3. Value proposition — what customer gets\n4. Differentiator — how we differ from competitors (use gaps!)\n\nIMPORTANT: Differentiator must be UNIQUE — verify competitors do not use the same.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave positioning issues to `{{workspace_path}}/positioning-issues.md` with format:\n```\n# Positioning Issues\n\n## DIFFERENTIATION\n1. [Overlap with competitor]\n\n## UNIQUENESS\n1. [Not verified against competitors]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `positioning_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. DIFFERENTIATION per {{planning_standards}}\n2. Positioning statement unique\n3. Differentiator verified\n4. No overlap with competitors\n\nReturn `issues_count` = number of issues found (0 if positioning complete).",
+      "completionCondition": "Positioning statement, key messages, value proposition and differentiator defined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "positioning_statement": {
+            "type": "string",
+            "description": "One sentence — unique value"
+          },
+          "key_messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 3,
+            "maxItems": 5,
+            "description": "3-5 key messages"
+          },
+          "differentiator": {
+            "type": "string",
+            "description": "Unique difference from competitors"
+          }
+        },
+        "required": [
+          "positioning_statement",
+          "key_messages",
+          "value_proposition",
+          "differentiator"
+        ],
+        "globalInputs": [
+          "value_proposition"
+        ]
+      },
+      "connections": {
+        "success": "proof"
+      }
+    },
+    {
+      "id": "proof",
+      "type": "agent-directive",
+      "directive": "Gather proof points for claims.\n\nKey messages that need backing:\n{{positioning.key_messages}}\n\nFor EACH claim specify proof point:\n- data: statistics, metrics, numbers\n- testimonial: customer quote with name/company\n- case_study: specific customer result\n\n{{common_mistakes}}\n\nIMPORTANT: Cannot leave claim without proof. If no proof — claim needs to be rephrased or removed.",
+      "completionCondition": "Each key message has proof point",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "claim": {
+                  "type": "string"
+                },
+                "proof_type": {
+                  "type": "string",
+                  "enum": [
+                    "data",
+                    "testimonial",
+                    "case_study"
+                  ]
+                },
+                "proof_content": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "claim",
+                "proof_type",
+                "proof_content"
+              ]
+            },
+            "minItems": 3,
+            "description": "Claims with proof points"
+          }
+        },
+        "required": [
+          "claims"
+        ]
+      },
+      "connections": {
+        "success": "brand"
+      }
+    },
+    {
+      "id": "brand",
+      "type": "agent-directive",
+      "directive": "Define brand voice for materials.\n\nTarget audience: {{audience.primary_persona}}\nPositioning: {{positioning.positioning_statement}}\n\nDefine:\n1. Tone — professional / casual / expert / friendly\n2. Style — short and punchy / detailed and thorough\n3. Banned phrases — words and phrases NOT to use\n4. Examples — examples of good copy in this style\n\nIf product already has brand guidelines — use them.",
+      "completionCondition": "Tone, style, banned phrases and examples defined",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tone": {
+            "type": "string",
+            "description": "Communication tone"
+          },
+          "style": {
+            "type": "string",
+            "description": "Text style"
+          },
+          "banned_phrases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Banned words and phrases"
+          }
+        },
+        "required": [
+          "tone",
+          "style",
+          "banned_phrases"
+        ],
+        "globalInputs": [
+          "examples"
+        ]
+      },
+      "connections": {
+        "success": "create"
+      }
+    },
+    {
+      "id": "create",
+      "type": "agent-directive",
+      "directive": "Create marketing materials.\n\nUse planning standards: {{planning_standards}}\n\nPositioning: {{positioning.positioning_statement}}\nKey messages: {{positioning.key_messages}}\nDifferentiator: {{positioning.differentiator}}\nProof points: {{proof.claims}}\nBrand voice: {{brand.tone}}, {{brand.style}}\nBanned phrases: {{brand.banned_phrases}}\n\nCreate materials:\n- Headlines (3-5 variants)\n- Body copy\n- CTA (call to action)\n\nFor each material specify which proof points are used.\n\nIMPORTANT: Every benefit must be backed by proof point from previous step.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave materials creation issues to `{{workspace_path}}/create-issues.md` with format:\n```\n# Materials Issues\n\n## CTA CLARITY\n1. [Vague call to action]\n\n## PROOF POINTS\n1. [Claim without proof]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `create_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. CTA CLARITY per {{planning_standards}}\n2. PROOF POINTS per {{planning_standards}}\n3. Every claim backed by proof\n4. CTAs specific and actionable\n\nReturn `issues_count` = number of issues found (0 if materials complete).",
+      "completionCondition": "Materials created: headlines, body, CTA with proof points",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "materials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "headline / body / cta"
+                },
+                "content": {
+                  "type": "string"
+                },
+                "proof_used": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "content"
+              ]
+            },
+            "minItems": 3
+          }
+        },
+        "required": [
+          "materials"
+        ]
+      },
+      "connections": {
+        "success": "review"
+      }
+    },
+    {
+      "id": "review",
+      "type": "agent-directive",
+      "directive": "Delegate materials review to subagent via Task tool.\n\nUse Task tool to spawn review subagent with prompt:\n```\nYOU ARE marketing materials reviewer.\n\nReview the following marketing materials against quality checklist.\n\n**CHECKLIST:**\n{{validation_criteria}}\n\n**PLANNING STANDARDS:**\n{{planning_standards}}\n\n**MATERIALS TO REVIEW:**\n{{create.materials}}\n\n**BRAND VOICE:**\n- Tone: {{brand.tone}}\n- Banned phrases: {{brand.banned_phrases}}\n\n**YOUR TASK:**\nFor each checklist item:\n1. Evaluate materials against criteria\n2. Mark passed: yes/no\n3. Add specific notes explaining assessment\n\n**CATEGORIES TO CHECK:**\n1. CLAIMS - every claim has proof point\n2. DIFFERENTIATION - messaging unique from competitors\n3. BRAND - tone matches guidelines, no banned phrases\n4. LEGAL - no misleading claims\n\nReturn:\n- checklist: array of {item, passed, notes}\n- approved: true if all critical items passed, false otherwise\n- improvements_needed: array of specific fixes required (if not approved)\n- issues_count: number of failed items (0 if all passed)\n\nRead materials yourself - DO NOT ask main agent.\n```\n\nSubagent model: sonnet\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave final review issues to `{{workspace_path}}/review-issues.md` with format:\n```\n# Review Issues\n\n## CLAIMS\n1. [Unverified claim]\n\n## DIFFERENTIATION\n1. [Not unique]\n\n## BRAND\n1. [Tone mismatch]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `review_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if review complete).\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approved = \"yes\"\n- If user gave ANY feedback or said \"no\" → approved = \"no\"\n- DO NOT fix yourself!\n- Reply approved = \"no\" and write feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "All checklist items verified, final decision made",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "checklist",
+          "approved"
+        ],
+        "globalInputs": [
+          "checklist",
+          "approved",
+          "improvements_needed"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ],
+  "variableRegistry": {
+    "quality_standards": {
+      "type": "string",
+      "description": "Marketing materials quality standards",
+      "default": "MARKETING MATERIALS QUALITY STANDARDS:\n\n1. USPs must be SPECIFIC, not generic buzzwords:\n   - 'Revolutionary AI-powered solution'\n   + 'Reduces deployment time from 2 hours to 5 minutes'\n\n2. Every claim requires PROOF POINT:\n   - Data point (statistics, metrics)\n   - Testimonial (customer quote with name)\n   - Case study (specific result)\n\n3. Differentiator must differ from competitors:\n   - Check that competitors DON'T use same messaging\n   - Find gap in their positioning\n\n4. Brand voice consistency:\n   - Tone matches brand\n   - No banned phrases\n   - Style uniform"
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Common mistakes in marketing materials",
+      "default": "COMMON MISTAKES IN MARKETING MATERIALS:\n\n1. Generic messaging - sounds like all competitors\n   → Solution: competitive analysis + unique differentiator\n\n2. Made-up claims without proof\n   → Solution: proof point for EVERY benefit\n\n3. Abstract benefits instead of specific\n   - 'Save time and money'\n   + 'Save 10 hours per week on manual data entry'\n\n4. Tone mismatch - copy doesn't match brand\n   → Solution: brand voice guidelines before writing\n\n5. Legal risks - misleading claims\n   → Solution: review checklist before finalization"
+    },
+    "validation_criteria": {
+      "type": "string",
+      "description": "Marketing materials review checklist",
+      "default": "MARKETING MATERIALS REVIEW CHECKLIST:\n\n1. CLAIMS:\n[ ] Does every claim have proof point?\n[ ] Are proof points real (not made up)?\n[ ] Is statistics current and verifiable?\n\n2. DIFFERENTIATION:\n[ ] Is messaging different from competitors?\n[ ] Is USP unique for market?\n[ ] No generic buzzwords?\n\n3. BRAND:\n[ ] Does tone match guidelines?\n[ ] No banned phrases?\n[ ] Is style consistent?\n\n4. LEGAL:\n[ ] No misleading claims?\n[ ] Disclaimers where needed?\n[ ] Testimonials with permission?"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "Marketing planning standards",
+      "default": "MARKETING PLANNING STANDARDS:\n\n1. TARGET AUDIENCE FIT:\n- Persona clearly defined with role and context\n- Pain points specific and verifiable\n- Decision criteria documented\n- Communication channels identified\n- Primary persona designated\n\n2. DIFFERENTIATION:\n- USPs specific, not generic buzzwords\n- Competitor gaps identified and exploited\n- Positioning statement unique\n- Differentiator verified against competitors\n- No overlap with competitor messaging\n\n3. CTA CLARITY:\n- Call to action specific and actionable\n- Next step clear to user\n- Value proposition in CTA\n- Urgency where appropriate\n- No ambiguous language\n\n4. PROOF POINTS:\n- Every claim backed by evidence\n- Data sources verified\n- Testimonials attributed\n- Case studies specific\n- No unsubstantiated claims"
+    },
+    "approved": {
+      "type": "boolean",
+      "description": "Workflow-global approved"
+    },
+    "checklist": {
+      "type": "array",
+      "description": "Workflow-global checklist",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "passed"
+        ]
+      },
+      "minItems": 5
+    },
+    "competitive_advantage": {
+      "type": "string",
+      "description": "Workflow-global competitive_advantage"
+    },
+    "competitors": {
+      "type": "array",
+      "description": "Workflow-global competitors",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "positioning": {
+            "type": "string"
+          },
+          "sample_messages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "weaknesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "positioning",
+          "weaknesses"
+        ]
+      },
+      "minItems": 1
+    },
+    "examples": {
+      "type": "array",
+      "description": "Workflow-global examples",
+      "items": {
+        "type": "string"
+      }
+    },
+    "improvements_needed": {
+      "type": "array",
+      "description": "Workflow-global improvements_needed",
+      "items": {
+        "type": "string"
+      }
+    },
+    "personas": {
+      "type": "array",
+      "description": "Workflow-global personas",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "company_type": {
+            "type": "string"
+          },
+          "pain_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "pain_points",
+          "decision_criteria"
+        ]
+      },
+      "minItems": 1
+    },
+    "value_proposition": {
+      "type": "string",
+      "description": "Workflow-global value_proposition"
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Workflow-global workspace_path"
+    },
+    "has_file_access": {
+      "type": "boolean",
+      "description": "Agent can read/write local files"
+    }
+  }
+}

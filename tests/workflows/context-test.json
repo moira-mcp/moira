@@ -1,0 +1,71 @@
+{
+  "slug": "context-test",
+  "metadata": {
+    "name": "Context Variable Test",
+    "version": "1.0.0",
+    "description": "Test context variable flow"
+  },
+  "variableRegistry": {
+    "workflow_id": {
+      "type": "string",
+      "description": "Workflow identifier for context testing",
+      "default": "context-test"
+    },
+    "user_name": {
+      "type": "string",
+      "description": "User name collected by collect-data"
+    },
+    "user_age": {
+      "type": "number",
+      "description": "User age collected by collect-data"
+    }
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "collect-data"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "collect-data",
+      "directive": "Collect user data",
+      "completionCondition": "Data collected",
+      "connections": {
+        "success": "verify-context"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_name",
+          "user_age"
+        ],
+        "globalInputs": [
+          "user_name",
+          "user_age"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-context",
+      "directive": "Verify all context data: workflow={{workflow_id}}, name={{user_name}}, age={{user_age}}",
+      "completionCondition": "Context verified",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "workflow_id",
+        "user_name",
+        "user_age"
+      ]
+    }
+  ]
+}

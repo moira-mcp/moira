@@ -1,0 +1,135 @@
+---
+title: Self-Hosting
+description: Run your own Moira instance with Docker Compose using the prebuilt image
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Run Moira on your own machine with Docker Compose. The default path pulls a prebuilt
+image from the registry — no source checkout or local build needed.
+
+## Prerequisites
+
+- Docker with the Compose plugin (`docker compose`)
+- The two files from the repository: `docker-compose.yml` and `.env.example`
+
+## Quick Start
+
+<Steps>
+
+1.  **Create your config**
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    For a `localhost` run, the defaults work unchanged.
+
+2.  **Start the container**
+
+    ```bash
+    docker compose up -d
+    ```
+
+    Compose pulls `ghcr.io/moira-mcp/moira:latest` and starts the container.
+
+3.  **Open the Web UI**
+
+    ```
+    http://localhost:8080
+    ```
+
+    Your instance also serves this documentation at `http://localhost:8080/docs/`
+    (and `/ru/docs/`), and the MCP endpoint at `http://localhost:8080/mcp`.
+
+</Steps>
+
+On first start, Moira generates the missing secrets and a one-time admin password.
+
+## Configuration
+
+`DEPLOYMENT_MODE=self-host` (the default) runs a single-user / private-team install:
+no open registration, no email-verification gate, and missing secrets are generated
+on first start.
+
+### Host-dependent variables
+
+These three must point at your host and keep their ports consistent. The shipped
+defaults target `localhost:8080`, so a localhost run needs no edits.
+
+| Variable                  | Default                 | Purpose                              |
+| ------------------------- | ----------------------- | ------------------------------------ |
+| `MOIRA_HOST`              | `localhost:8080`        | Public host (protocol auto-detected) |
+| `MOIRA_PORT`              | `8080`                  | Host port mapped to the container    |
+| `STATIC_ARTIFACTS_DOMAIN` | `static.localhost:8080` | Domain for served HTML artifacts     |
+
+For a real host or a different port, edit all three together:
+
+```bash
+MOIRA_HOST=moira.example.com
+MOIRA_PORT=8080
+STATIC_ARTIFACTS_DOMAIN=static.example.com
+```
+
+<Aside type="caution">`STATIC_ARTIFACTS_DOMAIN` is required — startup aborts if it is empty.</Aside>
+
+### Auto-generated secrets
+
+In self-host mode these are generated on first start and persisted to
+`<data-dir>/.secrets.env`. Leave them empty in `.env`:
+
+| Variable                  | Generated value                          |
+| ------------------------- | ---------------------------------------- |
+| `BETTER_AUTH_SECRET`      | Session encryption key                   |
+| `TELEGRAM_ENCRYPTION_KEY` | Telegram credential encryption key       |
+| `ADMIN_PASSWORD`          | Admin password, printed to the logs once |
+
+The admin login is shown once in the container logs on first start:
+
+```bash
+docker compose logs | grep -A3 "ADMIN LOGIN"
+```
+
+Sign in with `ADMIN_EMAIL` (default `admin@moira.local`) and the printed password.
+
+## Connect an MCP Client
+
+The MCP endpoint is your host plus `/mcp`:
+
+```
+http://localhost:8080/mcp
+```
+
+Add it as an MCP server in your AI client and complete OAuth authentication. See
+[Quick Start](/docs/getting-started/quickstart/) for client configuration.
+
+## Adding Your Own Workflow Flows
+
+The image ships a bundled workflow catalog in `./workflows/production`. To ALSO load
+your own flows, set `WORKFLOWS_DIRS` to a colon-separated list of catalog base
+directories (each containing a `flows/<uuid>.json` layout):
+
+```bash
+WORKFLOWS_DIRS=./workflows/production:./my-private-workflows/production
+```
+
+The directories are merged and de-duplicated by `(owner, slug)`. A **later** directory
+overrides an earlier one on a collision, so a directory listed last can extend or
+shadow the bundled catalog. Unset → just the bundled `./workflows/production`. Mount
+your extra directory into the container (e.g. via a compose volume) so the path exists
+at runtime.
+
+## Build From Source
+
+Building locally is an alternative for contributors who need to modify the image.
+In `docker-compose.yml`, comment out the `image:` line and uncomment the `build:`
+block, then:
+
+```bash
+docker compose up -d --build
+```
+
+## Related
+
+- [Quick Start](/docs/getting-started/quickstart/) - Connect an AI client
+- [MCP Clients](/docs/integration/mcp-clients/) - Client integrations

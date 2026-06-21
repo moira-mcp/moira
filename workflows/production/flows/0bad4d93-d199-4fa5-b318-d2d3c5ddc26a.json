@@ -1,0 +1,252 @@
+{
+  "slug": "infinite-task-loop",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "0bad4d93-d199-4fa5-b318-d2d3c5ddc26a",
+  "metadata": {
+    "name": "Infinite Task Loop",
+    "version": "1.2.0",
+    "description": "Infinite task execution loop for continuous agent work. Runs in a permanent loop: ask → plan → confirm → execute → report → repeat. Only exit via teleport."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "ask-task"
+      },
+      "initialData": {}
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-task",
+      "directive": "Ask the user what task they want to do next. Everything the user writes IS the task description.\n\n⛔ CRITICAL: Do NOT execute, read, study, or analyze the task. Do NOT perform any actions. Your ONLY job is to capture what the user said in task_description and submit this step IMMEDIATELY. The workflow handles planning and execution in subsequent steps.",
+      "completionCondition": "User described their task and agent submitted step immediately without performing any actions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_description": {
+            "type": "string",
+            "minLength": 10,
+            "description": "Full description of the task the user wants done"
+          }
+        },
+        "required": [
+          "task_description"
+        ]
+      },
+      "connections": {
+        "success": "understand-and-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "understand-and-plan",
+      "directive": "Analyze the task and create a precise execution plan.\n\nTask: {{ask-task.task_description}}\nPrevious attempt feedback (if returning from results rejection): {{user_feedback}}\n\n⛔ This step is MANDATORY for ALL tasks — no matter how simple or small. No task is too small to skip planning.\n\nThis is for PLANNING and ANALYSIS only — do NOT start executing the task.\n\nBreak the task down into clear, specific, actionable steps. Consider edge cases and potential issues. The plan should be detailed enough that you can follow it step by step.",
+      "completionCondition": "Execution plan created with specific actionable steps",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "execution_plan"
+        ],
+        "globalInputs": [
+          "execution_plan"
+        ]
+      },
+      "connections": {
+        "success": "present-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "present-plan",
+      "directive": "Present the execution plan to the user and ask for their confirmation.\n\nPlan:\n{{execution_plan}}\n\n⛔ MANDATORY USER CONFIRMATION: You MUST ask the user and wait for their ACTUAL response. NEVER auto-approve. NEVER skip this confirmation under ANY circumstances. If you do not have a real response from the user — you have NOT completed this step.\n\nCRITICALLY IMPORTANT — REACTION TO FEEDBACK:\nIf user said 'yes' / approved → plan_approved = 'yes'.\nIf user gave ANY feedback, corrections, or said 'no' → plan_approved = 'no'.\nDO NOT fix the plan yourself! Set plan_approved = 'no' and write the user's feedback in user_feedback. The workflow will route to the revision branch automatically.",
+      "completionCondition": "User has reviewed the plan and provided approval or feedback",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether user approved the plan"
+          }
+        },
+        "required": [
+          "plan_approved"
+        ],
+        "globalInputs": [
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-approved"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-plan-approved",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-plan.plan_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "execute-task",
+        "false": "revise-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "revise-plan",
+      "directive": "Revise the execution plan based on user feedback.\n\nOriginal task: {{ask-task.task_description}}\nPrevious plan: {{execution_plan}}\nUser feedback: {{user_feedback}}\n\nCreate an updated plan that addresses the feedback.\n\n⛔ You MUST present the revised plan to the user in the next step. NEVER auto-continue without user seeing the plan.",
+      "completionCondition": "Plan revised to address user feedback",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "execution_plan"
+        ],
+        "globalInputs": [
+          "execution_plan"
+        ]
+      },
+      "connections": {
+        "success": "present-plan"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "execute-task",
+      "directive": "Execute the task according to the approved plan.\n\nTask: {{ask-task.task_description}}\nPlan: {{execution_plan}}\n\nDo the work thoroughly. Follow each step of the plan. Verify results as you go.",
+      "completionCondition": "Task executed according to the plan with verifiable results",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "execution_summary": {
+            "type": "string",
+            "minLength": 20,
+            "description": "Summary of what was done and the results"
+          }
+        },
+        "required": [
+          "execution_summary"
+        ]
+      },
+      "connections": {
+        "success": "report-results"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "report-results",
+      "directive": "Report the execution results to the user and ask if they are satisfied.\n\nTask: {{ask-task.task_description}}\nWhat was done: {{execute-task.execution_summary}}\n\nPresent the results clearly and ask the user if the outcome is acceptable.\n\n⛔ MANDATORY USER CONFIRMATION: You MUST ask the user and wait for their ACTUAL response. NEVER auto-approve. NEVER skip this confirmation under ANY circumstances. If you do not have a real response from the user — you have NOT completed this step.\n\nCRITICALLY IMPORTANT — REACTION TO FEEDBACK:\nIf user said 'yes' / approved → results_approved = 'yes'.\nIf user gave ANY feedback or said 'no' → results_approved = 'no'.\nDO NOT fix issues yourself! Set results_approved = 'no' and write the feedback in user_feedback. The workflow will route to full re-planning cycle automatically.",
+      "completionCondition": "User has reviewed results and provided approval or feedback",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "results_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether user approved the results"
+          }
+        },
+        "required": [
+          "results_approved"
+        ],
+        "globalInputs": [
+          "user_feedback"
+        ]
+      },
+      "connections": {
+        "success": "route-results-approved"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-results-approved",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "report-results.results_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "loop-back",
+        "false": "understand-and-plan"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "loop-back",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "always_exit"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "end",
+        "false": "ask-task"
+      }
+    },
+    {
+      "type": "teleport",
+      "id": "teleport-exit",
+      "hint": "Use when you want to exit the infinite task loop and end the session",
+      "directive": "The user wants to exit the task loop. Provide a brief summary of all tasks completed during this session.",
+      "completionCondition": "Session summary provided",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "session_summary"
+        ],
+        "globalInputs": [
+          "session_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "session_summary",
+        "task_description",
+        "execution_summary"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "always_exit": {
+      "type": "string",
+      "description": "Workflow-global always_exit"
+    },
+    "execution_plan": {
+      "type": "string",
+      "description": "Workflow-global execution_plan",
+      "minLength": 20
+    },
+    "session_summary": {
+      "type": "string",
+      "description": "Workflow-global session_summary"
+    },
+    "user_feedback": {
+      "type": "string",
+      "description": "Workflow-global user_feedback"
+    }
+  }
+}

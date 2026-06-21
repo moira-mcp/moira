@@ -1,0 +1,61 @@
+# MCP Moira — self-hosted local deploy
+#
+# Quickstart:
+#   cp .env.example .env       # then edit .env: set MOIRA_HOST, BETTER_AUTH_SECRET, TELEGRAM_ENCRYPTION_KEY
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# This compose runs Moira on a single port with direct port-mapping — no Traefik,
+# no reverse proxy, no external networks. To serve it on a public domain, put your
+# own reverse proxy (Traefik, Caddy, nginx, …) with TLS in front of this container.
+
+services:
+  moira:
+    container_name: moira
+
+    # --- Option A: use the prebuilt public image (DEFAULT) ---
+    # Pulled from GHCR — no source checkout or local build needed. This is the
+    # recommended self-host path: `cp .env.example .env` then `docker compose up -d`.
+    image: ghcr.io/moira-mcp/moira:latest
+
+    # --- Option B: build the image locally from source (advanced) ---
+    # For contributors / customizers only. Requires the full source tree.
+    # Comment out the `image:` line above and uncomment the `build:` block below.
+    # build:
+    #   context: .
+    #   dockerfile: config/Dockerfile
+    #   args:
+    #     ENV_FILE: .env.example
+    #     BUILD_ID: local
+    #     APP_BASE_PATH: /
+
+    restart: unless-stopped
+
+    # Runtime configuration. Values here override the defaults baked into the
+    # image at build time (dotenv does not overwrite existing process.env).
+    # REQUIRED in .env: MOIRA_HOST, BETTER_AUTH_SECRET, TELEGRAM_ENCRYPTION_KEY.
+    env_file:
+      - .env
+
+    environment:
+      - NODE_ENV=production
+      - WORKFLOWS_DIR=./workflows/production
+      - METRICS_PORT=9090
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+
+    # Host port (left) → container nginx port 80 (right). Change MOIRA_PORT in .env
+    # to use a different host port. Keep it consistent with MOIRA_HOST.
+    ports:
+      - "${MOIRA_PORT:-8080}:80"
+
+    # SQLite database + execution storage persist on the host. Survives rebuilds.
+    volumes:
+      - ./data:/app/data
+
+    # Internal metrics/health server (9090) is the source of truth for health.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3

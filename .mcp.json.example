@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "moira-local": {
+      "type": "http",
+      "url": "http://localhost:3030/mcp"
+    },
+    "moira-remote": {
+      "type": "http",
+      "url": "http://192.0.2.1:3030/mcp"
+    }
+  }
+}

@@ -1,0 +1,109 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+**/*.d.ts
+**/*.d.ts.map
+**/*.js.map
+*.tsbuildinfo
+# But allow config files
+!*.config.js
+!jest.config.cjs
+
+# Storage
+.moira-storage/
+.graph-storage/
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code harness config (personal, not shipped)
+.claude/
+
+# Environment - ignore all except the public examples + the self-host/CI build env
+.env*
+!.env.example
+!.env.local.example
+!.env.test.example
+!.env.selfhost
+!.env.ci
+
+# Private deploy / infra config (lives in the private moira-infra repo, never public)
+.deploy-config.json
+.deploy-config.*.json
+config/docker-compose.*.yml
+*-remote.yml
+config/deploy-hooks/
+.env.production*
+.env.staging*
+.deploy-log-*.txt
+deploy-logs/
+
+# MCP configuration
+.mcp.json
+
+# Test storage
+.moira-test-storage/
+
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+*.log.gz
+
+# Workflow backups
+workflow-backups/
+
+# Database backups
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Development artifacts
+
+# Project structure - keep organized  
+# tests/ - comprehensive test suite
+# scripts/ - development utilities
+
+# Experimental directories
+*-experiment/
+*-feature/
+*-analysis/
+/.playwright-mcp/
+
+# Test storage directories (cleanup)
+.test-graph-storage-*
+.graph-storage-test
+claude-temp-files/
+
+# Generated test-discovery artifact (contains absolute project paths)
+tests/DISCOVERED-TESTS.json
+
+MOIRA-BUGS.md
+test-results/
+playwright-report/
+
+# Database files
+/data/
+*.db
+*.db-shm
+*.db-wal
+test-workflow-storage.db*
+.test-results-*.json
+.env.*.backup
+mcp-tools-context.json
+/GEMINI.md
+issues-todo.json
+
+# Load tests
+load-tests/results/
+moira-ws/

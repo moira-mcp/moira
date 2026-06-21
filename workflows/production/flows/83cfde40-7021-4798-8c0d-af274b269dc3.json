@@ -1,0 +1,738 @@
+{
+  "slug": "content-creation",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "83cfde40-7021-4798-8c0d-af274b269dc3",
+  "metadata": {
+    "name": "Content Creation",
+    "version": "1.4.0",
+    "description": "Workflow for creating text content (articles, posts, documentation). Guides through stages: requirements gathering, topic research, structure creation, draft writing, review and editing, finalization. Supports different content formats and tones."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "get-brief"
+      }
+    },
+    {
+      "id": "get-brief",
+      "type": "agent-directive",
+      "directive": "Get content brief from user.\n\nAsk:\n1. Content topic - what to write about?\n2. Format - article, post, documentation, other?\n3. Target audience - for whom?\n4. Tone - formal, casual, technical?\n5. Constraints - volume, deadline, special requirements?\n\nIMPORTANT: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until user explicitly responds\n- Record in user_response_text exactly what user wrote",
+      "completionCondition": "User provided content information",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 5,
+            "description": "Content topic"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "article",
+              "post",
+              "documentation",
+              "other"
+            ],
+            "description": "Content format"
+          },
+          "target_audience": {
+            "type": "string",
+            "description": "Target audience"
+          },
+          "tone": {
+            "type": "string",
+            "enum": [
+              "formal",
+              "casual",
+              "technical",
+              "mixed"
+            ],
+            "description": "Tone"
+          }
+        },
+        "required": [
+          "topic",
+          "format",
+          "target_audience",
+          "tone",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "constraints",
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "research-topic"
+      }
+    },
+    {
+      "id": "research-topic",
+      "type": "agent-directive",
+      "directive": "Research the topic: {{get-brief.topic}}\n\nFor audience: {{get-brief.target_audience}}\nFormat: {{get-brief.format}}\n\nUse planning standards: {{planning_standards}}\n\nTasks:\n1. Find authoritative sources on the topic\n2. Gather key facts, statistics, examples\n3. Study different viewpoints\n4. Verify information currency\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave research issues to `{{workspace_path}}/research-issues.md` with format:\n```\n# Research Issues\n\n## SOURCE QUALITY\n1. [Issue with source]\n\n## COVERAGE GAPS\n1. [Missing topic aspect]\n\n## FACT VERIFICATION\n1. [Unverified claim]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `research_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Minimum 3 authoritative sources\n2. Main topic aspects covered\n3. Facts verified from primary sources\n4. Different viewpoints considered\n\nReturn `issues_count` = number of issues found (0 if research complete).",
+      "completionCondition": "Research completed, key information gathered",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 3,
+            "description": "List of sources used"
+          },
+          "key_facts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 3,
+            "description": "Key facts and thesis points"
+          },
+          "research_summary": {
+            "type": "string",
+            "minLength": 50,
+            "description": "Brief research summary"
+          },
+          "research_complete": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        },
+        "required": [
+          "sources",
+          "key_facts",
+          "research_summary",
+          "research_complete"
+        ]
+      },
+      "connections": {
+        "success": "check-research"
+      }
+    },
+    {
+      "id": "check-research",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research-topic.research_complete"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "create-outline",
+        "false": "expr-inc-research-fix"
+      }
+    },
+    {
+      "id": "fix-research",
+      "type": "agent-directive",
+      "directive": "Fix research issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/research-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `research_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Find additional sources or verify facts\n3. Update research summary\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.\n\nTopic: {{get-brief.topic}}\nCurrent sources: {{research-topic.sources}}\nCurrent facts: {{research-topic.key_facts}}",
+      "completionCondition": "Research completed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "additional_sources",
+          "additional_facts"
+        ],
+        "globalInputs": [
+          "additional_sources",
+          "additional_facts"
+        ]
+      },
+      "connections": {
+        "success": "research-topic"
+      }
+    },
+    {
+      "id": "create-outline",
+      "type": "agent-directive",
+      "directive": "Create content structure (outline).\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\nAudience: {{get-brief.target_audience}}\nTone: {{get-brief.tone}}\n\nResearch: {{research-topic.research_summary}}\nKey facts: {{research-topic.key_facts}}\n\nUse planning standards: {{planning_standards}}\n\nCreate logical structure with:\n1. Clear headline\n2. Hook in introduction\n3. Main sections with key points\n4. Conclusion with takeaways\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave outline issues to `{{workspace_path}}/outline-issues.md` with format:\n```\n# Outline Issues\n\n## REQUIREMENTS COVERAGE\n1. [Brief requirement not addressed]\n\n## STANDARDS COMPLIANCE\n1. [Planning standard not followed]\n\n## STRUCTURE ISSUES\n1. [Logical flow problem]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `outline_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - all brief points addressed\n2. STANDARDS COMPLIANCE - follows {{planning_standards}}\n3. Logical flow from section to section\n4. Appropriate for target audience\n\nReturn `issues_count` = number of issues found (0 if outline complete).",
+      "completionCondition": "Content structure created",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outline": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "section": {
+                  "type": "string"
+                },
+                "key_points": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "minItems": 3
+          },
+          "outline_summary": {
+            "type": "string",
+            "description": "Brief structure description"
+          }
+        },
+        "required": [
+          "outline",
+          "outline_summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-outline"
+      }
+    },
+    {
+      "id": "notify-outline",
+      "type": "telegram-notification",
+      "message": "*Content structure ready*\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\n\nAwaiting structure confirmation.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "approve-outline",
+        "error": "approve-outline"
+      }
+    },
+    {
+      "id": "approve-outline",
+      "type": "agent-directive",
+      "directive": "Show user the content structure and get confirmation.\n\nStructure:\n{{create-outline.outline_summary}}\n\nSections:\n{{create-outline.outline}}\n\nIMPORTANT: WAIT FOR USER RESPONSE\n- Show structure and ask 'Do you approve the structure? (yes/no)'\n- DO NOT fill outline_approved until user explicitly responds\n- Record in user_response_text exactly what user responded\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed or rejected structure",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "outline_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "outline_feedback": {
+            "type": "string",
+            "description": "Structure feedback"
+          }
+        },
+        "required": [
+          "outline_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-outline-approval"
+      }
+    },
+    {
+      "id": "route-outline-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-outline.outline_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "write-draft",
+        "false": "revise-outline"
+      }
+    },
+    {
+      "id": "revise-outline",
+      "type": "agent-directive",
+      "directive": "Revise content structure based on feedback.\n\nUser feedback: {{approve-outline.outline_feedback}}\n\n{{#if has_file_access}}\n**FILE MODE:**\nAlso read `{{workspace_path}}/outline-issues.md` for additional issues.\n{{else}}\n**CONTEXT MODE:**\nAlso use `outline_issues` from previous validation.\n{{/if}}\n\nAddress EACH issue one by one:\n1. User feedback points\n2. Requirements coverage gaps\n3. Standards compliance issues\n4. Structure problems\n\nDO NOT skip any issue. All issues must be addressed.\n\nCurrent outline: {{create-outline.outline}}",
+      "completionCondition": "Structure revised",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "revised_outline"
+        ],
+        "globalInputs": [
+          "revised_outline"
+        ]
+      },
+      "connections": {
+        "success": "create-outline"
+      }
+    },
+    {
+      "id": "write-draft",
+      "type": "agent-directive",
+      "directive": "Write content draft following approved structure.\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\nAudience: {{get-brief.target_audience}}\nTone: {{get-brief.tone}}\n\nStructure: {{create-outline.outline}}\nSources: {{research-topic.sources}}\nFacts: {{research-topic.key_facts}}\n\nUse planning standards: {{planning_standards}}\n\nQuality criteria:\n- Clear and engaging writing\n- Facts properly attributed\n- Tone consistent throughout\n- Appropriate for audience level\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave draft issues to `{{workspace_path}}/draft-issues.md` with format:\n```\n# Draft Issues\n\n## REQUIREMENTS COVERAGE\n1. [Outline section not fully covered]\n\n## TONE CONSISTENCY\n1. [Tone shift detected]\n\n## QUALITY ISSUES\n1. [Clarity/engagement problem]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `draft_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - all outline sections covered\n2. TONE CONSISTENCY - matches specified tone throughout\n3. AUDIENCE FIT - appropriate language level\n4. QUALITY - clear, engaging, no filler\n\nReturn `issues_count` = number of issues found (0 if draft complete).",
+      "completionCondition": "Draft written",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "draft_content": {
+            "type": "string",
+            "minLength": 200,
+            "description": "Draft text"
+          },
+          "draft_complete": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          }
+        },
+        "required": [
+          "draft_content",
+          "word_count",
+          "draft_complete"
+        ],
+        "globalInputs": [
+          "word_count"
+        ]
+      },
+      "connections": {
+        "success": "check-draft"
+      }
+    },
+    {
+      "id": "check-draft",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "write-draft.draft_complete"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "review-edit",
+        "false": "expr-inc-draft-fix"
+      }
+    },
+    {
+      "id": "fix-draft",
+      "type": "agent-directive",
+      "directive": "Fix draft issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/draft-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `draft_issues` from previous validation.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Revise the affected section\n3. Verify fix resolves issue\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.\n\nCurrent draft: {{write-draft.draft_content}}\nStructure: {{create-outline.outline}}",
+      "completionCondition": "Draft completed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "improvements_made"
+        ],
+        "globalInputs": [
+          "improvements_made"
+        ]
+      },
+      "connections": {
+        "success": "write-draft"
+      }
+    },
+    {
+      "id": "review-edit",
+      "type": "agent-directive",
+      "directive": "Edit and improve the draft.\n\nDraft: {{write-draft.draft_content}}\n\nUse planning standards: {{planning_standards}}\n\nEditing tasks:\n1. Check logic and coherence\n2. Remove repetitions and filler\n3. Improve readability\n4. Fact-check against sources: {{research-topic.sources}}\n5. Verify tone consistency\n6. Polish language and style\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave review issues to `{{workspace_path}}/review-issues.md` with format:\n```\n# Final Review Issues\n\n## STANDARDS COMPLIANCE\n1. [Standard not met]\n\n## QUALITY ISSUES\n1. [Remaining quality problem]\n\n## FACT CHECK\n1. [Verification needed]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `review_issues` field as array.\n{{/if}}\n\n**FINAL CHECKS:**\n1. STANDARDS COMPLIANCE - follows all {{planning_standards}}\n2. No filler or redundancy\n3. All facts verified\n4. Ready for publication\n\nReturn `issues_count` = number of issues found (0 if ready).",
+      "completionCondition": "Content edited",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "edited_content": {
+            "type": "string",
+            "minLength": 200
+          },
+          "changes_made": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of changes made"
+          }
+        },
+        "required": [
+          "edited_content",
+          "changes_made"
+        ]
+      },
+      "connections": {
+        "success": "approve-content"
+      }
+    },
+    {
+      "id": "approve-content",
+      "type": "agent-directive",
+      "directive": "Show user final content for approval.\n\nContent:\n{{review-edit.edited_content}}\n\nChanges made: {{review-edit.changes_made}}\n\nIMPORTANT: WAIT FOR USER RESPONSE\n- Show content and ask 'Do you approve? (yes/no)'\n- DO NOT fill content_approved until user explicitly responds\n- Record in user_response_text exactly what user responded\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed or rejected content",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ]
+          },
+          "content_feedback": {
+            "type": "string",
+            "description": "Content feedback"
+          }
+        },
+        "required": [
+          "content_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-content-approval"
+      }
+    },
+    {
+      "id": "route-content-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-content.content_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "finalize",
+        "false": "revise-content"
+      }
+    },
+    {
+      "id": "revise-content",
+      "type": "agent-directive",
+      "directive": "User did not confirm content.\n\nFeedback: {{approve-content.content_feedback}}\n\nRevise content considering feedback and reset retry_count.",
+      "completionCondition": "Content revised",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "retry_count"
+        ],
+        "globalInputs": [
+          "retry_count"
+        ]
+      },
+      "connections": {
+        "success": "review-edit"
+      }
+    },
+    {
+      "id": "finalize",
+      "type": "agent-directive",
+      "directive": "Finalize content and prepare for publication.\n\nFinal content: {{review-edit.edited_content}}\n\nTasks:\n1. Add final formatting\n2. Verify everything is ready for publication\n3. Prepare summary\n\nSave final version.",
+      "completionCondition": "Content finalized and ready for publication",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "final_word_count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "final_content",
+          "final_word_count",
+          "final_summary"
+        ],
+        "globalInputs": [
+          "final_content",
+          "final_summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-complete"
+      }
+    },
+    {
+      "id": "notify-complete",
+      "type": "telegram-notification",
+      "message": "*Content ready*\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\nWords: {{finalize.final_word_count}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end",
+        "error": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "final_content",
+        "final_word_count",
+        "final_summary",
+        "topic",
+        "format"
+      ]
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-research-fix",
+      "expressions": [
+        "fix_research_iteration = fix_research_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-research-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-research-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_research_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "fix-research",
+        "false": "ask-user-research-fix-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-draft-fix",
+      "expressions": [
+        "fix_draft_iteration = fix_draft_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-draft-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-draft-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_draft_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "fix-draft",
+        "false": "ask-user-draft-fix-limit-reached"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-research-fix-limit-reached",
+      "directive": "The research fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-research-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-research-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-research-fix-counter",
+        "false": "create-outline"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-research-fix-counter",
+      "expressions": [
+        "fix_research_iteration = 0"
+      ],
+      "connections": {
+        "default": "fix-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-draft-fix-limit-reached",
+      "directive": "The draft fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-draft-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-draft-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-draft-fix-counter",
+        "false": "review-edit"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-draft-fix-counter",
+      "expressions": [
+        "fix_draft_iteration = 0"
+      ],
+      "connections": {
+        "default": "fix-draft"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "retry_count": {
+      "type": "number",
+      "description": "Stores retry count",
+      "default": 0
+    },
+    "max_retries": {
+      "type": "number",
+      "description": "Stores max retries",
+      "default": 3
+    },
+    "process_requirements": {
+      "type": "string",
+      "description": "Product requirements",
+      "default": "CONTENT CREATION PROCESS:\n\n1. REQUIREMENTS GATHERING:\n- Define topic and key questions\n- Clarify format (article, post, documentation)\n- Define target audience\n- Clarify tone (formal, casual, technical)\n- Volume constraints\n\n2. RESEARCH:\n- Study topic from authoritative sources\n- Gather facts, statistics, examples\n- Find opposing viewpoints\n- Verify information currency\n\n3. STRUCTURING:\n- Create logical outline\n- Define key thesis points\n- Distribute information across sections\n- Ensure natural flow\n\n4. WRITING:\n- Follow the structure\n- Write for target audience\n- Use examples and analogies\n- Maintain consistent tone\n\n5. EDITING:\n- Check logic and coherence\n- Remove repetitions and filler\n- Improve readability\n- Fact-check"
+    },
+    "quality_standards": {
+      "type": "string",
+      "description": "Stores quality standards",
+      "default": "CONTENT QUALITY STANDARDS:\n\n1. CLARITY:\n- One paragraph = one idea\n- Short sentences (up to 20 words)\n- Active voice preferred\n- Avoid jargon without explanation\n\n2. STRUCTURE:\n- Clear headings and subheadings\n- Logical transitions between sections\n- Introduction → Main body → Conclusion\n- Visual breaks every 3-5 paragraphs\n\n3. ENGAGEMENT:\n- Hook in first paragraph\n- Questions to reader\n- Examples and stories\n- Actionable takeaways\n\n4. CREDIBILITY:\n- Facts backed by sources\n- Quotes attributed\n- Statistics current\n- No misleading claims"
+    },
+    "validation_criteria": {
+      "type": "string",
+      "description": "Criteria for validation",
+      "default": "CONTENT VALIDATION CRITERIA:\n\n1. BRIEF COMPLIANCE:\n- Topic fully covered\n- Format matches request\n- Tone maintained\n- Volume within requirements\n\n2. RESEARCH COMPLETENESS:\n- Minimum 3-5 sources\n- Main topic aspects covered\n- Opposing views considered\n- No obvious gaps\n\n3. STRUCTURE QUALITY:\n- Outline is logical\n- All sections connected\n- No repetitions\n- Natural flow\n\n4. READABILITY:\n- Clear to target audience\n- No long unreadable paragraphs\n- Visual breaks present"
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Stores common mistakes",
+      "default": "COMMON CONTENT CREATION MISTAKES:\n\n- Starting to write without research → Research first, write second\n- Writing for yourself, not audience → Always keep reader persona in mind\n- Long paragraphs without breaks → One paragraph = one idea, max 4-5 sentences\n- Ignoring structure → Outline before writing\n- Weak introduction → Hook in first 2-3 sentences\n- No call-to-action → What should reader do/understand after reading\n- Copy-paste without adaptation → Adapt to your voice and audience\n- Not fact-checking → Verify everything from primary sources"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "Content creation planning standards",
+      "default": "CONTENT CREATION PLANNING STANDARDS:\n\n1. ARTICLE STRUCTURE:\n- Clear headline that captures attention\n- Hook in first paragraph\n- Logical section progression\n- Strong conclusion with takeaways\n- Visual breaks every 3-5 paragraphs\n\n2. TONE OF VOICE:\n- Consistent throughout the piece\n- Matches target audience expectations\n- Formal/casual/technical as specified\n- No jarring shifts in register\n- Authentic and engaging\n\n3. AUDIENCE FIT:\n- Language appropriate for reader level\n- Examples relevant to audience\n- Addresses audience pain points\n- Answers likely questions\n- Actionable for the reader\n\n4. CONTENT QUALITY:\n- Facts verified from sources\n- No filler or redundancy\n- Each section adds value\n- Clear and concise writing\n- Proper attribution"
+    },
+    "fix_research_iteration": {
+      "type": "number",
+      "description": "Counter for research fix loop",
+      "default": 0
+    },
+    "fix_draft_iteration": {
+      "type": "number",
+      "description": "Counter for draft fix loop",
+      "default": 0
+    },
+    "max_self_fix_iterations": {
+      "type": "number",
+      "description": "Max iterations for self-fix loops before proceeding",
+      "default": 3
+    },
+    "additional_facts": {
+      "type": "array",
+      "description": "Workflow-global additional_facts",
+      "items": {
+        "type": "string"
+      }
+    },
+    "additional_sources": {
+      "type": "array",
+      "description": "Workflow-global additional_sources",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints": {
+      "type": "string",
+      "description": "Workflow-global constraints"
+    },
+    "decision": {
+      "type": "string",
+      "description": "Workflow-global decision",
+      "enum": [
+        "continue",
+        "reset"
+      ]
+    },
+    "final_content": {
+      "type": "string",
+      "description": "Workflow-global final_content",
+      "minLength": 200
+    },
+    "final_summary": {
+      "type": "string",
+      "description": "Workflow-global final_summary"
+    },
+    "improvements_made": {
+      "type": "string",
+      "description": "Workflow-global improvements_made"
+    },
+    "revised_outline": {
+      "type": "string",
+      "description": "Workflow-global revised_outline"
+    },
+    "user_response_text": {
+      "type": "string",
+      "description": "Workflow-global user_response_text",
+      "minLength": 2
+    },
+    "word_count": {
+      "type": "number",
+      "description": "Workflow-global word_count"
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Workflow-global workspace_path"
+    },
+    "has_file_access": {
+      "type": "boolean",
+      "description": "Agent can read/write local files"
+    }
+  }
+}

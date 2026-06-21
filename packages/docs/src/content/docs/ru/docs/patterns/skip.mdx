@@ -1,0 +1,137 @@
+---
+title: Паттерн пропуска шагов
+description: Возможность пропуска необязательных шагов пользователем
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Позволяет пользователям или агентам пропускать необязательные шаги workflow, когда они не нужны. Полезно для опциональных этапов анализа, ревью или конфигурации.
+
+## Структура
+
+```
+[optional-step] → [check-skip] → skip=true  → [next-step]
+                              → skip=false → [process-result]
+```
+
+## Реализация
+
+### Нода необязательного шага
+
+```json
+{
+  "type": "agent-directive",
+  "id": "optional-analysis",
+  "directive": "Perform optional deep analysis. User can skip if not needed by providing skip='yes'.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "analysis_result": { "type": "string" },
+      "skip": { "type": "string", "enum": ["yes"] }
+    }
+  },
+  "connections": { "success": "check-skip" }
+}
+```
+
+<Aside type="note">
+  Поле `skip` использует `enum: ["yes"]`, чтобы сделать его необязательным, но явным. Если
+  пользователь хочет пропустить — он указывает `skip: "yes"`. В противном случае предоставляет
+  фактический результат.
+</Aside>
+
+### Нода проверки пропуска
+
+```json
+{
+  "type": "condition",
+  "id": "check-skip",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "skip" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "next-step",
+    "false": "process-analysis"
+  }
+}
+```
+
+## Альтернатива: булев флаг
+
+Для более простых случаев:
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "result": { "type": "string" },
+      "skipped": { "type": "boolean" }
+    },
+    "required": ["skipped"]
+  }
+}
+```
+
+## Совмещение со сбором информации
+
+Решение о пропуске можно принять заранее:
+
+```json
+{
+  "id": "collect-preferences",
+  "directive": "Ask user: do you want detailed analysis?",
+  "inputSchema": {
+    "properties": {
+      "want_detailed_analysis": { "type": "boolean" }
+    },
+    "required": ["want_detailed_analysis"]
+  }
+}
+```
+
+Затем используйте condition:
+
+```json
+{
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "want_detailed_analysis" },
+    "right": false
+  },
+  "connections": {
+    "true": "skip-to-summary",
+    "false": "detailed-analysis"
+  }
+}
+```
+
+## Реальный пример
+
+Из `workflow-management-flow.json`:
+
+```json
+{
+  "id": "review-existing-workflow",
+  "directive": "If editing, review the existing workflow structure.\nIf creating new workflow, skip this step.",
+  "inputSchema": {
+    "properties": {
+      "workflow_reviewed": { "type": "string" },
+      "skip": { "type": "string", "enum": ["yes"] }
+    }
+  }
+}
+```
+
+<Aside type="tip">
+  Делайте поведение пропуска явным в директиве. Укажите пользователю точно, когда и как можно
+  пропустить шаг.
+</Aside>
+
+## Связанные паттерны
+
+- [Сбор информации](/ru/docs/patterns/information-collection/) - Сбор предпочтений о пропуске заранее
+- [Ветвление](/ru/docs/patterns/branching/) - Маршрутизация по разным путям на основе решений

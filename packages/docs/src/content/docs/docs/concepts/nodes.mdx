@@ -1,0 +1,501 @@
+---
+title: Nodes
+description: Understanding node types and configuration in Moira workflows
+---
+
+import { Aside, Card, CardGrid } from "@astrojs/starlight/components";
+
+Nodes are the building blocks of Moira workflows. Each node represents a step in the process with specific behavior defined by its type.
+
+## Node Types
+
+Moira supports interactive node types and automatic node types:
+
+<CardGrid>
+  <Card title="Start" icon="rocket">
+    Entry point for workflow execution.
+  </Card>
+  <Card title="End" icon="approve-check">
+    Terminal node marking workflow completion.
+  </Card>
+  <Card title="Agent Directive" icon="pencil">
+    Agent task with directive and completion condition.
+  </Card>
+  <Card title="Condition" icon="random">
+    Branch execution based on structured conditions.
+  </Card>
+  <Card title="Expression" icon="setting">
+    Compute values using arithmetic expressions.
+  </Card>
+  <Card title="Subgraph" icon="seti:folder">
+    Delegate to another workflow.
+  </Card>
+  <Card title="Telegram Notification" icon="email">
+    Send notifications via Telegram.
+  </Card>
+  <Card title="Teleport" icon="forward-slash">
+    Jump target reachable only via explicit teleport.
+  </Card>
+  <Card title="Lock" icon="lock">
+    PIN-based execution gate with Telegram approval.
+  </Card>
+</CardGrid>
+
+## Start Node
+
+Entry point for workflow execution. Every workflow must have exactly one start node.
+
+```json
+{
+  "id": "start",
+  "type": "start",
+  "connections": {
+    "default": "first-task"
+  }
+}
+```
+
+| Property              | Required | Description                   |
+| --------------------- | -------- | ----------------------------- |
+| `id`                  | Yes      | Convention: should be "start" |
+| `type`                | Yes      | Must be `"start"`             |
+| `connections.default` | Yes      | Next node ID                  |
+
+The start node seeds the workflow's global variables from the `variableRegistry` `default` values. Declare globals in the workflow-level `variableRegistry`, not on the start node.
+
+## End Node
+
+Terminal node marking workflow completion. No outgoing connections.
+
+```json
+{
+  "id": "end",
+  "type": "end",
+  "finalOutput": ["result", "summary"]
+}
+```
+
+| Property      | Required | Description                             |
+| ------------- | -------- | --------------------------------------- |
+| `id`          | Yes      | Convention: should be "end"             |
+| `type`        | Yes      | Must be `"end"`                         |
+| `finalOutput` | No       | Context keys to include in final result |
+
+<Aside type="note">End nodes have no connections - they are terminal nodes.</Aside>
+
+## Agent Directive Node
+
+The primary node type for agent tasks. Contains a directive (what to do) and completion condition (when done).
+
+```json
+{
+  "id": "analyze-requirements",
+  "type": "agent-directive",
+  "directive": "Analyze the requirements document and identify key features",
+  "completionCondition": "Features are listed with priorities",
+  "inputSchema": {
+    "type": "object",
+    "globalInputs": ["analysis_done"],
+    "properties": {
+      "features": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "required": ["analysis_done", "features"]
+  },
+  "connections": {
+    "success": "next-step"
+  }
+}
+```
+
+| Property                         | Required | Description                                          |
+| -------------------------------- | -------- | ---------------------------------------------------- |
+| `directive`                      | Yes      | What the agent should do                             |
+| `completionCondition`            | Yes      | When the step is complete                            |
+| `inputSchema`                    | No       | JSON Schema for response validation                  |
+| `inputSchema.globalInputs`       | No       | Names of `variableRegistry` globals this node writes |
+| `inputSchema.properties`         | No       | Node-local outputs (referenced as `node-id.name`)    |
+| `maxRetries`                     | No       | Max validation retries (default: 3)                  |
+| `retryMessage`                   | No       | Custom retry message                                 |
+| `connections.success`            | Yes      | Next node on success                                 |
+| `connections.error`              | No       | Next node on error                                   |
+| `connections.maxRetriesExceeded` | No       | Next node when retries exhausted                     |
+
+In the example, `analysis_done` is a declared global (it must exist in `variableRegistry`) written by this node and readable elsewhere as `{{analysis_done}}`; `features` is a node-local output readable as `{{analyze-requirements.features}}`. A returned key that is neither a declared global nor a described local output is rejected.
+
+<Aside type="tip">
+  Use `inputSchema` to ensure structured responses. `globalInputs` lists the globals the node
+  writes; `properties` describes its node-local outputs. The engine validates and routes the
+  response automatically.
+</Aside>
+
+## Condition Node
+
+Branch execution based on structured conditions:
+
+```json
+{
+  "id": "check-result",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "status" },
+    "right": "success"
+  },
+  "connections": {
+    "true": "success-path",
+    "false": "retry-step"
+  }
+}
+```
+
+| Property            | Required | Description                       |
+| ------------------- | -------- | --------------------------------- |
+| `condition`         | Yes      | Structured condition object       |
+| `connections.true`  | Yes      | Next node when condition is true  |
+| `connections.false` | Yes      | Next node when condition is false |
+
+### Structured Conditions
+
+Conditions use a structured format (not string evaluation):
+
+```json
+{
+  "operator": "and",
+  "conditions": [
+    {
+      "operator": "gt",
+      "left": { "contextPath": "score" },
+      "right": 80
+    },
+    {
+      "operator": "eq",
+      "left": { "contextPath": "validated" },
+      "right": true
+    }
+  ]
+}
+```
+
+Supported operators:
+
+- `eq`, `neq`
+- `gt`, `gte`, `lt`, `lte`
+- `contains`
+- `exists`
+- `and`, `or`, `not`
+
+## Expression Node
+
+Compute values using arithmetic expressions. Useful for counters, calculations, and variable transformations:
+
+```json
+{
+  "id": "increment-counter",
+  "type": "expression",
+  "expressions": ["counter = counter + 1", "result = counter * multiplier"],
+  "connections": {
+    "default": "next-step",
+    "error": "error-handler"
+  }
+}
+```
+
+| Property              | Required | Description                           |
+| --------------------- | -------- | ------------------------------------- |
+| `expressions`         | Yes      | Array of assignment expressions       |
+| `connections.default` | Yes      | Next node after successful evaluation |
+| `connections.error`   | No       | Next node on evaluation error         |
+
+### Expression Syntax
+
+Expressions support basic arithmetic operations:
+
+- **Arithmetic:** `+`, `-`, `*`, `/`
+- **Parentheses:** `(a + b) * c`
+- **Assignment:** `result = a + b`
+- **Context paths:** `step.index`, `plan.items[0].value`
+
+```json
+{
+  "expressions": ["total = price * quantity", "tax = total * 0.1", "final_price = total + tax"]
+}
+```
+
+<Aside type="caution">
+  Expression evaluation uses a custom sandboxed parser, NOT JavaScript eval. Only arithmetic
+  operations are supported.
+</Aside>
+
+### Error Handling
+
+Expression nodes can fail in two cases:
+
+- Division by zero
+- Reference to undefined variable
+
+When an error occurs, execution routes to the `error` connection if defined, otherwise the workflow fails.
+
+## Subgraph Node
+
+Delegate execution to another workflow:
+
+```json
+{
+  "id": "run-tests",
+  "type": "subgraph",
+  "graphId": "test-workflow",
+  "inputMapping": {
+    "codeDir": "projectPath"
+  },
+  "outputMapping": {
+    "testResults": "results"
+  },
+  "connections": {
+    "success": "next-step"
+  }
+}
+```
+
+| Property              | Required | Description                        |
+| --------------------- | -------- | ---------------------------------- |
+| `graphId`             | Yes      | Referenced workflow ID             |
+| `inputMapping`        | Yes      | Parent context -> subgraph context |
+| `outputMapping`       | Yes      | Subgraph context -> parent context |
+| `connections.success` | Yes      | Next node on success               |
+| `connections.error`   | No       | Next node on failure               |
+
+<Aside type="tip">
+  Subgraphs enable workflow composition and reuse. The agent sees it as a continuous workflow.
+</Aside>
+
+## Telegram Notification Node
+
+Send automated notifications via Telegram:
+
+```json
+{
+  "id": "notify-complete",
+  "type": "telegram-notification",
+  "message": "Workflow {{workflowName}} completed successfully",
+  "parseMode": "Markdown",
+  "connections": {
+    "default": "next-step",
+    "error": "notification-failed"
+  }
+}
+```
+
+| Property              | Required | Description                            |
+| --------------------- | -------- | -------------------------------------- |
+| `message`             | Yes      | Notification text (supports templates) |
+| `parseMode`           | No       | Message format: "Markdown" or "HTML"   |
+| `connections.default` | Yes      | Next node after sending                |
+| `connections.error`   | No       | Next node on API failure               |
+
+## Teleport Node
+
+Jump target reachable only via explicit teleport, not via normal connections. Behaves like agent-directive (pauses for input, validates schema) but is only reachable when the agent explicitly requests a teleport jump.
+
+```json
+{
+  "id": "teleport-replan",
+  "type": "teleport",
+  "directive": "Rewrite the development plan",
+  "completionCondition": "New plan created and validated",
+  "hint": "Use when current plan needs restructuring",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "reason": { "type": "string" }
+    },
+    "required": ["reason"]
+  },
+  "connections": { "success": "plan-node" }
+}
+```
+
+| Property              | Required | Description                                        |
+| --------------------- | -------- | -------------------------------------------------- |
+| `hint`                | Yes      | Human-readable description of when to use teleport |
+| `directive`           | Yes      | Instruction shown to agent after teleport          |
+| `completionCondition` | Yes      | Success criteria for the teleport step             |
+| `inputSchema`         | No       | JSON Schema for agent response validation          |
+| `connections.success` | Yes      | Next node after teleport input provided            |
+| `connections.error`   | No       | Error handler node                                 |
+
+<Aside type="caution">
+  Teleport nodes must NOT have incoming connections from other nodes. They are excluded from
+  unreachable node warnings during validation.
+</Aside>
+
+### Using Teleport at Runtime
+
+When a workflow contains teleport nodes, their hints are automatically appended to each step response under "Available Teleport Jumps". To jump to a teleport node, use the `teleportTo` parameter in `step()`:
+
+```
+step({ processId: "abc123", teleportTo: "teleport-replan" })
+```
+
+- Only teleport-type nodes can be targets
+- Do NOT provide `input` when teleporting — the teleport node will present its own directive
+- Execution context (all variables) is preserved across the teleport
+- After providing input to the teleport node, execution continues via its `connections.success`
+
+## Lock Node
+
+PIN-based execution gate. Creates a lock, sends PIN via Telegram with Approve inline keyboard, and pauses workflow until unlocked.
+
+```json
+{
+  "type": "lock",
+  "id": "approval-gate",
+  "reason": "Deploy to production for {{workflow_name}}",
+  "connections": {
+    "unlocked": "proceed-node"
+  }
+}
+```
+
+| Property               | Required | Description                                     |
+| ---------------------- | -------- | ----------------------------------------------- |
+| `reason`               | Yes      | Lock reason (supports `{{variable}}` templates) |
+| `connections.unlocked` | Yes      | Next node after lock is unlocked                |
+
+**Behavior:**
+
+1. First visit: creates lock via LockService, sends PIN via Telegram, pauses execution
+2. Subsequent visits: checks lock status or validates PIN from input
+3. Routes to `unlocked` connection when lock is resolved
+4. Stores `_lockId` in context variables for lock lookup on re-entry
+
+## Input Schema
+
+Define expected response structure using JSON Schema:
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "string",
+        "description": "Brief summary of findings"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "priority": { "type": "number" }
+          }
+        }
+      }
+    },
+    "required": ["summary"]
+  }
+}
+```
+
+## Automatic Node Types
+
+Automatic nodes execute without agent interaction. They run server-side and immediately continue to the next node. Used for note storage operations.
+
+### Read Note Node
+
+Reads notes matching filter criteria into context variable:
+
+```json
+{
+  "type": "read-note",
+  "id": "load-notes",
+  "outputVariable": "projectNotes",
+  "filter": {
+    "tag": "{{projectTag}}",
+    "keyPattern": "project-"
+  },
+  "singleMode": false,
+  "connections": {
+    "default": "next-node",
+    "error": "error-handler"
+  }
+}
+```
+
+| Property            | Required | Description                       |
+| ------------------- | -------- | --------------------------------- |
+| `outputVariable`    | Yes      | Context variable to store results |
+| `filter.tag`        | No       | Filter by exact tag               |
+| `filter.keyPattern` | No       | Filter by key prefix              |
+| `filter.keySearch`  | No       | Search in key (contains)          |
+| `singleMode`        | No       | Return object instead of array    |
+| `connections.error` | No       | Error handler node                |
+
+### Write Note Node
+
+Writes data from context to notes:
+
+```json
+{
+  "type": "write-note",
+  "id": "save-results",
+  "key": "results-{{timestamp}}",
+  "source": "analysisResults",
+  "tags": ["analysis"],
+  "connections": {
+    "default": "next-node"
+  }
+}
+```
+
+| Property    | Required | Description                        |
+| ----------- | -------- | ---------------------------------- |
+| `key`       | No\*     | Note key (required in single mode) |
+| `source`    | Yes      | Context variable with value        |
+| `tags`      | No       | Tags to assign                     |
+| `batchMode` | No       | Process array of notes             |
+
+### Upsert Note Node
+
+Find-or-create operation:
+
+```json
+{
+  "type": "upsert-note",
+  "id": "upsert-config",
+  "search": { "tag": "config" },
+  "keyTemplate": "{{projectId}}-config",
+  "value": "configData",
+  "connections": {
+    "default": "next-node"
+  }
+}
+```
+
+| Property            | Required | Description                      |
+| ------------------- | -------- | -------------------------------- |
+| `search.tag`        | No       | Search by tag                    |
+| `search.keyPattern` | No       | Search by key prefix             |
+| `keyTemplate`       | Yes      | Key for new note if not found    |
+| `value`             | Yes      | Context variable with note value |
+
+<Aside type="tip">
+  All filter and key parameters support `{{ variable }}` template expressions.
+</Aside>
+
+## Best Practices
+
+1. **Start with start** - Every workflow needs exactly one start node
+2. **End with end** - Use end nodes to mark completion points
+3. **Clear Directives** - Be specific about what the agent should do
+4. **Verifiable Conditions** - Completion conditions should be objectively measurable
+5. **Schema Validation** - Use `inputSchema` for structured responses
+6. **Error Paths** - Define error connections for graceful failure handling
+
+## Related
+
+- [Workflows](/docs/concepts/workflows/) - Workflow structure
+- [Templates](/docs/concepts/templates/) - Dynamic content

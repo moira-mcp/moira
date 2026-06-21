@@ -1,0 +1,247 @@
+{
+  "slug": "user-onboarding",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "a1838a9a-d3a5-448e-aae1-18e15eeb8286",
+  "metadata": {
+    "name": "Moira User Onboarding",
+    "version": "2.3.5",
+    "description": "Streamlined onboarding for new Moira users. Self-aware workflow that introduces Moira by demonstrating itself, then quickly gets users to action. Optimized based on real user feedback."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "welcome"
+      }
+    },
+    {
+      "id": "welcome",
+      "type": "agent-directive",
+      "directive": "Welcome the new user to Moira! Be warm and exciting, but keep it brief.\n\n**Your greeting should:**\n1. Say hello enthusiastically\n2. Explain Moira in 2-3 sentences:\n   - An Agent Workflow Engine for AI agents\n   - Guides you through multi-step processes with clear directives and success criteria\n   - Works via MCP with Claude, Cursor, and other AI tools\n3. Build anticipation: \"Here's the cool part...\"\n\n**Tone:** Friendly, excited, like showing a friend a new tool you love.\n\nDon't ask if they're ready — just flow naturally into the next revelation.",
+      "completionCondition": "User has been welcomed and shown initial interest (any response indicating engagement)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_engaged"
+        ],
+        "globalInputs": [
+          "user_engaged"
+        ]
+      },
+      "connections": {
+        "success": "self-explain"
+      }
+    },
+    {
+      "id": "self-explain",
+      "type": "agent-directive",
+      "directive": "This is the META moment! Reveal that they're INSIDE a workflow RIGHT NOW.\n\n**Key points (keep it punchy):**\n1. \"This conversation? It's a Moira workflow!\"\n2. Quick visual of the structure:\n   ```\n   [welcome] → [self-explain] → [capabilities] → [YOUR CHOICE] → [action!]\n       ✓           📍 HERE\n   ```\n3. Explain the 3 key concepts they're experiencing:\n   - **Directive**: What I'm told to do\n   - **Completion Condition**: How we know I succeeded\n   - **Input Schema**: Structure for my responses\n\n**One-liner insight:** \"Every step has a purpose, nothing gets skipped.\"\n\nKeep it short — they'll learn more by doing. Ask if it clicks.",
+      "completionCondition": "User confirms understanding or shows they get the concept",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_understands"
+        ],
+        "globalInputs": [
+          "user_understands"
+        ]
+      },
+      "connections": {
+        "success": "capabilities-and-choice"
+      }
+    },
+    {
+      "id": "capabilities-and-choice",
+      "type": "agent-directive",
+      "directive": "Show capabilities AND collect their choice in ONE step. This is crucial to avoid redundant questions later.\n\n**Quick capability overview:**\n- ⭐ **Quick Task** — Fast execution for 2-10 step tasks (Recommended)\n- 🔧 **Robust Task** — Reliable execution for complex critical tasks\n- 🔬 **Research** — Verified sources, anti-hallucination\n- 📝 **Content** — Articles, docs, blog posts  \n- 💻 **Development** — Full dev cycle, tests, bug hunting\n- 💻 **Development Lite** — Lightweight dev for small features\n- 🛒 **Purchase** — Smart product analysis with HTML reports\n- 📊 **Data Analysis** — Analyze data and visualize insights\n- 📢 **Marketing** — Create marketing materials and campaigns\n- 🐛 **Bug Hunting** — Investigate and fix bugs systematically\n- 📋 **Test Planning** — Create QA strategy and test plans\n- 🛠️ **Custom Workflows** — Build your own!\n\n**Available workflows:**\n`quick-task` (Recommended) · `robust-task` · `verified-research` · `content-creation` · `software-development-flow` · `software-development-flow-lite` · `test-generation` · `prd-creation` · `ux-design` · `smart-purchase-assistant` · `marketing-campaign` · `data-analysis` · `bug-hunting-workflow` · `test-planning`\n\n**THE KEY QUESTION (combine interest + intent):**\n\"What would you like to do?\n- **Name a workflow** to try it now (e.g., 'research', 'task-breakdown', 'purchase')\n- **Say 'create my own'** if you want to build a custom workflow\"\n\n**IMPORTANT FOR INPUT:**\n- If user names a specific workflow or area → set `user_intent` to `try_existing` AND set `chosen_workflow` to the mapped workflow ID\n- If user wants to create/build their own → set `user_intent` to `create_own` AND set `chosen_workflow` to `none`\n\n**Workflow mapping:**\n- 'task' / 'quick' / 'simple' / 'steps' / 'задача' / 'выполни' → `quick-task` (Recommended for most tasks)\n- 'complex' / 'robust' / 'reliable' / 'сложная' / 'надёжно' → `robust-task`\n- 'research' / 'verified sources' / 'исследование' → `verified-research`\n- 'content' / 'article' / 'blog' / 'статья' / 'контент' → `content-creation`\n- 'dev' / 'development' / 'code' / 'разработка' / 'код' → `software-development-flow`\n- 'dev lite' / 'small feature' / 'quick dev' / 'лёгкая фича' / 'простая разработка' → `software-development-flow-lite`\n- 'test' / 'testing' / 'write tests' / 'тесты для кода' → `test-generation`\n- 'prd' / 'product requirements' / 'требования' → `prd-creation`\n- 'ux' / 'design' / 'дизайн' → `ux-design`\n- 'buy' / 'purchase' / 'product' / 'shopping' / 'купить' / 'покупка' / 'товар' / 'выбрать' → `smart-purchase-assistant`\n- 'marketing' / 'campaign' / 'promo' / 'advertising' / 'маркетинг' / 'реклама' / 'кампания' → `marketing-campaign`\n- 'data' / 'analytics' / 'metrics' / 'statistics' / 'данные' / 'анализ данных' / 'метрики' → `data-analysis`\n- 'bug' / 'debug' / 'error' / 'fix' / 'баг' / 'ошибка' / 'дебаг' / 'отладка' → `bug-hunting-workflow`\n- 'test plan' / 'qa plan' / 'qa strategy' / 'тест-план' / 'QA стратегия' / 'планирование тестов' → `test-planning`\n\n**BOTH FIELDS ARE REQUIRED** — always provide both `user_intent` and `chosen_workflow`.",
+      "completionCondition": "User chose either a specific workflow to try OR explicitly said they want to create their own",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_intent": {
+            "type": "string",
+            "enum": [
+              "try_existing",
+              "create_own"
+            ],
+            "description": "try_existing if they named a workflow/area, create_own if they want to build"
+          },
+          "chosen_workflow": {
+            "type": "string",
+            "description": "The workflow ID to try (quick-task, robust-task, verified-research, content-creation, software-development-flow, software-development-flow-lite, test-generation, prd-creation, ux-design, smart-purchase-assistant, marketing-campaign, data-analysis, bug-hunting-workflow, test-planning), or 'none' if user_intent is create_own"
+          }
+        },
+        "required": [
+          "user_intent",
+          "chosen_workflow"
+        ]
+      },
+      "connections": {
+        "success": "route-intent"
+      }
+    },
+    {
+      "id": "route-intent",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "capabilities-and-choice.user_intent"
+        },
+        "right": "try_existing"
+      },
+      "connections": {
+        "true": "launch-workflow",
+        "false": "suggest-creation"
+      }
+    },
+    {
+      "id": "launch-workflow",
+      "type": "agent-directive",
+      "directive": "Get the user started with their chosen workflow: {{capabilities-and-choice.chosen_workflow}}\n\n**Do these things:**\n\n1. **Confirm their choice enthusiastically:**\n   \"Great pick! The `{{capabilities-and-choice.chosen_workflow}}` workflow will [brief description of what it does].\"\n\n2. **Show how to start (keep it brief):**\n   - Simple way: Just say \"Start {{capabilities-and-choice.chosen_workflow}}\"\n   - Or: `Moira:start({ workflowId: \"{{capabilities-and-choice.chosen_workflow}}\", parentExecutionId: \"none\" })`\n\n3. **Offer to start it NOW:**\n   \"Want me to start it for you right now?\"\n\n4. **Quick mention of extras (don't dwell):**\n   \"By the way — you can set up Telegram notifications later in settings if you want alerts when workflows complete. But let's focus on getting you started!\"\n\n**Workflow descriptions for reference:**\n- `quick-task` — Fast execution for 2-10 step tasks (Recommended for most tasks)\n- `robust-task` — Reliable execution for complex critical tasks with retry and escalation\n- `verified-research` — Verified research with real, checked sources\n- `content-creation` — Guided content writing (articles, docs, posts)\n- `software-development-flow` — Full development cycle with validation\n- `software-development-flow-lite` — Lightweight development for small features (1-5 steps)\n- `test-generation` — Generate tests for your code\n- `prd-creation` — Product requirements documents\n- `ux-design` — User experience design process\n- `smart-purchase-assistant` — Smart product analysis with HTML reports and comparison tables\n- `marketing-campaign` — Create differentiated marketing materials with proof points\n- `data-analysis` — Analyze data from files, inline, or APIs with visualization\n- `bug-hunting-workflow` — Systematic bug investigation with hypothesis validation\n- `test-planning` — Create comprehensive QA strategy with P0-P3 prioritization\n\n**Important:** This onboarding is a one-time demo workflow to show you how Moira works.\nYou DON'T need to run it every time! In the future, just ask the agent:\n\"Start workflow X\" — and it will begin immediately.\n\nEnd with encouragement — they've completed onboarding!",
+      "completionCondition": "User knows how to start their chosen workflow and has been offered to start it now",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_launched"
+        ],
+        "globalInputs": [
+          "workflow_launched",
+          "start_now"
+        ]
+      },
+      "connections": {
+        "success": "check-start-now"
+      }
+    },
+    {
+      "id": "check-start-now",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "start_now"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "start-chosen-workflow",
+        "false": "end"
+      }
+    },
+    {
+      "id": "start-chosen-workflow",
+      "type": "agent-directive",
+      "directive": "Start the workflow the user chose!\n\n**Execute this MCP call:**\n```\nMoira:start({ workflowId: \"{{capabilities-and-choice.chosen_workflow}}\", parentExecutionId: \"none\" })\n```\n\nOnce started, you'll receive the first directive from their chosen workflow. Continue executing it naturally — the onboarding is complete and you're now in a new workflow!\n\n**Note:** This is a handoff moment. The onboarding ends here and the new workflow begins seamlessly.",
+      "completionCondition": "The chosen workflow has been started via Moira:start",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_started"
+        ],
+        "globalInputs": [
+          "workflow_started"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "suggest-creation",
+      "type": "agent-directive",
+      "directive": "Guide the user toward creating their own workflow!\n\n**Acknowledge their ambition (brief):**\n\"Nice! Creating your own workflow = define the process once, reuse forever.\"\n\n**Introduce the meta-workflow:**\nThe `workflow-management-flow` guides you through:\n- Designing your structure\n- Defining steps and success criteria  \n- Handling branching and validation\n- Auto-generating the JSON\n- Deploying to Moira\n\n**Quick start:**\nJust say \"Start workflow-management-flow\" or:\n`Moira:start({ workflowId: \"workflow-management-flow\", parentExecutionId: \"none\" })`\n\n**Brief tips:**\n1. Start with a clear goal\n2. Think: what steps would an expert take?\n3. Define success criteria for each step\n\n**🚀 Pro tip:** Want to work like a pro? [Learn about workflow patterns](https://{MOIRA_HOST}/docs/patterns/)\n\n**Quick mention:** \"Telegram notifications are available in settings if you want alerts later.\"\n\n**Important:** This onboarding is a one-time demo workflow to show you how Moira works.\nYou DON'T need to run it every time! In the future, just ask the agent:\n\"Start workflow X\" — and it will begin immediately.\n\nOffer to start workflow-management-flow now!",
+      "completionCondition": "User knows how to create workflows and has been offered to start the process",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_guided"
+        ],
+        "globalInputs": [
+          "user_guided",
+          "start_now"
+        ]
+      },
+      "connections": {
+        "success": "check-start-creation"
+      }
+    },
+    {
+      "id": "check-start-creation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "start_now"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "start-creation-workflow",
+        "false": "end"
+      }
+    },
+    {
+      "id": "start-creation-workflow",
+      "type": "agent-directive",
+      "directive": "Start the workflow-management-flow for the user!\n\n**Execute this MCP call:**\n```\nMoira:start({ workflowId: \"workflow-management-flow\", parentExecutionId: \"none\" })\n```\n\nOnce started, continue executing the workflow-management-flow directives. The onboarding ends here and creation begins seamlessly!",
+      "completionCondition": "workflow-management-flow has been started",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workflow_started"
+        ],
+        "globalInputs": [
+          "workflow_started"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "user_intent",
+        "chosen_workflow",
+        "workflow_launched",
+        "start_now"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "start_now": {
+      "type": "boolean",
+      "description": "Workflow-global start_now"
+    },
+    "user_engaged": {
+      "type": "boolean",
+      "description": "Workflow-global user_engaged"
+    },
+    "user_guided": {
+      "type": "boolean",
+      "description": "Workflow-global user_guided"
+    },
+    "user_understands": {
+      "type": "boolean",
+      "description": "Workflow-global user_understands"
+    },
+    "workflow_launched": {
+      "type": "boolean",
+      "description": "Workflow-global workflow_launched"
+    },
+    "workflow_started": {
+      "type": "boolean",
+      "description": "Workflow-global workflow_started"
+    }
+  }
+}

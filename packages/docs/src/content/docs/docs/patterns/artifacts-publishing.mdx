@@ -1,0 +1,335 @@
+---
+title: Artifacts Publishing Pattern
+description: Publish HTML content with shareable public URLs
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Publish static HTML content accessible via public URL. Generate reports, dashboards, and shareable documents that users can view in a browser.
+
+## When to Use
+
+| Use Case              | Example                                                |
+| --------------------- | ------------------------------------------------------ |
+| **Reports**           | Purchase analysis, research results, comparison tables |
+| **Dashboards**        | Status pages, metrics visualization                    |
+| **Shareable content** | Documents, presentations, portfolios                   |
+| **Notifications**     | Generate report + send URL via Telegram                |
+| **User deliverables** | Anything user needs to view in browser                 |
+
+<Aside type="caution">
+  Don't use artifacts for temporary data (use notes), structured JSON storage (use notes), binary
+  files, frequently changing content, or authenticated content.
+</Aside>
+
+## Structure
+
+```
+[generate-data] → [create-html] → [upload-artifact] → [share-url]
+```
+
+## Implementation
+
+### Direct Upload Pattern
+
+When agent generates HTML in memory:
+
+```json
+{
+  "id": "generate-and-upload",
+  "type": "agent-directive",
+  "directive": "Generate HTML report from analysis data.\n\n**Data:**\n{{note:analysis-results}}\n\nCreate responsive HTML with Tailwind CDN.\n\nUpload using:\nartifacts({ action: \"upload\", name: \"report.html\", content: \"<html>...\" })\n\nSave the returned `url` as report_url.",
+  "completionCondition": "Report uploaded and URL obtained",
+  "inputSchema": {
+    "type": "object",
+    "required": ["report_url", "uploaded"],
+    "properties": {
+      "report_url": { "type": "string" },
+      "uploaded": { "type": "boolean" }
+    }
+  },
+  "connections": { "success": "notify-user" }
+}
+```
+
+### Token-based Upload Pattern
+
+When agent creates files locally first:
+
+```json
+{
+  "id": "upload-via-token",
+  "type": "agent-directive",
+  "directive": "Upload the report file.\n\n1. Get token: artifacts({ action: \"token\", ttlMinutes: 30 })\n2. Read file from {{report_file_path}}\n3. POST to the uploadUrl with content\n4. Save response url",
+  "inputSchema": {
+    "properties": {
+      "report_url": { "type": "string" },
+      "uploaded": { "type": "boolean" }
+    }
+  }
+}
+```
+
+### Conditional Based on Capabilities
+
+Route based on agent's file access:
+
+```json
+{
+  "id": "check-file-access",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "can_create_files" },
+    "right": true
+  },
+  "connections": {
+    "true": "generate-file-then-upload",
+    "false": "generate-and-upload-direct"
+  }
+}
+```
+
+## MCP Tool Usage
+
+### Upload Artifact
+
+```typescript
+artifacts({
+  action: "upload",
+  name: "purchase-report.html",
+  content: `<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-8">
+  <h1 class="text-2xl font-bold">Report</h1>
+</body>
+</html>`,
+  executionId: "exec-123", // Optional: link to workflow
+});
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "url": "https://{MOIRA_HOST}/a/a1b2c3d4...",
+    "name": "purchase-report.html",
+    "size": 1234,
+    "expiresAt": "2025-02-28T10:00:00.000Z"
+  }
+}
+```
+
+### Update Artifact
+
+```typescript
+artifacts({
+  action: "update",
+  uuid: "a1b2c3d4...",
+  content: "<html>...updated...</html>",
+  name: "report-v2.html", // Optional
+});
+```
+
+### Check Quota
+
+```typescript
+artifacts({
+  action: "stats",
+});
+// Returns: totalArtifacts, totalSize, storageLimit, usedPercent
+```
+
+### List Artifacts
+
+```typescript
+artifacts({
+  action: "list",
+  limit: 20,
+});
+```
+
+## Quotas and Limits
+
+| Limit            | Value          |
+| ---------------- | -------------- |
+| Storage per user | 100 MB         |
+| File count       | 50 artifacts   |
+| Max file size    | 5 MB           |
+| Token TTL        | 1-1440 minutes |
+| Expiration       | 30 days        |
+
+<Aside type="tip">
+  Check quota before upload with `artifacts({ action: "stats" })`. Clean up old artifacts if approaching limits.
+</Aside>
+
+## HTML Generation Tips
+
+### Use Tailwind CDN
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-50 min-h-screen">
+    <!-- Content -->
+  </body>
+</html>
+```
+
+### Responsive Layout
+
+```html
+<div class="container mx-auto px-4 py-8">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- Cards -->
+  </div>
+</div>
+```
+
+### Product Card
+
+```html
+<div class="bg-white rounded-lg shadow-md p-6">
+  <h3 class="text-lg font-semibold">Product Name</h3>
+  <p class="text-gray-600 mt-2">Description</p>
+  <div class="mt-4 flex justify-between items-center">
+    <span class="text-2xl font-bold text-green-600">$999</span>
+    <a
+      href="https://store.com/product"
+      class="bg-blue-500 text-white px-4 py-2 rounded"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Buy Now
+    </a>
+  </div>
+</div>
+```
+
+### Comparison Table
+
+```html
+<table class="w-full border-collapse">
+  <thead>
+    <tr class="bg-gray-100">
+      <th class="border p-3 text-left">Product</th>
+      <th class="border p-3 text-left">Price</th>
+      <th class="border p-3 text-left">Rating</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="hover:bg-gray-50">
+      <td class="border p-3">Product A</td>
+      <td class="border p-3">$599</td>
+      <td class="border p-3">4.5/5</td>
+    </tr>
+  </tbody>
+</table>
+```
+
+## Integration with Notifications
+
+Combine with telegram notifications:
+
+```json
+{
+  "id": "notify-with-link",
+  "type": "agent-directive",
+  "directive": "Send the report URL to user via Telegram.\n\nURL: {{report_url}}\n\nUse telegram-notification to share the link.",
+  "connections": { "success": "end" }
+}
+```
+
+## Real Example
+
+From a purchase analysis workflow:
+
+```json
+{
+  "id": "create-report",
+  "type": "agent-directive",
+  "directive": "Create HTML report with product recommendations.\n\n**Analysis data:**\n{{note:purchase-{{executionId}}-03-analysis}}\n\nGenerate responsive HTML:\n- Product cards with images, prices, links\n- Comparison table\n- Recommendation summary\n\nUpload: artifacts({ action: \"upload\", name: \"purchase-{{executionId}}.html\", content: html, executionId: \"{{executionId}}\" })",
+  "inputSchema": {
+    "properties": {
+      "report_url": { "type": "string" },
+      "uploaded": { "type": "boolean" }
+    },
+    "required": ["report_url"]
+  }
+}
+```
+
+## Best Practices
+
+### Descriptive Names
+
+```typescript
+// Good
+artifacts({ name: "purchase-analysis-2025-01-31.html" });
+
+// Bad
+artifacts({ name: "report.html" });
+```
+
+### Link to Execution
+
+```typescript
+artifacts({
+  action: "upload",
+  name: "report.html",
+  content: htmlContent,
+  executionId: context.executionId,
+});
+```
+
+Benefits:
+
+- Track which execution created which artifact
+- Query artifacts by execution
+- Clean up when execution archived
+
+### Handle Errors
+
+```json
+{
+  "id": "upload-report",
+  "type": "agent-directive",
+  "directive": "Upload report. Check quota first. If upload fails, inform user.",
+  "connections": {
+    "success": "notify-user",
+    "error": "handle-upload-error"
+  }
+}
+```
+
+## Anti-patterns
+
+### Using Artifacts for Data Storage
+
+Use notes for JSON data, artifacts for presentable HTML only.
+
+### Not Checking Quotas
+
+Always check `stats` before large uploads. Handle quota exceeded errors.
+
+### Non-responsive HTML
+
+Use Tailwind or media queries. Fixed-width layouts break on mobile.
+
+## Related Patterns
+
+- [Notes Persistence](/docs/patterns/notes-persistence/) - For structured data storage
+- [Workspace](/docs/patterns/workspace/) - For file organization

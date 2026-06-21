@@ -1,0 +1,79 @@
+{
+  "slug": "TEST-WHILE-MULTIPLE",
+  "metadata": {
+    "name": "TEST-WHILE-MULTIPLE",
+    "version": "1.0.0",
+    "description": "While loop with multiple iterations"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "setup"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "setup",
+      "directive": "Initialize counter to zero",
+      "completionCondition": "Counter set to 0",
+      "connections": {
+        "success": "check-loop"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "counter": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "counter"
+        ]
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-loop",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "counter"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "increment",
+        "false": "end"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "increment",
+      "directive": "Increment counter by 1",
+      "completionCondition": "Counter incremented",
+      "connections": {
+        "success": "check-loop"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "counter": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "counter"
+        ]
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "counter"
+      ]
+    }
+  ]
+}

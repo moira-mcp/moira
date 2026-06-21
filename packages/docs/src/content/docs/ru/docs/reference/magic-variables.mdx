@@ -1,0 +1,177 @@
+---
+title: Магические переменные
+description: Специальные переменные с автоматической обработкой в workflows
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Обзор
+
+Магические переменные — это специальные поля ввода, которые запускают автоматическое поведение помимо обычного сохранения в контекст.
+
+## execution_note
+
+Обновляет поле заметки execution для целей отслеживания.
+
+### Использование
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "execution_note": {
+        "type": "string",
+        "description": "Note to identify this execution"
+      }
+    }
+  }
+}
+```
+
+### Поведение
+
+Когда агент предоставляет `execution_note`:
+
+1. Значение сохраняется в контексте как обычно
+2. Поле `note` записи execution обновляется в базе данных
+3. Заметка видна в списках execution и запросах session
+
+### Варианты использования
+
+**Отслеживание текущей работы:**
+
+```json
+{
+  "directive": "Document what you're working on for tracking.",
+  "inputSchema": {
+    "properties": {
+      "execution_note": {
+        "type": "string",
+        "description": "Feature/task being developed"
+      }
+    },
+    "required": ["execution_note"]
+  }
+}
+```
+
+**Обновление заметки при изменении задачи:**
+
+```json
+{
+  "directive": "Task requirements changed. Update the execution note.",
+  "inputSchema": {
+    "properties": {
+      "execution_note": { "type": "string" }
+    }
+  }
+}
+```
+
+<Aside type="note">
+  `execution_note` проходит через валидацию inputSchema. Включите в массив `required`, чтобы обязать
+  агентов предоставлять идентификацию execution.
+</Aside>
+
+### Запрос заметок
+
+Заметки отображаются в запросах session:
+
+```typescript
+mcp__moira__session({ action: "executions" });
+// Возвращает executions с заполненным полем note
+```
+
+## Системные переменные
+
+Эти переменные автоматически доступны в контексте:
+
+### executionId
+
+ID текущего процесса выполнения.
+
+```
+{{executionId}}
+```
+
+### workflowId
+
+Идентификатор текущего workflow.
+
+```
+{{workflowId}}
+```
+
+### Пример использования
+
+```json
+{
+  "directive": "Process ID: {{executionId}}\nWorkflow: {{workflowId}}\n\nDocument this for reference."
+}
+```
+
+## Переменные выражений
+
+Переменные, изменяемые узлами expression:
+
+### Переменные-счётчики
+
+Объявляются как глобальные в `variableRegistry` со значением `default`:
+
+```json
+{
+  "variableRegistry": {
+    "current_step_index": { "type": "number", "description": "Текущий индекс шага", "default": 1 },
+    "current_iteration": { "type": "number", "description": "Текущая итерация", "default": 1 }
+  }
+}
+```
+
+Изменяются выражением (узлы expression присваивают глобальным переменным по короткому имени):
+
+```json
+{
+  "type": "expression",
+  "expressions": ["current_step_index = current_step_index + 1", "current_iteration = 1"]
+}
+```
+
+<Aside type="tip">
+  Объявляйте переменные-счётчики в `variableRegistry` со значением `default`, чтобы они существовали
+  до обращения из узлов expression.
+</Aside>
+
+## Обработка шаблонов
+
+Все магические и контекстные переменные работают с шаблонами:
+
+### Простой доступ
+
+```
+{{variable_name}}
+```
+
+### Вложенный доступ
+
+```
+{{user.profile.name}}
+```
+
+### Доступ к массиву
+
+```
+{{items[0]}}
+{{items[0].field}}
+```
+
+### Условные шаблоны
+
+```
+{{#if execution_note}}Note: {{execution_note}}{{/if}}
+```
+
+## Смотрите также
+
+- [Input Schema](/ru/docs/reference/input-schema/) - Валидация входных данных магических переменных
+- [Шаблоны](/ru/docs/concepts/templates/) - Синтаксис шаблонов

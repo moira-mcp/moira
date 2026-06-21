@@ -1,0 +1,23 @@
+{
+  "unknown_error": "Unknown error occurred",
+  "workflow_id_required": "Workflow ID is required",
+  "workflow_object_required": "Workflow object required for create action",
+  "workflow_metadata_required": "Workflow metadata required (name, version, description)",
+  "process_not_found": "Process not found or expired",
+  "process_id_required": "Process ID is required",
+  "execution_access_denied": "Access denied: execution belongs to another user",
+  "parent_execution_id_invalid_format": "parentExecutionId must be a valid UUID or \"none\" for standalone workflows",
+  "changes_required": "Changes object required with at least one modification",
+  "validation_failed": "Validation failed",
+  "invalid_input": "Invalid input data",
+  "auth_required": "Authentication required",
+  "access_denied": "Access denied",
+  "access_denied_to_execution": "Access denied to this execution",
+  "invalid_token": "Invalid or expired token",
+  "setting_key_required": "Setting key required for set action",
+  "token_expired": "Token has expired",
+  "token_invalid": "Invalid token",
+  "upload_failed": "Upload failed",
+  "download_failed": "Download failed",
+  "workflow_id_required_for_download": "workflowId required for download action"
+}

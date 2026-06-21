@@ -1,0 +1,876 @@
+{
+  "slug": "data-analysis",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "5dd9c5c3-1176-4967-9d6c-798134b769df",
+  "metadata": {
+    "name": "Data Analysis",
+    "version": "1.6.0",
+    "description": "Workflow for data analysis: from problem statement to conclusions and visualization. Supports file, inline and API data sources."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "get-context"
+      }
+    },
+    {
+      "id": "get-context",
+      "type": "agent-directive",
+      "directive": "Get data analysis task context from user:\n\n1. **Business question** - what exactly needs to be discovered?\n2. **Context** - why is this important, how will results be used?\n3. **Data** - what data is available (files, databases, API)?\n4. **Data source type** - how will data be provided?\n   - `file` - files on disk (CSV, Excel, JSON)\n   - `inline` - data pasted as text in chat\n   - `api` - data via API requests\n5. **Constraints** - deadlines, resources, technical limitations?\n6. **Audience** - who will use the analysis results?\n\nRequest information from user and record answers.",
+      "completionCondition": "Received information about business question, context, data, source type, constraints and audience",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "business_question",
+          "context",
+          "data_sources",
+          "data_source_type",
+          "audience"
+        ],
+        "globalInputs": [
+          "business_question",
+          "context",
+          "data_sources",
+          "data_source_type",
+          "constraints",
+          "audience"
+        ]
+      },
+      "connections": {
+        "success": "define-problem"
+      }
+    },
+    {
+      "id": "define-problem",
+      "type": "agent-directive",
+      "directive": "Formulate clear analysis task statement:\n\n**Context from previous step:**\n- Business question: {{get-context.business_question}}\n- Context: {{get-context.context}}\n- Data sources: {{get-context.data_sources}}\n\n**Formulate:**\n1. **Research question** - rephrase business question as analytical\n2. **Hypothesis** - what hypotheses will we test?\n3. **Success criteria** - how will we know analysis is successful?\n4. **Scope** - what is and is NOT in analysis scope?\n5. **Deliverables** - what will user receive as result?\n\nRemember: 'Problem definition is the most overlooked step in data analysis'\n\n{{#if has_file_access}}\n**FILE MODE:** Save problem definition to `analysis-problem.md`\n{{else}}\n**CONTEXT MODE:** Store problem definition in response for reference\n{{/if}}",
+      "completionCondition": "Research question, hypotheses, success criteria, scope and deliverables formulated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "research_question",
+          "hypotheses",
+          "success_criteria",
+          "scope",
+          "deliverables"
+        ],
+        "globalInputs": [
+          "research_question",
+          "hypotheses",
+          "success_criteria",
+          "scope",
+          "deliverables"
+        ]
+      },
+      "connections": {
+        "success": "approve-problem"
+      }
+    },
+    {
+      "id": "approve-problem",
+      "type": "agent-directive",
+      "directive": "Request user confirmation of task statement:\n\n**Research question:** {{define-problem.research_question}}\n\n**Hypotheses:** {{define-problem.hypotheses}}\n\n**Success criteria:** {{define-problem.success_criteria}}\n\n**Scope:** {{define-problem.scope}}\n\n**Deliverables:** {{define-problem.deliverables}}\n\nIs everything correct? Any adjustments needed?\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed task statement or made adjustments",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "approved"
+        ],
+        "globalInputs": [
+          "approved",
+          "feedback"
+        ]
+      },
+      "connections": {
+        "success": "check-problem-approved"
+      }
+    },
+    {
+      "id": "check-problem-approved",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-problem.approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "route-data-source",
+        "false": "define-problem"
+      }
+    },
+    {
+      "id": "route-data-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "get-context.data_source_type"
+        },
+        "right": "inline"
+      },
+      "connections": {
+        "true": "collect-data-inline",
+        "false": "collect-data"
+      }
+    },
+    {
+      "id": "collect-data-inline",
+      "type": "agent-directive",
+      "directive": "Collect data from user in inline format:\n\n**Research question:** {{define-problem.research_question}}\n\n**Tasks:**\n1. Ask user to provide data in text format (CSV, JSON, table)\n2. Parse and structure received data\n3. Study structure (columns, types, size)\n4. Document metadata\n\n**Important:** Data may be pasted directly in chat or described in text. Help user format data correctly if needed.",
+      "completionCondition": "Data received from user, structure studied",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "datasets_info",
+          "quality_observations"
+        ],
+        "globalInputs": [
+          "datasets_info",
+          "data_volume",
+          "quality_observations",
+          "potential_issues"
+        ]
+      },
+      "connections": {
+        "success": "prepare-data"
+      }
+    },
+    {
+      "id": "collect-data",
+      "type": "agent-directive",
+      "directive": "Collect and study data from specified sources:\n\n**Sources:** {{get-context.data_sources}}\n\n**Tasks:**\n1. Load/access data\n2. Study data structure (columns, types, size)\n3. Check primary quality (nulls, duplicates, obvious errors)\n4. Document metadata (source, date, version)\n\n**Record:**\n- List of datasets and their structure\n- Data volume (rows, columns)\n- Primary quality observations\n- Potential issues",
+      "completionCondition": "Data loaded, structure studied, primary observations recorded",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "datasets_info",
+          "quality_observations"
+        ],
+        "globalInputs": [
+          "datasets_info",
+          "data_volume",
+          "quality_observations",
+          "potential_issues"
+        ]
+      },
+      "connections": {
+        "success": "prepare-data"
+      }
+    },
+    {
+      "id": "prepare-data",
+      "type": "agent-directive",
+      "directive": "Prepare data for analysis:\n\n{{#if collect-data.potential_issues}}**Identified issues:** {{collect-data.potential_issues}}{{/if}}{{#if collect-data-inline.potential_issues}}**Identified issues:** {{collect-data-inline.potential_issues}}{{/if}}\n\n**Preparation tasks:**\n1. **Missing values** - determine strategy (drop, impute, flag)\n2. **Data types** - convert to needed types\n3. **Duplicates** - find and handle duplicates\n4. **Outliers** - identify, document decision\n5. **Transformations** - normalization, category encoding if needed\n6. **Feature engineering** - create new variables if useful\n\n**Document** every decision and its rationale for reproducibility.\n\n{{#if has_file_access}}\n**FILE MODE:** Save data preparation log to `data-preparation.md`\n{{else}}\n**CONTEXT MODE:** Document preparation decisions in response\n{{/if}}",
+      "completionCondition": "Data cleaned and prepared, all decisions documented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "missing_values_strategy",
+          "transformations_applied",
+          "final_dataset_info"
+        ],
+        "globalInputs": [
+          "missing_values_strategy",
+          "transformations_applied",
+          "outliers_handling",
+          "features_created",
+          "final_dataset_info"
+        ]
+      },
+      "connections": {
+        "success": "check-data-quality"
+      }
+    },
+    {
+      "id": "check-data-quality",
+      "type": "agent-directive",
+      "directive": "Verify prepared data quality:\n\n**Data quality checklist:**\n- [ ] No critical missing values\n- [ ] Data types correct\n- [ ] Duplicates handled\n- [ ] Outliers analyzed and decision documented\n- [ ] Data sufficient to answer research question\n\n**Research question:** {{define-problem.research_question}}\n\nIs data ready for EDA?",
+      "completionCondition": "Data quality verified, data ready or needs rework",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "quality_passed"
+        ],
+        "globalInputs": [
+          "quality_passed",
+          "issues_found"
+        ]
+      },
+      "connections": {
+        "success": "condition-data-quality"
+      }
+    },
+    {
+      "id": "condition-data-quality",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "check-data-quality.quality_passed"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "explore-data",
+        "false": "expr-inc-dq-fix"
+      }
+    },
+    {
+      "id": "explore-data",
+      "type": "agent-directive",
+      "directive": "Conduct Exploratory Data Analysis (EDA):\n\n**Research question:** {{define-problem.research_question}}\n**Hypotheses:** {{define-problem.hypotheses}}\n\n**EDA tasks:**\n1. **Univariate analysis** - distribution of each variable\n2. **Bivariate analysis** - relationships between variables\n3. **Correlations** - correlation matrix for numeric variables\n4. **Segmentation** - groupings and comparisons\n5. **Anomalies** - unusual patterns in data\n\n**Record:**\n- Key statistics\n- Interesting patterns\n- Preliminary insights\n- Questions for further investigation\n\n{{#if has_file_access}}\n**FILE MODE:** Save EDA findings to `eda-findings.md`\n{{else}}\n**CONTEXT MODE:** Store EDA findings in structured response\n{{/if}}",
+      "completionCondition": "EDA completed, patterns and preliminary insights recorded",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "key_statistics",
+          "patterns_found",
+          "preliminary_insights"
+        ],
+        "globalInputs": [
+          "key_statistics",
+          "patterns_found",
+          "preliminary_insights",
+          "questions_for_investigation"
+        ]
+      },
+      "connections": {
+        "success": "check-eda"
+      }
+    },
+    {
+      "id": "check-eda",
+      "type": "agent-directive",
+      "directive": "Evaluate EDA completeness:\n\n**EDA completeness checklist:**\n- [ ] All key variables studied\n- [ ] Distributions understood\n- [ ] Correlations checked\n- [ ] Preliminary insights for hypotheses exist\n- [ ] Directions for deeper analysis formulated\n\n**Hypotheses:** {{define-problem.hypotheses}}\n**Preliminary insights:** {{explore-data.preliminary_insights}}\n\nIs EDA sufficient to proceed to insights discovery?",
+      "completionCondition": "EDA evaluated as sufficient or needs rework",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "eda_complete"
+        ],
+        "globalInputs": [
+          "eda_complete",
+          "gaps_found"
+        ]
+      },
+      "connections": {
+        "success": "condition-eda"
+      }
+    },
+    {
+      "id": "condition-eda",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "check-eda.eda_complete"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "find-insights",
+        "false": "expr-inc-eda-fix"
+      }
+    },
+    {
+      "id": "find-insights",
+      "type": "agent-directive",
+      "directive": "Find key insights and answers to research question:\n\n**Research question:** {{define-problem.research_question}}\n**Hypotheses:** {{define-problem.hypotheses}}\n**Preliminary insights:** {{explore-data.preliminary_insights}}\n\n**Tasks:**\n1. **Test hypotheses** - are they supported by data?\n2. **Answer research question** - what does data say?\n3. **Find actionable insights** - what can be done with this knowledge?\n4. **Identify limitations** - what data CANNOT tell?\n5. **Formulate recommendations** - specific recommendations\n\nRemember: correlation ≠ causation. Document assumptions.\n\n{{#if has_file_access}}\n**FILE MODE:** Save insights to `analysis-insights.md`\n{{else}}\n**CONTEXT MODE:** Store insights in structured response\n{{/if}}",
+      "completionCondition": "Key insights found, hypotheses tested, recommendations formulated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "hypotheses_results",
+          "answer_to_research_question",
+          "key_insights",
+          "limitations",
+          "recommendations"
+        ],
+        "globalInputs": [
+          "hypotheses_results",
+          "answer_to_research_question",
+          "key_insights",
+          "limitations",
+          "recommendations"
+        ]
+      },
+      "connections": {
+        "success": "notify-insights"
+      }
+    },
+    {
+      "id": "notify-insights",
+      "type": "telegram-notification",
+      "message": "Data Analysis: insights found\n\nResearch question: {{define-problem.research_question}}\n\nReady for visualization and conclusions.",
+      "connections": {
+        "default": "visualize",
+        "error": "visualize"
+      }
+    },
+    {
+      "id": "visualize",
+      "type": "agent-directive",
+      "directive": "Create visualizations for key findings:\n\n**Audience:** {{get-context.audience}}\n**Key insights:** {{find-insights.key_insights}}\n\n**Visualization tasks:**\n1. **Select chart types** for each insight\n2. **Create visualizations** - clear, informative\n3. **Add annotations** - key points, trends\n4. **Format** - titles, axis labels, legends\n\n**Principles:**\n- One insight = one chart\n- Minimal visual clutter\n- Colors with purpose\n- Accessible to audience\n\nDescribe created visualizations.\n\n{{#if has_file_access}}\n**FILE MODE:** Save visualization specifications to `visualizations.md`\n{{else}}\n**CONTEXT MODE:** Describe visualizations in response\n{{/if}}",
+      "completionCondition": "Visualizations created for key insights",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "visualizations_created",
+          "key_visual_insights"
+        ],
+        "globalInputs": [
+          "visualizations_created",
+          "chart_types_used",
+          "key_visual_insights"
+        ]
+      },
+      "connections": {
+        "success": "conclude"
+      }
+    },
+    {
+      "id": "conclude",
+      "type": "agent-directive",
+      "directive": "Formulate final analysis conclusions:\n\n**Research question:** {{define-problem.research_question}}\n**Success criteria:** {{define-problem.success_criteria}}\n**Key insights:** {{find-insights.key_insights}}\n**Recommendations:** {{find-insights.recommendations}}\n**Limitations:** {{find-insights.limitations}}\n\n**Conclusions structure:**\n1. **Executive summary** - main conclusion in 2-3 sentences\n2. **Key findings** - top 3-5 findings\n3. **Recommendations** - specific actionable items\n4. **Limitations & caveats** - what to consider when using\n5. **Next steps** - what to investigate further\n\nVerify: do conclusions meet success criteria?\n\n{{#if has_file_access}}\n**FILE MODE:** Save conclusions to `analysis-conclusions.md`\n{{else}}\n**CONTEXT MODE:** Structure conclusions in response\n{{/if}}",
+      "completionCondition": "Structured conclusions formulated with executive summary, findings, recommendations",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "executive_summary",
+          "key_findings",
+          "recommendations",
+          "limitations_caveats",
+          "next_steps"
+        ],
+        "globalInputs": [
+          "executive_summary",
+          "key_findings",
+          "recommendations",
+          "limitations_caveats",
+          "next_steps"
+        ]
+      },
+      "connections": {
+        "success": "approve-conclusions"
+      }
+    },
+    {
+      "id": "approve-conclusions",
+      "type": "agent-directive",
+      "directive": "Present conclusions to user for confirmation:\n\n## Executive Summary\n{{conclude.executive_summary}}\n\n## Key Findings\n{{conclude.key_findings}}\n\n## Recommendations\n{{conclude.recommendations}}\n\n## Limitations\n{{conclude.limitations_caveats}}\n\n## Next Steps\n{{conclude.next_steps}}\n\n---\n\nAre conclusions correct? Need any adjustments?\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "completionCondition": "User confirmed conclusions or requested adjustments",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "conclusions_approved"
+        ],
+        "globalInputs": [
+          "conclusions_approved",
+          "feedback"
+        ]
+      },
+      "connections": {
+        "success": "condition-conclusions"
+      }
+    },
+    {
+      "id": "condition-conclusions",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-conclusions.conclusions_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "finalize",
+        "false": "conclude"
+      }
+    },
+    {
+      "id": "finalize",
+      "type": "agent-directive",
+      "directive": "Finalize analysis results:\n\n**Deliverables:** {{define-problem.deliverables}}\n\n**Tasks:**\n1. **Prepare deliverables** according to expectations\n2. **Format documentation** - methodology, code, data\n3. **Save artifacts** - report, visualizations, data\n4. **Ensure reproducibility** - code with comments\n\n**Analysis summary:**\n- Research question: {{define-problem.research_question}}\n- Executive summary: {{conclude.executive_summary}}\n- Key findings: {{conclude.key_findings}}",
+      "completionCondition": "Deliverables prepared, documentation formatted, artifacts saved",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "deliverables_prepared"
+        ],
+        "globalInputs": [
+          "deliverables_prepared",
+          "documentation_location",
+          "artifacts_saved"
+        ]
+      },
+      "connections": {
+        "success": "notify-complete"
+      }
+    },
+    {
+      "id": "notify-complete",
+      "type": "telegram-notification",
+      "message": "Data Analysis completed\n\nResearch question: {{define-problem.research_question}}\n\nExecutive summary: {{conclude.executive_summary}}",
+      "connections": {
+        "default": "end",
+        "error": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-dq-fix",
+      "expressions": [
+        "fix_dq_iteration = fix_dq_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-dq-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-dq-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_dq_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "prepare-data",
+        "false": "ask-user-dq-fix-limit-reached"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-eda-fix",
+      "expressions": [
+        "fix_eda_iteration = fix_eda_iteration + 1"
+      ],
+      "connections": {
+        "default": "check-eda-fix-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-eda-fix-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_eda_iteration"
+        },
+        "right": {
+          "contextPath": "max_self_fix_iterations"
+        }
+      },
+      "connections": {
+        "true": "explore-data",
+        "false": "ask-user-eda-fix-limit-reached"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-dq-fix-limit-reached",
+      "directive": "The data quality fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-dq-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-dq-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-dq-fix-counter",
+        "false": "explore-data"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-dq-fix-counter",
+      "expressions": [
+        "fix_dq_iteration = 0"
+      ],
+      "connections": {
+        "default": "prepare-data"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "ask-user-eda-fix-limit-reached",
+      "directive": "The EDA fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
+      "completionCondition": "User has made a decision on how to proceed",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "decision"
+        ],
+        "globalInputs": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-eda-fix-limit-decision"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "route-eda-fix-limit-decision",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-eda-fix-counter",
+        "false": "find-insights"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-eda-fix-counter",
+      "expressions": [
+        "fix_eda_iteration = 0"
+      ],
+      "connections": {
+        "default": "explore-data"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "process_requirements": {
+      "type": "string",
+      "description": "CRISP-DM methodology steps for data analysis",
+      "default": "Data analysis follows CRISP-DM methodology: 1) Business understanding - define what exactly needs to be known and why, 2) Data understanding - study available data, quality and limitations, 3) Data preparation - cleaning, transformation, feature engineering, 4) Exploration - EDA, statistical analysis, pattern discovery, 5) Conclusions - interpret results in business context, 6) Visualization - visual representation of findings"
+    },
+    "quality_standards": {
+      "type": "string",
+      "description": "Quality standards for data analysis",
+      "default": "Quality analysis: 1) Reproducibility - every step documented and repeatable, 2) Validity - results verified for correctness, 3) Relevance - conclusions answer the posed question, 4) Clarity - findings understandable to target audience, 5) Actionability - conclusions can be applied in practice"
+    },
+    "validation_criteria": {
+      "type": "string",
+      "description": "Criteria for validating analysis quality",
+      "default": "Validation criteria: 1) Data quality - missing values handled, outliers analyzed, data types correct, 2) EDA completeness - distributions studied, correlations checked, hypotheses formulated, 3) Conclusions validity - conclusions backed by data, limitations described, next steps proposed"
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Common data analysis mistakes to avoid",
+      "default": "Common mistakes: 1) Starting analysis without clear question understanding - 'most overlooked step', 2) Ignoring data quality issues, 3) Confirmation bias - seeking confirmation of expected result, 4) Not documenting assumptions and limitations, 5) Drawing conclusions from correlations without checking causation, 6) Not validating results"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "Planning standards for statistical validity, data quality, reproducibility and visualization",
+      "default": "DATA ANALYSIS PLANNING STANDARDS:\n\n1. STATISTICAL VALIDITY:\n- Sample size appropriate for conclusions\n- Statistical tests match data types\n- Confidence intervals stated\n- P-values interpreted correctly\n- Correlation vs causation distinguished\n\n2. DATA QUALITY VERIFICATION:\n- Missing values strategy documented\n- Outliers analyzed and decision documented\n- Data types verified\n- Duplicates handled\n- Source reliability confirmed\n\n3. REPRODUCIBILITY:\n- Every step documented\n- Code with comments provided\n- Data transformations logged\n- Assumptions explicit\n- Environment/tools noted\n\n4. VISUALIZATION CLARITY:\n- One insight per chart\n- Appropriate chart type for data\n- Clear labels and titles\n- No misleading scales\n- Accessible to target audience"
+    },
+    "fix_dq_iteration": {
+      "type": "number",
+      "description": "Counter for data quality fix loop",
+      "default": 0
+    },
+    "fix_eda_iteration": {
+      "type": "number",
+      "description": "Counter for EDA fix loop",
+      "default": 0
+    },
+    "max_self_fix_iterations": {
+      "type": "number",
+      "description": "Max iterations for self-fix loops before proceeding",
+      "default": 3
+    },
+    "answer_to_research_question": {
+      "type": "string",
+      "description": "Workflow-global answer_to_research_question",
+      "minLength": 20
+    },
+    "approved": {
+      "type": "string",
+      "description": "Workflow-global approved",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "artifacts_saved": {
+      "type": "string",
+      "description": "Workflow-global artifacts_saved"
+    },
+    "audience": {
+      "type": "string",
+      "description": "Workflow-global audience"
+    },
+    "business_question": {
+      "type": "string",
+      "description": "Workflow-global business_question",
+      "minLength": 10
+    },
+    "chart_types_used": {
+      "type": "string",
+      "description": "Workflow-global chart_types_used"
+    },
+    "conclude": {
+      "type": "string",
+      "description": "Workflow-global conclude"
+    },
+    "conclusions_approved": {
+      "type": "string",
+      "description": "Workflow-global conclusions_approved",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "constraints": {
+      "type": "string",
+      "description": "Workflow-global constraints"
+    },
+    "context": {
+      "type": "string",
+      "description": "Workflow-global context",
+      "minLength": 10
+    },
+    "data_source_type": {
+      "type": "string",
+      "description": "Workflow-global data_source_type",
+      "enum": [
+        "file",
+        "inline",
+        "api"
+      ]
+    },
+    "data_sources": {
+      "type": "string",
+      "description": "Workflow-global data_sources",
+      "minLength": 5
+    },
+    "data_volume": {
+      "type": "string",
+      "description": "Workflow-global data_volume"
+    },
+    "datasets_info": {
+      "type": "string",
+      "description": "Workflow-global datasets_info",
+      "minLength": 20
+    },
+    "decision": {
+      "type": "string",
+      "description": "Workflow-global decision",
+      "enum": [
+        "continue",
+        "reset"
+      ]
+    },
+    "deliverables": {
+      "type": "string",
+      "description": "Workflow-global deliverables",
+      "minLength": 10
+    },
+    "deliverables_prepared": {
+      "type": "string",
+      "description": "Workflow-global deliverables_prepared",
+      "minLength": 10
+    },
+    "documentation_location": {
+      "type": "string",
+      "description": "Workflow-global documentation_location"
+    },
+    "eda_complete": {
+      "type": "string",
+      "description": "Workflow-global eda_complete",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "executive_summary": {
+      "type": "string",
+      "description": "Workflow-global executive_summary",
+      "minLength": 20
+    },
+    "features_created": {
+      "type": "string",
+      "description": "Workflow-global features_created"
+    },
+    "feedback": {
+      "type": "string",
+      "description": "Workflow-global feedback"
+    },
+    "final_dataset_info": {
+      "type": "string",
+      "description": "Workflow-global final_dataset_info",
+      "minLength": 10
+    },
+    "gaps_found": {
+      "type": "string",
+      "description": "Workflow-global gaps_found"
+    },
+    "hypotheses": {
+      "type": "string",
+      "description": "Workflow-global hypotheses",
+      "minLength": 10
+    },
+    "hypotheses_results": {
+      "type": "string",
+      "description": "Workflow-global hypotheses_results",
+      "minLength": 20
+    },
+    "issues_found": {
+      "type": "string",
+      "description": "Workflow-global issues_found"
+    },
+    "key_findings": {
+      "type": "string",
+      "description": "Workflow-global key_findings",
+      "minLength": 20
+    },
+    "key_insights": {
+      "type": "string",
+      "description": "Workflow-global key_insights",
+      "minLength": 20
+    },
+    "key_statistics": {
+      "type": "string",
+      "description": "Workflow-global key_statistics",
+      "minLength": 20
+    },
+    "key_visual_insights": {
+      "type": "string",
+      "description": "Workflow-global key_visual_insights",
+      "minLength": 10
+    },
+    "limitations": {
+      "type": "string",
+      "description": "Workflow-global limitations",
+      "minLength": 10
+    },
+    "limitations_caveats": {
+      "type": "string",
+      "description": "Workflow-global limitations_caveats",
+      "minLength": 10
+    },
+    "missing_values_strategy": {
+      "type": "string",
+      "description": "Workflow-global missing_values_strategy",
+      "minLength": 5
+    },
+    "next_steps": {
+      "type": "string",
+      "description": "Workflow-global next_steps"
+    },
+    "outliers_handling": {
+      "type": "string",
+      "description": "Workflow-global outliers_handling"
+    },
+    "patterns_found": {
+      "type": "string",
+      "description": "Workflow-global patterns_found",
+      "minLength": 10
+    },
+    "potential_issues": {
+      "type": "string",
+      "description": "Workflow-global potential_issues"
+    },
+    "preliminary_insights": {
+      "type": "string",
+      "description": "Workflow-global preliminary_insights",
+      "minLength": 10
+    },
+    "quality_observations": {
+      "type": "string",
+      "description": "Workflow-global quality_observations",
+      "minLength": 10
+    },
+    "quality_passed": {
+      "type": "string",
+      "description": "Workflow-global quality_passed",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "questions_for_investigation": {
+      "type": "string",
+      "description": "Workflow-global questions_for_investigation"
+    },
+    "recommendations": {
+      "type": "string",
+      "description": "Workflow-global recommendations",
+      "minLength": 10
+    },
+    "research_question": {
+      "type": "string",
+      "description": "Workflow-global research_question",
+      "minLength": 10
+    },
+    "scope": {
+      "type": "string",
+      "description": "Workflow-global scope",
+      "minLength": 10
+    },
+    "success_criteria": {
+      "type": "string",
+      "description": "Workflow-global success_criteria",
+      "minLength": 10
+    },
+    "transformations_applied": {
+      "type": "string",
+      "description": "Workflow-global transformations_applied",
+      "minLength": 10
+    },
+    "visualizations_created": {
+      "type": "string",
+      "description": "Workflow-global visualizations_created",
+      "minLength": 20
+    },
+    "has_file_access": {
+      "type": "boolean",
+      "description": "Agent can read/write local files"
+    }
+  }
+}

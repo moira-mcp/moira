@@ -1,0 +1,5 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Enhanced Error Formatting Tests formats required field errors with fix instructions: required-field-error-username 1`] = `"VALIDATION ERROR: Required field 'username' is missing. Add 'username' field to your input."`;
+
+exports[`Enhanced Error Formatting Tests formats type validation errors with fix instructions: type-validation-error-string-number 1`] = `"VALIDATION ERROR: Field 'name' must be string, got number. Provide string value instead."`;

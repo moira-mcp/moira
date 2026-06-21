@@ -1,0 +1,30 @@
+{
+  "slug": "mcp-tools-private-workflow",
+  "metadata": {
+    "name": "MCP Tools Private Workflow",
+    "version": "1.0.0",
+    "description": "Private workflow for MCP tools test user"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "step1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "step1",
+      "directive": "Private workflow step",
+      "completionCondition": "Step completed",
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

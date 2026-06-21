@@ -1,0 +1,152 @@
+---
+import { Code } from "astro:components";
+
+interface Props {
+  code: string;
+  language?: string;
+  title?: string;
+  class?: string;
+}
+
+const { code, language = "json", title, class: className = "" } = Astro.props;
+const uniqueId = `codeblock-${Math.random().toString(36).substring(2, 9)}`;
+
+const langMap: Record<string, string> = {
+  bash: "bash",
+  shell: "bash",
+  sh: "bash",
+  javascript: "javascript",
+  js: "javascript",
+  typescript: "typescript",
+  ts: "typescript",
+  json: "json",
+  yaml: "yaml",
+  yml: "yaml",
+  python: "python",
+  py: "python",
+};
+const resolvedLang = langMap[language] || language;
+---
+
+<div
+  class={`code-block-wrapper relative group rounded-lg overflow-hidden ${className}`}
+  id={uniqueId}
+>
+  {
+    title && (
+      <div class="bg-slate-200 dark:bg-slate-800 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 border-b border-slate-300 dark:border-slate-700">
+        {title}
+      </div>
+    )
+  }
+  <div class="relative">
+    <div
+      class="code-highlight border border-slate-200 dark:border-slate-700 rounded-b-lg overflow-x-auto [&_pre]:!p-4 [&_pre]:!m-0 [&_pre]:!rounded-none [&_pre]:text-sm [&_code]:!text-sm [&_code]:font-mono"
+    >
+      <Code
+        code={code}
+        lang={resolvedLang}
+        themes={{ light: "github-light", dark: "github-dark" }}
+      />
+    </div>
+
+    <button
+      type="button"
+      class="copy-btn absolute top-3 right-3 p-2 rounded-md transition-all bg-gray-200/80 hover:bg-gray-300 dark:bg-gray-800/80 dark:hover:bg-gray-700 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+      aria-label="Copy code"
+      data-code={code}
+    >
+      <svg class="copy-icon w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+        ></path>
+      </svg>
+      <svg
+        class="check-icon w-4 h-4 text-green-500 hidden"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"
+        ></path>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<style>
+  .copy-btn {
+    opacity: 0;
+    transition:
+      opacity 0.2s,
+      background-color 0.2s,
+      transform 0.15s;
+  }
+
+  .code-block-wrapper:hover .copy-btn {
+    opacity: 1;
+  }
+
+  .copy-btn:active {
+    transform: scale(0.95);
+  }
+
+  .copy-btn.copied .copy-icon {
+    display: none;
+  }
+
+  .copy-btn.copied .check-icon {
+    display: block;
+    animation: check-pop 0.3s ease-out;
+  }
+
+  @keyframes check-pop {
+    0% {
+      transform: scale(0);
+    }
+    50% {
+      transform: scale(1.2);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+</style>
+
+<style is:global>
+  html.dark .astro-code,
+  html.dark .astro-code span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll(".copy-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const code = btn.getAttribute("data-code");
+        if (!code) return;
+
+        try {
+          await navigator.clipboard.writeText(code);
+          btn.classList.add("copied");
+          btn.setAttribute("aria-label", "Copied!");
+
+          setTimeout(() => {
+            btn.classList.remove("copied");
+            btn.setAttribute("aria-label", "Copy code");
+          }, 2000);
+        } catch (err) {
+          console.error("Failed to copy:", err);
+        }
+      });
+    });
+  });
+</script>

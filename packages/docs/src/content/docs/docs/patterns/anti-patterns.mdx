@@ -1,0 +1,313 @@
+---
+title: Anti-Patterns
+description: Common workflow design mistakes to avoid
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Overview
+
+Anti-patterns are recurring workflow design mistakes that lead to broken, inefficient, or unmaintainable workflows. The Workflow Management Flow (WMF) checks for these automatically during creation and editing.
+
+<Aside type="tip">
+  Reference `moira/software-development-flow` as a canonical example of correct workflow patterns.
+</Aside>
+
+## Anti-Pattern Catalog
+
+### #1: Data Roundtrip
+
+Directive tells agent to collect data, then `inputSchema` asks agent to return that same data as structured output. The agent acts as a data-entry clerk copying from tool output to schema fields.
+
+**Detection:** `inputSchema` mirrors the structure of data the agent was told to collect.
+
+```
+❌ Directive: "Get project info from package.json"
+   inputSchema: { project_name: string, version: string, description: string }
+   // Agent copies data from file to schema fields — pointless roundtrip
+
+✅ Use expression node to extract data, or capture agent's ANALYSIS in inputSchema
+   inputSchema: { architecture_assessment: string, risks_identified: string[] }
+```
+
+### #2: Empty InputSchema with Side Effects
+
+Node has no `inputSchema` but directive tells agent to perform side effects (create files, run commands). No evidence of what was done is captured.
+
+**Detection:** Agent-directive node without `inputSchema` where directive describes actions with observable outcomes.
+
+```
+❌ Directive: "Create test files for auth module" (no inputSchema)
+   // Workflow doesn't know what was created or if it succeeded
+
+✅ inputSchema: { files_created: string[], tests_passing: boolean }
+   // Evidence of completion captured in workflow context
+```
+
+### #3: Undeclared Variable / Implicit Promotion
+
+Referencing a bare-name variable that is not declared in the workflow `variableRegistry`, or expecting a node's local output to become a global variable through name matching. Globals must be declared explicitly; a node writes a global only when it lists that name in `inputSchema.globalInputs`.
+
+**Detection:** A bare-name template reference (not a `node-id.name` local and not a system variable like `executionId`) that has no matching entry in `variableRegistry`. Or a workflow that relies on a node's returned key being promoted to a global by name match.
+
+```
+❌ Directive references a bare-name variable that is not declared in variableRegistry
+   // No registry entry → value is undefined at runtime
+
+❌ Node returns a key and expects it to become global because the name matches
+   // No implicit promotion — the value stays a node-local output
+
+✅ Declare every global in variableRegistry
+   A node writes a global only via inputSchema.globalInputs (list the name)
+   Reference node-local outputs as node-id.name
+```
+
+### #4: Review Loop via InputSchema Instead of Files
+
+Review feedback passed through `inputSchema` text fields instead of persistent files. Agent loses context between iterations.
+
+**Detection:** Review/fix cycle where fix node receives feedback only via `inputSchema` text, not via persistent file.
+
+```
+❌ Review node → inputSchema: { feedback: string } → Fix node reads feedback from input
+   // Feedback is ephemeral, lost on retry
+
+✅ Review node writes review.md → Fix node reads review.md
+   // Results persist across iterations and retries
+```
+
+### #5: Implicit Fix Loops
+
+Directive says "fix until done" without explicit loop structure in the graph. Agent retries internally without workflow control.
+
+**Detection:** Words like "retry", "keep trying", "fix until" in directive without corresponding condition node creating a graph loop.
+
+```
+❌ Directive: "Keep fixing tests until they all pass"
+   // No graph structure, agent loops internally without workflow control
+
+✅ [fix] → [run-tests] → condition(passed?) → [fix] / [next]
+   // Explicit graph loop with workflow visibility into each iteration
+```
+
+### #6: Unbounded Cycles
+
+Validation loops without iteration limits or escalation paths. Can run forever if condition never met.
+
+**Detection:** Cycle in graph without iteration counter variable or without condition checking iteration limit.
+
+```
+❌ Loop: [action] → [check] → [fix] → [action] (forever if quality never passes)
+
+❌ Counter + limit but silent skip:
+   expression(counter++) → condition(counter < max) → false → next-phase
+   // Silently skips fix loop — user never knows issues were unresolved!
+
+✅ Counter + limit + user decision:
+   expression(counter++) → condition(counter < max) → false → ask-user-limit-reached
+   // User decides: continue as-is / reset counter and retry / accept despite issues
+```
+
+**The `false` branch of a bounded loop limit check MUST route to a user decision node**, not directly to the next phase. Options should include:
+
+- **continue/accept** — proceed despite unresolved issues
+- **reset** — reset counter to 0 and retry the fix loop
+
+<Aside type="caution">
+  Routing the false branch directly to the next phase is a **silent failure** anti-pattern. The user
+  loses control and may not realize issues were left unresolved after max iterations.
+</Aside>
+
+<Aside type="note">
+  Human-in-the-loop cycles (user approval loops) are acceptable without bounds since the user
+  naturally terminates them.
+</Aside>
+
+### #7: Dynamic Data in Workflow Variables
+
+Storing **dynamic data generated during workflow execution** (file contents, API responses, HTML output, extraction results) in workflow variables. These variables get injected into every directive via templates, bloating context with potentially unbounded content.
+
+**Detection:** Variables that receive dynamic content through `inputSchema` during execution, especially content >1KB or content that grows unboundedly.
+
+**Scope:** This anti-pattern applies to **data flowing between workflow steps** — NOT to static configuration stored as a `variableRegistry` default. See the [Static Workflow Configuration](/docs/patterns/static-configuration/) pattern for the distinction.
+
+```
+❌ inputSchema: { html_content: string }
+   Next directive: "Publish {{step.html_content}}"
+   // Entire HTML page stored in variable, injected into every subsequent directive
+
+❌ inputSchema: { extraction_results: object }
+   Next directive: "Analyze {{extraction_results}}"
+   // Potentially large extraction data round-tripped through variables
+
+✅ Directive: "Save HTML to {{workspace_path}}/report.html"
+   inputSchema: { file_path: string }
+   Next directive: "Publish file at {{step.file_path}}"
+   // Only the path stored in variable, agent reads file when needed
+```
+
+**Exception:** Static instructional content stored as a `variableRegistry` default (rules, standards, checklists) is a **correct pattern**, not variable abuse. These are deliberately placed to ensure the agent sees them on every relevant step. See [Static Workflow Configuration](/docs/patterns/static-configuration/).
+
+### #8: SystemReminder Modification
+
+System-level consideration. `systemReminder` is static and applied to ALL steps. Step-specific instructions belong in node directives, not in `systemReminder`.
+
+### #9: Manual Index Management by Agent
+
+Agent manually tracks array indices, counters, or pagination through `inputSchema`. Error-prone and breaks on retry.
+
+**Detection:** `inputSchema` with fields like `current_index`, `next_item_number`, or counter values that agent must calculate.
+
+```
+❌ inputSchema: { current_index: number, next_item: string }
+   // Agent calculates arithmetic, prone to errors
+
+✅ Expression node: current_index = {current_index} + 1
+   Directive: "Process {{items[{current_index}]}}"
+   // Workflow engine handles arithmetic deterministically
+```
+
+### #10: File Upload via Content
+
+Passing entire workflow JSON through MCP tool parameters for large workflows. Hits size limits.
+
+**Detection:** `manage({ action: "create", workflow: <large JSON> })` with workflow >50KB.
+
+```
+❌ manage({ action: "create", workflow: <50KB JSON> })
+   // May hit parameter size limits
+
+✅ token({ action: "upload" }) → HTTP PUT with file content
+   // Token-based upload handles any size
+```
+
+### #11: Context Duplication
+
+Copying information already in agent's context into workflow variables. Redundant and bloats context.
+
+**Detection:** `inputSchema` that captures data the agent already has in conversation context (e.g., directory listings, project info from prior analysis).
+
+```
+❌ variable: project_structure = "<output of tree command>"
+   // Agent already has this in context; storing it again wastes tokens
+
+✅ Let agent re-read current data when needed. Store only stable references (paths, IDs).
+```
+
+### #12: Externalizing Critical Instructions to Files
+
+Moving essential agent instructions and standards from a `variableRegistry` default to external files, expecting the agent to read them each time. This creates risk of hallucination and adds unnecessary I/O.
+
+**Detection:** Directive says "read rules from file X" for content that should be consistently available. Instructions that are critical for agent behavior stored outside the workflow.
+
+```
+❌ Directive: "Read planning standards from ./standards.md before creating plan"
+   // Agent may skip reading, recall from training data, or read selectively
+   // Extra I/O operation on every step that needs these rules
+
+✅ Declare as a variableRegistry default: planning_standards = "1. Each step must... 2. Tests built-in..."
+   Directive: "Create plan following {{planning_standards}}"
+   // Workflow engine guarantees delivery; no I/O; no hallucination risk
+```
+
+<Aside type="caution">
+  This anti-pattern applies to instructions the agent MUST follow consistently. Externalization is
+  fine for large reference data the agent only needs occasionally (e.g., a 100KB dataset).
+</Aside>
+
+### #13: False-Loop Misreport
+
+The agent sees the same review/validate directive twice and tells the user the flow is looping or stuck, then stops.
+
+**Detection:** A re-validate back-edge to an identical node with no round counter, no "expected, not a bug" cue, and often no bound.
+
+```
+❌ [validate] → condition(issues?) → true → [fix] → [validate]
+   // Same validate directive reappears; agent reports "the workflow is stuck in a loop"
+
+✅ expression(validation_round = validation_round + 1) → [validate] (renders the counter and the cue)
+   condition(validation_round < max_validation_rounds) → true → [fix] → expression(...) → [validate]
+                                                       → false → [ask-user-limit]
+```
+
+The loop-entry directive renders the round counter and states the loop is expected:
+
+```
+Re-validation pass {{validation_round}} of {{max_validation_rounds}} — a normal quality loop,
+expected to converge. This is NOT a bug and NOT a stuck flow; do not report a loop to the user.
+```
+
+The counter is incremented by an expression node (flow-automatic), declared in `variableRegistry` with a numeric `default` (counter default 0, max default e.g. 5). An agent-incremented counter is itself an anti-pattern (see #9).
+
+### #14: Declared-But-No-Default Variable
+
+`{{var}}` renders `[[UNDEFINED_VARIABLE]]` at runtime even though `var` is declared in `variableRegistry`; an expression like `var = var + 1` yields `NaN`.
+
+**Detection:** A `variableRegistry` declaration with no `default`, where the variable is not seeded in start `initialData` and not written by any upstream node's `globalInputs`.
+
+```
+❌ variableRegistry: { validation_round: { type: "number" } }   // no default
+   Directive: "Pass {{validation_round}} ..."  // renders [[UNDEFINED_VARIABLE]]
+   Expression: validation_round = validation_round + 1  // NaN
+
+✅ variableRegistry: { validation_round: { type: "number", default: 0 } }
+   // Counter starts at a real value; increments and templates resolve
+```
+
+Give every counter and flag a `default`. The validator emits a declared-but-no-default warning when a referenced variable has no `default` and is never written upstream.
+
+### #15: Template-in-Data
+
+A `{{name}}` the agent writes into data returned via `step()` renders `[[UNDEFINED_VARIABLE]]` when that value is later interpolated into a directive.
+
+**Detection:** Returned `inputSchema` values that contain bare `{{...}}` template syntax.
+
+```
+❌ step() returns: { summary: "Report for {{project_name}}" }
+   Next directive: "Publish {{summary}}"  // {{project_name}} renders [[UNDEFINED_VARIABLE]]
+
+✅ step() returns: { summary: "Report for acme-api" }
+   // Substituted data values are treated as literal text, never re-parsed as templates
+```
+
+Never write bare `{{...}}` into `step()` data; templates belong only in static node fields (directive, completionCondition, message). The engine treats substituted data values as literal.
+
+### #16: Template Injection (SSTI)
+
+Untrusted input containing template syntax interpolated into a directive could attempt to dump the variable bag (`{{context.variables}}`), run an `each`/`if` helper, or traverse another node's scope via `node-id.field`.
+
+**Detection:** A directive interpolates a variable whose value comes from untrusted input that may contain `{{...}}` syntax.
+
+```
+❌ Directive: "Summarize the user's note: {{user_note}}"
+   where user_note = "{{context.variables}}"   // attempt to dump all variables
+
+✅ Interpolated VALUES are literal — the engine neutralizes brace syntax originating from
+   substituted data, so {{context.variables}} in user_note renders as plain text.
+   Don't echo untrusted template syntax into directives; prefer explicit named vars
+   over {{context.variables}} full-dumps.
+```
+
+Interpolated values are never re-parsed as templates. Author-controlled static fields are where templates live.
+
+## Correct Patterns
+
+### Dynamic Array Index Pattern
+
+The correct way to iterate over array items:
+
+```
+1. Store array: items = ["a", "b", "c"]
+2. Store index: current_index = 0
+3. Directive: "Process item {{items[{current_index}]}}"
+4. Expression: current_index = {current_index} + 1
+5. Condition: {current_index} < items.length → loop / continue
+```
+
+### File-Based Review Pattern
+
+```
+[implement] → [review-to-file] → [check-issues] → [fix-from-file] → [review-to-file]
+                                        ↓
+                                    no issues → [next]
+```

@@ -1,0 +1,100 @@
+---
+title: Паттерн сбора информации
+description: Сбор возможностей агента или предпочтений пользователя в начале workflow
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Сбор информации об окружении агента, предпочтениях пользователя или конфигурации проекта перед продолжением workflow. Это позволяет использовать условное поведение на последующих шагах.
+
+## Структура
+
+```
+[start] → [collect-info] → [route-by-info] → [branch-a | branch-b]
+```
+
+## Реализация
+
+### Узел-коллектор
+
+```json
+{
+  "type": "agent-directive",
+  "id": "collect-info",
+  "directive": "Determine agent capabilities:\n- File system access?\n- Web fetch access?\n- Test framework?",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "has_file_access": { "type": "boolean" },
+      "has_web_access": { "type": "boolean" },
+      "test_framework": { "type": "string" }
+    },
+    "required": ["has_file_access", "has_web_access"]
+  },
+  "connections": { "success": "route-by-capabilities" }
+}
+```
+
+### Узел маршрутизации
+
+```json
+{
+  "type": "condition",
+  "id": "route-by-capabilities",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "has_file_access" },
+    "right": true
+  },
+  "connections": {
+    "true": "file-based-flow",
+    "false": "memory-based-flow"
+  }
+}
+```
+
+## Использование собранных значений
+
+После сбора значения находятся в контексте. Используйте их с условными шаблонами:
+
+```json
+{
+  "directive": "{{#if has_file_access}}Save to {{output_path}}{{else}}Store in context variable{{/if}}"
+}
+```
+
+## Реальный пример
+
+Из `development-flow.json`:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "get-initial-requirements",
+  "directive": "Study project and collect ALL information for development.\n\n1) Find CLAUDE.md or similar agent instructions\n2) Determine test command (npm test, pytest, etc.)\n3) Check for project checklist\n4) Check for agent onboarding document\n...",
+  "inputSchema": {
+    "properties": {
+      "test_command": { "type": "string" },
+      "has_tests": { "type": "string", "enum": ["yes", "no"] },
+      "build_command": { "type": "string" },
+      "checklist_path": { "type": "string" },
+      "has_checklist": { "type": "string", "enum": ["yes", "no"] },
+      "has_browser_ui": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["test_command", "has_tests", "build_command", "has_checklist"]
+  }
+}
+```
+
+<Aside type="tip">
+  Собирайте всю конфигурацию заранее, а не запрашивайте по ходу workflow. Это улучшает
+  пользовательский опыт и позволяет использовать условное ветвление.
+</Aside>
+
+## Связанные паттерны
+
+- [Паттерн пропуска](/ru/docs/patterns/skip/) - Использование собранных флагов для пропуска шагов
+- [Динамические файлы](/ru/docs/patterns/dynamic-files/) - Использование собранных путей в шаблонах
+- [Ветвление](/ru/docs/patterns/branching/) - Маршрутизация на основе собранных значений

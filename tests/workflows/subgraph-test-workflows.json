@@ -1,0 +1,364 @@
+[
+  {
+    "slug": "subgraph-parent-test",
+    "metadata": {
+      "name": "Subgraph Parent Test",
+      "version": "1.0.0",
+      "description": "Parent workflow for testing subgraph execution"
+    },
+    "nodes": [
+      {
+        "type": "start",
+        "id": "start",
+        "initialData": {
+          "variables": {
+            "userName": {
+              "description": "Name of the test user",
+              "value": "TestUser"
+            },
+            "config": {
+              "description": "Configuration object with environment settings",
+              "value": {
+                "environment": "test",
+                "features": [
+                  "logging",
+                  "metrics"
+                ]
+              }
+            }
+          }
+        },
+        "connections": {
+          "default": "subgraph"
+        }
+      },
+      {
+        "type": "subgraph",
+        "id": "subgraph",
+        "graphId": "subgraph-child-test",
+        "inputMapping": {
+          "userName": "user",
+          "config.environment": "env",
+          "config.features[0]": "primaryFeature"
+        },
+        "outputMapping": {
+          "result": "childResult",
+          "processed": "wasProcessed"
+        },
+        "connections": {
+          "success": "end",
+          "error": "error-end"
+        }
+      },
+      {
+        "type": "end",
+        "id": "end",
+        "finalOutput": [
+          "userName",
+          "childResult",
+          "wasProcessed"
+        ]
+      },
+      {
+        "type": "end",
+        "id": "error-end",
+        "finalOutput": [
+          "error"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "subgraph-child-test",
+    "metadata": {
+      "name": "Subgraph Child Test",
+      "version": "1.0.0",
+      "description": "Child workflow for testing subgraph execution"
+    },
+    "nodes": [
+      {
+        "type": "start",
+        "id": "start",
+        "connections": {
+          "default": "process"
+        }
+      },
+      {
+        "type": "agent-directive",
+        "id": "process",
+        "directive": "Process user {{user}} in {{env}} environment with {{primaryFeature}}",
+        "completionCondition": "User processing completed successfully",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string",
+              "description": "Processing result"
+            },
+            "processed": {
+              "type": "boolean",
+              "description": "Processing completion status"
+            }
+          },
+          "required": [
+            "result",
+            "processed"
+          ]
+        },
+        "connections": {
+          "success": "end"
+        }
+      },
+      {
+        "type": "end",
+        "id": "end",
+        "finalOutput": [
+          "result",
+          "processed",
+          "user",
+          "env",
+          "primaryFeature"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "subgraph-recursive-test",
+    "metadata": {
+      "name": "Recursive Subgraph Test",
+      "version": "1.0.0",
+      "description": "Self-referencing workflow for testing recursion limits"
+    },
+    "nodes": [
+      {
+        "type": "start",
+        "id": "start",
+        "initialData": {
+          "variables": {
+            "counter": {
+              "description": "Recursion counter",
+              "value": 0
+            }
+          }
+        },
+        "connections": {
+          "default": "check"
+        }
+      },
+      {
+        "type": "condition",
+        "id": "check",
+        "condition": {
+          "operator": "lt",
+          "left": {
+            "contextPath": "counter"
+          },
+          "right": 3
+        },
+        "connections": {
+          "true": "recurse",
+          "false": "end"
+        }
+      },
+      {
+        "type": "subgraph",
+        "id": "recurse",
+        "graphId": "subgraph-recursive-test",
+        "inputMapping": {
+          "counter": "counter"
+        },
+        "outputMapping": {
+          "counter": "counter"
+        },
+        "connections": {
+          "success": "increment",
+          "error": "end"
+        }
+      },
+      {
+        "type": "agent-directive",
+        "id": "increment",
+        "directive": "Increment counter from {{counter}}",
+        "completionCondition": "Counter incremented successfully",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "counter": {
+              "type": "number",
+              "description": "Incremented counter value"
+            }
+          },
+          "required": [
+            "counter"
+          ]
+        },
+        "connections": {
+          "success": "check"
+        }
+      },
+      {
+        "type": "end",
+        "id": "end",
+        "finalOutput": [
+          "counter"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "subgraph-deep-nesting-test",
+    "metadata": {
+      "name": "Deep Nesting Test",
+      "version": "1.0.0",
+      "description": "Multi-level nesting test workflow"
+    },
+    "nodes": [
+      {
+        "type": "start",
+        "id": "start",
+        "initialData": {
+          "variables": {
+            "level": {
+              "description": "Nesting level",
+              "value": 1
+            },
+            "data": {
+              "description": "Root data passed through levels",
+              "value": "root-data"
+            }
+          }
+        },
+        "connections": {
+          "default": "subgraph"
+        }
+      },
+      {
+        "type": "subgraph",
+        "id": "subgraph",
+        "graphId": "subgraph-middle-level",
+        "inputMapping": {
+          "level": "level",
+          "data": "data"
+        },
+        "outputMapping": {
+          "result": "finalResult"
+        },
+        "connections": {
+          "success": "end"
+        }
+      },
+      {
+        "type": "end",
+        "id": "end",
+        "finalOutput": [
+          "finalResult",
+          "level",
+          "data"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "subgraph-middle-level",
+    "metadata": {
+      "name": "Middle Level Subgraph",
+      "version": "1.0.0",
+      "description": "Middle level in deep nesting test"
+    },
+    "nodes": [
+      {
+        "type": "start",
+        "id": "start",
+        "connections": {
+          "default": "condition"
+        }
+      },
+      {
+        "type": "condition",
+        "id": "condition",
+        "condition": {
+          "operator": "lt",
+          "left": {
+            "contextPath": "level"
+          },
+          "right": 3
+        },
+        "connections": {
+          "true": "subgraph",
+          "false": "end"
+        }
+      },
+      {
+        "type": "subgraph",
+        "id": "subgraph",
+        "graphId": "subgraph-leaf-level",
+        "inputMapping": {
+          "level": "level",
+          "data": "data"
+        },
+        "outputMapping": {
+          "result": "result"
+        },
+        "connections": {
+          "success": "end"
+        }
+      },
+      {
+        "type": "end",
+        "id": "end",
+        "finalOutput": [
+          "result",
+          "level",
+          "data"
+        ]
+      }
+    ]
+  },
+  {
+    "slug": "subgraph-leaf-level",
+    "metadata": {
+      "name": "Leaf Level Subgraph",
+      "version": "1.0.0",
+      "description": "Deepest level in nesting test"
+    },
+    "nodes": [
+      {
+        "type": "start",
+        "id": "start",
+        "connections": {
+          "default": "process"
+        }
+      },
+      {
+        "type": "agent-directive",
+        "id": "process",
+        "directive": "Process at level {{level}} with data {{data}}",
+        "completionCondition": "Processing completed at deepest level",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "result": {
+              "type": "string",
+              "description": "Deep processing result"
+            }
+          },
+          "required": [
+            "result"
+          ]
+        },
+        "connections": {
+          "success": "end"
+        }
+      },
+      {
+        "type": "end",
+        "id": "end",
+        "finalOutput": [
+          "result",
+          "level",
+          "data"
+        ]
+      }
+    ]
+  }
+]

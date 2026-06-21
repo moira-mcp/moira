@@ -1,0 +1,169 @@
+---
+/**
+ * Shared component for rendering MCP client setup tabs in Starlight docs.
+ * Uses the shared client registry as single data source.
+ * Renders Starlight-compatible Tabs/TabItem with setup instructions and token auth.
+ */
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+import CodeBlock from "~/components/ui/CodeBlock.astro";
+import { createT, type Language } from "~/i18n-server";
+import { getMcpUrl } from "@mcp-moira/shared/urls";
+import {
+  mcpClients,
+  deeplinkGenerators,
+  tokenConfigGenerators,
+} from "@mcp-moira/shared/mcp-clients";
+import type { McpClient } from "@mcp-moira/shared/mcp-clients";
+
+interface Props {
+  lang?: Language;
+}
+
+const { lang = "en" } = Astro.props;
+const t = createT(lang);
+const mcpUrl = getMcpUrl();
+
+function replaceUrl(content: string): string {
+  return content.replace(/\{\{mcpUrl\}\}/g, mcpUrl);
+}
+
+function ct(clientId: string, field: string): string {
+  return t(`quickStart.tabs.${clientId}.${field}`);
+}
+
+function getDeeplinkUrl(client: McpClient): string | undefined {
+  if (!client.deeplinkGenerator) return undefined;
+  return deeplinkGenerators[client.deeplinkGenerator](mcpUrl);
+}
+
+function getTokenConfig(client: McpClient): string | undefined {
+  if (!client.setup.tokenAuth) return undefined;
+  return tokenConfigGenerators[client.setup.tokenAuth.generator](mcpUrl);
+}
+
+function tt(field: string): string {
+  return t(`quickStart.tokenAuth.${field}`);
+}
+---
+
+<Tabs>
+  {
+    mcpClients.map((client) => (
+      <TabItem label={ct(client.id, "label")}>
+        <div class="space-y-4">
+          {/* GUI / Config: description + code block */}
+          {(client.setupType === "gui" || client.setupType === "config") && (
+            <Fragment>
+              <p>{ct(client.id, "description")}</p>
+              <CodeBlock
+                code={replaceUrl(ct(client.id, "content"))}
+                language={client.configLanguage}
+                title={client.setup.primaryTitle}
+              />
+            </Fragment>
+          )}
+
+          {/* CLI: recommended + primary command + auth + alternative */}
+          {client.setupType === "cli" && (
+            <Fragment>
+              <p>
+                <strong>{ct(client.id, "recommended")}</strong>
+              </p>
+              <CodeBlock
+                code={replaceUrl(ct(client.id, "primaryContent"))}
+                language={client.configLanguage}
+                title={client.setup.primaryTitle}
+              />
+              <p>{ct(client.id, "authIntro")}</p>
+              <CodeBlock
+                code={replaceUrl(ct(client.id, "authContent"))}
+                language={client.setup.auth!.language}
+                title={client.setup.auth!.title}
+              />
+              <details>
+                <summary>{ct(client.id, "alternativeTitle")}</summary>
+                <div class="mt-2">
+                  <CodeBlock
+                    code={replaceUrl(ct(client.id, "alternativeContent"))}
+                    language={client.setup.alternative!.language}
+                  />
+                </div>
+              </details>
+            </Fragment>
+          )}
+
+          {/* Deeplink: recommended + button + auth + alternative */}
+          {client.setupType === "deeplink" && (
+            <Fragment>
+              <p>
+                <strong>{ct(client.id, "recommended")}</strong>
+              </p>
+              <a
+                href={getDeeplinkUrl(client)}
+                aria-label={ct(client.id, "ariaLabel")}
+                class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors no-underline"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  />
+                </svg>
+                {ct(client.id, "deeplinkButton")}
+              </a>
+              <p>{ct(client.id, "authIntro")}</p>
+              <CodeBlock
+                code={replaceUrl(ct(client.id, "authContent"))}
+                language={client.setup.auth!.language}
+                title={client.setup.auth!.title}
+              />
+              <details>
+                <summary>{ct(client.id, "alternativeTitle")}</summary>
+                <div class="mt-2">
+                  <CodeBlock
+                    code={replaceUrl(ct(client.id, "alternativeContent"))}
+                    language={client.setup.alternative!.language}
+                    title={client.setup.alternative!.title}
+                  />
+                </div>
+              </details>
+            </Fragment>
+          )}
+
+          {/* Token Auth: collapsible section for API token as OAuth alternative */}
+          {client.setup.tokenAuth && (
+            <details class="token-auth-section border border-gray-200 dark:border-gray-700 rounded-lg not-content">
+              <summary class="cursor-pointer px-4 py-3 text-sm font-medium flex items-center gap-2">
+                <svg
+                  style="width: 1rem; height: 1rem; flex-shrink: 0;"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
+                  />
+                </svg>
+                {tt("sectionTitle")}
+              </summary>
+              <div class="px-4 pb-4 space-y-3">
+                <p class="text-sm">{tt("description")}</p>
+                <div class="text-sm" set:html={tt("steps").replace(/\n/g, "<br>")} />
+                <CodeBlock
+                  code={getTokenConfig(client)!}
+                  language={client.setup.tokenAuth.language}
+                  title={client.setup.tokenAuth.title}
+                />
+              </div>
+            </details>
+          )}
+        </div>
+      </TabItem>
+    ))
+  }
+</Tabs>

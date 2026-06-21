@@ -1,0 +1,148 @@
+{
+  "slug": "advanced-templates-test",
+  "metadata": {
+    "name": "Advanced Templates Test",
+    "version": "1.0.0",
+    "description": "Test all template functions with variable flow between steps"
+  },
+  "variableRegistry": {
+    "feature_name": {
+      "type": "string",
+      "description": "Feature name set by set-variables, read by later steps"
+    },
+    "iteration_counter": {
+      "type": "number",
+      "description": "Iteration counter set by set-variables"
+    },
+    "max_allowed_iterations": {
+      "type": "number",
+      "description": "Max allowed iterations set by set-variables"
+    },
+    "user": {
+      "type": "object",
+      "description": "User object set by set-variables"
+    },
+    "config": {
+      "type": "object",
+      "description": "Config object set by set-variables"
+    }
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "set-variables"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "set-variables",
+      "directive": "Set project variables: feature name, iteration counter, and user data",
+      "completionCondition": "All project variables set",
+      "connections": {
+        "success": "read-simple-variables"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "feature_name",
+          "iteration_counter",
+          "max_allowed_iterations",
+          "user",
+          "config"
+        ],
+        "globalInputs": [
+          "feature_name",
+          "iteration_counter",
+          "max_allowed_iterations",
+          "user",
+          "config"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "read-simple-variables",
+      "directive": "Reading simple variables: Feature={{feature_name}}, Counter={{iteration_counter}}, Max={{max_allowed_iterations}}",
+      "completionCondition": "Simple variables template processed",
+      "connections": {
+        "success": "read-context-dump"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "read-context-dump",
+      "directive": "Full context dump: {{context.variables}}",
+      "completionCondition": "Context variables template processed",
+      "connections": {
+        "success": "read-nested-paths"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "read-nested-paths",
+      "directive": "Nested data: User name={{user.name}}, User email={{user.email}}, API key={{config.api.key}}",
+      "completionCondition": "Nested path templates processed",
+      "connections": {
+        "success": "read-mixed-templates"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "read-mixed-templates",
+      "directive": "Mixed templates: Working on {{feature_name}} iteration {{iteration_counter}} of {{max_allowed_iterations}} for user {{user.name}} ({{user.email}}) using API {{config.api.key}}",
+      "completionCondition": "Mixed template processing completed",
+      "connections": {
+        "success": "end"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "feature_name",
+        "iteration_counter",
+        "user",
+        "config"
+      ]
+    }
+  ]
+}

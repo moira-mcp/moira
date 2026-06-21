@@ -1,0 +1,156 @@
+---
+title: Паттерн рабочего пространства
+description: Организация файлов workflow в выделенной директории
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Создание выделенной директории рабочего пространства для выполнения workflow. Все рабочие файлы (планы, результаты, отчёты, резервные копии) хранятся в одном месте, сохраняя чистоту проекта.
+
+## Структура
+
+```
+./moira-ws/{workspace-name}/
+├── process-id.txt       # ID выполнения workflow для восстановления
+├── development-plan.md  # Планы и спецификации
+├── step-1/              # Результаты конкретных шагов
+│   └── step-results.md
+├── *.backup.json        # Файлы резервных копий
+└── ...                  # Прочие рабочие файлы
+```
+
+## Расположение рабочего пространства
+
+Все рабочие пространства создаются в поддиректории `./moira-ws/` **текущего проекта**:
+
+```
+./moira-ws/{workspace-name}/
+```
+
+<Aside type="caution">
+  НЕ создавайте рабочие пространства в корне проекта (`./feature-name/`) или в других местах. Всегда
+  используйте `./moira-ws/` для единообразия.
+</Aside>
+
+## Соглашение об именовании
+
+Формат: `{short-name}-{YYYYMMDD}-{HHMM}`
+
+- `short-name`: Краткое описание задачи (макс. 20 символов, kebab-case)
+- Дата и время создания
+
+Примеры:
+
+- `wmf-edit-20251211-2145`
+- `auth-fix-20251212-0930`
+- `api-refactor-20251215-1400`
+
+## Реализация
+
+### Нода инициализации
+
+Сбор пути рабочего пространства при запуске workflow:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "create-workspace",
+  "directive": "Create workspace for this workflow execution.\n\n1. Generate workspace name: {task-short-name}-{YYYYMMDD}-{HHMM}\n2. Create directory: ./moira-ws/{workspace-name}/\n3. Create process-id.txt with execution ID: {{executionId}}\n4. Return workspace path",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace_path": {
+        "type": "string",
+        "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
+        "description": "Path to created workspace"
+      }
+    },
+    "required": ["workspace_path"]
+  },
+  "connections": { "success": "next-step" }
+}
+```
+
+### Использование пути рабочего пространства
+
+Ссылайтесь на `{{workspace_path}}` в последующих директивах:
+
+```json
+{
+  "directive": "Save development plan to {{workspace_path}}development-plan.md"
+}
+```
+
+```json
+{
+  "directive": "Create step results in {{workspace_path}}step-{{current_step}}/step-results.md"
+}
+```
+
+## Что хранить в рабочем пространстве
+
+**Включайте:**
+
+- `process-id.txt` — ID выполнения для восстановления workflow
+- Планы и спецификации (файлы `.md`)
+- Результаты и отчёты по шагам
+- Резервные копии перед редактированием
+- Временные результаты анализа
+
+**Исключайте:**
+
+- Исходный код проекта
+- `node_modules` или зависимости
+- Большие бинарные файлы
+- Секреты и учётные данные
+
+## Настройка Git
+
+Добавьте `./moira-ws/` в `.gitignore`:
+
+```gitignore
+# Рабочие пространства Moira workflow
+moira-ws/
+```
+
+Рабочие пространства — это временные рабочие директории, которые не следует коммитить.
+
+## Восстановление
+
+При прерывании workflow агент может:
+
+1. Прочитать `process-id.txt` из рабочего пространства
+2. Возобновить выполнение по сохранённому ID процесса
+3. Продолжить с последнего завершённого шага
+
+```json
+{
+  "directive": "Check for existing workspace in ./moira-ws/\nIf found, read process-id.txt and resume workflow"
+}
+```
+
+## Реальный пример
+
+Из `workflow-management-flow`:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "setup-workspace",
+  "directive": "Create workspace for workflow editing.\n\nFormat: ./moira-ws/{{workflow_id}}-edit-{YYYYMMDD}-{HHMM}/\nExample: ./moira-ws/development-flow-edit-20251211-2200/\n\n1. Create the directory\n2. Save process-id.txt with: {{executionId}}\n3. Return the workspace path",
+  "inputSchema": {
+    "properties": {
+      "workspace_path": { "type": "string" }
+    },
+    "required": ["workspace_path"]
+  }
+}
+```
+
+## Связанные паттерны
+
+- [Сбор информации](/ru/docs/patterns/information-collection/) - Сбор пути рабочего пространства при инициализации
+- [Динамические файлы](/ru/docs/patterns/dynamic-files/) - Использование `{{workspace_path}}` в путях файлов
+- [Верификация шагов](/ru/docs/patterns/step-verification/) - Хранение результатов верификации в рабочем пространстве

@@ -1,0 +1,177 @@
+---
+title: Magic Variables
+description: Special variables with automatic handling in workflows
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Overview
+
+Magic variables are special input fields that trigger automatic behavior beyond normal context storage.
+
+## execution_note
+
+Updates the execution's note field for tracking purposes.
+
+### Usage
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "execution_note": {
+        "type": "string",
+        "description": "Note to identify this execution"
+      }
+    }
+  }
+}
+```
+
+### Behavior
+
+When agent provides `execution_note`:
+
+1. Value stored in context like normal
+2. Execution record's `note` field updated in database
+3. Note visible in execution lists and session queries
+
+### Use Cases
+
+**Track what's being worked on:**
+
+```json
+{
+  "directive": "Document what you're working on for tracking.",
+  "inputSchema": {
+    "properties": {
+      "execution_note": {
+        "type": "string",
+        "description": "Feature/task being developed"
+      }
+    },
+    "required": ["execution_note"]
+  }
+}
+```
+
+**Update note on task changes:**
+
+```json
+{
+  "directive": "Task requirements changed. Update the execution note.",
+  "inputSchema": {
+    "properties": {
+      "execution_note": { "type": "string" }
+    }
+  }
+}
+```
+
+<Aside type="note">
+  `execution_note` passes through inputSchema validation. Include in `required` array to enforce
+  agents provide execution identification.
+</Aside>
+
+### Querying Notes
+
+Notes appear in session queries:
+
+```typescript
+mcp__moira__session({ action: "executions" });
+// Returns executions with note field populated
+```
+
+## System Variables
+
+These variables are automatically available in context:
+
+### executionId
+
+Current process execution ID.
+
+```
+{{executionId}}
+```
+
+### workflowId
+
+Current workflow identifier.
+
+```
+{{workflowId}}
+```
+
+### Usage Example
+
+```json
+{
+  "directive": "Process ID: {{executionId}}\nWorkflow: {{workflowId}}\n\nDocument this for reference."
+}
+```
+
+## Expression Variables
+
+Variables modified by expression nodes:
+
+### Counter Variables
+
+Declared as globals in `variableRegistry` with a `default`:
+
+```json
+{
+  "variableRegistry": {
+    "current_step_index": { "type": "number", "description": "Current step index", "default": 1 },
+    "current_iteration": { "type": "number", "description": "Current iteration", "default": 1 }
+  }
+}
+```
+
+Modified by expression (expression nodes assign to globals by bare name):
+
+```json
+{
+  "type": "expression",
+  "expressions": ["current_step_index = current_step_index + 1", "current_iteration = 1"]
+}
+```
+
+<Aside type="tip">
+  Declare counter variables in `variableRegistry` with a `default` so they exist before expression
+  nodes access them.
+</Aside>
+
+## Template Processing
+
+All magic and context variables work with templates:
+
+### Simple Access
+
+```
+{{variable_name}}
+```
+
+### Nested Access
+
+```
+{{user.profile.name}}
+```
+
+### Array Access
+
+```
+{{items[0]}}
+{{items[0].field}}
+```
+
+### Conditional Templates
+
+```
+{{#if execution_note}}Note: {{execution_note}}{{/if}}
+```
+
+## See Also
+
+- [Input Schema](/docs/reference/input-schema/) - Validating magic variable inputs
+- [Templates](/docs/concepts/templates/) - Template syntax details

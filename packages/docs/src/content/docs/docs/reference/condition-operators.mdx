@@ -1,0 +1,320 @@
+---
+title: Condition Operators
+description: Reference for all condition operators in workflow nodes
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Comparison Operators
+
+### Equal (`eq`)
+
+```json
+{
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "status" },
+    "right": "ready"
+  }
+}
+```
+
+Works with strings, numbers, booleans.
+
+### Not Equal (`neq`)
+
+```json
+{
+  "condition": {
+    "operator": "neq",
+    "left": { "contextPath": "error_count" },
+    "right": 0
+  }
+}
+```
+
+### Greater Than (`gt`)
+
+```json
+{
+  "condition": {
+    "operator": "gt",
+    "left": { "contextPath": "score" },
+    "right": 80
+  }
+}
+```
+
+### Greater Than or Equal (`gte`)
+
+```json
+{
+  "condition": {
+    "operator": "gte",
+    "left": { "contextPath": "items_count" },
+    "right": 1
+  }
+}
+```
+
+### Less Than (`lt`)
+
+```json
+{
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "retry_count" },
+    "right": 3
+  }
+}
+```
+
+### Less Than or Equal (`lte`)
+
+```json
+{
+  "condition": {
+    "operator": "lte",
+    "left": { "contextPath": "error_rate" },
+    "right": 0.05
+  }
+}
+```
+
+## String Operators
+
+### Contains (`contains`)
+
+```json
+{
+  "condition": {
+    "operator": "contains",
+    "left": { "contextPath": "message" },
+    "right": "error"
+  }
+}
+```
+
+Also works with arrays:
+
+```json
+{
+  "condition": {
+    "operator": "contains",
+    "left": { "contextPath": "tags" },
+    "right": "urgent"
+  }
+}
+```
+
+## Existence Operators
+
+### Exists (`exists`)
+
+```json
+{
+  "condition": {
+    "operator": "exists",
+    "operand": { "contextPath": "optional_field" }
+  }
+}
+```
+
+Returns true if variable exists and is not null/undefined.
+
+### Is Empty (`isEmpty`)
+
+```json
+{
+  "condition": {
+    "operator": "isEmpty",
+    "operand": { "contextPath": "items" }
+  }
+}
+```
+
+Returns true for:
+
+- Empty string `""`
+- Empty array `[]`
+- Null/undefined
+
+## Logical Operators
+
+### AND (`and`)
+
+All conditions must be true:
+
+```json
+{
+  "condition": {
+    "operator": "and",
+    "conditions": [
+      {
+        "operator": "eq",
+        "left": { "contextPath": "status" },
+        "right": "complete"
+      },
+      {
+        "operator": "gt",
+        "left": { "contextPath": "score" },
+        "right": 80
+      }
+    ]
+  }
+}
+```
+
+### OR (`or`)
+
+At least one condition must be true:
+
+```json
+{
+  "condition": {
+    "operator": "or",
+    "conditions": [
+      {
+        "operator": "eq",
+        "left": { "contextPath": "priority" },
+        "right": "high"
+      },
+      {
+        "operator": "eq",
+        "left": { "contextPath": "priority" },
+        "right": "critical"
+      }
+    ]
+  }
+}
+```
+
+### NOT (`not`)
+
+Negates a condition:
+
+```json
+{
+  "condition": {
+    "operator": "not",
+    "condition": {
+      "operator": "eq",
+      "left": { "contextPath": "status" },
+      "right": "blocked"
+    }
+  }
+}
+```
+
+## Context Path Syntax
+
+### Simple Path
+
+```json
+{ "contextPath": "variable_name" }
+```
+
+### Nested Path
+
+```json
+{ "contextPath": "user.profile.name" }
+```
+
+### Array Index
+
+```json
+{ "contextPath": "items[0]" }
+```
+
+### Combined
+
+```json
+{ "contextPath": "results[0].score" }
+```
+
+## Literal Values
+
+Right-hand values can be literals:
+
+```json
+{
+  "right": "string value"
+}
+```
+
+```json
+{
+  "right": 42
+}
+```
+
+```json
+{
+  "right": true
+}
+```
+
+```json
+{
+  "right": null
+}
+```
+
+<Aside type="note">
+  When comparing with `contextPath` on both sides, both values are resolved from context before
+  comparison.
+</Aside>
+
+## Common Patterns
+
+### Check Boolean Flag
+
+```json
+{
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "has_tests" },
+    "right": "yes"
+  }
+}
+```
+
+### Check Iteration Limit
+
+```json
+{
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "current_iteration" },
+    "right": 5
+  }
+}
+```
+
+### Check Non-Empty Result
+
+```json
+{
+  "condition": {
+    "operator": "and",
+    "conditions": [
+      {
+        "operator": "exists",
+        "operand": { "contextPath": "result" }
+      },
+      {
+        "operator": "not",
+        "condition": {
+          "operator": "isEmpty",
+          "operand": { "contextPath": "result" }
+        }
+      }
+    ]
+  }
+}
+```
+
+## See Also
+
+- [Workflow Templates](/docs/reference/workflow-templates/) - Using conditions in workflows
+- [Validation](/docs/reference/validation/) - Input validation rules

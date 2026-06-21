@@ -1,0 +1,111 @@
+---
+title: Quick Start
+description: Get started with Moira in 5 minutes
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+import McpUrl from "~/components/docs/McpUrl.astro";
+import MoiraUrl from "~/components/docs/MoiraUrl.astro";
+import ClientSetupTabs from "~/components/docs/ClientSetupTabs.astro";
+
+This guide helps you connect Moira to your AI client and run your first workflow.
+
+## Prerequisites
+
+- An MCP-compatible AI client (see supported clients below)
+- Moira account (sign up at <MoiraUrl format="link" label="Moira" />)
+
+## Setup
+
+<Steps>
+
+1.  **Get your MCP endpoint**
+
+    For Moira Cloud: <McpUrl format="code" />
+
+    For self-hosted, use your server's MCP endpoint.
+
+2.  **Configure your AI client**
+
+    <ClientSetupTabs lang="en" />
+
+3.  **Authenticate the MCP server**
+
+    After adding the server configuration, complete OAuth authentication.
+    Most clients will prompt you automatically or have an "Authenticate" button.
+
+    <Aside type="tip" title="No OAuth support?">
+      If your client cannot open a browser for OAuth, create an API token instead:
+      1. Log in to Moira web UI → **Settings → API Tokens**
+      2. Create a token and copy it (starts with `moira_`)
+      3. Add it as `Authorization: Bearer moira_...` header in your client config
+
+      See [MCP Clients → API Tokens](/docs/integration/mcp-clients/#api-tokens) for details.
+    </Aside>
+
+4.  **Verify connection**
+
+    Ask your AI client to list available Moira workflows:
+
+    ```
+    List available Moira workflows
+    ```
+
+    You should see a list of workflows you have access to.
+
+5.  **Start the user onboarding**
+
+    Now simply type in the chat:
+
+    ```
+    Start user onboarding flow
+    ```
+
+    The agent will guide you through an interactive onboarding experience that:
+    - Explains Moira by demonstrating a workflow in action
+    - Shows you key workflows available
+    - Helps you get started with your first real task
+
+    This is the recommended way to learn Moira!
+
+</Steps>
+
+## Available MCP Tools
+
+Once connected, your AI client has access to these Moira tools:
+
+| Tool              | Description                               |
+| ----------------- | ----------------------------------------- |
+| `list`  | List available workflows                  |
+| `start`  | Start a new workflow execution            |
+| `step`    | Submit step result and get next directive |
+| `get_help`        | Get documentation and help                |
+| `manage_settings` | Manage user settings                      |
+
+## Example Session
+
+Here's what a typical workflow session looks like:
+
+```
+Agent: I'll start the development workflow.
+       [calls start with workflowId: "development-flow"]
+
+Moira: Process ID: abc-123
+       Your next task: Analyze the requirements document...
+       Success criteria: Requirements are documented...
+
+Agent: [analyzes requirements, produces output]
+       [calls step with processId: "abc-123" and result]
+
+Moira: Process ID: abc-123
+       Your next task: Create implementation plan...
+       Success criteria: Plan covers all requirements...
+
+[... workflow continues until completion]
+```
+
+## Next Steps
+
+- [Workflows](/docs/concepts/workflows/) - Understand workflow structure
+- [Claude Code Integration](/docs/integration/claude-code/) - Detailed Claude Code setup
+- [MCP Clients](/docs/integration/mcp-clients/) - Other MCP client integrations

@@ -1,0 +1,172 @@
+---
+title: Паттерн ветвления
+description: Разные пути для разных сценариев
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Назначение
+
+Маршрутизация выполнения workflow по различным путям на основе выбора пользователя, собранных данных или вычисленных условий.
+
+## Структура
+
+```
+[get-choice] → [route] → choice=A → [path-a] → [merge]
+                      → choice=B → [path-b] → [merge]
+```
+
+## Реализация
+
+### Сбор выбора
+
+```json
+{
+  "type": "agent-directive",
+  "id": "get-action",
+  "directive": "Ask user: create new or edit existing?",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": { "type": "string", "enum": ["create", "edit"] }
+    },
+    "required": ["action"]
+  },
+  "connections": { "success": "route-action" }
+}
+```
+
+### Простая бинарная маршрутизация
+
+```json
+{
+  "type": "condition",
+  "id": "route-action",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "action" },
+    "right": "create"
+  },
+  "connections": {
+    "true": "create-workflow",
+    "false": "edit-workflow"
+  }
+}
+```
+
+## Ветвление на несколько путей
+
+Для более чем 2 вариантов используйте цепочку условий:
+
+```json
+{
+  "id": "check-create",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "action" },
+    "right": "create"
+  },
+  "connections": {
+    "true": "create-branch",
+    "false": "check-edit"
+  }
+}
+```
+
+```json
+{
+  "id": "check-edit",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "action" },
+    "right": "edit"
+  },
+  "connections": {
+    "true": "edit-branch",
+    "false": "delete-branch"
+  }
+}
+```
+
+<Aside type="tip">
+  Для ветвлений на несколько путей упорядочивайте условия от наиболее частых к наименее частым для
+  эффективности.
+</Aside>
+
+## Ветвление по булевому флагу
+
+```json
+{
+  "type": "condition",
+  "id": "check-has-tests",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "has_tests" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "run-tests",
+    "false": "skip-tests"
+  }
+}
+```
+
+## Ветвление по числовому значению
+
+```json
+{
+  "type": "condition",
+  "id": "check-error-count",
+  "condition": {
+    "operator": "gt",
+    "left": { "contextPath": "error_count" },
+    "right": 0
+  },
+  "connections": {
+    "true": "fix-errors",
+    "false": "proceed"
+  }
+}
+```
+
+## Сложные условия
+
+Комбинирование нескольких проверок:
+
+```json
+{
+  "condition": {
+    "operator": "and",
+    "conditions": [
+      {
+        "operator": "eq",
+        "left": { "contextPath": "status" },
+        "right": "ready"
+      },
+      {
+        "operator": "gt",
+        "left": { "contextPath": "items_count" },
+        "right": 0
+      }
+    ]
+  }
+}
+```
+
+## Объединение ветвей
+
+Ветви обычно сходятся в общем узле:
+
+```
+[create-branch] → [save-workflow]
+[edit-branch]   → [save-workflow]
+```
+
+Оба пути подключаются к одному целевому узлу.
+
+## Связанные паттерны
+
+- [Сбор информации](/ru/docs/patterns/information-collection/) - Сбор данных для принятия решений о маршрутизации
+- [Паттерн пропуска](/ru/docs/patterns/skip/) - Частный случай ветвления для опциональных шагов

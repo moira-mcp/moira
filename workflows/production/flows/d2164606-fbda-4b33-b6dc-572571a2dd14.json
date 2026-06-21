@@ -1,0 +1,2076 @@
+{
+  "slug": "startup-idea-validation",
+  "owner": "system-admin",
+  "visibility": "public",
+  "id": "d2164606-fbda-4b33-b6dc-572571a2dd14",
+  "metadata": {
+    "name": "Startup Idea Validation",
+    "version": "1.3.1",
+    "description": "Автономная глубокая валидация стартап-идеи от начальной концепции до готового инвестиционного документа. На вход принимает описание идеи в свободной форме. Workflow автоматически: структурирует идею, исследует рынок (TAM/SAM/SOM), анализирует конкурентов с таблицами сравнения, оценивает техническую сложность, рассчитывает бюджет (MVP vs Full), определяет команду, выявляет риски, рассматривает альтернативы. Результат — HTML-отчёт для инвесторов."
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "initialData": {
+        "variables": {
+          "startup_idea": {
+            "description": "Описание стартап-идеи в свободной форме",
+            "value": ""
+          },
+          "enhance_iteration": {
+            "description": "Iteration counter for enhance-analysis loop",
+            "value": 0
+          },
+          "fix_competitors_iteration": {
+            "description": "Iteration counter for fix-competitors loop",
+            "value": 0
+          },
+          "refine_budget_iteration": {
+            "description": "Iteration counter for refine-budget loop",
+            "value": 0
+          },
+          "refine_risks_iteration": {
+            "description": "Iteration counter for refine-risks loop",
+            "value": 0
+          },
+          "validation_framework": {
+            "description": "Фреймворк валидации стартап-идей",
+            "value": "VALIDATION FRAMEWORK:\n\n1. TIER 1 PROBLEM CHECK:\n- Проблема должна быть в топ-3 болей целевой аудитории\n- Если проблема не критична — пользователи не заплатят\n- Вопрос: 'Насколько срочно решить эту проблему?' (1-10)\n\n2. RULE OF ONE:\n- Одна чёткая проблема\n- Один конкретный сегмент пользователей\n- Один основной продукт\n- Фокус важнее широты охвата\n\n3. MARKET VALIDATION SIGNALS:\n- Существующие решения (конкуренты) = подтверждённый спрос\n- Поисковые запросы по теме\n- Сообщества и форумы с обсуждением проблемы\n- Готовность платить (willingness to pay)\n\n4. RED FLAGS:\n- 'Всем нужно' = никому конкретно\n- Нет конкурентов = возможно нет рынка\n- Проблема решается бесплатно\n- Слишком нишевый рынок (TAM < $100M)"
+          },
+          "market_sizing_methodology": {
+            "description": "Методология расчёта размера рынка",
+            "value": "MARKET SIZING (TAM/SAM/SOM):\n\n1. TAM (Total Addressable Market):\n- Весь рынок, если бы все потенциальные клиенты купили\n- Формула: Количество потенциальных клиентов × Средний чек × Частота покупки в год\n- Источники: отчёты аналитиков (Statista, IBISWorld), публичные данные компаний\n\n2. SAM (Serviceable Addressable Market):\n- Часть TAM, которую можно обслужить с учётом географии, языка, специфики\n- Обычно 10-40% от TAM для стартапа\n- Учитывать: регион запуска, языковые барьеры, регуляторные ограничения\n\n3. SOM (Serviceable Obtainable Market):\n- Реалистичная доля рынка за 3-5 лет\n- Для стартапа обычно 1-5% от SAM\n- Зависит от: конкуренции, ресурсов, скорости роста рынка\n\n4. VALIDATION:\n- TAM должен быть > $1B для венчурных инвесторов\n- SAM > $100M для устойчивого бизнеса\n- SOM > $10M для окупаемости\n- Все цифры должны иметь источники"
+          },
+          "cost_estimation_guidelines": {
+            "description": "Гайдлайны по оценке стоимости разработки",
+            "value": "COST ESTIMATION GUIDELINES:\n\n1. MVP SCOPE (Minimum Viable Product):\n- Только core функционал для проверки гипотезы\n- 1-3 ключевые фичи, не больше\n- Срок: 2-4 месяца\n- Бюджет: $30K-$100K (аутсорс), $50K-$150K (inhouse)\n\n2. FULL VERSION:\n- Полный функционал для масштабирования\n- Все запланированные фичи + интеграции\n- Срок: 6-12 месяцев\n- Бюджет: $150K-$500K+ в зависимости от сложности\n\n3. COST CATEGORIES:\n- Development (50-60%): backend, frontend, mobile\n- Design (10-15%): UX/UI, брендинг\n- Infrastructure (5-10%): серверы, домены, SSL\n- Marketing (15-25%): запуск, первые пользователи\n- Legal (5%): регистрация, GDPR, terms\n\n4. RATE CARDS (2025-2026):\n- Junior dev: $25-40/hr\n- Middle dev: $40-70/hr\n- Senior dev: $70-120/hr\n- Tech Lead: $100-150/hr\n- Designer: $40-80/hr\n- PM: $50-100/hr\n\n5. MULTIPLIERS:\n- Мобильное приложение: ×1.5-2 к web\n- Геолокация/карты: +$10-30K\n- Платежи: +$5-15K\n- Соцсеть функционал: +$20-50K\n- AI/ML: +$30-100K"
+          },
+          "risk_assessment_criteria": {
+            "description": "Критерии оценки рисков",
+            "value": "RISK ASSESSMENT MATRIX:\n\n1. RISK CATEGORIES:\n- Market risks: конкуренция, изменение спроса, регуляции\n- Technical risks: сложность реализации, масштабируемость, безопасность\n- Financial risks: недофинансирование, неверная unit-экономика\n- Team risks: ключевые люди, компетенции, мотивация\n- Operational risks: процессы, поставщики, партнёры\n\n2. PROBABILITY SCALE:\n- Low (1): маловероятно (<20%)\n- Medium (2): возможно (20-50%)\n- High (3): вероятно (>50%)\n\n3. IMPACT SCALE:\n- Low (1): незначительное влияние, легко исправить\n- Medium (2): заметное влияние, требует ресурсов\n- High (3): критическое, может убить проект\n\n4. RISK SCORE:\n- Score = Probability × Impact\n- 1-2: Low priority (мониторинг)\n- 3-4: Medium priority (план митигации)\n- 6-9: High priority (немедленные действия)\n\n5. MITIGATION STRATEGIES:\n- Avoid: изменить план чтобы исключить риск\n- Reduce: действия для снижения вероятности/влияния\n- Transfer: страховка, аутсорс, партнёрство\n- Accept: принять с планом реагирования"
+          },
+          "report_quality_standards": {
+            "description": "Стандарты качества итогового отчёта",
+            "value": "REPORT QUALITY STANDARDS:\n\n1. STRUCTURE:\n- Executive Summary (1 страница): ключевые выводы, рекомендация go/no-go\n- Problem & Solution: чёткая формулировка проблемы и решения\n- Market Analysis: TAM/SAM/SOM с источниками\n- Competitive Landscape: таблица сравнения, позиционирование\n- Technical Assessment: архитектура, стек, сложность\n- Financial Projections: бюджет MVP/Full, unit-экономика\n- Team Requirements: роли, компетенции, структура\n- Risk Analysis: матрица рисков, митигация\n- Recommendations: конкретные следующие шаги\n\n2. DATA REQUIREMENTS:\n- Каждое утверждение должно иметь источник\n- Цифры с точностью и диапазонами\n- Даты источников (не старше 2 лет для рынка)\n- Сравнительные таблицы для наглядности\n\n3. VISUAL STANDARDS:\n- Профессиональный дизайн (Tailwind CSS)\n- Графики и диаграммы где уместно\n- Цветовое кодирование (зелёный/жёлтый/красный)\n- Responsive для мобильных устройств\n\n4. OBJECTIVITY:\n- Честная оценка рисков\n- Указание ограничений анализа\n- Альтернативные точки зрения\n- Confidence score для каждой секции"
+          },
+          "competitor_analysis_template": {
+            "description": "Шаблон анализа конкурентов",
+            "value": "| Критерий | Конкурент 1 | Конкурент 2 | Конкурент 3 | Наш продукт |\n|----------|-------------|-------------|-------------|-------------|\n| Название | | | | |\n| Сайт | | | | |\n| Год основания | | | | |\n| Финансирование | | | | |\n| Ключевые фичи | | | | |\n| Целевая аудитория | | | | |\n| Ценовая модель | | | | |\n| Сильные стороны | | | | |\n| Слабые стороны | | | | |\n| Уникальность | | | | |"
+          }
+        }
+      },
+      "connections": {
+        "default": "intake"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "intake",
+      "directive": "ЗАДАЧА: Извлечь и структурировать информацию о стартап-идее.\n\n**ВХОДНЫЕ ДАННЫЕ:**\nИдея стартапа передана в переменной `startup_idea`:\n\n---BEGIN IDEA---\n{{startup_idea}}\n---END IDEA---\n\n**ЕСЛИ ИДЕЯ ПУСТАЯ (между BEGIN и END нет текста):**\nВерни ошибку в inputSchema: в поле `product_name` напиши 'ERROR', в `problem_statement` напиши 'Startup idea not provided. Set startup_idea variable in workflow initialData before starting.'\n\nЕсли идея предоставлена, автоматически извлеки из описания:\n\n1. **Продукт/Сервис**: Что именно создаётся?\n2. **Проблема**: Какую проблему решает?\n3. **Целевая аудитория**: Кто будет пользоваться?\n4. **Ключевые фичи**: 3-5 основных функций\n5. **УТП (Unique Value Proposition)**: Чем отличается от существующих решений?\n6. **География**: Регион запуска\n7. **Бизнес-модель**: Как планируется зарабатывать?\n8. **Тип продукта**: mobile app / web app / SaaS / marketplace / другое\n\nИспользуй {{validation_framework}} для проверки:\n- Является ли проблема Tier 1 (топ-3 боли аудитории)?\n- Соблюдается ли Rule of One (фокус)?\n- Есть ли red flags?\n\nЕсли информации недостаточно — сделай разумные предположения на основе описания и укажи их явно.",
+      "completionCondition": "Все 8 полей заполнены (продукт, проблема, аудитория, фичи, УТП, география, бизнес-модель, тип). Проведена базовая валидация по фреймворку.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "product_name",
+          "product_description",
+          "problem_statement",
+          "target_audience",
+          "key_features",
+          "unique_value_proposition",
+          "geography",
+          "business_model",
+          "product_type",
+          "tier1_problem_score"
+        ],
+        "globalInputs": [
+          "product_name",
+          "product_description",
+          "problem_statement",
+          "target_audience",
+          "key_features",
+          "unique_value_proposition",
+          "geography",
+          "business_model",
+          "product_type",
+          "tier1_problem_score",
+          "red_flags",
+          "assumptions_made"
+        ]
+      },
+      "connections": {
+        "success": "check-intake-error"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-intake-error",
+      "condition": {
+        "operator": "neq",
+        "left": {
+          "contextPath": "product_name"
+        },
+        "right": "ERROR"
+      },
+      "connections": {
+        "true": "setup-workspace",
+        "false": "end-error"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end-error",
+      "finalOutput": [
+        "product_name",
+        "problem_statement"
+      ]
+    },
+    {
+      "type": "agent-directive",
+      "id": "setup-workspace",
+      "directive": "ЗАДАЧА: Создать рабочую директорию для хранения промежуточных артефактов анализа.\n\n**ШАГ 1:** Создай директорию используя Bash tool:\n```\nmkdir -p ./moira-ws/startup-validation-{{executionId}}\n```\n\n**ШАГ 2:** Создай файл 01-structured-idea.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА (уже доступны как переменные):**\n- product_name: {{product_name}}\n- product_description: {{product_description}}\n- problem_statement: {{problem_statement}}\n- target_audience: {{target_audience}}\n- key_features: {{key_features}}\n- unique_value_proposition: {{unique_value_proposition}}\n- geography: {{geography}}\n- business_model: {{business_model}}\n- product_type: {{product_type}}\n- tier1_problem_score: {{tier1_problem_score}}\n- red_flags: {{red_flags}}\n- assumptions_made: {{assumptions_made}}\n\n**ФОРМАТ ФАЙЛА:**\nСоздай Markdown файл со следующей структурой:\n- Заголовок H1 с названием продукта\n- Секции H2: Описание продукта, Проблема, Целевая аудитория, Ключевые фичи (bullet list), УТП, География, Бизнес-модель, Тип продукта, Оценка проблемы\n- Если есть red_flags — добавь секцию Red Flags\n- Если есть assumptions_made — добавь секцию Предположения\n\n**ШАГ 3:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Директория создана, файл 01-structured-idea.md сохранён и верифицирован (прочитаны первые строки)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "idea_file_saved": {
+            "type": "boolean",
+            "description": "Файл 01-structured-idea.md создан"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки сохранённого файла для верификации"
+          }
+        },
+        "required": [
+          "workspace_path",
+          "idea_file_saved",
+          "verification"
+        ],
+        "globalInputs": [
+          "workspace_path"
+        ]
+      },
+      "connections": {
+        "success": "market-research"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "market-research",
+      "directive": "ЗАДАЧА: Провести исследование рынка для продукта {{product_name}}.\n\nИспользуй web search для сбора данных. Следуй методологии {{market_sizing_methodology}}.\n\n**ИССЛЕДОВАТЬ:**\n\n1. **Размер рынка (TAM/SAM/SOM)**:\n   - TAM: общий размер рынка (глобально)\n   - SAM: доступный рынок для {{geography}}\n   - SOM: реалистичная доля за 3-5 лет\n   - ВСЕ цифры должны иметь источники!\n\n2. **Тренды рынка**:\n   - Рост/падение рынка (CAGR)\n   - Технологические тренды\n   - Изменения в поведении потребителей\n\n3. **Регуляторная среда**:\n   - Лицензии/разрешения для {{geography}}\n   - GDPR/персональные данные\n   - Отраслевые регуляции\n\n**Целевая аудитория:** {{target_audience}}\n**Бизнес-модель:** {{business_model}}\n**Тип продукта:** {{product_type}}",
+      "completionCondition": "TAM/SAM/SOM рассчитаны с источниками, тренды определены, регуляторная среда описана",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "tam",
+          "sam",
+          "som",
+          "market_growth",
+          "key_trends"
+        ],
+        "globalInputs": [
+          "tam",
+          "sam",
+          "som",
+          "market_growth",
+          "key_trends",
+          "regulatory_requirements",
+          "market_validation_signals"
+        ]
+      },
+      "connections": {
+        "success": "save-market-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-market-report",
+      "directive": "ЗАДАЧА: Сохранить отчёт по исследованию рынка в файл.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/02-market-research.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- tam: {{tam}}\n- sam: {{sam}}\n- som: {{som}}\n- market_growth: {{market_growth}}\n- key_trends: {{key_trends}}\n- regulatory_requirements: {{regulatory_requirements}}\n- market_validation_signals: {{market_validation_signals}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Исследование рынка: [название продукта]\n- H2: Размер рынка\n  - H3: TAM (Total Addressable Market) с размером, источником, годом\n  - H3: SAM (Serviceable Addressable Market) с размером, источником, расчётом\n  - H3: SOM (Serviceable Obtainable Market) с размером, горизонтом, предположениями\n- H2: Динамика рынка с CAGR, трендом, источником\n- H2: Ключевые тренды (bullet list)\n- H2: Регуляторные требования (bullet list)\n- H2: Сигналы валидации рынка (bullet list)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 02-market-research.md сохранён и верифицирован (прочитаны первые строки)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "market_report_saved": {
+            "type": "boolean",
+            "description": "Файл успешно сохранён"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки сохранённого файла для верификации"
+          }
+        },
+        "required": [
+          "market_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "competitor-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "competitor-analysis",
+      "directive": "ЗАДАЧА: Провести глубокий анализ конкурентов для {{product_name}}.\n\nИспользуй web search для поиска конкурентов.\n\n**НАЙТИ:**\n1. **Прямые конкуренты** (5-10): решают ту же проблему тем же способом\n2. **Косвенные конкуренты** (3-5): решают ту же проблему другим способом\n\n**ДЛЯ КАЖДОГО КОНКУРЕНТА СОБРАТЬ:**\n- Название и сайт\n- Год основания\n- Финансирование (если публично)\n- Ключевые фичи\n- Ценовая модель\n- Целевая аудитория\n- Сильные стороны\n- Слабые стороны\n- Отзывы пользователей (если есть)\n\n**СОЗДАТЬ СРАВНИТЕЛЬНУЮ ТАБЛИЦУ** по шаблону:\n{{competitor_analysis_template}}\n\n**КОНТЕКСТ:**\n- Продукт: {{product_name}}\n- Проблема: {{problem_statement}}\n- Аудитория: {{target_audience}}\n- География: {{geography}}\n- Наши фичи: {{key_features}}\n- Наше УТП: {{unique_value_proposition}}",
+      "completionCondition": "Найдено минимум 5 прямых конкурентов, собрана информация по каждому, создана сравнительная таблица",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "direct_competitors",
+          "comparison_table_markdown",
+          "market_gaps",
+          "competitive_advantages",
+          "competitors_count"
+        ],
+        "globalInputs": [
+          "direct_competitors",
+          "indirect_competitors",
+          "comparison_table_markdown",
+          "market_gaps",
+          "competitive_advantages",
+          "competitors_count"
+        ]
+      },
+      "connections": {
+        "success": "verify-competitors"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "verify-competitors",
+      "directive": "Re-validation pass {{fix_competitors_iteration}} of up to 3 — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nЗАДАЧА: Верифицировать качество и полноту анализа конкурентов.\n\n**ПРОВЕРИТЬ:**\n\n1. **Количество**: найдено минимум 5 прямых конкурентов?\n   - Текущее количество: {{competitors_count}}\n\n2. **Полнота данных**: для каждого конкурента есть:\n   - Название и описание\n   - Ключевые фичи (минимум 3)\n   - Сильные стороны (минимум 2)\n   - Слабые стороны (минимум 1)\n\n3. **Сравнительная таблица**: заполнена корректно?\n\n4. **Market gaps**: выявлены рыночные ниши?\n\n5. **Competitive advantages**: определены наши преимущества?\n\n**КРИТЕРИИ УСПЕХА:**\n- issues_count = 0 если всё в порядке\n- issues_count > 0 если есть проблемы\n\nПеречисли конкретные проблемы если они есть.",
+      "completionCondition": "Верификация завершена, issues_count определён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "competitors_verified": {
+            "type": "number",
+            "description": "Количество полностью заполненных конкурентов"
+          }
+        },
+        "required": [
+          "issues_count",
+          "competitors_verified"
+        ],
+        "globalInputs": [
+          "issues_count",
+          "issues"
+        ]
+      },
+      "connections": {
+        "success": "check-competitors-count"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-competitors-count",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "save-competitors-report",
+        "false": "check-fix-competitors-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-fix-competitors-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "fix_competitors_iteration"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "fix-competitors",
+        "false": "save-competitors-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "fix-competitors",
+      "directive": "ЗАДАЧА: Исправить проблемы в анализе конкурентов.\n\n**ИТЕРАЦИЯ:** {{fix_competitors_iteration}} из максимум 3\n\n**ВЫЯВЛЕННЫЕ ПРОБЛЕМЫ:**\nПроблемы перечислены в массиве: {{issues}}\nОбработай каждый элемент массива и исправь соответствующие данные.\n\n**ТРЕБУЕТСЯ:**\n1. Провести дополнительный поиск если не хватает конкурентов\n2. Дополнить информацию по неполным записям\n3. Обновить сравнительную таблицу\n\n**КОНТЕКСТ:**\n- Продукт: {{product_name}}\n- Проблема: {{problem_statement}}\n- География: {{geography}}\n\nВерни fix_competitors_iteration = текущее значение + 1.",
+      "completionCondition": "Все проблемы исправлены, данные дополнены, fix_competitors_iteration увеличен на 1",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fixes_applied": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Какие исправления были сделаны"
+          }
+        },
+        "required": [
+          "direct_competitors",
+          "comparison_table_markdown",
+          "competitors_count",
+          "fixes_applied",
+          "fix_competitors_iteration"
+        ],
+        "globalInputs": [
+          "direct_competitors",
+          "indirect_competitors",
+          "comparison_table_markdown",
+          "market_gaps",
+          "competitive_advantages",
+          "competitors_count",
+          "fix_competitors_iteration"
+        ]
+      },
+      "connections": {
+        "success": "verify-competitors"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-competitors-report",
+      "directive": "ЗАДАЧА: Сохранить отчёт по анализу конкурентов.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/03-competitors.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- comparison_table_markdown: {{comparison_table_markdown}}\n- direct_competitors: {{direct_competitors}}\n- indirect_competitors: {{indirect_competitors}}\n- market_gaps: {{market_gaps}}\n- competitive_advantages: {{competitive_advantages}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Анализ конкурентов: [название продукта]\n- H2: Сравнительная таблица (вставить comparison_table_markdown)\n- H2: Прямые конкуренты\n  - Для каждого конкурента: H3 с именем, сайт, год основания, финансирование, ценовая модель, аудитория, фичи (bullet list), сильные стороны (bullet list), слабые стороны (bullet list)\n- H2: Косвенные конкуренты (для каждого: имя и альтернативный подход)\n- H2: Рыночные ниши (bullet list)\n- H2: Наши конкурентные преимущества (bullet list)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 03-competitors.md сохранён и верифицирован",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "competitors_report_saved": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки файла"
+          }
+        },
+        "required": [
+          "competitors_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "tech-assessment"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "tech-assessment",
+      "directive": "ЗАДАЧА: Провести техническую оценку реализации {{product_name}}.\n\n**ОЦЕНИТЬ:**\n\n1. **Архитектура высокого уровня:**\n   - Frontend (web/mobile/both)\n   - Backend (API, база данных)\n   - Инфраструктура (хостинг, CDN)\n   - Интеграции (платежи, карты, соцсети, email)\n\n2. **Технологический стек (рекомендации):**\n   - Frontend: React/Vue/React Native/Flutter\n   - Backend: Node.js/Python/Go\n   - База данных: PostgreSQL/MongoDB\n   - Инфраструктура: AWS/GCP/Vercel\n\n3. **Сложность реализации (1-10):**\n   - 1-3: простое CRUD приложение\n   - 4-6: средняя сложность с интеграциями\n   - 7-10: высокая сложность (real-time, ML, сложные алгоритмы)\n\n4. **Технические риски:**\n   - Масштабируемость\n   - Безопасность\n   - Производительность\n\n**КОНТЕКСТ:**\n- Тип продукта: {{product_type}}\n- Ключевые фичи: {{key_features}}\n- География: {{geography}}",
+      "completionCondition": "Архитектура описана, стек рекомендован, сложность оценена, риски выявлены",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "architecture",
+          "recommended_stack",
+          "complexity_score",
+          "complexity_factors",
+          "technical_risks"
+        ],
+        "globalInputs": [
+          "architecture",
+          "recommended_stack",
+          "complexity_score",
+          "complexity_factors",
+          "technical_risks",
+          "third_party_services"
+        ]
+      },
+      "connections": {
+        "success": "save-tech-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-tech-report",
+      "directive": "ЗАДАЧА: Сохранить технический отчёт.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/04-tech-assessment.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- complexity_score: {{complexity_score}}\n- complexity_factors: {{complexity_factors}}\n- architecture: {{architecture}}\n- recommended_stack: {{recommended_stack}}\n- technical_risks: {{technical_risks}}\n- third_party_services: {{third_party_services}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Техническая оценка: [название]\n- H2: Сложность реализации (скор X/10, bullet list факторов)\n- H2: Архитектура (таблица: Frontend, Backend, База данных, Инфраструктура + bullet list интеграций)\n- H2: Рекомендуемый стек (таблица: Frontend, Backend, Database, Hosting + обоснование)\n- H2: Технические риски (таблица: Риск | Серьёзность | Митигация)\n- H2: Сторонние сервисы (для каждого: название, назначение, стоимость)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 04-tech-assessment.md сохранён и верифицирован",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tech_report_saved": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки файла"
+          }
+        },
+        "required": [
+          "tech_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "budget-estimation"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "budget-estimation",
+      "directive": "ЗАДАЧА: Рассчитать бюджет разработки {{product_name}}.\n\nИспользуй {{cost_estimation_guidelines}} для расчётов.\n\n**РАССЧИТАТЬ ДВА СЦЕНАРИЯ:**\n\n### 1. MVP (Minimum Viable Product)\n- Только core фичи для проверки гипотезы\n- Срок: 2-4 месяца\n- Цель: запуск и первые пользователи\n\n### 2. Full Version\n- Все запланированные фичи\n- Срок: 6-12 месяцев\n- Цель: масштабирование\n\n**РАЗБИВКА ПО КАТЕГОРИЯМ:**\n- Development (50-60%)\n- Design (10-15%)\n- Infrastructure (5-10%)\n- Marketing (15-25%)\n- Legal (5%)\n- Contingency (10-15%)\n\n**КОНТЕКСТ:**\n- Сложность: {{complexity_score}}/10\n- Тип продукта: {{product_type}}\n- Ключевые фичи: {{key_features}}\n- Интеграции: {{architecture.integrations}}\n- Сторонние сервисы: {{third_party_services}}",
+      "completionCondition": "Бюджеты MVP и Full рассчитаны с разбивкой по категориям",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "monthly_runway": {
+            "type": "object",
+            "properties": {
+              "burn_rate": {
+                "type": "string",
+                "description": "Месячный burn rate"
+              },
+              "runway_mvp": {
+                "type": "string",
+                "description": "Runway для MVP бюджета"
+              },
+              "runway_full": {
+                "type": "string",
+                "description": "Runway для Full бюджета"
+              }
+            }
+          }
+        },
+        "required": [
+          "mvp_budget",
+          "full_budget",
+          "budget_assumptions"
+        ],
+        "globalInputs": [
+          "mvp_budget",
+          "full_budget",
+          "cost_optimization_suggestions",
+          "budget_assumptions"
+        ]
+      },
+      "connections": {
+        "success": "review-budget"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-budget",
+      "directive": "Re-validation pass {{refine_budget_iteration}} of up to 3 — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nЗАДАЧА: Провести самопроверку оценки бюджета.\n\n**ПРИМЕЧАНИЕ:** Это self-check (самопроверка), не независимый subagent review. Критически проверь собственную оценку бюджета для {{product_name}}.\n\n**ДАННЫЕ ДЛЯ ПРОВЕРКИ:**\n- MVP Total: {{mvp_budget.total}}\n- MVP Timeline: {{mvp_budget.timeline}}\n- Full Total: {{full_budget.total}}\n- Full Timeline: {{full_budget.timeline}}\n\n**КОНТЕКСТ:**\n- Product type: {{product_type}}\n- Complexity score: {{complexity_score}}/10\n- Key features: {{key_features}}\n- Integrations: {{architecture.integrations}}\n\n**ПРОВЕРИТЬ:**\n1. Реалистичен ли бюджет MVP для scope? (не занижен, не завышен)\n2. Достижим ли timeline? (2-4 месяца для MVP, 6-12 для Full)\n3. Покрыты ли все категории затрат? (dev, design, infra, marketing, legal, contingency)\n4. Разумны ли предположения?\n5. Адекватно ли соотношение MVP/Full? (типично 1:3 to 1:5)\n\n**OUTPUT:**\n- issues_count: количество найденных проблем (0 если всё ок)\n- issues: список конкретных проблем\n- recommendations: предложения по улучшению",
+      "completionCondition": "Self-check завершён, issues_count определён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "self_check_confidence": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Уверенность reviewer в оценке (1-10)"
+          }
+        },
+        "required": [
+          "issues_count"
+        ],
+        "globalInputs": [
+          "issues_count",
+          "issues",
+          "recommendations"
+        ]
+      },
+      "connections": {
+        "success": "check-budget-review"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-budget-review",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "save-budget-report",
+        "false": "check-refine-budget-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-refine-budget-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "refine_budget_iteration"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "refine-budget",
+        "false": "save-budget-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "refine-budget",
+      "directive": "ЗАДАЧА: Уточнить оценку бюджета на основе feedback от self-check.\n\n**ИТЕРАЦИЯ:** {{refine_budget_iteration}} из максимум 3\n\n**ПРОБЛЕМЫ ВЫЯВЛЕННЫЕ ПРИ ПРОВЕРКЕ:**\nПроблемы перечислены в массиве: {{issues}}\nОбработай каждый элемент и исправь соответствующие данные.\n\n**РЕКОМЕНДАЦИИ:**\nРекомендации перечислены в массиве: {{recommendations}}\nУчти каждую рекомендацию при корректировке.\n\n**ТРЕБУЕТСЯ:**\n1. Исправить выявленные проблемы\n2. Пересчитать бюджеты если нужно\n3. Обновить предположения\n\nИспользуй {{cost_estimation_guidelines}} для корректировки.\n\nВерни refine_budget_iteration = текущее значение + 1.",
+      "completionCondition": "Бюджеты скорректированы, проблемы исправлены, refine_budget_iteration увеличен на 1",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changes_made": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Какие изменения были сделаны"
+          }
+        },
+        "required": [
+          "mvp_budget",
+          "full_budget",
+          "changes_made",
+          "refine_budget_iteration"
+        ],
+        "globalInputs": [
+          "mvp_budget",
+          "full_budget",
+          "budget_assumptions",
+          "refine_budget_iteration"
+        ]
+      },
+      "connections": {
+        "success": "review-budget"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-budget-report",
+      "directive": "ЗАДАЧА: Сохранить отчёт по бюджету.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/05-budget.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- mvp_budget: {{mvp_budget}}\n- full_budget: {{full_budget}}\n- budget_assumptions: {{budget_assumptions}}\n- cost_optimization_suggestions: {{cost_optimization_suggestions}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Оценка бюджета: [название]\n- H2: MVP (общий бюджет, срок, scope как bullet list, таблица разбивки по категориям)\n- H2: Full Version (общий бюджет, срок, scope как bullet list, таблица разбивки)\n- H2: Предположения (bullet list)\n- H2: Предложения по оптимизации (bullet list, если есть)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 05-budget.md сохранён и верифицирован",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "budget_report_saved": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки файла"
+          }
+        },
+        "required": [
+          "budget_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "team-requirements"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "team-requirements",
+      "directive": "ЗАДАЧА: Определить требования к команде для {{product_name}}.\n\n**ОПРЕДЕЛИТЬ:**\n\n1. **Необходимые роли:**\n   - Technical (developers, QA, DevOps)\n   - Product (PM, Designer)\n   - Business (Marketing, Sales, Support)\n\n2. **Для каждой роли:**\n   - Уровень (junior/middle/senior)\n   - Полная/частичная занятость\n   - Inhouse vs outsource vs freelance\n   - Примерная зарплата/рейт\n\n3. **Структура команды:**\n   - MVP команда (минимум)\n   - Full команда (масштабирование)\n\n4. **Ключевые компетенции:**\n   - Must have (критично)\n   - Nice to have (желательно)\n\n**КОНТЕКСТ:**\n- Тип продукта: {{product_type}}\n- Сложность: {{complexity_score}}/10\n- Стек: {{recommended_stack}}\n- MVP бюджет: {{mvp_budget.total}}\n- Full бюджет: {{full_budget.total}}",
+      "completionCondition": "Роли определены, структура команды описана, ФОТ оценён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "mvp_team",
+          "full_team",
+          "monthly_payroll",
+          "key_competencies"
+        ],
+        "globalInputs": [
+          "mvp_team",
+          "full_team",
+          "monthly_payroll",
+          "key_competencies",
+          "hiring_recommendations"
+        ]
+      },
+      "connections": {
+        "success": "save-team-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-team-report",
+      "directive": "ЗАДАЧА: Сохранить отчёт по команде.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/06-team.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- mvp_team: {{mvp_team}}\n- full_team: {{full_team}}\n- monthly_payroll: {{monthly_payroll}}\n- key_competencies: {{key_competencies}}\n- hiring_recommendations: {{hiring_recommendations}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Требования к команде: [название]\n- H2: MVP команда (таблица: Роль | Уровень | Занятость | Тип | Месячная стоимость + месячный ФОТ)\n- H2: Full команда (аналогичная таблица + месячный ФОТ)\n- H2: Ключевые компетенции (H3: Must Have и Nice to Have как bullet lists)\n- H2: Рекомендации по найму (bullet list)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 06-team.md сохранён и верифицирован",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "team_report_saved": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки файла"
+          }
+        },
+        "required": [
+          "team_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "risk-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "risk-analysis",
+      "directive": "ЗАДАЧА: Провести анализ рисков для {{product_name}}.\n\nИспользуй {{risk_assessment_criteria}} для структурирования анализа.\n\n**КАТЕГОРИИ РИСКОВ:**\n\n1. **Market risks**: конкуренция, спрос, регуляции\n2. **Technical risks**: сложность, масштабируемость, безопасность\n3. **Financial risks**: недофинансирование, unit-экономика\n4. **Team risks**: ключевые люди, компетенции\n5. **Operational risks**: процессы, поставщики\n\n**ДЛЯ КАЖДОГО РИСКА:**\n- Описание риска\n- Вероятность (1-3): Low/Medium/High\n- Влияние (1-3): Low/Medium/High\n- Risk Score = Probability × Impact\n- Стратегия митигации\n\n**КОНТЕКСТ:**\n- Продукт: {{product_name}}\n- Рынок: TAM={{tam.value}}, тренд={{market_growth.trend}}\n- Конкуренты: {{competitors_count}} найдено\n- Сложность: {{complexity_score}}/10\n- Бюджет MVP: {{mvp_budget.total}}",
+      "completionCondition": "Риски выявлены по всем категориям, risk matrix составлена, митигации определены",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "risks",
+          "high_priority_risks",
+          "overall_risk_level",
+          "risk_summary"
+        ],
+        "globalInputs": [
+          "risks",
+          "high_priority_risks",
+          "overall_risk_level",
+          "risk_summary"
+        ]
+      },
+      "connections": {
+        "success": "review-risks"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "review-risks",
+      "directive": "Re-validation pass {{refine_risks_iteration}} of up to 3 — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nЗАДАЧА: Провести самопроверку анализа рисков.\n\n**ПРИМЕЧАНИЕ:** Это self-check (самопроверка), не независимый subagent review. Критически проверь собственный анализ рисков для {{product_name}}.\n\n**РИСКИ ДЛЯ ПРОВЕРКИ:**\n{{risks}}\n\n**OVERALL RISK LEVEL:** {{overall_risk_level}}\n\n**КОНТЕКСТ:**\n- TAM: {{tam}}\n- Market growth: {{market_growth}}\n- Competitors count: {{competitors_count}}\n- Complexity: {{complexity_score}}/10\n- MVP Budget: {{mvp_budget}}\n- Full Budget: {{full_budget}}\n\n**ПРОВЕРИТЬ:**\n1. Покрыты ли ВСЕ категории рисков? (market, technical, financial, team, operational)\n2. Адекватны ли risk scores для данного контекста?\n3. Реалистичны ли стратегии митигации?\n4. Есть ли ПРОПУЩЕННЫЕ критические риски?\n5. Корректна ли оценка overall risk level?\n\n**OUTPUT:**\n- issues_count: количество проблем (0 если всё ок)\n- issues: конкретные проблемы\n- missed_risks: пропущенные критические риски",
+      "completionCondition": "Self-check завершён, issues_count определён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "issues_count"
+        ],
+        "globalInputs": [
+          "issues_count",
+          "issues",
+          "missed_risks"
+        ]
+      },
+      "connections": {
+        "success": "check-risks-review"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-risks-review",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "save-risks-report",
+        "false": "check-refine-risks-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-refine-risks-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "refine_risks_iteration"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "refine-risks",
+        "false": "save-risks-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "refine-risks",
+      "directive": "ЗАДАЧА: Доработать анализ рисков на основе feedback от self-check.\n\n**ИТЕРАЦИЯ:** {{refine_risks_iteration}} из максимум 3\n\n**ПРОБЛЕМЫ:**\nПроблемы перечислены в массиве: {{issues}}\nОбработай каждый элемент и исправь соответствующие данные.\n\n**ПРОПУЩЕННЫЕ РИСКИ:**\nПропущенные риски перечислены в массиве: {{missed_risks}}\nДобавь каждый пропущенный риск в анализ.\n\n**ТРЕБУЕТСЯ:**\n1. Добавить пропущенные риски\n2. Скорректировать оценки\n3. Улучшить стратегии митигации\n\nИспользуй {{risk_assessment_criteria}}.\n\nВерни refine_risks_iteration = текущее значение + 1.",
+      "completionCondition": "Риски доработаны, пропущенные добавлены, refine_risks_iteration увеличен на 1",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changes_made": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Какие изменения внесены"
+          }
+        },
+        "required": [
+          "risks",
+          "high_priority_risks",
+          "overall_risk_level",
+          "changes_made",
+          "refine_risks_iteration"
+        ],
+        "globalInputs": [
+          "risks",
+          "high_priority_risks",
+          "overall_risk_level",
+          "risk_summary",
+          "refine_risks_iteration"
+        ]
+      },
+      "connections": {
+        "success": "review-risks"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-risks-report",
+      "directive": "ЗАДАЧА: Сохранить отчёт по рискам.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/07-risks.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- overall_risk_level: {{overall_risk_level}}\n- risk_summary: {{risk_summary}}\n- risks: {{risks}}\n- high_priority_risks: {{high_priority_risks}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Анализ рисков: [название]\n- H2: Общий уровень риска: [уровень] + резюме\n- H2: Risk Matrix (таблица: Риск | Категория | P | I | Score | Митигация)\n- H2: Высокоприоритетные риски (Score >= 6) — для каждого H3 + пометка о немедленных действиях\n- H2: Легенда (P: 1=Low, 2=Medium, 3=High; I: аналогично; Score интерпретация)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 07-risks.md сохранён и верифицирован",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "risks_report_saved": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки файла"
+          }
+        },
+        "required": [
+          "risks_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "alternatives-analysis"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "alternatives-analysis",
+      "directive": "ЗАДАЧА: Рассмотреть альтернативные подходы и бизнес-модели для {{product_name}}.\n\n**ПРОАНАЛИЗИРОВАТЬ:**\n\n1. **Альтернативные бизнес-модели:**\n   - Текущая: {{business_model}}\n   - Какие ещё модели возможны? (subscription, freemium, marketplace fee, advertising, etc.)\n   - Плюсы/минусы каждой\n\n2. **Pivot варианты:**\n   - Если основная гипотеза не подтвердится\n   - Смежные рынки/аудитории\n   - Упрощённые версии продукта\n\n3. **Go-to-market стратегии:**\n   - Органический рост vs платное привлечение\n   - B2B2C vs direct-to-consumer\n   - Партнёрства и интеграции\n\n4. **Exit стратегии:**\n   - Acquisition (кем?)\n   - IPO (реалистично?)\n   - Lifestyle business\n\n**КОНТЕКСТ:**\n- Продукт: {{product_name}}\n- Текущая модель: {{business_model}}\n- Аудитория: {{target_audience}}\n- Конкуренты: {{direct_competitors}}\n- TAM: {{tam.value}}",
+      "completionCondition": "Альтернативные модели проанализированы, pivot варианты определены, GTM стратегии предложены",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "alternative_business_models",
+          "pivot_options",
+          "gtm_strategies",
+          "recommended_approach"
+        ],
+        "globalInputs": [
+          "alternative_business_models",
+          "pivot_options",
+          "gtm_strategies",
+          "exit_strategies",
+          "recommended_approach"
+        ]
+      },
+      "connections": {
+        "success": "save-alternatives-report"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "save-alternatives-report",
+      "directive": "ЗАДАЧА: Сохранить отчёт по альтернативам.\n\n**ШАГ 1:** Создай файл {{workspace_path}}/08-alternatives.md используя Write tool.\n\n**ДАННЫЕ ИЗ КОНТЕКСТА:**\n- product_name: {{product_name}}\n- alternative_business_models: {{alternative_business_models}}\n- pivot_options: {{pivot_options}}\n- gtm_strategies: {{gtm_strategies}}\n- exit_strategies: {{exit_strategies}}\n- recommended_approach: {{recommended_approach}}\n\n**ФОРМАТ ФАЙЛА:**\n- H1: Альтернативные подходы: [название]\n- H2: Альтернативные бизнес-модели (для каждой: H3 с названием и fit score, описание, плюсы/минусы как bullet lists)\n- H2: Pivot варианты (для каждого: H3 тип, описание, триггер, усилия)\n- H2: Go-to-Market стратегии (для каждой: H3 название с пометкой если рекомендуется, описание, плюсы/минусы)\n- H2: Exit стратегии (bullet list: тип, timeline, вероятность)\n- H2: Рекомендация (текст recommended_approach)\n\n**ШАГ 2:** Прочитай первые 3 строки файла для верификации.",
+      "completionCondition": "Файл 08-alternatives.md сохранён и верифицирован",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "alternatives_report_saved": {
+            "type": "boolean"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 3 строки файла"
+          }
+        },
+        "required": [
+          "alternatives_report_saved",
+          "verification"
+        ]
+      },
+      "connections": {
+        "success": "final-review"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "final-review",
+      "directive": "Re-validation pass {{enhance_iteration}} of up to 3 — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nЗАДАЧА: Провести финальную самопроверку всего анализа.\n\n**ПРИМЕЧАНИЕ:** Это self-check (самопроверка), не независимый review. Ты проверяешь работу выполненную на предыдущих шагах этого workflow.\n\nПроведи критическую валидацию полного анализа для {{product_name}}.\n\n**ШАГ 1: ПРОЧИТАЙ ВСЕ ФАЙЛЫ**\nИспользуй Read tool для чтения каждого файла по очереди. Директория workspace: {{workspace_path}}\n\nФайлы для чтения:\n1. {{workspace_path}}/01-structured-idea.md\n2. {{workspace_path}}/02-market-research.md\n3. {{workspace_path}}/03-competitors.md\n4. {{workspace_path}}/04-tech-assessment.md\n5. {{workspace_path}}/05-budget.md\n6. {{workspace_path}}/06-team.md\n7. {{workspace_path}}/07-risks.md\n8. {{workspace_path}}/08-alternatives.md\n\n**ШАГ 2: ПРОВЕРИТЬ КАЖДУЮ СЕКЦИЮ**\n1. CONSISTENCY: Секции ссылаются друг на друга корректно? Цифры совпадают?\n2. COMPLETENESS: Все секции заполнены? Есть очевидные пробелы?\n3. QUALITY: Выводы подкреплены данными? Источники указаны?\n4. REALISM: Оценки реалистичны? Предположения разумны?\n5. ACTIONABILITY: Можно ли действовать на основе этого анализа?\n\nДля каждой секции выставь confidence (1-10) и укажи проблемы.\n\n**ШАГ 3: СФОРМУЛИРУЙ ИТОГИ**\n- overall_confidence: 1-10 score для всего анализа\n- section_scores: confidence по каждой секции\n- blocking_issues: массив критических проблем которые нужно исправить\n- blocking_issues_count: количество blocking issues (длина массива)\n- recommendations: предложения по улучшению\n- go_no_go_recommendation: итоговая рекомендация (strong_go/go_with_conditions/needs_more_research/no_go)\n- executive_summary: краткое резюме для отчёта (2-3 абзаца)",
+      "completionCondition": "Final review завершён, confidence score определён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "overall_confidence",
+          "blocking_issues",
+          "blocking_issues_count",
+          "go_no_go_recommendation",
+          "executive_summary"
+        ],
+        "globalInputs": [
+          "overall_confidence",
+          "section_scores",
+          "blocking_issues",
+          "blocking_issues_count",
+          "recommendations",
+          "go_no_go_recommendation",
+          "executive_summary"
+        ]
+      },
+      "connections": {
+        "success": "check-final-review"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-final-review",
+      "condition": {
+        "operator": "and",
+        "conditions": [
+          {
+            "operator": "gte",
+            "left": {
+              "contextPath": "overall_confidence"
+            },
+            "right": 7
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "blocking_issues_count"
+            },
+            "right": 0
+          }
+        ]
+      },
+      "connections": {
+        "true": "generate-html",
+        "false": "check-iteration-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-iteration-limit",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "enhance_iteration",
+          "default": 0
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "enhance-analysis",
+        "false": "generate-html-with-warnings"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-html-with-warnings",
+      "directive": "ЗАДАЧА: Сгенерировать HTML отчёт НЕСМОТРЯ НА НЕЗАКРЫТЫЕ ПРОБЛЕМЫ.\n\n**ВАЖНО:** Этот путь выполняется потому что достигнут лимит итераций (3) для исправления блокирующих проблем. Отчёт будет содержать предупреждения.\n\n**BLOCKING ISSUES (не исправлены):**\n{{blocking_issues}}\n\n**CONFIDENCE:** {{overall_confidence}}/10\n\nВыполни те же шаги что в generate-html:\n1. Прочитай все файлы в {{workspace_path}}\n2. Сгенерируй HTML с Tailwind CSS\n3. ДОБАВЬ СЕКЦИЮ 'WARNINGS' в начало отчёта с описанием незакрытых проблем\n4. Сохрани в {{workspace_path}}/09-final-report.html",
+      "completionCondition": "HTML отчёт с warnings сохранён",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "verification": {
+            "type": "string"
+          },
+          "has_warnings": {
+            "type": "boolean",
+            "description": "true - отчёт содержит warnings"
+          }
+        },
+        "required": [
+          "html_file_path",
+          "verification",
+          "has_warnings"
+        ],
+        "globalInputs": [
+          "html_file_path"
+        ]
+      },
+      "connections": {
+        "success": "publish-artifact"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "enhance-analysis",
+      "directive": "ЗАДАЧА: Улучшить анализ на основе финального review.\n\n**ИТЕРАЦИЯ:** {{enhance_iteration}} из максимум 3\n\n**CONFIDENCE SCORE:** {{overall_confidence}}/10 (нужно >= 7)\n\n**BLOCKING ISSUES:**\n{{blocking_issues}}\n\n**РЕКОМЕНДАЦИИ:**\n{{recommendations}}\n\n**SECTION SCORES:**\n{{section_scores}}\n\n**ТРЕБУЕТСЯ:**\n1. Прочитать соответствующие файлы в {{workspace_path}}\n2. Исправить blocking issues\n3. Улучшить секции с низким score (<7)\n4. Обновить файлы в workspace используя Write tool\n5. Прочитать первые строки обновлённых файлов для верификации\n\nВерни список внесённых изменений и новое значение enhance_iteration (текущее + 1).",
+      "completionCondition": "Blocking issues исправлены или сделана попытка исправления, enhance_iteration увеличен на 1",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "changes_made": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Список внесённых изменений"
+          },
+          "files_updated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Обновлённые файлы"
+          }
+        },
+        "required": [
+          "changes_made",
+          "files_updated",
+          "enhance_iteration"
+        ],
+        "globalInputs": [
+          "enhance_iteration"
+        ]
+      },
+      "connections": {
+        "success": "final-review"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-html",
+      "directive": "ЗАДАЧА: Сгенерировать красивый HTML отчёт для инвесторов.\n\n**ШАГ 1: ПРОЧИТАЙ ВСЕ ФАЙЛЫ ДЛЯ СБОРА ДАННЫХ**\nИспользуй Read tool для чтения каждого файла в директории {{workspace_path}}:\n1. {{workspace_path}}/01-structured-idea.md\n2. {{workspace_path}}/02-market-research.md\n3. {{workspace_path}}/03-competitors.md\n4. {{workspace_path}}/04-tech-assessment.md\n5. {{workspace_path}}/05-budget.md\n6. {{workspace_path}}/06-team.md\n7. {{workspace_path}}/07-risks.md\n8. {{workspace_path}}/08-alternatives.md\n\n**ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ ИЗ КОНТЕКСТА:**\n- executive_summary: {{executive_summary}}\n- go_no_go_recommendation: {{go_no_go_recommendation}}\n- overall_confidence: {{overall_confidence}}\n- product_name: {{product_name}}\n\n**ШАГ 2: СОЗДАЙ HTML ОТЧЁТ**\nИспользуй {{report_quality_standards}} для структуры.\n\n**HTML ТРЕБОВАНИЯ:**\n1. Использовать Tailwind CSS CDN\n2. Responsive дизайн\n3. Профессиональный дизайн\n4. Таблицы для сравнения\n5. Цветовая индикация (зелёный/жёлтый/красный)\n6. Интерактивное оглавление\n\n**СТРУКТУРА ОТЧЁТА:**\n1. Header с названием и датой\n2. Executive Summary (go/no-go badge)\n3. Problem & Solution\n4. Market Analysis (TAM/SAM/SOM)\n5. Competitive Landscape (таблица)\n6. Technical Assessment\n7. Financial Projections (MVP vs Full)\n8. Team Requirements\n9. Risk Analysis (risk matrix)\n10. Alternatives & Recommendations\n11. Next Steps\n\n**ШАГ 3: СОХРАНИ HTML**\nИспользуй Write tool для сохранения в {{workspace_path}}/09-final-report.html.\nHTML должен начинаться с <!DOCTYPE html>.\n\n**ШАГ 4: ВЕРИФИКАЦИЯ**\nПрочитай первые 5 строк сохранённого файла для проверки.",
+      "completionCondition": "HTML отчёт сохранён в файл {{workspace_path}}/09-final-report.html",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "html_size_kb": {
+            "type": "number",
+            "description": "Размер HTML в KB"
+          },
+          "verification": {
+            "type": "string",
+            "description": "Первые 5 строк HTML файла для верификации"
+          }
+        },
+        "required": [
+          "html_file_path",
+          "verification"
+        ],
+        "globalInputs": [
+          "html_file_path"
+        ]
+      },
+      "connections": {
+        "success": "publish-artifact"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "publish-artifact",
+      "directive": "ЗАДАЧА: Опубликовать HTML отчёт как артефакт в Moira.\n\n**ШАГ 1:** Прочитай HTML файл используя Read tool:\n- Путь к файлу: {{html_file_path}}\n\n**ШАГ 2:** Используй MCP tool `mcp__moira__artifacts` с параметрами:\n- action: \"upload\"\n- name: \"{{product_name}}-startup-analysis.html\"\n- content: содержимое прочитанного HTML файла\n\n**ШАГ 3:** Сохрани полученные uuid и url для отправки пользователю.",
+      "completionCondition": "Артефакт загружен, URL получен",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "artifact_uuid": {
+            "type": "string",
+            "description": "UUID загруженного артефакта"
+          },
+          "artifact_expires": {
+            "type": "string",
+            "description": "Дата истечения (30 дней)"
+          }
+        },
+        "required": [
+          "artifact_uuid",
+          "artifact_url"
+        ],
+        "globalInputs": [
+          "artifact_url"
+        ]
+      },
+      "connections": {
+        "success": "notify-complete"
+      }
+    },
+    {
+      "type": "telegram-notification",
+      "id": "notify-complete",
+      "message": "✅ *Анализ стартап-идеи завершён*\n\n📊 *{{product_name}}*\n\n**Результат:** {{go_no_go_recommendation}}\n**Confidence:** {{overall_confidence}}/10\n**Риски:** {{overall_risk_level}}\n\n💰 *Бюджет:*\n• MVP: {{mvp_budget.total}}\n• Full: {{full_budget.total}}\n\n📈 *Рынок:*\n• TAM: {{tam.value}}\n• Конкурентов: {{competitors_count}}\n\n🔗 *Отчёт:* {{artifact_url}}\n\n_Отчёт доступен 30 дней_",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "product_name",
+        "go_no_go_recommendation",
+        "overall_confidence",
+        "artifact_url",
+        "mvp_budget",
+        "full_budget",
+        "tam",
+        "sam",
+        "som",
+        "competitors_count",
+        "overall_risk_level",
+        "executive_summary"
+      ]
+    }
+  ],
+  "variableRegistry": {
+    "startup_idea": {
+      "type": "string",
+      "description": "Описание стартап-идеи в свободной форме",
+      "default": ""
+    },
+    "enhance_iteration": {
+      "type": "number",
+      "description": "Iteration counter for enhance-analysis loop",
+      "default": 0
+    },
+    "fix_competitors_iteration": {
+      "type": "number",
+      "description": "Iteration counter for fix-competitors loop",
+      "default": 0
+    },
+    "refine_budget_iteration": {
+      "type": "number",
+      "description": "Iteration counter for refine-budget loop",
+      "default": 0
+    },
+    "refine_risks_iteration": {
+      "type": "number",
+      "description": "Iteration counter for refine-risks loop",
+      "default": 0
+    },
+    "validation_framework": {
+      "type": "string",
+      "description": "Фреймворк валидации стартап-идей",
+      "default": "VALIDATION FRAMEWORK:\n\n1. TIER 1 PROBLEM CHECK:\n- Проблема должна быть в топ-3 болей целевой аудитории\n- Если проблема не критична — пользователи не заплатят\n- Вопрос: 'Насколько срочно решить эту проблему?' (1-10)\n\n2. RULE OF ONE:\n- Одна чёткая проблема\n- Один конкретный сегмент пользователей\n- Один основной продукт\n- Фокус важнее широты охвата\n\n3. MARKET VALIDATION SIGNALS:\n- Существующие решения (конкуренты) = подтверждённый спрос\n- Поисковые запросы по теме\n- Сообщества и форумы с обсуждением проблемы\n- Готовность платить (willingness to pay)\n\n4. RED FLAGS:\n- 'Всем нужно' = никому конкретно\n- Нет конкурентов = возможно нет рынка\n- Проблема решается бесплатно\n- Слишком нишевый рынок (TAM < $100M)"
+    },
+    "market_sizing_methodology": {
+      "type": "string",
+      "description": "Методология расчёта размера рынка",
+      "default": "MARKET SIZING (TAM/SAM/SOM):\n\n1. TAM (Total Addressable Market):\n- Весь рынок, если бы все потенциальные клиенты купили\n- Формула: Количество потенциальных клиентов × Средний чек × Частота покупки в год\n- Источники: отчёты аналитиков (Statista, IBISWorld), публичные данные компаний\n\n2. SAM (Serviceable Addressable Market):\n- Часть TAM, которую можно обслужить с учётом географии, языка, специфики\n- Обычно 10-40% от TAM для стартапа\n- Учитывать: регион запуска, языковые барьеры, регуляторные ограничения\n\n3. SOM (Serviceable Obtainable Market):\n- Реалистичная доля рынка за 3-5 лет\n- Для стартапа обычно 1-5% от SAM\n- Зависит от: конкуренции, ресурсов, скорости роста рынка\n\n4. VALIDATION:\n- TAM должен быть > $1B для венчурных инвесторов\n- SAM > $100M для устойчивого бизнеса\n- SOM > $10M для окупаемости\n- Все цифры должны иметь источники"
+    },
+    "cost_estimation_guidelines": {
+      "type": "string",
+      "description": "Гайдлайны по оценке стоимости разработки",
+      "default": "COST ESTIMATION GUIDELINES:\n\n1. MVP SCOPE (Minimum Viable Product):\n- Только core функционал для проверки гипотезы\n- 1-3 ключевые фичи, не больше\n- Срок: 2-4 месяца\n- Бюджет: $30K-$100K (аутсорс), $50K-$150K (inhouse)\n\n2. FULL VERSION:\n- Полный функционал для масштабирования\n- Все запланированные фичи + интеграции\n- Срок: 6-12 месяцев\n- Бюджет: $150K-$500K+ в зависимости от сложности\n\n3. COST CATEGORIES:\n- Development (50-60%): backend, frontend, mobile\n- Design (10-15%): UX/UI, брендинг\n- Infrastructure (5-10%): серверы, домены, SSL\n- Marketing (15-25%): запуск, первые пользователи\n- Legal (5%): регистрация, GDPR, terms\n\n4. RATE CARDS (2025-2026):\n- Junior dev: $25-40/hr\n- Middle dev: $40-70/hr\n- Senior dev: $70-120/hr\n- Tech Lead: $100-150/hr\n- Designer: $40-80/hr\n- PM: $50-100/hr\n\n5. MULTIPLIERS:\n- Мобильное приложение: ×1.5-2 к web\n- Геолокация/карты: +$10-30K\n- Платежи: +$5-15K\n- Соцсеть функционал: +$20-50K\n- AI/ML: +$30-100K"
+    },
+    "risk_assessment_criteria": {
+      "type": "string",
+      "description": "Критерии оценки рисков",
+      "default": "RISK ASSESSMENT MATRIX:\n\n1. RISK CATEGORIES:\n- Market risks: конкуренция, изменение спроса, регуляции\n- Technical risks: сложность реализации, масштабируемость, безопасность\n- Financial risks: недофинансирование, неверная unit-экономика\n- Team risks: ключевые люди, компетенции, мотивация\n- Operational risks: процессы, поставщики, партнёры\n\n2. PROBABILITY SCALE:\n- Low (1): маловероятно (<20%)\n- Medium (2): возможно (20-50%)\n- High (3): вероятно (>50%)\n\n3. IMPACT SCALE:\n- Low (1): незначительное влияние, легко исправить\n- Medium (2): заметное влияние, требует ресурсов\n- High (3): критическое, может убить проект\n\n4. RISK SCORE:\n- Score = Probability × Impact\n- 1-2: Low priority (мониторинг)\n- 3-4: Medium priority (план митигации)\n- 6-9: High priority (немедленные действия)\n\n5. MITIGATION STRATEGIES:\n- Avoid: изменить план чтобы исключить риск\n- Reduce: действия для снижения вероятности/влияния\n- Transfer: страховка, аутсорс, партнёрство\n- Accept: принять с планом реагирования"
+    },
+    "report_quality_standards": {
+      "type": "string",
+      "description": "Стандарты качества итогового отчёта",
+      "default": "REPORT QUALITY STANDARDS:\n\n1. STRUCTURE:\n- Executive Summary (1 страница): ключевые выводы, рекомендация go/no-go\n- Problem & Solution: чёткая формулировка проблемы и решения\n- Market Analysis: TAM/SAM/SOM с источниками\n- Competitive Landscape: таблица сравнения, позиционирование\n- Technical Assessment: архитектура, стек, сложность\n- Financial Projections: бюджет MVP/Full, unit-экономика\n- Team Requirements: роли, компетенции, структура\n- Risk Analysis: матрица рисков, митигация\n- Recommendations: конкретные следующие шаги\n\n2. DATA REQUIREMENTS:\n- Каждое утверждение должно иметь источник\n- Цифры с точностью и диапазонами\n- Даты источников (не старше 2 лет для рынка)\n- Сравнительные таблицы для наглядности\n\n3. VISUAL STANDARDS:\n- Профессиональный дизайн (Tailwind CSS)\n- Графики и диаграммы где уместно\n- Цветовое кодирование (зелёный/жёлтый/красный)\n- Responsive для мобильных устройств\n\n4. OBJECTIVITY:\n- Честная оценка рисков\n- Указание ограничений анализа\n- Альтернативные точки зрения\n- Confidence score для каждой секции"
+    },
+    "competitor_analysis_template": {
+      "type": "string",
+      "description": "Шаблон анализа конкурентов",
+      "default": "| Критерий | Конкурент 1 | Конкурент 2 | Конкурент 3 | Наш продукт |\n|----------|-------------|-------------|-------------|-------------|\n| Название | | | | |\n| Сайт | | | | |\n| Год основания | | | | |\n| Финансирование | | | | |\n| Ключевые фичи | | | | |\n| Целевая аудитория | | | | |\n| Ценовая модель | | | | |\n| Сильные стороны | | | | |\n| Слабые стороны | | | | |\n| Уникальность | | | | |"
+    },
+    "product_name": {
+      "type": "string",
+      "description": "Название продукта/сервиса"
+    },
+    "product_description": {
+      "type": "string",
+      "description": "Краткое описание продукта (1-2 предложения)"
+    },
+    "problem_statement": {
+      "type": "string",
+      "description": "Какую проблему решает"
+    },
+    "target_audience": {
+      "type": "string",
+      "description": "Целевая аудитория"
+    },
+    "key_features": {
+      "type": "array",
+      "description": "Ключевые фичи (3-7 штук)",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3,
+      "maxItems": 7
+    },
+    "unique_value_proposition": {
+      "type": "string",
+      "description": "Уникальное торговое предложение"
+    },
+    "geography": {
+      "type": "string",
+      "description": "География запуска"
+    },
+    "business_model": {
+      "type": "string",
+      "description": "Бизнес-модель (как зарабатывать)"
+    },
+    "product_type": {
+      "type": "string",
+      "description": "Тип продукта",
+      "enum": [
+        "mobile_app",
+        "web_app",
+        "saas",
+        "marketplace",
+        "hybrid",
+        "other"
+      ]
+    },
+    "tier1_problem_score": {
+      "type": "number",
+      "description": "Насколько проблема критична для аудитории (1-10)"
+    },
+    "red_flags": {
+      "type": "array",
+      "description": "Выявленные red flags (если есть)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "assumptions_made": {
+      "type": "array",
+      "description": "Сделанные предположения (если информации не хватало)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Полный путь к созданной директории"
+    },
+    "tam": {
+      "type": "object",
+      "description": "Global variable tam",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "Размер TAM (например '$5.2B')"
+        },
+        "source": {
+          "type": "string",
+          "description": "Источник данных"
+        },
+        "year": {
+          "type": "number",
+          "description": "Год данных"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "year"
+      ]
+    },
+    "sam": {
+      "type": "object",
+      "description": "Global variable sam",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "calculation_basis": {
+          "type": "string",
+          "description": "Как рассчитан от TAM"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "calculation_basis"
+      ]
+    },
+    "som": {
+      "type": "object",
+      "description": "Global variable som",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "timeframe": {
+          "type": "string",
+          "description": "За какой период (например '5 лет')"
+        },
+        "assumptions": {
+          "type": "string",
+          "description": "Предположения для расчёта"
+        }
+      },
+      "required": [
+        "value",
+        "timeframe",
+        "assumptions"
+      ]
+    },
+    "market_growth": {
+      "type": "object",
+      "description": "Global variable market_growth",
+      "properties": {
+        "cagr": {
+          "type": "string",
+          "description": "Compound Annual Growth Rate"
+        },
+        "trend": {
+          "type": "string",
+          "enum": [
+            "growing",
+            "stable",
+            "declining"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "cagr",
+        "trend",
+        "source"
+      ]
+    },
+    "key_trends": {
+      "type": "array",
+      "description": "Ключевые тренды рынка",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3
+    },
+    "regulatory_requirements": {
+      "type": "array",
+      "description": "Регуляторные требования",
+      "items": {
+        "type": "string"
+      }
+    },
+    "market_validation_signals": {
+      "type": "array",
+      "description": "Сигналы подтверждения рынка (конкуренты с финансированием, поисковые запросы и т.д.)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "competitors_count": {
+      "type": "number",
+      "description": "Общее количество найденных конкурентов"
+    },
+    "issues_count": {
+      "type": "number",
+      "description": "Количество найденных проблем (0 = всё ок)"
+    },
+    "issues": {
+      "type": "array",
+      "description": "Список проблем (если есть)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "comparison_table_markdown": {
+      "type": "string",
+      "description": "Сравнительная таблица в формате Markdown"
+    },
+    "direct_competitors": {
+      "type": "array",
+      "description": "Прямые конкуренты",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          },
+          "founded_year": {
+            "type": "number"
+          },
+          "funding": {
+            "type": "string"
+          },
+          "key_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pricing_model": {
+            "type": "string"
+          },
+          "target_audience": {
+            "type": "string"
+          },
+          "strengths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "weaknesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "key_features",
+          "strengths",
+          "weaknesses"
+        ]
+      },
+      "minItems": 5
+    },
+    "indirect_competitors": {
+      "type": "array",
+      "description": "Косвенные конкуренты",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          },
+          "alternative_approach": {
+            "type": "string"
+          },
+          "key_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strengths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "weaknesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "alternative_approach"
+        ]
+      }
+    },
+    "market_gaps": {
+      "type": "array",
+      "description": "Выявленные рыночные ниши/пробелы",
+      "items": {
+        "type": "string"
+      }
+    },
+    "competitive_advantages": {
+      "type": "array",
+      "description": "Наши конкурентные преимущества",
+      "items": {
+        "type": "string"
+      }
+    },
+    "complexity_score": {
+      "type": "number",
+      "description": "Сложность реализации (1-10)"
+    },
+    "complexity_factors": {
+      "type": "array",
+      "description": "Факторы влияющие на сложность",
+      "items": {
+        "type": "string"
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "description": "Global variable architecture",
+      "properties": {
+        "frontend": {
+          "type": "string"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "database": {
+          "type": "string"
+        },
+        "infrastructure": {
+          "type": "string"
+        },
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "frontend",
+        "backend",
+        "database",
+        "infrastructure"
+      ]
+    },
+    "recommended_stack": {
+      "type": "object",
+      "description": "Global variable recommended_stack",
+      "properties": {
+        "frontend_tech": {
+          "type": "string"
+        },
+        "backend_tech": {
+          "type": "string"
+        },
+        "database_tech": {
+          "type": "string"
+        },
+        "hosting": {
+          "type": "string"
+        },
+        "justification": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frontend_tech",
+        "backend_tech",
+        "database_tech",
+        "hosting"
+      ]
+    },
+    "technical_risks": {
+      "type": "array",
+      "description": "Global variable technical_risks",
+      "items": {
+        "type": "object",
+        "properties": {
+          "risk": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "mitigation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "risk",
+          "severity"
+        ]
+      }
+    },
+    "third_party_services": {
+      "type": "array",
+      "description": "Сторонние сервисы и их стоимость",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "estimated_cost": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "mvp_budget": {
+      "type": "object",
+      "description": "Global variable mvp_budget",
+      "properties": {
+        "total": {
+          "type": "string"
+        },
+        "timeline": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "breakdown": {
+          "type": "object",
+          "properties": {
+            "development": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "infrastructure": {
+              "type": "string"
+            },
+            "marketing": {
+              "type": "string"
+            },
+            "legal": {
+              "type": "string"
+            },
+            "contingency": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "total",
+        "timeline",
+        "scope",
+        "breakdown"
+      ]
+    },
+    "full_budget": {
+      "type": "object",
+      "description": "Global variable full_budget",
+      "properties": {
+        "total": {
+          "type": "string"
+        },
+        "timeline": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "breakdown": {
+          "type": "object",
+          "properties": {
+            "development": {
+              "type": "string"
+            },
+            "design": {
+              "type": "string"
+            },
+            "infrastructure": {
+              "type": "string"
+            },
+            "marketing": {
+              "type": "string"
+            },
+            "legal": {
+              "type": "string"
+            },
+            "contingency": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "total",
+        "timeline",
+        "scope",
+        "breakdown"
+      ]
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "Рекомендации по улучшению",
+      "items": {
+        "type": "string"
+      }
+    },
+    "budget_assumptions": {
+      "type": "array",
+      "description": "Предположения при расчёте",
+      "items": {
+        "type": "string"
+      }
+    },
+    "cost_optimization_suggestions": {
+      "type": "array",
+      "description": "Предложения по оптимизации затрат",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mvp_team": {
+      "type": "array",
+      "description": "Команда для MVP",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "junior",
+              "middle",
+              "senior",
+              "lead"
+            ]
+          },
+          "employment": {
+            "type": "string",
+            "enum": [
+              "full-time",
+              "part-time",
+              "freelance"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "inhouse",
+              "outsource",
+              "freelance"
+            ]
+          },
+          "monthly_cost": {
+            "type": "string"
+          },
+          "responsibilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "role",
+          "level",
+          "employment",
+          "monthly_cost"
+        ]
+      }
+    },
+    "full_team": {
+      "type": "array",
+      "description": "Команда для Full version",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "junior",
+              "middle",
+              "senior",
+              "lead"
+            ]
+          },
+          "employment": {
+            "type": "string",
+            "enum": [
+              "full-time",
+              "part-time",
+              "freelance"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "inhouse",
+              "outsource",
+              "freelance"
+            ]
+          },
+          "monthly_cost": {
+            "type": "string"
+          },
+          "responsibilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "role",
+          "level",
+          "employment",
+          "monthly_cost"
+        ]
+      }
+    },
+    "monthly_payroll": {
+      "type": "object",
+      "description": "Месячный ФОТ",
+      "properties": {
+        "mvp": {
+          "type": "string"
+        },
+        "full": {
+          "type": "string"
+        }
+      }
+    },
+    "key_competencies": {
+      "type": "object",
+      "description": "Global variable key_competencies",
+      "properties": {
+        "must_have": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nice_to_have": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "hiring_recommendations": {
+      "type": "array",
+      "description": "Рекомендации по найму",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "description": "Список рисков",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "market",
+              "technical",
+              "financial",
+              "team",
+              "operational"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "probability": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "impact": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "risk_score": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 9
+          },
+          "mitigation_strategy": {
+            "type": "string"
+          },
+          "mitigation_type": {
+            "type": "string",
+            "enum": [
+              "avoid",
+              "reduce",
+              "transfer",
+              "accept"
+            ]
+          }
+        },
+        "required": [
+          "category",
+          "description",
+          "probability",
+          "impact",
+          "risk_score",
+          "mitigation_strategy"
+        ]
+      },
+      "minItems": 5
+    },
+    "overall_risk_level": {
+      "type": "string",
+      "description": "Общий уровень риска проекта",
+      "enum": [
+        "high",
+        "low",
+        "medium"
+      ]
+    },
+    "missed_risks": {
+      "type": "array",
+      "description": "Пропущенные критические риски",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risk_summary": {
+      "type": "string",
+      "description": "Краткое резюме по рискам"
+    },
+    "high_priority_risks": {
+      "type": "array",
+      "description": "Риски с score >= 6 (требуют немедленных действий)",
+      "items": {
+        "type": "string"
+      }
+    },
+    "alternative_business_models": {
+      "type": "array",
+      "description": "Альтернативные бизнес-модели",
+      "items": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "pros": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fit_score": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "model",
+          "description",
+          "pros",
+          "cons",
+          "fit_score"
+        ]
+      },
+      "minItems": 2
+    },
+    "pivot_options": {
+      "type": "array",
+      "description": "Варианты pivot",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pivot_type": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string",
+            "description": "Когда делать pivot"
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        },
+        "required": [
+          "pivot_type",
+          "description",
+          "trigger"
+        ]
+      }
+    },
+    "gtm_strategies": {
+      "type": "array",
+      "description": "Go-to-market стратегии",
+      "items": {
+        "type": "object",
+        "properties": {
+          "strategy": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "pros": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "recommended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "strategy",
+          "description",
+          "recommended"
+        ]
+      }
+    },
+    "exit_strategies": {
+      "type": "array",
+      "description": "Exit стратегии",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "potential_acquirers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeline": {
+            "type": "string"
+          },
+          "probability": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          }
+        }
+      }
+    },
+    "recommended_approach": {
+      "type": "string",
+      "description": "Рекомендуемый подход с обоснованием"
+    },
+    "overall_confidence": {
+      "type": "number",
+      "description": "Общий confidence score анализа"
+    },
+    "blocking_issues_count": {
+      "type": "number",
+      "description": "Количество blocking issues (длина массива blocking_issues)"
+    },
+    "blocking_issues": {
+      "type": "array",
+      "description": "Критические проблемы",
+      "items": {
+        "type": "string"
+      }
+    },
+    "section_scores": {
+      "type": "object",
+      "description": "Global variable section_scores",
+      "properties": {
+        "idea": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "market": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "competitors": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "tech": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "budget": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "team": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "risks": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "alternatives": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        }
+      }
+    },
+    "executive_summary": {
+      "type": "string",
+      "description": "Executive summary для отчёта"
+    },
+    "go_no_go_recommendation": {
+      "type": "string",
+      "description": "Итоговая рекомендация",
+      "enum": [
+        "strong_go",
+        "go_with_conditions",
+        "needs_more_research",
+        "no_go"
+      ]
+    },
+    "html_file_path": {
+      "type": "string",
+      "description": "Global variable html_file_path"
+    },
+    "artifact_url": {
+      "type": "string",
+      "description": "Публичный URL артефакта"
+    }
+  }
+}

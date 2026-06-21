@@ -1,0 +1,240 @@
+---
+title: Subagent Review Pattern
+description: Delegate reviews to independent subagents for unbiased verification
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Purpose
+
+Ensure independent verification by delegating review tasks to a subagent. Prevents self-review bias where the same agent evaluates its own work.
+
+<Aside type="caution">
+  Self-review is unreliable. The agent that did the work cannot objectively assess its quality.
+</Aside>
+
+## Problem
+
+When an agent reviews its own work:
+
+- Confirmation bias affects judgment
+- Known issues may be rationalized
+- Quality standards drift over time
+- "Looks good to me" syndrome
+
+## Solution
+
+Delegate review to a separate subagent using the Task tool:
+
+1. Agent completes work
+2. Workflow directs to review node
+3. Review node delegates to subagent via Task tool
+4. Subagent returns objective assessment
+5. Workflow routes based on findings
+
+## Issue Contract
+
+The subagent returns a FLAT list of issues, not a severity-tiered report. There are no BLOCKING / MAJOR / MINOR tiers — every issue is mandatory to address. The condition node passes only when the count is zero.
+
+- `issues_count` — number of issues found (0 = pass)
+- `issues` — the flat list of every issue, each mandatory
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "issues_count": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Number of issues found (0 = pass)"
+      },
+      "issues": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Flat list of every issue found (all mandatory, no severity tiers)"
+      }
+    },
+    "required": ["issues_count"]
+  }
+}
+```
+
+## Structure
+
+```
+[do-work] → [delegate-review] → [check-result] → pass → [next]
+                                      ↓
+                                    fail → [fix-issues] → [do-work]
+```
+
+## Implementation
+
+### Review Delegation Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "delegate-review",
+  "directive": "Delegate review to subagent using Task tool.\n\n1) Pass ONLY necessary information:\n   - File paths to review\n   - Success criteria\n   - Context directory\n\n2) Agent delegation rules:\n   - Role clarity: 'YOU ARE reviewer'\n   - Direct commands: 'CHECK' not 'could you check'\n   - Specify files: list exact paths\n   - Demand verification: 'VERIFY by reading files'\n\n3) Save review result to {{review_file_path}}\n\n4) Report findings honestly - if reviewer found issues, report issues_found: yes",
+  "completionCondition": "Review delegated, result saved, findings reported",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "review_file": {
+        "type": "string",
+        "description": "Path to saved review file"
+      },
+      "issues_found": {
+        "type": "string",
+        "enum": ["yes", "no"],
+        "description": "Did reviewer find any issues? (every issue is mandatory; no severity tiers)"
+      }
+    },
+    "required": ["review_file", "issues_found"]
+  },
+  "connections": { "success": "check-review-result" }
+}
+```
+
+### Key Directive Elements
+
+**Role Assignment:**
+
+```
+YOU ARE plan reviewer. Your assessment determines if we proceed.
+```
+
+**Direct Commands:**
+
+```
+READ plan file directly.
+CHECK step implementation.
+VERIFY by reading actual files.
+RETURN every issue found as a flat list — every issue is mandatory; no severity tiers.
+```
+
+**Information Boundaries:**
+
+```
+Pass ONLY:
+- File paths to review
+- Success criteria
+- Relevant context paths
+
+DO NOT pass:
+- Your interpretation of quality
+- Hints about what you expect
+- Explanations of your work
+```
+
+### Check Result Node
+
+```json
+{
+  "type": "condition",
+  "id": "check-review-result",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "issues_found" },
+    "right": "no"
+  },
+  "connections": {
+    "true": "next-step",
+    "false": "fix-issues"
+  }
+}
+```
+
+## Real Example
+
+From `development-flow.json` gate review:
+
+```json
+{
+  "id": "agent-validate-step",
+  "directive": "Delegate critical review to subagent.\n\n1) Pass direct access to plan without interpretation\n2) No mentions of 'code was improved/added/fixed'\n3) Pass: file path, step index, changed files, reports directory\n4) Tell which project parts to study for context\n\nAgent prompt:\nYOU ARE plan step gate reviewer.\nYour assessment determines if we proceed.\nREAD plan file directly.\nCHECK step against PREVIOUS and FUTURE steps.\nEvaluate: code quality, errors, plan compliance.\nReturn every issue found as a flat list — every issue is mandatory; no severity tiers.\nProvide fix recommendations.",
+  "inputSchema": {
+    "properties": {
+      "agent_review_file": { "type": "string" },
+      "agent_issues_found": { "type": "string", "enum": ["yes", "no"] }
+    },
+    "required": ["agent_review_file", "agent_issues_found"]
+  }
+}
+```
+
+## Anti-Patterns
+
+### Self-Review (Wrong)
+
+```json
+{
+  "directive": "Check if your work meets quality standards.",
+  "completionCondition": "Quality check passed"
+}
+```
+
+Problem: Agent evaluates own work.
+
+### Biased Delegation (Wrong)
+
+```json
+{
+  "directive": "Ask subagent to verify the improvements we made."
+}
+```
+
+Problem: "improvements" assumes positive outcome.
+
+### Excessive Context (Wrong)
+
+```json
+{
+  "directive": "Tell the reviewer about all the hard work done and why each decision was made."
+}
+```
+
+Problem: Influences reviewer's judgment.
+
+## Numeric Validation
+
+Combine with numeric validation for objective criteria:
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "issues_count": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Number of issues found (0 = pass)"
+      }
+    }
+  }
+}
+```
+
+```json
+{
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "issues_count" },
+    "right": 0
+  }
+}
+```
+
+## Best Practices
+
+1. **Minimal context** - Pass only what reviewer needs
+2. **No interpretation** - Let reviewer form own conclusions
+3. **Direct file access** - Reviewer reads files directly
+4. **Honest reporting** - Agent must report findings truthfully
+5. **Save results** - Write review to file for traceability
+
+## Related Patterns
+
+- [Validation Loop](/docs/patterns/validation-loop/) - Retry on failure
+- [Step Verification](/docs/patterns/step-verification/) - Verify specific steps
+- [Escalation](/docs/patterns/escalation/) - Handle repeated failures

@@ -1,0 +1,122 @@
+{
+  "slug": "validation-loop-test",
+  "metadata": {
+    "name": "Validation Loop Test",
+    "version": "1.0.0",
+    "description": "Creator-validator improvement cycle pattern"
+  },
+  "variableRegistry": {
+    "score": {
+      "type": "number",
+      "description": "Score from validator, checked by score-check (latest-wins across loop)"
+    },
+    "feedback": {
+      "type": "string",
+      "description": "Feedback from validator, used by creator-improve (latest-wins across loop)"
+    },
+    "code": {
+      "type": "string",
+      "description": "Function code from creator/creator-improve (latest-wins), collected in finalOutput"
+    },
+    "description": {
+      "type": "string",
+      "description": "Function description from creator/creator-improve (latest-wins)"
+    }
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "creator"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "creator",
+      "directive": "Create a simple add function",
+      "completionCondition": "Function created",
+      "connections": {
+        "success": "validator"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "code",
+          "description"
+        ],
+        "globalInputs": [
+          "code",
+          "description"
+        ]
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "validator",
+      "directive": "Score the function 0-10. Scoring Criteria: Correctness (5pts), simplicity (5pts)",
+      "completionCondition": "Score provided",
+      "connections": {
+        "success": "score-check"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "score",
+          "feedback"
+        ],
+        "globalInputs": [
+          "score",
+          "feedback"
+        ]
+      }
+    },
+    {
+      "type": "condition",
+      "id": "score-check",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "score"
+        },
+        "right": 8
+      },
+      "connections": {
+        "true": "end",
+        "false": "creator-improve"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "creator-improve",
+      "directive": "Improve the function: {{feedback}}",
+      "completionCondition": "Function improved",
+      "connections": {
+        "success": "validator"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "code",
+          "description"
+        ],
+        "globalInputs": [
+          "code",
+          "description"
+        ]
+      }
+    },
+    {
+      "type": "end",
+      "id": "end",
+      "finalOutput": [
+        "code",
+        "score",
+        "feedback"
+      ]
+    }
+  ]
+}

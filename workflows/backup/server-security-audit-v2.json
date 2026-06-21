@@ -1,0 +1,125 @@
+{
+  "slug": "server-security-audit-v2",
+  "metadata": {
+    "name": "Server Security Audit",
+    "version": "2.0.0",
+    "description": "Simplified 8-stage security audit with inline approvals"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "get-server-info"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "get-server-info",
+      "directive": "Collect server information:\n1. Server hostname/IP\n2. Access method (infrastructure-tools MCP or other)\n3. Server purpose\n\nExplain: Audit will be READ-ONLY (no changes without approval).",
+      "completionCondition": "Server info collected. Access confirmed. User approved starting audit.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "serverName": {
+            "type": "string"
+          },
+          "accessMethod": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "serverName"
+        ]
+      },
+      "connections": {
+        "success": "stage1"
+      }
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage1",
+      "connections": {
+        "success": "stage2"
+      },
+      "directive": "STAGE 1: System Health & Resources Analysis\n\nExecute comprehensive system health checks on {{serverName}} via {{accessMethod}}:\n\n**1.1 CPU Usage Analysis:**\n- Run: top -bn1 | head -20\n- Check: Load average (1min, 5min, 15min)\n- Check: CPU idle percentage\n- Check: Top processes by CPU consumption\n- Identify: Any runaway processes\n\n**1.2 RAM Usage Analysis:**\n- Run: free -h\n- Check: Total RAM, Used, Free, Available\n- Check: Swap configuration and usage\n- Calculate: RAM usage percentage\n- WARNING: Flag if free RAM < 200MB or swap = 0\n\n**1.3 Disk Space Analysis:**\n- Run: df -h\n- Check: Root (/) usage percentage\n- Check: /boot, /var, /opt usage\n- Identify: Filesystems > 80% usage\n- Run: df -i\n- Check: Inode usage (flag if > 80%)\n\n**1.4 Network Status:**\n- Run: netstat -tuln | wc -l (or ss -tuln | wc -l)\n- Count: Total listening ports\n- Identify: Unexpected listeners\n\n**1.5 System Uptime:**\n- Run: uptime\n- Check: Days without reboot\n- Check: System stability\n- Run: vmstat 1 5\n- Check: I/O wait, swap activity\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 1 section with:\n- All command outputs\n- Status for each subsystem (healthy/warning/critical)\n- Specific metrics (percentages, GB values)\n- Any warnings or concerns\n\n**REPORT TO USER:**\nBrief summary highlighting ONLY:\n- Critical issues (if any)\n- RAM status and swap configuration\n- Disk usage percentage\n- System uptime\n\n**ASK USER:** Continue to Stage 2 (Running Processes & Services)? Reply 'yes' to proceed.",
+      "completionCondition": "All 5 checks executed and documented. Results saved to SERVER-AUDIT-PLAN.md Stage 1 with detailed findings. Brief summary provided to user. User explicitly approved continuing to Stage 2 (answered 'yes' or similar)."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage2",
+      "connections": {
+        "success": "stage3"
+      },
+      "directive": "STAGE 2: Running Processes & Services Analysis\n\nDeep analysis of running services on {{serverName}}:\n\n**2.1 Process List (Top Consumers):**\n- Run: ps auxf --sort=-%mem | head -40\n- Identify: Top 10 RAM consumers\n- Identify: Top 10 CPU consumers\n- Check: Process tree structure\n- Flag: Unexpected processes\n\n**2.2 Docker Containers Status:**\n- Run: docker ps -a --format \"table {{.Names}}\\t{{.Status}}\\t{{.Image}}\"\n- Count: Total containers (running vs stopped)\n- Check: Health status for each\n- Identify: Recently restarted containers\n- Run: docker stats --no-stream\n- List: Top 5 RAM consumers\n- List: Top 5 CPU consumers\n\n**2.3 Systemd Services:**\n- Run: systemctl list-units --type=service --state=running --no-pager\n- Count: Total running services\n- Identify: Security-critical services (fail2ban, ssh, docker, firewall)\n- Check: All expected services are running\n\n**2.4 Zombie Process Check:**\n- Run: ps aux | grep -E \"defunct|<defunct>|Z\" | grep -v grep\n- Count: Defunct processes (should be 0)\n- Flag: If any zombies found\n\n**2.5 Port Listeners:**\n- Run: ss -tuln\n- Run: lsof -i -P -n | grep LISTEN | head -30\n- List: All ports listening on 0.0.0.0 (public)\n- List: All ports on 127.0.0.1 (localhost only)\n- Identify: Unexpected open ports\n- Flag: Ports that should NOT be public\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 2:\n- Container count and health summary\n- Top resource consumers\n- Complete port listing with security assessment\n- Systemd service status\n- Any zombie processes\n\n**REPORT TO USER:**\nSummary with:\n- Container count and health\n- Critical security services status (fail2ban, firewall)\n- Publicly exposed ports (highlight concerns)\n- Top RAM consumers\n\n**ASK USER:** Continue to Stage 3 (SSH Attack Analysis)?",
+      "completionCondition": "All process and service checks complete. Docker, systemd, ports analyzed. Results saved to file. Summary provided to user with security concerns highlighted. User approved Stage 3."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage3",
+      "connections": {
+        "success": "stage4"
+      },
+      "directive": "STAGE 3: Security - SSH Access Logs & Attack Analysis\n\nAnalyze SSH attack patterns on {{serverName}}:\n\n**3.1 Failed Login Attempts (Brute-Force Detection):**\n- Run: lastb | head -100\n- Count: Total failed attempts in last 100 entries\n- Identify: IPs with multiple attempts\n- Calculate: Attempts per IP (find persistent attackers)\n- Pattern: Rapid-fire attempts = automated tools\n\n**3.2 Successful Logins:**\n- Run: last | head -50\n- Identify: Legitimate IP addresses\n- Check: Login frequency and timing\n- Separate: Authorized vs suspicious IPs\n\n**3.3 Auth Log Analysis:**\n- Run: grep \"Failed password\" /var/log/auth.log | tail -100\n- Extract: Attacking IPs and usernames\n- Identify: Dictionary attack patterns (common usernames)\n- Identify: Targeted attacks (domain-specific usernames)\n- Run: grep \"Accepted\" /var/log/auth.log | tail -50\n- Verify: Only expected IPs successfully logged in\n\n**3.4 Attack Pattern Recognition:**\n- Identify: Coordinated attacks (multiple IPs, same network)\n- Identify: Botnet signatures (timing patterns)\n- Check: If attackers know domain name (reconnaissance)\n- Geographic distribution: Analyze IP origins\n\n**3.5 Recent Activity:**\n- Run: journalctl -u ssh -n 100 --no-pager | grep -E \"Failed|Accepted|Invalid\"\n- Focus: Last few hours of activity\n- Identify: Current active attacks\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 3:\n- Attack intensity rating (low/medium/high/critical)\n- List of top 10 attacking IPs with attempt counts\n- Attack patterns identified (botnet, coordinated, etc)\n- Targeted usernames (especially domain-related)\n- Geographic origin of attacks\n- Legitimate IP addresses for whitelist\n\n**REPORT TO USER:**\nCritical summary:\n- Attack intensity and current status\n- If attacks ongoing RIGHT NOW\n- Top 5 attacking IPs\n- Coordinated attack detection (yes/no)\n- Reconnaissance findings (do attackers know your domain?)\n\n**ASK USER:** Continue to Stage 4 (Network & Intrusion Detection)?",
+      "completionCondition": "SSH log analysis complete. Attack patterns identified and documented. Top attacking IPs listed. Coordinated attacks flagged. Results saved comprehensively. User briefed on threat level. User approved Stage 4."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage4",
+      "connections": {
+        "success": "stage5"
+      },
+      "directive": "STAGE 4: Network Security & Intrusion Detection\n\nDeep network security analysis on {{serverName}}:\n\n**4.1 Active Connections Analysis:**\n- Run: netstat -antp | grep ESTABLISHED\n- List: All established connections\n- Cross-reference: IPs with Stage 3 attack list\n- Flag: Active connections from known attackers\n- Count: Suspicious connections vs legitimate\n\n**4.2 Firewall Rules Audit:**\n- Run: ufw status verbose\n- Check: UFW enabled or disabled\n- List: All allow/deny rules\n- Run: iptables -L -n -v | head -100\n- Analyze: INPUT chain policy (ACCEPT vs DROP)\n- Check: fail2ban chains (f2b-sshd)\n- Calculate: Packets/bytes blocked by fail2ban\n- Identify: Firewall gaps or misconfigurations\n\n**4.3 Port Security Assessment:**\n- Cross-reference: ss -tuln output with expected services\n- Identify: Ports that should NOT be public\n- Check: Proper localhost-only bindings\n- Flag: Unnecessary exposure\n\n**4.4 Suspicious Process Detection:**\n- Run: ps aux | grep -E \"nc|netcat|socat|bash.*tcp|/dev/tcp|perl.*socket\" | grep -v grep\n- Search: Reverse shell indicators\n- Search: Backdoor processes\n- Search: Unauthorized network tools\n\n**4.5 Rootkit Indicators (Basic Check):**\n- Check: Unexpected network listeners\n- Check: Hidden processes\n- Check: Suspicious system modifications\n- Note: This is basic check, not comprehensive rootkit scan\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 4:\n- Active attacker connections (count and IPs)\n- Firewall status (UFW on/off, iptables policy)\n- fail2ban statistics (packets blocked, banned IPs)\n- Security gaps identified\n- Suspicious process findings (should be none)\n- Port exposure assessment\n\n**REPORT TO USER:**\nCritical findings:\n- Active connections from attackers (count and IPs)\n- Firewall status (enabled/disabled)\n- fail2ban effectiveness (GB blocked)\n- Any suspicious processes (rootkits, backdoors)\n- Critical security gaps\n\n**ASK USER:** Continue to Stage 5 (Docker & Container Security)?",
+      "completionCondition": "Network analysis complete. Active connections checked. Firewall audited. Suspicious processes scanned. Results documented with security assessment. User notified of active threats. User approved Stage 5."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage5",
+      "connections": {
+        "success": "stage6"
+      },
+      "directive": "STAGE 5: Docker & Container Security Analysis\n\nComprehensive Docker security audit on {{serverName}}:\n\n**5.1 Container Log Analysis (Error Scanning):**\n- Run: docker ps -q | xargs -I {} sh -c 'echo \"=== {} ===\" && docker logs --tail 50 {} 2>&1 | grep -iE \"error|warning|fail|fatal|panic\"'\n- Parse: Error messages for security implications\n- Identify: Web exploit attempts (PHP, SQL injection, XSS)\n- Identify: Authentication failures\n- Identify: Configuration warnings\n\n**5.2 Docker Image Vulnerability Assessment:**\n- Run: docker images --format \"table {{.Repository}}\\t{{.Tag}}\\t{{.CreatedAt}}\\t{{.Size}}\"\n- Identify: Images older than 6 months\n- Identify: Images older than 1 year (critical)\n- Check: Base image versions (alpine, ubuntu, node)\n- List: Outdated critical images needing updates\n\n**5.3 Container Network Exposure:**\n- Run: docker inspect $(docker ps -q) --format='{{.Name}}: Ports={{.NetworkSettings.Ports}} Networks={{.NetworkSettings.Networks}}'\n- List: Containers with ports on 0.0.0.0 (public)\n- List: Containers on localhost only (secure)\n- List: Containers behind Traefik (secure)\n- Flag: Unexpected public exposure\n- Flag: Containers on 'host' network (dangerous)\n\n**5.4 Volume Security Review:**\n- Run: docker volume ls\n- Check: Volume permissions\n- Identify: Sensitive data in volumes\n- Check: Volume backup status\n\n**5.5 Resource Limits Verification:**\n- Run: docker ps --format \"{{.Names}}\" | xargs -I {} docker inspect {} --format='{{.Name}}: Memory={{.HostConfig.Memory}} CPUs={{.HostConfig.NanoCpus}}'\n- Count: Containers WITHOUT memory limits (Memory=0)\n- Count: Containers WITHOUT CPU limits (CPUs=0)\n- Calculate: Risk level (no limits + low RAM = high risk)\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 5:\n- Web exploit attempts found in logs\n- List of outdated images with ages\n- Network exposure assessment (public vs private)\n- Resource limits status (count of unlimited containers)\n- Security concerns prioritized\n\n**REPORT TO USER:**\nKey findings:\n- Web exploit attempts detected (yes/no, which containers)\n- Critically outdated images (count and names)\n- Publicly exposed containers (unexpected ones)\n- Resource limits status (X containers without limits)\n- Overall Docker security rating\n\n**ASK USER:** Continue to Stage 6 (Disk Usage & Cleanup)?",
+      "completionCondition": "Docker security analysis complete. Container logs scanned for exploits. Image ages documented. Network exposure mapped. Resource limits verified. All findings saved to file with security ratings. User briefed on critical Docker issues. User approved Stage 6."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage6",
+      "connections": {
+        "success": "stage7"
+      },
+      "directive": "STAGE 6: Disk Usage Analysis & Cleanup Opportunities\n\nIdentify disk waste and optimization opportunities on {{serverName}}:\n\n**6.1 Large File Detection:**\n- Run: find / -type f -size +100M 2>/dev/null | head -30\n- List: Files over 100MB with paths and sizes\n- Categorize: System files vs cleanup candidates\n- Identify: Forgotten deployment artifacts (.tar, .tar.gz)\n- Identify: Old Docker image archives\n\n**6.2 Old Log Files:**\n- Run: find /var/log -type f -name \"*.log\" -mtime +30 2>/dev/null\n- Count: Logs older than 30 days\n- Calculate: Total size of old logs\n- Check: Log rotation configuration\n\n**6.3 Docker Disk Usage:**\n- Run: docker system df\n- Parse: Images total size and reclaimable\n- Parse: Containers, Volumes, Build Cache\n- Run: docker images -f \"dangling=true\" | wc -l\n- Count: Dangling (unused) images\n- Calculate: Space wasted on old images\n\n**6.4 Temporary Directories:**\n- Run: du -sh /tmp /var/tmp /var/cache\n- Identify: Unusual accumulation\n- Check: Files that should be auto-cleaned\n- Run: ls -lh /tmp/*.tar* /tmp/*.gz 2>/dev/null\n- Identify: Forgotten archives in temp\n\n**6.5 Docker Directory Analysis:**\n- Run: du -sh /var/lib/docker\n- Check: Total Docker storage consumption\n- Compare: With df -h to verify overlay storage\n\n**CALCULATE TOTAL RECLAIMABLE:**\n- Dangling images: X GB\n- Old archives: Y GB\n- Unused volumes: Z GB\n- Old logs: W GB\n- Total: X+Y+Z+W GB\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 6:\n- Complete breakdown of disk usage\n- List of dangling images (count and size)\n- List of large files with cleanup recommendations\n- Total reclaimable space calculation\n- Specific cleanup commands (DO NOT EXECUTE)\n- Priority ranking (high/medium/low)\n\n**REPORT TO USER:**\nCleanup opportunities:\n- Dangling images: X count, Y GB\n- Large forgotten files: list with sizes\n- Total reclaimable: Z GB\n- Disk usage before/after potential cleanup\n\n**IMPORTANT:** This is READ-ONLY - do NOT execute any cleanup commands.\n\n**ASK USER:** Continue to Stage 7 (System Vulnerabilities)?",
+      "completionCondition": "Disk analysis complete. All large files identified. Dangling images counted. Total reclaimable space calculated. Cleanup commands documented but NOT executed. Results saved with prioritized recommendations. User informed of cleanup potential. User approved Stage 7."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage7",
+      "connections": {
+        "success": "stage8"
+      },
+      "directive": "STAGE 7: System Vulnerabilities & Security Updates\n\nComprehensive vulnerability assessment on {{serverName}}:\n\n**7.1 Package Updates Check:**\n- Run: apt list --upgradable 2>/dev/null | head -50\n- Count: Total packages needing updates\n- Identify: Security-critical packages (docker, kernel, systemd, cryptsetup, apt)\n- Identify: Major version jumps (high priority)\n- Parse: Current version → Available version\n\n**7.2 Kernel & OS Version:**\n- Run: uname -r\n- Check: Current kernel version\n- Identify: How many versions behind\n- Run: cat /etc/os-release\n- Check: OS version and codename\n- Check: LTS status and EOL date\n- Calculate: Months until EOL (flag if < 6 months)\n\n**7.3 Docker Ecosystem Updates:**\n- From apt output, extract:\n  - docker-ce version (current → available)\n  - containerd.io version\n  - docker-compose-plugin version\n- Flag: Major version differences (critical)\n\n**7.4 SSL/TLS Certificate Status:**\n- Run: docker exec traefik ls -la /letsencrypt/acme.json 2>/dev/null\n- Check: Certificate file exists\n- Check: File permissions (should be 600)\n- Check: Last modified date (should be recent)\n- Verify: Auto-renewal working\n\n**7.5 File Permission Audit:**\n- Run: find /opt /home -type f -perm -002 2>/dev/null | head -20\n- List: World-writable files (security risk)\n- Identify: Files with sensitive data\n- Flag: Permission violations\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 7:\n- Complete list of outdated packages\n- Critical updates highlighted (Docker, kernel, systemd)\n- OS EOL status and timeline\n- SSL certificate health\n- World-writable files (security issues)\n- Vulnerability summary with threat levels\n\n**REPORT TO USER:**\nVulnerability summary:\n- Total packages needing updates\n- Critical updates (Docker X.X → Y.Y, kernel, etc)\n- OS EOL warning (if applicable)\n- World-writable files (list if found)\n- Overall vulnerability risk level\n\n**ASK USER:** Continue to Stage 8 (Web Server Logs - Final Stage)?",
+      "completionCondition": "Vulnerability scan complete. All packages checked. Kernel and OS version documented. SSL certificates verified. File permissions audited. Critical vulnerabilities identified and prioritized. Results saved comprehensively. User informed of security update requirements. User approved Stage 8."
+    },
+    {
+      "type": "agent-directive",
+      "id": "stage8",
+      "connections": {
+        "success": "generate-summary"
+      },
+      "directive": "STAGE 8: Web Server & Application Log Analysis (FINAL STAGE)\n\nAnalyze web application attacks on {{serverName}}:\n\n**8.1 Traefik Access Log Analysis:**\n- Run: docker logs traefik 2>&1 | tail -200 | head -100\n- Parse: Recent access patterns\n- Identify: Legitimate vs attack traffic\n- Run: docker logs traefik 2>&1 | grep -oE '\"[^\"]*HTTP' | sort | uniq -c | sort -rn | head -20\n- List: Top requested endpoints\n\n**8.2 Error & Denial Analysis:**\n- Run: docker logs traefik 2>&1 | grep -iE \"error|fail|deny|forbidden|unauthorized\" | tail -50\n- Count: Error frequency\n- Identify: Repeated errors (configuration issues)\n\n**8.3 Exploit Pattern Detection:**\n- Run: docker logs traefik 2>&1 | grep -E \"SELECT|UNION|<script|\\.\\.\\/|etc\\/passwd|phpMyAdmin|wp-admin|\\.php|eval\\(|base64\" | tail -50\n- Identify: SQL injection attempts\n- Identify: XSS attempts\n- Identify: Path traversal attempts\n- Identify: WordPress exploitation\n- Identify: PHP backdoor scanning\n\n**8.4 Credential Harvesting Detection:**\n- Search in logs: GET /.env requests (count)\n- Search: GET /.git/config requests (count)\n- Search: GET /api/.env, /config/.env variants\n- Pattern: Automated credential scanning\n\n**8.5 Attack Source Analysis:**\n- Extract: Unique attacking IPs from logs\n- Identify: Cloudflare-proxied attacks\n- Identify: Direct attacker IPs\n- Check: Bot signatures in User-Agent\n\n**SAVE TO FILE:**\nUpdate SERVER-AUDIT-PLAN.md Stage 8:\n- Traffic statistics (top endpoints)\n- Attack pattern breakdown (WordPress, .env, .git, etc)\n- Exploit attempt counts by type\n- Attacking IPs and sources\n- Traefik configuration errors (if any)\n- Overall web security assessment\n\n**REPORT TO USER:**\nWeb attack summary:\n- WordPress scanning (yes/no, frequency)\n- .env credential harvesting (count)\n- .git source code scanning (count)\n- Other attack vectors identified\n- Defense effectiveness (all blocked or breaches?)\n\n**ASK USER:** All 8 stages complete. Generate final summary and action plan?",
+      "completionCondition": "Web log analysis complete. All attack patterns documented (.env, .git, WordPress, SQL injection, etc). Attack frequency calculated. Sources identified. Traefik errors noted. Results saved comprehensively. User informed of web threat landscape. User approved final summary generation."
+    },
+    {
+      "type": "agent-directive",
+      "id": "generate-summary",
+      "connections": {
+        "success": "end"
+      },
+      "directive": "Generate Final Audit Summary and Action Plan\n\nConsolidate all findings from Stages 1-8 for {{serverName}}:\n\n**TASK 1: Complete SERVER-AUDIT-PLAN.md**\n\nAdd comprehensive Summary & Recommendations section:\n\n1. **Critical Issues (Priority 1 - Immediate):**\n   - Compile all critical findings from 8 stages\n   - Provide specific fix commands for each\n   - Example: No swap → command to create swap\n   - Example: UFW disabled → commands to enable\n   - Example: Active attacks → IPs to ban\n\n2. **High Priority Issues (Priority 2 - This Week):**\n   - Outdated software (Docker, kernel)\n   - Disk cleanup (with size savings)\n   - Container updates needed\n   - Security hardening tasks\n\n3. **Medium Priority Issues (Priority 3 - This Month):**\n   - Configuration improvements\n   - Monitoring setup\n   - Log management\n\n4. **Security Posture Assessment:**\n   - Calculate overall rating (1-10 scale)\n   - List strengths (what's working well)\n   - List weaknesses (what needs improvement)\n   - Active threats summary\n   - Risk assessment (breach/DoS/leak/availability)\n\n**TASK 2: Create SERVER-ACTIONS-TODO.md**\n\nGenerate prioritized action checklist:\n- Organize by: Critical → High → Important → Planning\n- Each action with: specific commands, reason, impact, risk level\n- Include: Time estimates, reboot requirements\n- Group: Related actions together\n- Add: Quick Start Guide (5 actions for 30 minutes)\n\n**TASK 3: Generate Executive Summary**\n\nCreate brief summary for user with:\n- Top 3-5 most critical findings\n- Security rating (X/10)\n- Total disk that can be freed\n- Key protection mechanisms status (firewall, fail2ban, swap)\n- Overall assessment: compromised/under attack/healthy\n\n**DELIVERABLES:**\n1. SERVER-AUDIT-PLAN.md (complete with all sections)\n2. SERVER-ACTIONS-TODO.md (47 prioritized actions)\n3. Executive summary (present to user)\n\n**PRESENT TO USER:**\nExecutive summary with:\n- Security rating\n- Top 3 critical issues\n- Total actions count\n- Immediate actions needed (today)\n- Overall server status",
+      "completionCondition": "Both files (SERVER-AUDIT-PLAN.md and SERVER-ACTIONS-TODO.md) completely generated and saved. Executive summary created and presented to user. User acknowledged completion. Files contain comprehensive findings, prioritized actions with commands, and clear security assessment."
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

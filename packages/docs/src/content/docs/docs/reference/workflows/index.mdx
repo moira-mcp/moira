@@ -1,0 +1,107 @@
+---
+title: Ready Workflows
+description: Pre-built workflows for common AI agent tasks
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Production-ready workflows you can use immediately. Each workflow guides your AI agent through a structured process with validation at every step.
+
+## Software Development
+
+<CardGrid>
+  <LinkCard
+    title="Software Development Flow"
+    description="Complete feature development cycle with planning, iterative implementation, and validation"
+    href="/docs/reference/workflow-templates/#software-development-flow"
+  />
+  <LinkCard
+    title="Software Development Flow Lite"
+    description="Simplified development flow for small features (1-5 steps)"
+    href="./software-development-lite/"
+  />
+</CardGrid>
+
+## Task Management
+
+<CardGrid>
+  <LinkCard
+    title="Quick Task (Recommended)"
+    description="Fast task execution for 2-10 step tasks. Use for most tasks"
+    href="./quick-task/"
+  />
+  <LinkCard
+    title="Robust Task"
+    description="Reliable execution of complex tasks with full infrastructure"
+    href="./robust-task/"
+  />
+  <LinkCard
+    title="Test Generation"
+    description="Generate unit, integration, and E2E tests with coverage validation"
+    href="./test-generation/"
+  />
+  <LinkCard
+    title="Test Planning"
+    description="Create comprehensive test plans with P0-P3 prioritization"
+    href="./test-planning/"
+  />
+</CardGrid>
+
+## Content & Research
+
+<CardGrid>
+  <LinkCard
+    title="Verified Research"
+    description="Structured research with verified sources and citations"
+    href="./verified-research/"
+  />
+  <LinkCard
+    title="Iterative Research"
+    description="Research with iterative quality improvement cycles"
+    href="./iterative-research/"
+  />
+  <LinkCard
+    title="Content Creation"
+    description="From outline to publication with quality gates"
+    href="./content-creation/"
+  />
+  <LinkCard
+    title="PRD Creation"
+    description="Product requirements with edge cases and validation"
+    href="./prd-creation/"
+  />
+</CardGrid>
+
+## Business & Design
+
+<CardGrid>
+  <LinkCard
+    title="Data Analysis"
+    description="Data validation, analysis, and visualization pipeline"
+    href="./data-analysis/"
+  />
+  <LinkCard
+    title="Marketing Campaign"
+    description="Multi-channel campaign with A/B testing setup"
+    href="./marketing-campaign/"
+  />
+  <LinkCard
+    title="UX Design"
+    description="User experience design with accessibility checks"
+    href="./ux-design/"
+  />
+</CardGrid>
+
+## Usage
+
+Start any workflow:
+
+```bash
+mcp__moira__start({ workflowId: "workflow-id", parentExecutionId: "none" })
+```
+
+List available workflows:
+
+```bash
+mcp__moira__list()
+```

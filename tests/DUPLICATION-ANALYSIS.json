@@ -1,0 +1,2144 @@
+{
+  "analysisDate": "2025-09-28T05:04:25.580Z",
+  "totalDuplicationGroups": 54,
+  "consolidationPlan": [
+    {
+      "group": "integration",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/e2e/full-system.test.ts",
+          "testCount": 8,
+          "size": 18687
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        },
+        {
+          "path": "tests/integration/agent-message-enhancement.test.ts",
+          "testCount": 5,
+          "size": 7239
+        },
+        {
+          "path": "tests/integration/error-enhancement-real.test.ts",
+          "testCount": 5,
+          "size": 3803
+        },
+        {
+          "path": "tests/integration/schema-simplification.test.ts",
+          "testCount": 5,
+          "size": 6230
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/workflow-execution.test.ts",
+          "testCount": 3,
+          "size": 6518
+        },
+        {
+          "path": "tests/integration/input-enhancement.test.ts",
+          "testCount": 1,
+          "size": 6914
+        },
+        {
+          "path": "tests/integration/subgraph-execution.test.ts",
+          "testCount": 0,
+          "size": 3371
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/e2e/full-system.test.ts",
+          "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "tests/integration/agent-message-enhancement.test.ts",
+          "tests/integration/error-enhancement-real.test.ts",
+          "tests/integration/schema-simplification.test.ts",
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/workflow-execution.test.ts",
+          "tests/integration/input-enhancement.test.ts",
+          "tests/integration/subgraph-execution.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "integration: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "tests",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        },
+        {
+          "path": "tests/unit/workflow-engine/error-formatting.test.ts",
+          "testCount": 11,
+          "size": 6615
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "testCount": 9,
+          "size": 6280
+        },
+        {
+          "path": "tests/e2e/full-system.test.ts",
+          "testCount": 8,
+          "size": 18687
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        },
+        {
+          "path": "tests/integration/agent-message-enhancement.test.ts",
+          "testCount": 5,
+          "size": 7239
+        },
+        {
+          "path": "tests/integration/error-enhancement-real.test.ts",
+          "testCount": 5,
+          "size": 3803
+        },
+        {
+          "path": "tests/integration/error-handling-validation.test.ts",
+          "testCount": 5,
+          "size": 5111
+        },
+        {
+          "path": "tests/integration/schema-simplification.test.ts",
+          "testCount": 5,
+          "size": 6230
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/input-enhancement.test.ts",
+          "testCount": 1,
+          "size": 6914
+        },
+        {
+          "path": "tests/integration/subgraph-execution.test.ts",
+          "testCount": 0,
+          "size": 3371
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/functional/input-parsing-functional.test.ts",
+        "filesToRemove": [
+          "tests/unit/mcp-server/input-parsing.test.ts",
+          "tests/unit/workflow-engine/error-formatting.test.ts",
+          "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "tests/e2e/full-system.test.ts",
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "tests/integration/agent-message-enhancement.test.ts",
+          "tests/integration/error-enhancement-real.test.ts",
+          "tests/integration/error-handling-validation.test.ts",
+          "tests/integration/schema-simplification.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/input-enhancement.test.ts",
+          "tests/integration/subgraph-execution.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "tests: Multiple tests found, consolidate into tests/functional/input-parsing-functional.test.ts"
+      }
+    },
+    {
+      "group": "input",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/integration/input-enhancement.test.ts",
+          "testCount": 1,
+          "size": 6914
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/functional/input-parsing-functional.test.ts",
+        "filesToRemove": [
+          "tests/unit/mcp-server/input-parsing.test.ts",
+          "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "tests/integration/input-enhancement.test.ts"
+        ],
+        "reasoning": "input: Multiple tests found, consolidate into tests/functional/input-parsing-functional.test.ts"
+      }
+    },
+    {
+      "group": "parsing",
+      "type": "mixed-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/path-resolver.test.ts",
+          "testCount": 31,
+          "size": 9952
+        },
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/path-resolver.test.ts",
+        "filesToRemove": [
+          "tests/functional/input-parsing-functional.test.ts",
+          "tests/unit/mcp-server/input-parsing.test.ts"
+        ],
+        "reasoning": "parsing: Multiple tests found, consolidate into tests/unit/workflow-engine/path-resolver.test.ts"
+      }
+    },
+    {
+      "group": "enhanced",
+      "type": "mixed-overlap",
+      "files": [
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        },
+        {
+          "path": "tests/unit/workflow-engine/error-formatting.test.ts",
+          "testCount": 11,
+          "size": 6615
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/functional/input-parsing-functional.test.ts",
+        "filesToRemove": [
+          "tests/unit/mcp-server/input-parsing.test.ts",
+          "tests/unit/workflow-engine/error-formatting.test.ts"
+        ],
+        "reasoning": "enhanced: Multiple tests found, consolidate into tests/functional/input-parsing-functional.test.ts"
+      }
+    },
+    {
+      "group": "user-friendly",
+      "type": "mixed-overlap",
+      "files": [
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/functional/input-parsing-functional.test.ts",
+        "filesToRemove": ["tests/unit/mcp-server/input-parsing.test.ts"],
+        "reasoning": "user-friendly: Keep most complete test (27 tests), consolidate smaller (20 tests)"
+      }
+    },
+    {
+      "group": "formats",
+      "type": "mixed-overlap",
+      "files": [
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/functional/input-parsing-functional.test.ts",
+        "filesToRemove": ["tests/unit/mcp-server/input-parsing.test.ts"],
+        "reasoning": "formats: Keep most complete test (27 tests), consolidate smaller (20 tests)"
+      }
+    },
+    {
+      "group": "input-processing",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/functional/input-parsing-functional.test.ts",
+          "testCount": 27,
+          "size": 7410
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/integration/input-enhancement.test.ts",
+          "testCount": 1,
+          "size": 6914
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/functional/input-parsing-functional.test.ts",
+        "filesToRemove": [
+          "tests/unit/mcp-server/input-parsing.test.ts",
+          "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "tests/integration/input-enhancement.test.ts"
+        ],
+        "reasoning": "input-processing: Multiple tests found, consolidate into tests/functional/input-parsing-functional.test.ts"
+      }
+    },
+    {
+      "group": "advanced",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "testCount": 5,
+          "size": 4252
+        },
+        {
+          "path": "tests/integration/advanced-templates.test.ts",
+          "testCount": 2,
+          "size": 6039
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+        "filesToRemove": ["tests/integration/advanced-templates.test.ts"],
+        "reasoning": "advanced: Keep most complete test (5 tests), consolidate smaller (2 tests)"
+      }
+    },
+    {
+      "group": "template",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        },
+        {
+          "path": "tests/unit/workflow-engine/template-processor.test.ts",
+          "testCount": 3,
+          "size": 2800
+        },
+        {
+          "path": "tests/integration/advanced-templates.test.ts",
+          "testCount": 2,
+          "size": 6039
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/telegram-template-verification.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/template-processor.test.ts",
+          "tests/integration/advanced-templates.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "template: Multiple tests found, consolidate into tests/integration/telegram-template-verification.test.ts"
+      }
+    },
+    {
+      "group": "processing",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        },
+        {
+          "path": "tests/integration/advanced-templates.test.ts",
+          "testCount": 2,
+          "size": 6039
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/telegram-template-verification.test.ts",
+        "filesToRemove": [
+          "tests/integration/advanced-templates.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "processing: Multiple tests found, consolidate into tests/integration/telegram-template-verification.test.ts"
+      }
+    },
+    {
+      "group": "integration-layer",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+          "testCount": 7,
+          "size": 10289
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/integration/agent-message-enhancement.test.ts",
+          "testCount": 5,
+          "size": 7239
+        },
+        {
+          "path": "tests/integration/error-enhancement-real.test.ts",
+          "testCount": 5,
+          "size": 3803
+        },
+        {
+          "path": "tests/integration/error-handling-validation.test.ts",
+          "testCount": 5,
+          "size": 5111
+        },
+        {
+          "path": "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "testCount": 5,
+          "size": 4252
+        },
+        {
+          "path": "tests/integration/schema-simplification.test.ts",
+          "testCount": 5,
+          "size": 6230
+        },
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        },
+        {
+          "path": "tests/integration/mcp-engine-state-persistence.test.ts",
+          "testCount": 3,
+          "size": 5194
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/workflow-execution.test.ts",
+          "testCount": 3,
+          "size": 6518
+        },
+        {
+          "path": "tests/integration/workflow-outputs.test.ts",
+          "testCount": 3,
+          "size": 2018
+        },
+        {
+          "path": "tests/integration/advanced-templates.test.ts",
+          "testCount": 2,
+          "size": 6039
+        },
+        {
+          "path": "tests/integration/essential-cases-split.test.ts",
+          "testCount": 2,
+          "size": 2513
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        },
+        {
+          "path": "tests/integration/subgraph-performance.test.ts",
+          "testCount": 2,
+          "size": 6750
+        },
+        {
+          "path": "tests/integration/validation-loops.test.ts",
+          "testCount": 2,
+          "size": 3891
+        },
+        {
+          "path": "tests/integration/input-enhancement.test.ts",
+          "testCount": 1,
+          "size": 6914
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        },
+        {
+          "path": "tests/integration/subgraph-nested-levels.test.ts",
+          "testCount": 1,
+          "size": 5892
+        },
+        {
+          "path": "tests/integration/subgraph-sequential.test.ts",
+          "testCount": 1,
+          "size": 4402
+        },
+        {
+          "path": "tests/integration/essential-cases.test.ts",
+          "testCount": 0,
+          "size": 5569
+        },
+        {
+          "path": "tests/integration/subgraph-execution.test.ts",
+          "testCount": 0,
+          "size": 3371
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+        "filesToRemove": [
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/integration/agent-message-enhancement.test.ts",
+          "tests/integration/error-enhancement-real.test.ts",
+          "tests/integration/error-handling-validation.test.ts",
+          "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "tests/integration/schema-simplification.test.ts",
+          "tests/integration/telegram-template-verification.test.ts",
+          "tests/integration/mcp-engine-state-persistence.test.ts",
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/workflow-execution.test.ts",
+          "tests/integration/workflow-outputs.test.ts",
+          "tests/integration/advanced-templates.test.ts",
+          "tests/integration/essential-cases-split.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts",
+          "tests/integration/subgraph-performance.test.ts",
+          "tests/integration/validation-loops.test.ts",
+          "tests/integration/input-enhancement.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts",
+          "tests/integration/subgraph-nested-levels.test.ts",
+          "tests/integration/subgraph-sequential.test.ts",
+          "tests/integration/essential-cases.test.ts",
+          "tests/integration/subgraph-execution.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "integration-layer: Multiple tests found, consolidate into tests/integration/mcp-server/core-mcp-tools.test.ts"
+      }
+    },
+    {
+      "group": "agent",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "testCount": 9,
+          "size": 6280
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        },
+        {
+          "path": "tests/integration/agent-message-enhancement.test.ts",
+          "testCount": 5,
+          "size": 7239
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/agent-message-queue.test.ts",
+        "filesToRemove": [
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "tests/integration/agent-message-enhancement.test.ts",
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "agent: Multiple tests found, consolidate into tests/unit/workflow-engine/agent-message-queue.test.ts"
+      }
+    },
+    {
+      "group": "message",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "testCount": 9,
+          "size": 6280
+        },
+        {
+          "path": "tests/integration/agent-message-enhancement.test.ts",
+          "testCount": 5,
+          "size": 7239
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "tests/integration/agent-message-enhancement.test.ts"
+        ],
+        "reasoning": "message: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "enhancement",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/agent-message-enhancement.test.ts",
+          "testCount": 5,
+          "size": 7239
+        },
+        {
+          "path": "tests/integration/error-enhancement-real.test.ts",
+          "testCount": 5,
+          "size": 3803
+        },
+        {
+          "path": "tests/integration/input-enhancement.test.ts",
+          "testCount": 1,
+          "size": 6914
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/agent-message-enhancement.test.ts",
+        "filesToRemove": [
+          "tests/integration/error-enhancement-real.test.ts",
+          "tests/integration/input-enhancement.test.ts"
+        ],
+        "reasoning": "enhancement: Multiple tests found, consolidate into tests/integration/agent-message-enhancement.test.ts"
+      }
+    },
+    {
+      "group": "error",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/error-formatting.test.ts",
+          "testCount": 11,
+          "size": 6615
+        },
+        {
+          "path": "tests/integration/error-enhancement-real.test.ts",
+          "testCount": 5,
+          "size": 3803
+        },
+        {
+          "path": "tests/integration/error-handling-validation.test.ts",
+          "testCount": 5,
+          "size": 5111
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "tests/unit/workflow-engine/error-formatting.test.ts",
+          "tests/integration/error-enhancement-real.test.ts",
+          "tests/integration/error-handling-validation.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts"
+        ],
+        "reasoning": "error: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "real",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/integration/error-enhancement-real.test.ts",
+          "testCount": 5,
+          "size": 3803
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/mcp-server/input-parser-simple.test.ts",
+        "filesToRemove": ["tests/integration/error-enhancement-real.test.ts"],
+        "reasoning": "real: Keep most complete test (18 tests), consolidate smaller (5 tests)"
+      }
+    },
+    {
+      "group": "handling",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/integration/error-handling-validation.test.ts",
+          "testCount": 5,
+          "size": 5111
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "tests/integration/error-handling-validation.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts"
+        ],
+        "reasoning": "handling: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "validation",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/path-resolver.test.ts",
+          "testCount": 31,
+          "size": 9952
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        },
+        {
+          "path": "tests/integration/error-handling-validation.test.ts",
+          "testCount": 5,
+          "size": 5111
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        },
+        {
+          "path": "tests/integration/subgraph-performance.test.ts",
+          "testCount": 2,
+          "size": 6750
+        },
+        {
+          "path": "tests/integration/validation-loops.test.ts",
+          "testCount": 2,
+          "size": 3891
+        },
+        {
+          "path": "tests/integration/subgraph-nested-levels.test.ts",
+          "testCount": 1,
+          "size": 5892
+        },
+        {
+          "path": "tests/integration/subgraph-sequential.test.ts",
+          "testCount": 1,
+          "size": 4402
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/path-resolver.test.ts",
+          "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "tests/unit/workflow-engine/context-mapper.test.ts",
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "tests/integration/error-handling-validation.test.ts",
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts",
+          "tests/integration/subgraph-performance.test.ts",
+          "tests/integration/validation-loops.test.ts",
+          "tests/integration/subgraph-nested-levels.test.ts",
+          "tests/integration/subgraph-sequential.test.ts"
+        ],
+        "reasoning": "validation: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "validation-testing",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        },
+        {
+          "path": "tests/integration/error-handling-validation.test.ts",
+          "testCount": 5,
+          "size": 5111
+        },
+        {
+          "path": "tests/integration/validation-loops.test.ts",
+          "testCount": 2,
+          "size": 3891
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+        "filesToRemove": [
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "tests/integration/error-handling-validation.test.ts",
+          "tests/integration/validation-loops.test.ts"
+        ],
+        "reasoning": "validation-testing: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-validation.test.ts"
+      }
+    },
+    {
+      "group": "essential",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/essential-cases-split.test.ts",
+          "testCount": 2,
+          "size": 2513
+        },
+        {
+          "path": "tests/integration/essential-cases.test.ts",
+          "testCount": 0,
+          "size": 5569
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/essential-cases-split.test.ts",
+        "filesToRemove": ["tests/integration/essential-cases.test.ts"],
+        "reasoning": "essential: Keep most complete test (2 tests), consolidate smaller (0 tests)"
+      }
+    },
+    {
+      "group": "cases",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/integration/essential-cases-split.test.ts",
+          "testCount": 2,
+          "size": 2513
+        },
+        {
+          "path": "tests/integration/essential-cases.test.ts",
+          "testCount": 0,
+          "size": 5569
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "tests/integration/essential-cases-split.test.ts",
+          "tests/integration/essential-cases.test.ts"
+        ],
+        "reasoning": "cases: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "test",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/essential-cases-split.test.ts",
+          "testCount": 2,
+          "size": 2513
+        },
+        {
+          "path": "tests/integration/essential-cases.test.ts",
+          "testCount": 0,
+          "size": 5569
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/essential-cases-split.test.ts",
+        "filesToRemove": ["tests/integration/essential-cases.test.ts"],
+        "reasoning": "test: Keep most complete test (2 tests), consolidate smaller (0 tests)"
+      }
+    },
+    {
+      "group": "mcp",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+          "testCount": 7,
+          "size": 10289
+        },
+        {
+          "path": "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "testCount": 5,
+          "size": 4252
+        },
+        {
+          "path": "tests/integration/mcp-engine-state-persistence.test.ts",
+          "testCount": 3,
+          "size": 5194
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+        "filesToRemove": [
+          "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "tests/integration/mcp-engine-state-persistence.test.ts"
+        ],
+        "reasoning": "mcp: Multiple tests found, consolidate into tests/integration/mcp-server/core-mcp-tools.test.ts"
+      }
+    },
+    {
+      "group": "tools",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+          "testCount": 7,
+          "size": 10289
+        },
+        {
+          "path": "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "testCount": 5,
+          "size": 4252
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+        "filesToRemove": ["tests/integration/mcp-server/advanced-mcp-tools.test.ts"],
+        "reasoning": "tools: Keep most complete test (7 tests), consolidate smaller (5 tests)"
+      }
+    },
+    {
+      "group": "workflow",
+      "type": "integration-overlap",
+      "files": [
+        {
+          "path": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+          "testCount": 7,
+          "size": 10289
+        },
+        {
+          "path": "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "testCount": 5,
+          "size": 4252
+        },
+        {
+          "path": "tests/integration/workflow-execution.test.ts",
+          "testCount": 3,
+          "size": 6518
+        },
+        {
+          "path": "tests/integration/workflow-outputs.test.ts",
+          "testCount": 3,
+          "size": 2018
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+        "filesToRemove": [
+          "tests/integration/mcp-server/advanced-mcp-tools.test.ts",
+          "tests/integration/workflow-execution.test.ts",
+          "tests/integration/workflow-outputs.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "workflow: Multiple tests found, consolidate into tests/integration/mcp-server/core-mcp-tools.test.ts"
+      }
+    },
+    {
+      "group": "core",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+          "testCount": 7,
+          "size": 10289
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/mcp-server/input-parser-simple.test.ts",
+        "filesToRemove": ["tests/integration/mcp-server/core-mcp-tools.test.ts"],
+        "reasoning": "core: Keep most complete test (18 tests), consolidate smaller (7 tests)"
+      }
+    },
+    {
+      "group": "management",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+          "testCount": 7,
+          "size": 10289
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/mcp-server/core-mcp-tools.test.ts",
+        "filesToRemove": ["tests/unit/workflow-engine/subgraph-handler-complex.test.ts"],
+        "reasoning": "management: Keep most complete test (7 tests), consolidate smaller (0 tests)"
+      }
+    },
+    {
+      "group": "schema",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/unit/workflow-engine/schema-simplification.test.ts",
+          "testCount": 10,
+          "size": 5820
+        },
+        {
+          "path": "tests/integration/schema-simplification.test.ts",
+          "testCount": 5,
+          "size": 6230
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/schema-simplification.test.ts",
+          "tests/integration/schema-simplification.test.ts"
+        ],
+        "reasoning": "schema: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-validation.test.ts"
+      }
+    },
+    {
+      "group": "simplification",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/schema-simplification.test.ts",
+          "testCount": 10,
+          "size": 5820
+        },
+        {
+          "path": "tests/integration/schema-simplification.test.ts",
+          "testCount": 5,
+          "size": 6230
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/schema-simplification.test.ts",
+        "filesToRemove": ["tests/integration/schema-simplification.test.ts"],
+        "reasoning": "simplification: Keep most complete test (10 tests), consolidate smaller (5 tests)"
+      }
+    },
+    {
+      "group": "subgraph",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "testCount": 10,
+          "size": 16108
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        },
+        {
+          "path": "tests/integration/subgraph-performance.test.ts",
+          "testCount": 2,
+          "size": 6750
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        },
+        {
+          "path": "tests/integration/subgraph-nested-levels.test.ts",
+          "testCount": 1,
+          "size": 5892
+        },
+        {
+          "path": "tests/integration/subgraph-sequential.test.ts",
+          "testCount": 1,
+          "size": 4402
+        },
+        {
+          "path": "tests/integration/subgraph-execution.test.ts",
+          "testCount": 0,
+          "size": 3371
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts",
+          "tests/integration/subgraph-performance.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts",
+          "tests/integration/subgraph-nested-levels.test.ts",
+          "tests/integration/subgraph-sequential.test.ts",
+          "tests/integration/subgraph-execution.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "subgraph: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "transparency",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/integration/subgraph-transparency-validation.test.ts",
+        "filesToRemove": [
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "transparency: Multiple tests found, consolidate into tests/integration/subgraph-transparency-validation.test.ts"
+      }
+    },
+    {
+      "group": "subgraphnode",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "testCount": 10,
+          "size": 16108
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        },
+        {
+          "path": "tests/integration/subgraph-performance.test.ts",
+          "testCount": 2,
+          "size": 6750
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        },
+        {
+          "path": "tests/integration/subgraph-nested-levels.test.ts",
+          "testCount": 1,
+          "size": 5892
+        },
+        {
+          "path": "tests/integration/subgraph-sequential.test.ts",
+          "testCount": 1,
+          "size": 4402
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+        "filesToRemove": [
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts",
+          "tests/integration/subgraph-performance.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts",
+          "tests/integration/subgraph-nested-levels.test.ts",
+          "tests/integration/subgraph-sequential.test.ts"
+        ],
+        "reasoning": "subgraphnode: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-delegation.test.ts"
+      }
+    },
+    {
+      "group": "subgraph-testing",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "testCount": 10,
+          "size": 16108
+        },
+        {
+          "path": "tests/integration/subgraph-transparency-validation.test.ts",
+          "testCount": 6,
+          "size": 19090
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/integration/subgraph-agent-transparency.test.ts",
+          "testCount": 3,
+          "size": 8756
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        },
+        {
+          "path": "tests/integration/subgraph-performance.test.ts",
+          "testCount": 2,
+          "size": 6750
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        },
+        {
+          "path": "tests/integration/subgraph-nested-levels.test.ts",
+          "testCount": 1,
+          "size": 5892
+        },
+        {
+          "path": "tests/integration/subgraph-sequential.test.ts",
+          "testCount": 1,
+          "size": 4402
+        },
+        {
+          "path": "tests/integration/subgraph-execution.test.ts",
+          "testCount": 0,
+          "size": 3371
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "tests/integration/subgraph-transparency-validation.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/integration/subgraph-agent-transparency.test.ts",
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts",
+          "tests/integration/subgraph-performance.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts",
+          "tests/integration/subgraph-nested-levels.test.ts",
+          "tests/integration/subgraph-sequential.test.ts",
+          "tests/integration/subgraph-execution.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "subgraph-testing: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "context",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/context-mapper.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts"
+        ],
+        "reasoning": "context: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "mapping",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/integration/subgraph-context-mapping.test.ts",
+          "testCount": 2,
+          "size": 6106
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "tests/unit/workflow-engine/context-mapper.test.ts",
+          "tests/integration/subgraph-context-mapping.test.ts"
+        ],
+        "reasoning": "mapping: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "scenarios",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/integration/subgraph-error-scenarios.test.ts",
+          "testCount": 1,
+          "size": 4696
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/mcp-server/input-parser-simple.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/context-mapper.test.ts",
+          "tests/integration/subgraph-error-scenarios.test.ts"
+        ],
+        "reasoning": "scenarios: Multiple tests found, consolidate into tests/unit/mcp-server/input-parser-simple.test.ts"
+      }
+    },
+    {
+      "group": "execution",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        },
+        {
+          "path": "tests/integration/workflow-execution.test.ts",
+          "testCount": 3,
+          "size": 6518
+        },
+        {
+          "path": "tests/integration/subgraph-execution.test.ts",
+          "testCount": 0,
+          "size": 3371
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/integration/subgraph-step-execution.test.ts",
+          "tests/integration/workflow-execution.test.ts",
+          "tests/integration/subgraph-execution.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "execution: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "step",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "testCount": 10,
+          "size": 16108
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+        "filesToRemove": ["tests/integration/subgraph-step-execution.test.ts"],
+        "reasoning": "step: Keep most complete test (10 tests), consolidate smaller (3 tests)"
+      }
+    },
+    {
+      "group": "delegation",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "testCount": 10,
+          "size": 16108
+        },
+        {
+          "path": "tests/integration/subgraph-step-execution.test.ts",
+          "testCount": 3,
+          "size": 10224
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+        "filesToRemove": ["tests/integration/subgraph-step-execution.test.ts"],
+        "reasoning": "delegation: Keep most complete test (10 tests), consolidate smaller (3 tests)"
+      }
+    },
+    {
+      "group": "telegram",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/integration/telegram-template-verification.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "telegram: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "verification",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/context-mapper.test.ts",
+        "filesToRemove": ["tests/integration/telegram-template-verification.test.ts"],
+        "reasoning": "verification: Keep most complete test (15 tests), consolidate smaller (5 tests)"
+      }
+    },
+    {
+      "group": "formatting",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/error-formatting.test.ts",
+          "testCount": 11,
+          "size": 6615
+        },
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/error-formatting.test.ts",
+        "filesToRemove": ["tests/integration/telegram-template-verification.test.ts"],
+        "reasoning": "formatting: Keep most complete test (11 tests), consolidate smaller (5 tests)"
+      }
+    },
+    {
+      "group": "telegram-integration",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/integration/telegram-template-verification.test.ts",
+          "testCount": 5,
+          "size": 10711
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/integration/telegram-template-verification.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "telegram-integration: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "basic",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/integration/telegram-workflow.test.ts"
+        ],
+        "reasoning": "basic: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "with",
+      "type": "cross-layer",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/integration/telegram-workflow.test.ts",
+          "testCount": 0,
+          "size": 11875
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": ["tests/integration/telegram-workflow.test.ts"],
+        "reasoning": "with: Keep most complete test (38 tests), consolidate smaller (0 tests)"
+      }
+    },
+    {
+      "group": "simple",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/mcp-server/input-parser-simple.test.ts",
+        "filesToRemove": ["tests/unit/workflow-engine/subgraph-handler-simple.test.ts"],
+        "reasoning": "simple: Keep most complete test (18 tests), consolidate smaller (5 tests)"
+      }
+    },
+    {
+      "group": "unit-layer",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/path-resolver.test.ts",
+          "testCount": 31,
+          "size": 9952
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parsing.test.ts",
+          "testCount": 20,
+          "size": 9295
+        },
+        {
+          "path": "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "testCount": 18,
+          "size": 8757
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        },
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/unit/workflow-engine/node-handlers.test.ts",
+          "testCount": 12,
+          "size": 11929
+        },
+        {
+          "path": "tests/unit/workflow-engine/error-formatting.test.ts",
+          "testCount": 11,
+          "size": 6615
+        },
+        {
+          "path": "tests/unit/workflow-engine/schema-simplification.test.ts",
+          "testCount": 10,
+          "size": 5820
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "testCount": 10,
+          "size": 16108
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "testCount": 9,
+          "size": 6280
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/unit/workflow-engine/template-processor.test.ts",
+          "testCount": 3,
+          "size": 2800
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/path-resolver.test.ts",
+          "tests/unit/mcp-server/input-parsing.test.ts",
+          "tests/unit/mcp-server/input-parser-simple.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "tests/unit/workflow-engine/context-mapper.test.ts",
+          "tests/unit/workflow-engine/node-handlers.test.ts",
+          "tests/unit/workflow-engine/error-formatting.test.ts",
+          "tests/unit/workflow-engine/schema-simplification.test.ts",
+          "tests/unit/workflow-engine/subgraph-delegation.test.ts",
+          "tests/unit/workflow-engine/agent-message-queue.test.ts",
+          "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/unit/workflow-engine/template-processor.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "unit-layer: Multiple tests found, consolidate into tests/unit/workflow-engine/telegram-services.test.ts"
+      }
+    },
+    {
+      "group": "successful",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/agent-directive-validation.test.ts",
+          "testCount": 6,
+          "size": 5033
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": ["tests/unit/workflow-engine/agent-directive-validation.test.ts"],
+        "reasoning": "successful: Keep most complete test (38 tests), consolidate smaller (6 tests)"
+      }
+    },
+    {
+      "group": "complex",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/context-mapper.test.ts",
+          "testCount": 15,
+          "size": 11822
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/context-mapper.test.ts",
+        "filesToRemove": ["tests/unit/workflow-engine/subgraph-handler-complex.test.ts"],
+        "reasoning": "complex: Keep most complete test (15 tests), consolidate smaller (0 tests)"
+      }
+    },
+    {
+      "group": "node",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/node-handlers.test.ts",
+          "testCount": 12,
+          "size": 11929
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": ["tests/unit/workflow-engine/node-handlers.test.ts"],
+        "reasoning": "node: Keep most complete test (38 tests), consolidate smaller (12 tests)"
+      }
+    },
+    {
+      "group": "handler",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "handler: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "subgraphnodehandler",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+          "testCount": 16,
+          "size": 19155
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "testCount": 5,
+          "size": 5859
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-handler-complex.test.ts",
+          "testCount": 0,
+          "size": 5958
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/subgraph-handler.test.ts",
+        "filesToRemove": [
+          "tests/unit/workflow-engine/subgraph-handler-simple.test.ts",
+          "tests/unit/workflow-engine/subgraph-handler-complex.test.ts"
+        ],
+        "reasoning": "subgraphnodehandler: Multiple tests found, consolidate into tests/unit/workflow-engine/subgraph-handler.test.ts"
+      }
+    },
+    {
+      "group": "configuration",
+      "type": "unit-overlap",
+      "files": [
+        {
+          "path": "tests/unit/workflow-engine/telegram-services.test.ts",
+          "testCount": 38,
+          "size": 23392
+        },
+        {
+          "path": "tests/unit/workflow-engine/subgraph-validation.test.ts",
+          "testCount": 16,
+          "size": 21059
+        }
+      ],
+      "recommendation": {
+        "action": "consolidate",
+        "targetFile": "tests/unit/workflow-engine/telegram-services.test.ts",
+        "filesToRemove": ["tests/unit/workflow-engine/subgraph-validation.test.ts"],
+        "reasoning": "configuration: Keep most complete test (38 tests), consolidate smaller (16 tests)"
+      }
+    }
+  ]
+}

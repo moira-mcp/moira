@@ -1,0 +1,38 @@
+export type {
+  McpClient,
+  SetupType,
+  ClientCategory,
+  ConfigLanguage,
+  ConfigGeneratorId,
+  DeeplinkGeneratorId,
+  TokenConfigGeneratorId,
+  ClientSetup,
+  SetupAuth,
+  SetupAlternative,
+  SetupTokenAuth,
+} from "./types.js";
+export {
+  mcpClients,
+  getClientById,
+  getClientsByCategory,
+  getClientIds,
+  CLIENT_COUNT,
+} from "./clients.js";
+export {
+  generateMcpConfig,
+  generateClaudeCodeCommand,
+  generateCopilotCliConfig,
+  generateCursorDeeplink,
+  generateVSCodeDeeplink,
+  generateContinueConfig,
+  generateZedConfig,
+  generateGeminiCliConfig,
+  configGenerators,
+  deeplinkGenerators,
+  generateMcpConfigWithToken,
+  generateCopilotCliConfigWithToken,
+  generateContinueConfigWithToken,
+  generateZedConfigWithToken,
+  generateGeminiCliConfigWithToken,
+  tokenConfigGenerators,
+} from "./config.js";

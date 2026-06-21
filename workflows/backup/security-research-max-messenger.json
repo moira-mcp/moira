@@ -1,0 +1,263 @@
+{
+  "slug": "security-research-max-messenger",
+  "metadata": {
+    "name": "MAX Security Research Algorithm",
+    "version": "3.0.0",
+    "description": "Жёсткий алгоритм исследования безопасности MAX с конкретными командами и источниками"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "research-max-architecture"
+      },
+      "initialData": {
+        "target": "MAX messenger",
+        "research_focus": "security vulnerabilities and data protection"
+      }
+    },
+    {
+      "id": "research-max-architecture",
+      "type": "agent-directive",
+      "directive": "🔍 **КОМАНДА: ИССЛЕДОВАТЬ АРХИТЕКТУРУ MAX**\n\nИспользуйте точно эти источники:\n1. Официальный сайт MAX messenger и документация API\n2. GitHub: поиск \"MAX messenger\" OR \"MAX chat\" + security, vulnerability\n3. Технические whitepaper и архитектурная документация\n\nАнализируйте точно эти аспекты:\n- Клиент-серверная архитектура\n- Протоколы передачи сообщений\n- Криптографические алгоритмы\n- Хранение данных на сервере\n\nОтветьте ТОЛЬКО флагом и кратким статусом.",
+      "connections": {
+        "success": "scan-vulnerabilities"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "research_complete",
+          "architecture_analyzed",
+          "crypto_found"
+        ],
+        "properties": {
+          "crypto_found": {
+            "type": "boolean",
+            "description": "Найдена информация о криптографии"
+          },
+          "research_complete": {
+            "type": "boolean",
+            "description": "Архитектурное исследование завершено"
+          },
+          "architecture_analyzed": {
+            "type": "boolean",
+            "description": "Архитектура проанализирована"
+          }
+        }
+      },
+      "completionCondition": "Агент исследовал архитектуру MAX по указанным источникам"
+    },
+    {
+      "id": "scan-vulnerabilities",
+      "type": "agent-directive",
+      "directive": "🚨 **КОМАНДА: ПОИСК УЯЗВИМОСТЕЙ MAX**\n\nВыполните поиск в этих базах (без вариантов):\n1. CVE Database: поиск по \"MAX messenger\" за 2020-2024\n2. NVD (nvd.nist.gov): поиск \"MAX chat\" OR \"MAX messenger\"\n3. GitHub Issues: repo:*/MAX* label:security OR label:vulnerability\n4. Reddit r/netsec: поиск \"MAX messenger vulnerability\"\n5. Отчёты с HackerOne, Bugcrowd (публичные)\n\nКлассифицируйте найденное по CVSS:\n- Критичные (9.0-10.0): RCE, auth bypass\n- Высокие (7.0-8.9): crypto weaknesses, injections\n- Средние (4.0-6.9): DoS, info disclosure\n- Низкие (0.1-3.9): config issues\n\nОтветьте ТОЛЬКО счётчиками по категориям.",
+      "connections": {
+        "success": "analyze-data-protection"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "scan_complete",
+          "critical_found",
+          "high_found",
+          "medium_found",
+          "low_found"
+        ],
+        "properties": {
+          "low_found": {
+            "type": "number",
+            "description": "Количество низких уязвимостей"
+          },
+          "high_found": {
+            "type": "number",
+            "description": "Количество высоких уязвимостей"
+          },
+          "scan_complete": {
+            "type": "boolean",
+            "description": "Поиск уязвимостей завершён"
+          },
+          "medium_found": {
+            "type": "number",
+            "description": "Количество средних уязвимостей"
+          },
+          "critical_found": {
+            "type": "number",
+            "description": "Количество критичных уязвимостей"
+          }
+        }
+      },
+      "completionCondition": "Агент просканировал все указанные базы уязвимостей"
+    },
+    {
+      "id": "analyze-data-protection",
+      "type": "agent-directive",
+      "directive": "🛡️ **КОМАНДА: АНАЛИЗ ЗАЩИТЫ ПЕРСОНАЛЬНЫХ ДАННЫХ**\n\nИсследуйте точно эти источники:\n1. Официальные отчёты Роскомнадзора о нарушениях ПД (2023-2024)\n2. GDPR Enforcement Tracker (enforcementtracker.com) - статистика штрафов\n3. Ponemon Institute Cost of Data Breach Report 2024\n4. Verizon DBIR 2024 (секция по причинам утечек)\n5. Публичные case studies: Equifax, Target, Capital One\n\nКлассифицируйте проблемы по 3 категориям:\n- Технические: отсутствие шифрования, слабые пароли\n- Организационные: отсутствие политик, плохое обучение\n- Человеческий фактор: фишинг, ошибки сотрудников\n\nОтветьте только счётчиками.",
+      "connections": {
+        "success": "research-threat-landscape"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "analysis_complete",
+          "technical_issues",
+          "organizational_issues",
+          "human_factor_issues"
+        ],
+        "properties": {
+          "technical_issues": {
+            "type": "number",
+            "description": "Количество технических проблем"
+          },
+          "analysis_complete": {
+            "type": "boolean",
+            "description": "Анализ защиты ПД завершён"
+          },
+          "human_factor_issues": {
+            "type": "number",
+            "description": "Количество проблем человеческого фактора"
+          },
+          "organizational_issues": {
+            "type": "number",
+            "description": "Количество организационных проблем"
+          }
+        }
+      },
+      "completionCondition": "Агент проанализировал указанные источники по защите ПД"
+    },
+    {
+      "id": "research-threat-landscape",
+      "type": "agent-directive",
+      "directive": "🎯 **КОМАНДА: ИССЛЕДОВАНИЕ ЛАНДШАФТА УГРОЗ**\n\nИспользуйте точно эти источники:\n1. MITRE ATT&CK Matrix (attack.mitre.org) - тактики 2024\n2. Kaspersky Security Bulletin 2024 (последний доступный)\n3. CrowdStrike Global Threat Report 2024\n4. Microsoft Digital Defense Report 2024\n5. FireEye/Mandiant M-Trends Report 2024\n6. ENISA Threat Landscape Report 2024\n\nКлассифицируйте по 5 категориям:\n- APT группы (государственные)\n- Ransomware-as-a-Service (криминальные)\n- Фишинг и social engineering\n- Малварь и botnets\n- Внутренние угрозы\n\nОпределите топ-5 самых активных угроз 2024 года.\n\nОтветьте счётчиками + список топ-5.",
+      "connections": {
+        "success": "create-risk-matrix"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "research_complete",
+          "apt_threats",
+          "ransomware_threats",
+          "phishing_threats",
+          "malware_threats",
+          "insider_threats",
+          "top_5_threats"
+        ],
+        "properties": {
+          "apt_threats": {
+            "type": "number",
+            "description": "Количество APT угроз"
+          },
+          "top_5_threats": {
+            "type": "string",
+            "description": "Топ-5 самых активных угроз 2024"
+          },
+          "insider_threats": {
+            "type": "number",
+            "description": "Количество внутренних угроз"
+          },
+          "research_complete": {
+            "type": "boolean",
+            "description": "Исследование ландшафта угроз завершено"
+          },
+          "malware_threats": {
+            "type": "number",
+            "description": "Количество malware угроз"
+          },
+          "phishing_threats": {
+            "type": "number",
+            "description": "Количество фишинг угроз"
+          },
+          "ransomware_threats": {
+            "type": "number",
+            "description": "Количество ransomware угроз"
+          }
+        }
+      },
+      "completionCondition": "Агент происследовал указанные threat intelligence источники"
+    },
+    {
+      "id": "create-risk-matrix",
+      "type": "agent-directive",
+      "directive": "📈 **КОМАНДА: СОЗДАТЬ МАТРИЦУ РИСКОВ**\n\nНа основе всех предыдущих данных создайте:\n\n1. **Матрица рисков 5x5** (вероятность × воздействие)\n   - Критичные (20-25 баллов)\n   - Высокие (15-19 баллов)\n   - Средние (10-14 баллов)\n   - Низкие (5-9 баллов)\n   - Минимальные (1-4 балла)\n\n2. **Определите 5 самых критичных рисков:**\n   - Вулнерабилити MAX\n   - Проблемы защиты ПД\n   - Актуальные угрозы\n\n3. **Сформулируйте 10 конкретных рекомендаций** по приоритету\n\nОтветьте только списками (не описаниями).",
+      "connections": {
+        "success": "generate-executive-report"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "matrix_complete",
+          "critical_risks_count",
+          "high_risks_count",
+          "top_5_risks",
+          "recommendations_ready"
+        ],
+        "properties": {
+          "top_5_risks": {
+            "type": "string",
+            "description": "5 самых критичных рисков (кратко)"
+          },
+          "matrix_complete": {
+            "type": "boolean",
+            "description": "Матрица рисков создана"
+          },
+          "high_risks_count": {
+            "type": "number",
+            "description": "Количество высоких рисков"
+          },
+          "critical_risks_count": {
+            "type": "number",
+            "description": "Количество критичных рисков"
+          },
+          "recommendations_ready": {
+            "type": "boolean",
+            "description": "10 рекомендаций сформулированы"
+          }
+        }
+      },
+      "completionCondition": "Агент создал матрицу рисков и сформулировал рекомендации"
+    },
+    {
+      "id": "generate-executive-report",
+      "type": "agent-directive",
+      "directive": "📋 **КОМАНДА: СОЗДАТЬ EXECUTIVE SUMMARY**\n\nСоставьте краткий отчёт для руководства с 7 разделами:\n\n1. **EXECUTIVE SUMMARY** (1 страница)\n   - Ключевые находки в 3 пунктах\n   - Критичные риски (5 пунктов)\n   - Приоритетные действия (10 пунктов)\n\n2. **АНАЛИЗ MAX**: статистика уязвимостей + топ-3 проблемы\n3. **ЗАЩИТА ПД**: статистика по категориям + ключевые проблемы\n4. **ЛАНДШАФТ УГРОЗ**: топ-5 активных угроз 2024\n5. **МАТРИЦА РИСКОВ**: критичные vs высокие риски\n6. **ПЛАН ДЕЙСТВИЙ**: 10 рекомендаций с приоритетами\n7. **ПРИЛОЖЕНИЯ**: списки исследованных источников\n\nОтчёт максимум 5 страниц, только ключевое, готов к презентации.\n\nОтветьте только флагом готовности.",
+      "connections": {
+        "success": "end"
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "report_generated",
+          "pages_count",
+          "executive_ready"
+        ],
+        "properties": {
+          "pages_count": {
+            "type": "number",
+            "description": "Количество страниц отчёта"
+          },
+          "executive_ready": {
+            "type": "boolean",
+            "description": "Отчёт готов для руководства"
+          },
+          "report_generated": {
+            "type": "boolean",
+            "description": "Executive отчёт создан"
+          }
+        }
+      },
+      "completionCondition": "Агент создал компактный отчёт готовый для презентации"
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "research_complete",
+        "scan_complete",
+        "analysis_complete",
+        "matrix_complete",
+        "report_generated"
+      ]
+    }
+  ]
+}

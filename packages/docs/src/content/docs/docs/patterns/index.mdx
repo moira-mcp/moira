@@ -1,0 +1,46 @@
+---
+title: Workflow Patterns
+description: Reusable patterns for building workflows
+---
+
+Workflow patterns are reusable solutions to common workflow design problems.
+
+## Available Patterns
+
+| Pattern                                                          | Use Case                                                                |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [Information Collection](/docs/patterns/information-collection/) | Gather agent capabilities or user preferences at workflow start         |
+| [Skip Pattern](/docs/patterns/skip/)                             | Allow users to skip optional steps                                      |
+| [Validation Loop](/docs/patterns/validation-loop/)               | Verify results and retry on failure                                     |
+| [Branching](/docs/patterns/branching/)                           | Different paths for different scenarios                                 |
+| [Dynamic Files](/docs/patterns/dynamic-files/)                   | Template-based file paths for reusability                               |
+| [Step Verification](/docs/patterns/step-verification/)           | Verify step completion before proceeding                                |
+| [Escalation](/docs/patterns/escalation/)                         | Handle failures with user intervention                                  |
+| [Subagent Review](/docs/patterns/subagent-review/)               | Delegate reviews to independent subagents                               |
+| [Workspace](/docs/patterns/workspace/)                           | Organize workflow files in a dedicated workspace directory              |
+| [Static Configuration](/docs/patterns/static-configuration/)     | Store curated instructions as variableRegistry defaults for consistency |
+| [Anti-Patterns](/docs/patterns/anti-patterns/)                   | Common workflow design mistakes to avoid                                |
+
+## Pattern Selection Guide
+
+**Need to collect configuration?** → [Information Collection](/docs/patterns/information-collection/)
+
+**Need optional steps?** → [Skip Pattern](/docs/patterns/skip/)
+
+**Need quality control?** → [Validation Loop](/docs/patterns/validation-loop/)
+
+**Need different paths?** → [Branching](/docs/patterns/branching/)
+
+**Need reusable file references?** → [Dynamic Files](/docs/patterns/dynamic-files/)
+
+**Need to verify completion?** → [Step Verification](/docs/patterns/step-verification/)
+
+**Need failure handling?** → [Escalation](/docs/patterns/escalation/)
+
+**Need independent verification?** → [Subagent Review](/docs/patterns/subagent-review/)
+
+**Need organized working files?** → [Workspace](/docs/patterns/workspace/)
+
+**Need consistent agent instructions?** → [Static Configuration](/docs/patterns/static-configuration/)
+
+**Need to avoid common mistakes?** → [Anti-Patterns](/docs/patterns/anti-patterns/)

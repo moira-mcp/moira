@@ -1,0 +1,190 @@
+---
+title: Workflows
+description: Understanding Moira workflow structure and execution
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A workflow in Moira is a directed graph of nodes that defines a multi-step process for AI agents to execute.
+
+## Workflow Structure
+
+Every workflow consists of:
+
+```json
+{
+  "id": "my-workflow",
+  "metadata": {
+    "name": "My Workflow",
+    "version": "1.0.0",
+    "description": "Description of what this workflow does"
+  },
+  "variableRegistry": {
+    "project_name": { "type": "string", "description": "Name of the project" }
+  },
+  "nodes": [
+    // Array of node definitions
+  ]
+}
+```
+
+### Metadata
+
+| Field         | Required | Description                    |
+| ------------- | -------- | ------------------------------ |
+| `name`        | Yes      | Human-readable workflow name   |
+| `version`     | Yes      | Semantic version string        |
+| `description` | Yes      | What the workflow accomplishes |
+
+### Variable Registry
+
+`variableRegistry` declares the workflow's global variables once — the single source of truth for each variable's type and description. Each entry is keyed by variable name:
+
+| Field         | Required | Description                                         |
+| ------------- | -------- | --------------------------------------------------- |
+| `type`        | Yes      | `string`, `number`, `boolean`, `object`, or `array` |
+| `description` | Yes      | What the variable holds                             |
+| `default`     | No       | Initial value seeded at workflow start              |
+
+Globals are referenced by bare name (`{{project_name}}`); a node writes a global by listing its name in `inputSchema.globalInputs`.
+
+### Nodes Array
+
+Nodes are the steps in your workflow. Each node has an `id` and a `type` that determines its behavior.
+
+## Workflow Execution
+
+When a workflow starts:
+
+1. Engine creates an execution instance with unique `processId`
+2. Finds the start node (type: `start`)
+3. Returns the first directive to the agent
+4. Agent executes and returns result
+5. Engine evaluates connections and moves to next node
+6. Repeat until reaching an end node (type: `end`)
+
+## Execution Context
+
+Each execution maintains a context object containing:
+
+```typescript
+{
+  variables: Record<string, unknown>; // Globals at variables[name]; node-local outputs at variables[nodeId]
+  nodeStates: Record<string, unknown>; // Per-node state
+  executionId: string; // Unique execution ID
+  workflowId: string; // Source workflow ID
+  currentNodeId: string; // Current position
+}
+```
+
+Global variables (declared in `variableRegistry`) live at `variables[name]` and resolve by bare name (`{{name}}`). A node's outputs live at `variables[nodeId]` and resolve as `{{node-id.name}}`.
+
+<Aside type="tip">
+  Variables persist across steps. Globals carry workflow-wide values; node outputs carry per-step
+  results.
+</Aside>
+
+## Node Types
+
+Moira supports these node types:
+
+| Type                    | Purpose                                            |
+| ----------------------- | -------------------------------------------------- |
+| `start`                 | Entry point for workflow execution                 |
+| `end`                   | Terminal node marking completion                   |
+| `agent-directive`       | Agent task with directive and completion condition |
+| `condition`             | Branch based on structured conditions              |
+| `expression`            | Compute values using arithmetic expressions        |
+| `subgraph`              | Delegate to another workflow                       |
+| `telegram-notification` | Send notifications via Telegram                    |
+
+See [Nodes](/docs/concepts/nodes/) for detailed documentation on each type.
+
+## Connections
+
+Nodes connect via the `connections` object that defines the flow. Each node type has specific connection types:
+
+### Agent Directive Node
+
+```json
+{
+  "id": "analyze-task",
+  "type": "agent-directive",
+  "directive": "Analyze the task requirements",
+  "completionCondition": "Analysis is complete",
+  "connections": {
+    "success": "next-step",
+    "error": "error-handler"
+  }
+}
+```
+
+### Condition Node
+
+```json
+{
+  "id": "check-status",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "status" },
+    "right": "success"
+  },
+  "connections": {
+    "true": "success-path",
+    "false": "retry-path"
+  }
+}
+```
+
+## Complete Workflow Example
+
+```json
+{
+  "id": "simple-workflow",
+  "metadata": {
+    "name": "Simple Task Workflow",
+    "version": "1.0.0",
+    "description": "A basic workflow demonstrating node connections"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": { "default": "main-task" }
+    },
+    {
+      "id": "main-task",
+      "type": "agent-directive",
+      "directive": "Complete the assigned task",
+      "completionCondition": "Task is completed successfully",
+      "connections": { "success": "end" }
+    },
+    {
+      "id": "end",
+      "type": "end"
+    }
+  ]
+}
+```
+
+## Workflow Visibility
+
+Workflows have visibility settings:
+
+- **private** - Only the owner can access
+- **public** - All users can start the workflow
+
+## Best Practices
+
+1. **Start with start** - Every workflow must have a start node
+2. **End with end** - Use end nodes to mark completion
+3. **Clear Directives** - Write unambiguous instructions
+4. **Measurable Conditions** - Completion conditions should be verifiable
+5. **Error Handling** - Include error connections for graceful failures
+6. **Documentation** - Add descriptions to complex nodes
+
+## Related
+
+- [Nodes](/docs/concepts/nodes/) - Node types and configuration
+- [Templates](/docs/concepts/templates/) - Dynamic content in workflows

@@ -1,0 +1,249 @@
+---
+title: Система валидации
+description: Как Moira валидирует workflow и ответы агентов
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+# Система валидации
+
+Moira выполняет всестороннюю валидацию на нескольких уровнях для обеспечения целостности workflow и корректности ответов агентов.
+
+## Уровни валидации
+
+### 1. Валидация JSON Schema
+
+Workflow валидируются против определения JSON Schema:
+
+- Валидация структуры против схемы workflow
+- Проверка обязательных полей (id, metadata, nodes)
+- Валидация типов для всех свойств
+- Валидация enum для типов нод
+
+### 2. Структурная валидация
+
+Структура графа анализируется на корректность:
+
+- **Связность нод** - Все connections указывают на валидные ноды
+- **Обязательные ноды** - Нода start должна существовать
+- **Циклические зависимости** - Циклы обнаруживаются и помечаются
+- **Недостижимые ноды** - Ноды не связанные от start
+- **Записи реестра** - Каждая запись `variableRegistry` должна быть валидной JSON Schema (некорректный `items`/`pattern`/и т.п. — blocking-ошибка) с непустым описанием
+
+### 3. Валидация ввода
+
+Ответы агентов валидируются против `inputSchema`:
+
+- Валидация JSON Schema на основе AJV
+- Проверка типов для полей ответа
+- Валидация обязательных полей
+- Валидация pattern и format
+
+## Результаты валидации
+
+Валидация возвращает структурированные результаты:
+
+```typescript
+{
+  valid: boolean;
+  errors: ValidationError[];
+  warnings: ValidationWarning[];
+}
+```
+
+### Типы ошибок
+
+| Тип          | Описание                   | Пример                           |
+| ------------ | -------------------------- | -------------------------------- |
+| `schema`     | Невалидная JSON структура  | Отсутствует обязательное поле    |
+| `structure`  | Невалидная структура графа | Orphan нода                      |
+| `connection` | Невалидное соединение      | Указывает на несуществующую ноду |
+| `reference`  | Невалидная ссылка          | Невалидный subgraph ID           |
+
+### Типы предупреждений
+
+| Тип           | Описание         | Порог                     |
+| ------------- | ---------------- | ------------------------- |
+| `performance` | Большой workflow | >20 agent-directive нод   |
+| `complexity`  | Сложные условия  | Глубоко вложенные условия |
+| `context`     | Большой контекст | >100KB размер контекста   |
+
+## Примеры валидации
+
+### Валидный Workflow
+
+```json
+{
+  "id": "valid-workflow",
+  "metadata": {
+    "name": "Valid Workflow",
+    "version": "1.0.0",
+    "description": "A valid workflow"
+  },
+  "nodes": [
+    { "id": "start", "type": "start", "connections": { "default": "task" } },
+    {
+      "id": "task",
+      "type": "agent-directive",
+      "directive": "...",
+      "completionCondition": "...",
+      "connections": { "success": "end" }
+    },
+    { "id": "end", "type": "end" }
+  ]
+}
+```
+
+Результат:
+
+```json
+{ "valid": true, "errors": [], "warnings": [] }
+```
+
+### Невалидный Workflow - Отсутствует соединение
+
+```json
+{
+  "nodes": [
+    { "id": "start", "type": "start", "connections": { "default": "missing" } },
+    { "id": "end", "type": "end" }
+  ]
+}
+```
+
+Результат:
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "type": "connection",
+      "message": "Node 'start' references non-existent node 'missing'",
+      "nodeId": "start"
+    }
+  ]
+}
+```
+
+### Workflow с предупреждением
+
+Большой workflow вызывает предупреждение о производительности:
+
+```json
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "type": "performance",
+      "message": "Workflow has 25 agent-directive nodes. Consider breaking into subgraphs.",
+      "count": 25
+    }
+  ]
+}
+```
+
+## Валидация Input Schema
+
+Ответы агентов валидируются против `inputSchema` определенной на agent-directive нодах.
+
+### Ноды без inputSchema
+
+Ноды без `inputSchema` требуют пустой ввод от агента. Непустые ответы отклоняются:
+
+```json
+// Нода без inputSchema
+{ "id": "task", "type": "agent-directive", "directive": "..." }
+
+// Валидно: пустой ответ
+{}
+
+// Невалидно: непустой ответ
+{ "result": "done" }  // Отклоняется с ошибкой валидации
+```
+
+### Определение схемы
+
+```json
+{
+  "type": "agent-directive",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "string" },
+      "confidence": { "type": "number", "minimum": 0, "maximum": 10 }
+    },
+    "required": ["result"]
+  }
+}
+```
+
+### Валидный ответ
+
+```json
+{ "result": "completed", "confidence": 8 }
+```
+
+### Невалидный ответ
+
+```json
+{ "confidence": "high" }
+```
+
+Ошибка:
+
+```json
+{
+  "valid": false,
+  "errors": [
+    { "field": "result", "message": "Required field missing" },
+    { "field": "confidence", "message": "Expected number, got string" }
+  ]
+}
+```
+
+## Предупреждение о переменной, объявленной без default
+
+Валидатор выдаёт `warning` (severity `warning`, не ошибка — workflow остаётся валидным), когда переменная из `variableRegistry` используется в `directive`, `completionCondition`, `message` или `condition`, но у переменной нет `default` и её не записывает ни один вышестоящий узел через `globalInputs` (и она отсутствует в `initialData` стартового узла).
+
+В рантайме такая ссылка отображается как литеральный плейсхолдер `[[UNDEFINED_VARIABLE]]` вместо значения.
+
+```json
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "type": "structure",
+      "severity": "warning",
+      "nodeId": "do-work",
+      "message": "Variable 'iteration' is referenced in node 'do-work' but has no default and is never written by an upstream node. It will render [[UNDEFINED_VARIABLE]] at runtime."
+    }
+  ]
+}
+```
+
+Исправить можно одним из двух способов:
+
+- Добавить `default` для переменной в `variableRegistry`.
+- Сделать так, чтобы вышестоящий узел записывал переменную через `globalInputs` до узла, который на неё ссылается.
+
+## Безопасность от инъекций
+
+Подставленные ЗНАЧЕНИЯ переменных и данных никогда не выполняются повторно как шаблоны. Когда движок подставляет значение в `directive` или `message`, это значение трактуется как литеральная строка — синтаксис фигурных скобок, пришедший из подставленных данных, нейтрализуется и не парсится повторно.
+
+Это означает, что шаблоны выполняются только в статических полях узла, контролируемых автором, а не в значениях, которые приходят из ввода агента или внешних данных.
+
+<Aside type="danger">
+  Не подставляйте недоверенный ввод, содержащий `{{...}}`, в директиву. Объявляйте нужные переменные
+  и ссылайтесь на них явно. Предпочитайте явные именованные переменные вместо полных дампов
+  `{{context.variables}}`, которые могут раскрыть всю коллекцию переменных.
+</Aside>
+
+## Лучшие практики
+
+1. **Всегда включайте inputSchema** - Валидируйте ответы агентов для консистентных данных
+2. **Держите workflow сфокусированными** - Разбивайте большие workflow на subgraphs
+3. **Тестируйте валидацию** - Используйте `manage` с `includeValidation: true`
+4. **Обрабатывайте ошибки gracefully** - Определяйте error connections для ошибок валидации

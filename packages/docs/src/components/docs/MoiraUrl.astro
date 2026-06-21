@@ -1,0 +1,31 @@
+---
+/**
+ * Component to display Moira base URL from environment
+ * Used in documentation to avoid hardcoding URLs
+ */
+import { getBaseUrl } from "@mcp-moira/shared/urls";
+
+interface Props {
+  /** Path to append to base URL (e.g., "/app", "/api/auth") */
+  path?: string;
+  /** Display format: 'code' for inline code, 'link' for clickable link, 'text' for plain text */
+  format?: "code" | "link" | "text";
+  /** Link text (only for format="link", defaults to full URL) */
+  label?: string;
+}
+
+const { path = "", format = "text", label } = Astro.props;
+const baseUrl = getBaseUrl();
+const fullUrl = path ? `${baseUrl}${path}` : baseUrl;
+const displayLabel = label || fullUrl;
+---
+
+{
+  format === "code" ? (
+    <code>{fullUrl}</code>
+  ) : format === "link" ? (
+    <a href={fullUrl}>{displayLabel}</a>
+  ) : (
+    fullUrl
+  )
+}

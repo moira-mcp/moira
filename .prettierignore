@@ -1,0 +1,19 @@
+node_modules
+dist
+build
+.astro
+.claude
+coverage
+test-results
+playwright-report
+package-lock.json
+*.d.ts
+drizzle
+claude-temp-files
+workflows
+tests/workflows
+*.backup.json
+
+# Prettier conflicts with astra
+**/quickstart.mdx
+**/workflow-templates.mdx

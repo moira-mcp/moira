@@ -1,0 +1,217 @@
+---
+title: Writing Directives
+description: Best practices for writing clear and effective workflow directives
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Directive Structure
+
+Every agent-directive node needs:
+
+```json
+{
+  "type": "agent-directive",
+  "id": "unique-id",
+  "directive": "What the agent should do",
+  "completionCondition": "When the task is complete",
+  "inputSchema": {
+    /* expected response structure */
+  },
+  "connections": { "success": "next-node" }
+}
+```
+
+## Writing Clear Directives
+
+### Be Specific
+
+❌ Bad:
+
+```
+"Fix the bugs"
+```
+
+✅ Good:
+
+```
+"Fix TypeScript compilation errors in src/auth/.\n\nSteps:\n1. Run tsc --noEmit\n2. Fix each error\n3. Verify compilation succeeds"
+```
+
+### Include Context
+
+Use template variables:
+
+```
+"Implement step {{current_step_index}} of {{total_steps}}: {{current_step_name}}\n\nExpected outcome: {{expected_outcome}}"
+```
+
+### Specify Output Requirements
+
+```
+"Run tests and report results.\n\nRequired output format:\n- Total tests\n- Passed count\n- Failed count\n- List of failed test names"
+```
+
+## Completion Conditions
+
+### What Makes a Good Condition
+
+- **Measurable**: Can be verified objectively
+- **Specific**: Clear pass/fail criteria
+- **Complete**: All requirements covered
+
+### Examples
+
+❌ Vague:
+
+```
+"Task is done"
+```
+
+✅ Specific:
+
+```
+"All tests pass (npm test shows 0 failures)"
+```
+
+✅ Multi-criteria:
+
+```
+"Implementation complete:\n- Feature works as specified\n- Tests added and passing\n- No TypeScript errors"
+```
+
+<Aside type="caution">
+  Agents will claim completion when they believe the condition is met. Make conditions unambiguous
+  to prevent premature completion.
+</Aside>
+
+## Using InputSchema Effectively
+
+### Require Evidence
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "task_completed": { "type": "string", "enum": ["yes", "no"] },
+      "evidence": {
+        "type": "string",
+        "description": "Concrete proof: command output, test results, etc."
+      }
+    },
+    "required": ["task_completed", "evidence"]
+  }
+}
+```
+
+### Force Explicit Choices
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "quality_check": {
+        "type": "string",
+        "enum": ["pass", "fail"],
+        "description": "Did implementation meet quality standards?"
+      }
+    },
+    "required": ["quality_check"]
+  }
+}
+```
+
+### Collect Structured Data
+
+```json
+{
+  "inputSchema": {
+    "properties": {
+      "test_results": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "number" },
+          "passed": { "type": "number" },
+          "failed": { "type": "number" }
+        },
+        "required": ["total", "passed", "failed"]
+      }
+    },
+    "required": ["test_results"]
+  }
+}
+```
+
+## Directive Patterns
+
+### Step-by-Step Instructions
+
+```
+"Complete the following steps in order:\n\n1. [First action]\n2. [Second action]\n3. [Third action]\n\nReport which steps completed successfully."
+```
+
+### Conditional Instructions
+
+```
+"{{#if has_tests}}Run test suite: {{test_command}}{{else}}No tests configured, skip testing{{/if}}"
+```
+
+### Verification Requirements
+
+```
+"Verify implementation:\n\n- [ ] Feature works as specified\n- [ ] Edge cases handled\n- [ ] Error messages clear\n\nProvide evidence for each checkbox."
+```
+
+## Common Mistakes
+
+### Too Much Freedom
+
+❌ Problem:
+
+```
+"Make the code better"
+```
+
+✅ Solution:
+
+```
+"Refactor auth module:\n- Extract validation logic to separate function\n- Add error handling for null inputs\n- Add JSDoc comments"
+```
+
+### Missing Context
+
+❌ Problem:
+
+```
+"Fix the error"
+```
+
+✅ Solution:
+
+```
+"Fix error in {{file_path}}:\n\nError message: {{last_error}}\nIteration: {{current_iteration}}"
+```
+
+### No Success Criteria
+
+❌ Problem:
+
+```
+"completionCondition": "Done"
+```
+
+✅ Solution:
+
+```
+"completionCondition": "npm test passes with 0 failures, npm run build completes without errors"
+```
+
+<Aside type="tip">
+  Read your directives from the agent's perspective. Would you know exactly what to do and when
+  you're done?
+</Aside>
+
+## See Also
+
+- [Input Schema](/docs/reference/input-schema/) - Structuring expected responses
+- [Templates](/docs/concepts/templates/) - Using variables in directives

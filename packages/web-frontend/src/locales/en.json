@@ -1,0 +1,1845 @@
+{
+  "settings": {
+    "editFullscreen": "Edit Fullscreen",
+    "history": "History",
+    "reset": "Reset",
+    "setting": "setting",
+    "settings": "settings",
+    "inheritance": {
+      "default": "Default",
+      "agent": "Agent Override",
+      "model": "Model Override",
+      "inactive": "Inactive (using default)"
+    }
+  },
+  "auth": {
+    "SIGN_IN": "Sign In",
+    "SIGN_IN_ACTION": "Login",
+    "SIGN_UP": "Sign Up",
+    "SIGN_UP_ACTION": "Create an account",
+    "SIGN_IN_DESCRIPTION": "Enter your email and password to sign in",
+    "SIGN_UP_DESCRIPTION": "Create an account to get started",
+    "SIGN_OUT": "Sign Out",
+    "OR_CONTINUE_WITH": "Or continue with",
+    "SIGN_IN_WITH": "Sign in with",
+    "EMAIL": "Email",
+    "EMAIL_PLACEHOLDER": "your@email.com",
+    "EMAIL_REQUIRED": "Email address is required",
+    "PASSWORD": "Password",
+    "PASSWORD_PLACEHOLDER": "Password",
+    "PASSWORD_REQUIRED": "Password is required",
+    "FORGOT_PASSWORD": "Forgot Password?",
+    "FORGOT_PASSWORD_LINK": "Forgot your password?",
+    "FORGOT_PASSWORD_ACTION": "Send reset link",
+    "FORGOT_PASSWORD_DESCRIPTION": "Enter your email to receive a password reset link",
+    "FORGOT_PASSWORD_EMAIL": "Check your email for the password reset link",
+    "RESET_PASSWORD": "Reset Password",
+    "RESET_PASSWORD_ACTION": "Save new password",
+    "RESET_PASSWORD_DESCRIPTION": "Enter your new password below",
+    "RESET_PASSWORD_SUCCESS": "Password reset successfully",
+    "SEND_RESET_LINK": "Send Reset Link",
+    "NEW_PASSWORD": "New Password",
+    "NEW_PASSWORD_PLACEHOLDER": "Enter your new password",
+    "NEW_PASSWORD_REQUIRED": "New password is required",
+    "CONFIRM_PASSWORD": "Confirm Password",
+    "CONFIRM_PASSWORD_PLACEHOLDER": "Confirm Password",
+    "CONFIRM_PASSWORD_REQUIRED": "Confirm password is required",
+    "PASSWORDS_DO_NOT_MATCH": "Passwords do not match",
+    "SET_PASSWORD": "Set Password",
+    "DONT_HAVE_AN_ACCOUNT": "Don't have an account?",
+    "ALREADY_HAVE_AN_ACCOUNT": "Already have an account?",
+    "CONTINUE": "Continue",
+    "CANCEL": "Cancel",
+    "GO_BACK": "Go back",
+    "REMEMBER_ME": "Remember me"
+  },
+  "signUpForm": {
+    "acceptTerms": "I agree to the",
+    "termsOfService": "Terms of Service",
+    "and": "and",
+    "privacyPolicy": "Privacy Policy",
+    "confirmNotRussianResident": "I confirm that I am not a resident of the Russian Federation"
+  },
+  "layout": {
+    "sidebar": {
+      "collapse": "Collapse sidebar",
+      "expand": "Expand sidebar",
+      "show": "Show sidebar"
+    },
+    "nav": {
+      "home": "Home",
+      "workflows": "Workflows",
+      "executions": "Executions",
+      "notes": "Notes",
+      "artifacts": "Artifacts",
+      "settings": "Settings",
+      "docs": "Documentation",
+      "admin": "Admin"
+    },
+    "adminNav": {
+      "dashboard": "Dashboard",
+      "analytics": "Analytics",
+      "users": "Users",
+      "executions": "Executions",
+      "artifacts": "Artifacts",
+      "auditLog": "Audit Log",
+      "settingsManager": "Settings Manager",
+      "globalSettings": "Global Settings",
+      "mcpPrompts": "MCP Prompts",
+      "deletedWorkflows": "Deleted Workflows",
+      "workflows": "Workflows",
+      "monitoringTest": "Monitoring Test",
+      "backToApp": "Back to App",
+      "tokens": "API Tokens",
+      "operational": "Operational",
+      "reportedArtifacts": "Reported Artifacts"
+    },
+    "userMenu": {
+      "user": "User",
+      "theme": "Theme",
+      "language": "Language",
+      "settings": "Settings",
+      "logout": "Logout"
+    },
+    "languages": {
+      "en": "English",
+      "ru": "Russian"
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Dashboard",
+      "loading": "Loading dashboard data...",
+      "error": "Failed to load dashboard data",
+      "failedToLoad": "Failed to load data",
+      "retry": "Retry",
+      "stats": {
+        "totalWorkflows": "Total Workflows",
+        "executions": "Executions",
+        "notes": "Notes",
+        "clickToView": "Click to view all →",
+        "clickToConfigure": "Click to configure →"
+      },
+      "quickStart": {
+        "title": "Quick Start",
+        "description": "Add MCP Moira to your AI assistant. Choose your client below:",
+        "copy": "Copy",
+        "copied": "Copied!",
+        "learnMore": "Need help?",
+        "documentation": "Read the documentation",
+        "clients": {
+          "claude-web": {
+            "description": "1. Go to claude.ai → Settings → Connectors\n2. Click \"Add custom connector\"\n3. Enter server URL and click \"Connect\"\n4. Complete OAuth in browser\n\nRequires Pro/Max/Team/Enterprise plan."
+          },
+          "chatgpt": {
+            "description": "1. Go to chat.openai.com → Settings → Connectors\n2. Click \"Add connector\"\n3. Enter name \"MCP Moira\" and server URL\n4. Complete OAuth authentication\n\nRequires Plus or Pro plan."
+          },
+          "claude-code": {
+            "authIntro": "Then authenticate with your MCP Moira account:",
+            "authContent": "Browser will open for OAuth authentication.\nAuthorize and return to terminal.",
+            "alternativeTitle": "Alternative: manual config file"
+          },
+          "claude-desktop": {
+            "description": "1. Open Settings (⌘+,) → Connectors tab\n2. Click \"Add custom connector\"\n3. Enter server URL and click \"Connect\"\n4. Browser opens for OAuth → Done\n\nNo config file editing needed."
+          },
+          "cursor": {
+            "deeplinkButton": "Add to Cursor",
+            "authIntro": "Then authenticate with your MCP Moira account:",
+            "authContent": "Browser will open for OAuth authentication.\nAuthorize and return to Cursor.",
+            "alternativeTitle": "Alternative: manual config file"
+          },
+          "vscode": {
+            "deeplinkButton": "Add to VS Code",
+            "authIntro": "Then authenticate with your MCP Moira account:",
+            "authContent": "Browser will open for OAuth authentication.\nAuthorize and return to VS Code.",
+            "alternativeTitle": "Alternative: manual config file"
+          },
+          "perplexity": {
+            "description": "1. Install PerplexityXPC helper (Settings → Connectors → Install Helper)\n2. Click \"Add Connector\"\n3. Enter server name and MCP command\n4. Complete OAuth authentication\n\nPaid plan recommended. Uses mcp-remote bridge."
+          },
+          "continue": {},
+          "copilot-cli": {
+            "authIntro": "After saving the config file, authenticate:",
+            "authContent": "1. Start a Copilot CLI session\n2. Type /mcp\n3. Select \"moira\" → Authenticate\n→ Browser opens for OAuth",
+            "alternativeTitle": "Alternative: interactive /mcp setup"
+          },
+          "zed": {},
+          "gemini-cli": {}
+        }
+      },
+      "recentWorkflows": {
+        "title": "Recent Workflows",
+        "empty": "No workflows yet. Create your first workflow to get started!"
+      },
+      "recentExecutions": {
+        "title": "Recent Executions",
+        "empty": "No executions yet. Run a workflow to see execution history!",
+        "execution": "Execution",
+        "workflow": "Workflow"
+      },
+      "time": {
+        "justNow": "Just now",
+        "minutesAgo": "{{count}}m ago",
+        "hoursAgo": "{{count}}h ago",
+        "daysAgo": "{{count}}d ago",
+        "running": "Running..."
+      }
+    },
+    "workflows": {
+      "title": "Workflows",
+      "subtitle": "Browse and manage your workflows",
+      "explorer": {
+        "title": "Workflow Explorer",
+        "workflows": "Workflows",
+        "loading": "Loading...",
+        "failedToLoad": "Failed to load workflows",
+        "retry": "Retry",
+        "noWorkflows": "No workflows found",
+        "noMatch": "No workflows match current filters",
+        "statistics": "Statistics",
+        "valid": "valid",
+        "invalid": "invalid",
+        "of": "of",
+        "resultsCount": "{{count}} workflows found",
+        "sortBy": "Sort by",
+        "sortByDate": "Date",
+        "sortByName": "Name",
+        "newest": "Newest",
+        "oldest": "Oldest",
+        "page": "Page"
+      },
+      "time": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "daysAgo": "{{count}} days ago"
+      },
+      "confirmDelete": "Delete workflow \"{{name}}\"?"
+    },
+    "workflowDetail": {
+      "backToWorkflows": "← Back to Workflows",
+      "deleteWorkflow": "Delete Workflow",
+      "confirmDelete": "Delete this workflow?",
+      "toggleVisibility": "Click to toggle workflow visibility",
+      "useAsTemplate": "Use as Template",
+      "copyingWorkflow": "Creating copy...",
+      "copySuccess": "Workflow copied successfully",
+      "hideSidebar": "Hide sidebar",
+      "showSidebar": "Show sidebar",
+      "share": "Share",
+      "sharing": {
+        "title": "Share Workflow",
+        "description": "Share this workflow with others by generating an invite link",
+        "tabs": {
+          "invites": "Invite Links",
+          "access": "Users with Access"
+        },
+        "generateInvite": "Generate Invite Link",
+        "generating": "Generating...",
+        "inviteGenerated": "Invite link generated",
+        "copyLink": "Copy Link",
+        "copied": "Copied!",
+        "revoke": "Revoke",
+        "revoking": "Revoking...",
+        "noInvites": "No active invite links",
+        "noAccess": "No users have shared access yet",
+        "expiresIn": "Expires in {{time}}",
+        "expired": "Expired",
+        "used": "Used by {{handle}}",
+        "grantedBy": "Granted by {{handle}}",
+        "grantedAt": "Granted {{time}}",
+        "confirmRevoke": "Revoke this invite link?",
+        "confirmRevokeAccess": "Revoke access for {{name}}?",
+        "loadingInvites": "Loading invites...",
+        "loadingAccess": "Loading access list...",
+        "revokeSuccess": "Successfully revoked",
+        "revokeError": "Failed to revoke",
+        "revokeInvite": "Revoke invite",
+        "revokeAccess": "Revoke access",
+        "generateError": "Failed to generate invite",
+        "clipboardError": "Failed to copy to clipboard"
+      }
+    },
+    "inviteAccept": {
+      "title": "Workflow Invitation",
+      "loading": "Loading invite details...",
+      "notFound": "Invite Not Found",
+      "notFoundDescription": "This invite link is invalid or has been revoked",
+      "expired": "Invite Expired",
+      "expiredDescription": "This invite link has expired",
+      "used": "Invite Already Used",
+      "usedDescription": "This invite link has already been used",
+      "valid": "You're Invited!",
+      "validDescription": "{{handle}} has invited you to access their workflow",
+      "workflowName": "Workflow",
+      "expiresAt": "Expires",
+      "loginRequired": "Please sign in to accept this invite",
+      "signIn": "Sign In",
+      "accept": "Accept Invite",
+      "accepting": "Accepting...",
+      "acceptSuccess": "Access granted! Redirecting to workflow...",
+      "acceptError": "Failed to accept invite",
+      "selfInvite": "You cannot accept your own invite",
+      "alreadyHaveAccess": "You already have access to this workflow",
+      "goToWorkflow": "Go to Workflow",
+      "backToDashboard": "Back to Dashboard"
+    },
+    "notes": {
+      "title": "Notes",
+      "subtitle": "Manage your persistent notes for workflows",
+      "loading": "Loading notes...",
+      "retry": "Retry",
+      "noNotes": "No notes yet. Create your first note to get started!",
+      "noResults": "No notes match your filters",
+      "resultsCount": "{{count}} notes found",
+      "filters": {
+        "searchPlaceholder": "Search by key name...",
+        "tag": "Tag"
+      },
+      "table": {
+        "key": "Key",
+        "tags": "Tags",
+        "preview": "Preview",
+        "size": "Size",
+        "updated": "Updated",
+        "actions": "Actions"
+      },
+      "pagination": {
+        "showing": "Showing {{from}}-{{to}} of {{total}}",
+        "page": "{{current}} / {{total}}",
+        "previous": "Prev",
+        "next": "Next"
+      },
+      "quota": {
+        "used": "Storage used",
+        "usedPercent": "used"
+      },
+      "actions": {
+        "create": "New Note",
+        "edit": "Edit",
+        "delete": "Delete",
+        "history": "History"
+      },
+      "delete": {
+        "title": "Delete Note",
+        "description": "Are you sure you want to delete note \"{{key}}\"? This action can be undone."
+      },
+      "editor": {
+        "titleCreate": "Create Note",
+        "titleEdit": "Edit Note",
+        "descriptionCreate": "Create a new note with a unique key",
+        "descriptionEdit": "Edit note content and tags",
+        "key": "Key",
+        "keyPlaceholder": "my-note-key",
+        "keyHint": "1-100 characters. Letters, numbers, underscores, and hyphens only.",
+        "keyRequired": "Key is required",
+        "keyTooLong": "Key must be 100 characters or less",
+        "keyInvalidFormat": "Key can only contain letters, numbers, underscores, and hyphens",
+        "tags": "Tags",
+        "tagPlaceholder": "Add tag...",
+        "tagsHint": "{{count}}/{{max}} tags. Press Enter to add.",
+        "content": "Content",
+        "contentPlaceholder": "Enter note content...",
+        "contentTooLarge": "Content exceeds maximum size of 100 KB",
+        "preview": "Preview",
+        "edit": "Edit",
+        "noContent": "No content to preview",
+        "version": "v{{version}}",
+        "currentVersion": "Current",
+        "olderVersion": "Viewing v{{version}} (read-only)",
+        "restoreVersion": "Restore",
+        "restoreConfirmTitle": "Restore Version",
+        "restoreConfirmDescription": "This will create a new version with content from v{{version}}. Current content will not be deleted.",
+        "compareVersions": "Compare",
+        "newNoteCard": "New Note",
+        "newNoteHint": "Click to create a new note"
+      },
+      "history": {
+        "title": "Version History",
+        "description": "View version history for note \"{{key}}\"",
+        "noVersions": "No version history available",
+        "versions": "Versions",
+        "version": "Version",
+        "current": "current",
+        "content": "Content",
+        "selectVersion": "Select a version to view its content",
+        "noContent": "Unable to load content",
+        "diff": "Diff",
+        "diffDescription": "Changes from v{{from}} to v{{to}}",
+        "restore": "Restore",
+        "restoreTitle": "Restore Version",
+        "restoreDescription": "This will create a new version with the content from version {{version}}. The current version will not be deleted."
+      }
+    },
+    "artifacts": {
+      "title": "Artifacts",
+      "subtitle": "Manage your HTML artifacts for sharing",
+      "loading": "Loading artifacts...",
+      "retry": "Retry",
+      "noArtifacts": "No artifacts yet. Create your first artifact to get started!",
+      "resultsCount": "{{count}} artifacts found",
+      "table": {
+        "name": "Name",
+        "size": "Size",
+        "created": "Created",
+        "expires": "Expires",
+        "actions": "Actions"
+      },
+      "pagination": {
+        "showing": "Showing {{from}}-{{to}} of {{total}}",
+        "page": "{{current}} / {{total}}",
+        "previous": "Prev",
+        "next": "Next"
+      },
+      "quota": {
+        "storage": "Storage used",
+        "artifacts": "artifacts"
+      },
+      "actions": {
+        "create": "New Artifact",
+        "edit": "Edit",
+        "delete": "Delete",
+        "preview": "Preview",
+        "copyUrl": "Copy URL",
+        "copied": "Copied!",
+        "openInNewTab": "Open in new tab"
+      },
+      "delete": {
+        "title": "Delete Artifact",
+        "description": "Are you sure you want to delete artifact \"{{name}}\"? This action cannot be undone."
+      },
+      "editor": {
+        "titleCreate": "Create Artifact",
+        "titleEdit": "Edit Artifact",
+        "descriptionCreate": "Create a new HTML artifact for sharing",
+        "descriptionEdit": "Edit artifact: {{name}}",
+        "name": "Name",
+        "namePlaceholder": "report.html",
+        "content": "HTML Content",
+        "contentPlaceholder": "<!DOCTYPE html>\n<html>\n<head>\n  <title>My Report</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>",
+        "contentHint": "HTML content must include <html> tag",
+        "nameAndContentRequired": "Name and content are required",
+        "contentRequired": "Content is required",
+        "mustContainHtml": "Content must contain <html> tag",
+        "loadingContent": "Loading content...",
+        "loadError": "Failed to load artifact content"
+      }
+    },
+    "executions": {
+      "title": "Executions",
+      "subtitle": "Your workflow execution history",
+      "loading": "Loading executions...",
+      "retry": "Retry",
+      "noExecutions": "No executions yet",
+      "noResults": "No executions match your filters",
+      "resultsCount": "{{count}} executions found",
+      "filters": {
+        "searchPlaceholder": "Search by note...",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "active": "Active",
+        "workflow": "Workflow",
+        "allWorkflows": "All workflows",
+        "sortByCreated": "Created",
+        "sortByUpdated": "Updated",
+        "newest": "Newest",
+        "oldest": "Oldest"
+      },
+      "table": {
+        "executionId": "Execution ID",
+        "note": "Note",
+        "workflow": "Workflow",
+        "status": "Status",
+        "currentNode": "Current Node",
+        "created": "Created",
+        "updated": "Updated"
+      },
+      "pagination": {
+        "showing": "Showing {{from}}-{{to}} of {{total}}",
+        "page": "{{current}} / {{total}}",
+        "previous": "Prev",
+        "next": "Next"
+      }
+    },
+    "executionInspector": {
+      "loading": "Loading execution...",
+      "notFound": "Execution not found",
+      "backToExecutions": "Back to Executions",
+      "back": "Back to Executions",
+      "execution": "Execution",
+      "workflow": "Workflow",
+      "owner": "Owner",
+      "selected": "Selected",
+      "current": "Current",
+      "clearSelection": "Clear selection",
+      "toolbar": {
+        "copyId": "Copy execution ID",
+        "copied": "Copied!",
+        "focusNode": "Focus on current node",
+        "context": "View context",
+        "refresh": "Refresh",
+        "fullscreen": "Fullscreen",
+        "lock": "Lock Execution"
+      },
+      "tabs": {
+        "context": "Context",
+        "errors": "Errors",
+        "steps": "Steps",
+        "locks": "Locks"
+      },
+      "locks": {
+        "noHistory": "No lock history for this execution",
+        "node": "Node:",
+        "enterPin": "Enter PIN",
+        "submit": "Submit",
+        "unlock": "Unlock",
+        "pinHint": "Share this PIN with the agent to unlock",
+        "created": "Created:",
+        "unlocked": "Unlocked:"
+      },
+      "context": {
+        "title": "Execution Context",
+        "saving": "Saving...",
+        "fullscreen": "Fullscreen",
+        "close": "Close",
+        "editor": "Execution Context Editor",
+        "editingNote": "Context editing available only for running/waiting status",
+        "save": "Save",
+        "saveFailed": "Failed to save context",
+        "unsaved": "Unsaved",
+        "filterPlaceholder": "Filter variables...",
+        "filterField": {
+          "both": "All",
+          "key": "Name",
+          "value": "Value"
+        },
+        "empty": "No context variables",
+        "noMatches": "No variables match the filter",
+        "globalSection": "Global variables",
+        "nodeLocalSection": "Node outputs",
+        "invalidJson": "Invalid JSON",
+        "clickToEdit": "Click to edit",
+        "emptyValue": "(empty)",
+        "editLong": "Edit in a larger editor"
+      },
+      "errors": {
+        "title": "Errors"
+      },
+      "steps": {
+        "noSteps": "No steps available",
+        "current": "Current"
+      },
+      "lockDialog": {
+        "title": "Lock Execution",
+        "description": "Locking will pause the execution. Provide a reason for locking.",
+        "reasonPlaceholder": "Reason for locking...",
+        "confirm": "Lock",
+        "success": "Execution Locked",
+        "successMessage": "Execution has been locked. Share the PIN with the agent to unlock."
+      }
+    },
+    "settings": {
+      "title": "Settings",
+      "loading": "Loading settings...",
+      "required": "is required",
+      "validation": {
+        "mustBeOneOf": "Must be one of: {{values}}",
+        "minLength": "Minimum length: {{length}}",
+        "maxLength": "Maximum length: {{length}}"
+      },
+      "enable": "Enable",
+      "telegram": {
+        "testNotification": "Test Notification",
+        "sending": "Sending...",
+        "testDescription": "Send a test message to verify your Telegram configuration",
+        "setupGuide": "Need help setting up? See the",
+        "setupGuideLink": "Telegram Setup Guide",
+        "configureBotFirst": "Please configure Bot Token and Chat ID first",
+        "testSuccess": "Test notification sent successfully",
+        "testFailed": "Failed to send test notification",
+        "errors": {
+          "invalid_token": "Bot token is invalid. Please get a new token from @BotFather.",
+          "invalid_chat_id": "Chat not found. Send any message to your bot first, then try again.",
+          "network_error": "Could not connect to Telegram. Check your internet connection.",
+          "rate_limit_exceeded": "Too many requests. Please wait a moment and try again.",
+          "timeout_error": "Request to Telegram timed out. Please try again.",
+          "message_too_long": "Test message is too long.",
+          "template_error": "Message template error. Check your configuration.",
+          "api_error": "Telegram API error. Please check your configuration."
+        }
+      },
+      "saveChanges": "Save Changes",
+      "saving": "Saving...",
+      "cancel": "Cancel",
+      "noSettings": "No settings available in this category",
+      "editFullscreen": "Edit Fullscreen",
+      "history": "History",
+      "setting": "setting",
+      "settings": "settings",
+      "saveSuccess": "Settings saved successfully",
+      "saveFailed": "Failed to save settings",
+      "fixErrors": "Please fix validation errors before saving",
+      "tabs": {
+        "profile": "Profile",
+        "security": "Security",
+        "oauth": "OAuth Authorizations",
+        "sessions": "Active Sessions",
+        "notifications": "Notifications",
+        "connections": "Connections & Sessions",
+        "settings": "Settings",
+        "apiTokens": "API Tokens"
+      },
+      "profile": {
+        "title": "Profile Information",
+        "name": "Name",
+        "namePlaceholder": "Your name",
+        "email": "Email",
+        "verified": "Verified",
+        "notVerified": "Not verified",
+        "memberSince": "Member Since",
+        "saveChanges": "Save Changes",
+        "saving": "Saving...",
+        "updateSuccess": "Profile updated successfully!",
+        "nameMaxLength": "Name must be less than 100 characters",
+        "verificationWarning": "Your email address is not verified. Please check your inbox for the verification link.",
+        "resendVerification": "Resend Verification Email",
+        "sendingVerification": "Sending...",
+        "verificationSent": "Verification email sent!",
+        "handleTitle": "Username (Handle)",
+        "handle": "Handle",
+        "handlePlaceholder": "your-handle",
+        "handleHint": "3-30 characters. Lowercase letters, numbers, and hyphens only. Cannot start or end with a hyphen.",
+        "handleWarningTitle": "Warning:",
+        "handleWarningText": "Your handle appears in all workflow URLs (e.g., your-handle/workflow-name). Changing it will break existing links to your workflows.",
+        "handleLengthError": "Handle must be between 3 and 30 characters",
+        "handleFormatError": "Handle can only contain lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.",
+        "handleChangeWarning": "Are you sure you want to change your handle from \"{{currentHandle}}\" to \"{{handle}}\"? This will change all your workflow URLs.",
+        "handleUpdateSuccess": "Handle updated successfully!",
+        "changeHandle": "Change Handle",
+        "savingHandle": "Saving..."
+      },
+      "security": {
+        "title": "Security",
+        "currentPassword": "Current Password",
+        "currentPasswordPlaceholder": "Enter current password",
+        "newPassword": "New Password",
+        "newPasswordPlaceholder": "Enter new password (min 6 characters)",
+        "confirmPassword": "Confirm Password",
+        "confirmPasswordPlaceholder": "Confirm new password",
+        "changePassword": "Change Password",
+        "changingPassword": "Changing...",
+        "passwordSuccess": "Password changed successfully!",
+        "passwordStrength": "Password strength:",
+        "strength": {
+          "tooShort": "Too short",
+          "fair": "Fair",
+          "good": "Good",
+          "strong": "Strong"
+        },
+        "errors": {
+          "allRequired": "All fields are required",
+          "minLength": "New password must be at least 6 characters",
+          "maxLength": "New password must be less than 128 characters",
+          "noMatch": "Passwords do not match",
+          "samePassword": "New password must be different from current password"
+        }
+      },
+      "oauth": {
+        "title": "OAuth Authorizations",
+        "loading": "Loading OAuth consents...",
+        "noConsents": "No OAuth authorizations found.",
+        "clientId": "Client ID",
+        "permissions": "Permissions:",
+        "authorized": "Authorized",
+        "revoke": "Revoke",
+        "revoking": "Revoking...",
+        "confirmRevoke": "Are you sure you want to revoke this OAuth consent? This will also revoke all associated access tokens.",
+        "revokeFailed": "Failed to revoke consent"
+      },
+      "sessions": {
+        "title": "Active Sessions",
+        "loading": "Loading sessions...",
+        "noSessions": "No active sessions found.",
+        "currentSession": "Current Session",
+        "ipAddress": "IP Address",
+        "location": "Location",
+        "created": "Created",
+        "expires": "Expires",
+        "revoke": "Revoke",
+        "revoking": "Revoking...",
+        "cannotRevokeCurrent": "Cannot revoke current session",
+        "confirmRevoke": "Are you sure you want to revoke this session? The user will be logged out on that device.",
+        "revokeFailed": "Failed to revoke session"
+      },
+      "apiTokens": {
+        "description": "Create and manage API tokens for MCP client authentication.",
+        "createToken": "Create Token",
+        "createDescription": "Create a new API token for MCP client authentication. The token will only be shown once.",
+        "tokenName": "Token Name",
+        "tokenNamePlaceholder": "e.g., Claude Desktop, CI/CD Pipeline",
+        "expiration": "Expiration",
+        "expiry30d": "30 days",
+        "expiry90d": "90 days",
+        "expiry365d": "1 year",
+        "expiryNever": "No expiration",
+        "tokenCreated": "Token Created",
+        "tokenWarning": "Copy this token now. You won't be able to see it again.",
+        "doneButton": "Done",
+        "noTokens": "No API tokens",
+        "noTokensDescription": "Create a token to authenticate MCP clients without OAuth.",
+        "statusActive": "Active",
+        "statusExpired": "Expired",
+        "statusRevoked": "Revoked",
+        "created": "Created",
+        "expires": "Expires",
+        "lastUsed": "Last used",
+        "revoke": "Revoke",
+        "confirmRevoke": "Are you sure you want to revoke this token? Any MCP clients using it will lose access immediately.",
+        "createFailed": "Failed to create token",
+        "revokeFailed": "Failed to revoke token"
+      }
+    },
+    "forcedPasswordReset": {
+      "title": "Password Reset Required",
+      "description": "Your administrator has required you to change your password. You must set a new password to continue.",
+      "successTitle": "Password Changed Successfully",
+      "successDescription": "Your password has been updated. Redirecting you to the application...",
+      "currentPassword": "Current Password",
+      "newPassword": "New Password",
+      "confirmPassword": "Confirm New Password",
+      "minLength": "Must be at least 8 characters",
+      "changePassword": "Change Password",
+      "changingPassword": "Changing Password...",
+      "success": "Password changed successfully. Redirecting...",
+      "loginWithNew": "Please log in with your new password",
+      "note": "After changing your password, all OAuth tokens will be revoked for security reasons. You may need to re-authorize any connected applications.",
+      "errors": {
+        "allRequired": "All fields are required",
+        "noMatch": "New passwords do not match",
+        "minLength": "New password must be at least 8 characters",
+        "samePassword": "New password must be different from current password",
+        "failed": "Failed to change password. Please try again."
+      }
+    },
+    "registrationSuccess": {
+      "title": "Registration Successful!",
+      "verifiedTitle": "Email Verified!",
+      "redirecting": "Redirecting...",
+      "emailSent": "We've sent a verification email to your address.",
+      "checkInbox": "Please check your inbox and click the verification link to activate your account.",
+      "waitingVerification": "Waiting for email verification...",
+      "checkSpam": "Didn't receive the email? Check your spam folder.",
+      "goToLogin": "Go to Login",
+      "resendEmail": "Resend verification email",
+      "resendingEmail": "Sending...",
+      "resendSuccess": "Verification email sent! Please check your inbox.",
+      "resendError": "Failed to send verification email. Please try again.",
+      "resendCountdown": "Resend available in {{seconds}}s"
+    },
+    "authError": {
+      "title": "Authentication Error"
+    },
+    "oauthAuthorize": {
+      "loading": "Loading...",
+      "authorizing": "Authorizing...",
+      "title": "Authorize Access",
+      "description": "An application is requesting access to your account",
+      "signInTitle": "Authorize Access",
+      "signInDescription": "Sign in to authorize the application",
+      "application": "Application",
+      "requestedPermissions": "Requested Permissions",
+      "switch": "Switch",
+      "deny": "Deny",
+      "allow": "Allow",
+      "unknownUser": "Unknown User",
+      "scopes": {
+        "openid": "Verify your identity",
+        "profile": "Access your profile information",
+        "email": "Access your email address",
+        "offline_access": "Access your data when you're not using the app",
+        "mcp_tools": "Execute MCP tools on your behalf",
+        "mcp_read": "Read your workflow data",
+        "mcp_write": "Create and modify workflows"
+      }
+    },
+    "oauthConsent": {
+      "loading": "Loading...",
+      "authorizing": "Authorizing...",
+      "title": "Authorize Access",
+      "description": "An application is requesting access to your account",
+      "invalidRequest": "Invalid Request",
+      "missingParams": "Missing required OAuth parameters. Please try the authorization again.",
+      "goToDashboard": "Go to Dashboard",
+      "application": "Application",
+      "requestedPermissions": "Requested Permissions",
+      "switch": "Switch",
+      "deny": "Deny",
+      "allow": "Allow",
+      "unknownUser": "Unknown User",
+      "missingConsentCode": "Missing consent code",
+      "consentFailed": "Failed to process consent",
+      "scopes": {
+        "openid": "Verify your identity",
+        "profile": "Access your profile information",
+        "email": "Access your email address",
+        "offline_access": "Access your data when you're not using the app",
+        "mcp_tools": "Execute MCP tools on your behalf",
+        "mcp_read": "Read your workflow data",
+        "mcp_write": "Create and modify workflows"
+      }
+    },
+    "verifyEmail": {
+      "title": "Email Verification",
+      "verifying": "Verifying your email...",
+      "success": "Your email has been verified successfully!",
+      "invalidLink": "Invalid verification link",
+      "failed": "Verification failed. The link may have expired.",
+      "networkError": "An error occurred during verification",
+      "continueToLogin": "Continue to Login",
+      "backToLogin": "Back to Login"
+    }
+  },
+  "admin": {
+    "panel": {
+      "title": "Admin Panel",
+      "tabs": {
+        "definitions": "Setting Definitions",
+        "users": "Users",
+        "stats": "System Stats",
+        "globalSettings": "Global Settings"
+      },
+      "loading": "Loading...",
+      "definitions": {
+        "title": "Setting Definitions",
+        "createNew": "Create New Definition",
+        "keyPlaceholder": "Key (e.g., telegram.bot_token)",
+        "selectType": "Select Type",
+        "categoryPlaceholder": "Category",
+        "labelPlaceholder": "Label",
+        "descriptionPlaceholder": "Description (optional)",
+        "required": "Required",
+        "adminOnly": "Admin Only",
+        "createButton": "Create Definition",
+        "type": "Type",
+        "category": "Category",
+        "delete": "Delete",
+        "confirmDelete": "Delete setting definition \"{{key}}\"?",
+        "fillRequired": "Please fill in all required fields"
+      },
+      "users": {
+        "title": "Users",
+        "table": {
+          "email": "Email",
+          "name": "Name",
+          "role": "Role",
+          "workflows": "Workflows",
+          "created": "Created"
+        },
+        "admin": "Admin",
+        "user": "User",
+        "noUsers": "No users found"
+      },
+      "stats": {
+        "title": "System Statistics",
+        "totalWorkflows": "Total Workflows",
+        "totalExecutions": "Total Executions",
+        "settingDefinitions": "Setting Definitions",
+        "failedToLoad": "Failed to load stats"
+      },
+      "globalSettings": {
+        "title": "Global Settings",
+        "description": "System-wide settings that affect all users. Changes are applied immediately.",
+        "noSettings": "No global settings configured",
+        "save": "Save",
+        "saving": "Saving..."
+      },
+      "mcpPrompts": {
+        "title": "MCP Prompts",
+        "description": "Manage system prompts and tool descriptions for different AI agents and models.",
+        "howItWorks": "How it works",
+        "hint1": "Select a scope (Default, Claude, ChatGPT, etc.) to view/edit prompts for that agent",
+        "hint2": "Select a model to create model-specific overrides within an agent",
+        "hint3": "Empty value = uses parent level fallback (Model → Agent → Default)"
+      }
+    },
+    "globalSettings": {
+      "title": "Global Settings",
+      "description": "Manage MCP tool descriptions, system prompts, and other agent-facing texts.",
+      "loadError": "Failed to load settings",
+      "retry": "Retry",
+      "noSettings": "No settings configured",
+      "otherSettings": "Other Settings",
+      "save": "Save",
+      "saving": "Saving...",
+      "cancel": "Cancel",
+      "saveAndClose": "Save & Close",
+      "fullscreenEdit": "Edit in fullscreen",
+      "characters": "characters",
+      "setting": "setting",
+      "settings": "settings",
+      "history": {
+        "button": "History",
+        "title": "Change History",
+        "noHistory": "No change history",
+        "emptyValue": "(empty)",
+        "system": "System",
+        "oldValue": "Old value",
+        "newValue": "New value",
+        "rollback": "Rollback",
+        "close": "Close",
+        "confirmRollback": "Confirm Rollback",
+        "rollbackWarning": "This will restore the setting to a previous value. A new audit entry will be created.",
+        "restoreTo": "Restore to",
+        "confirmRollbackButton": "Rollback"
+      },
+      "export": {
+        "button": "Export"
+      },
+      "import": {
+        "button": "Import",
+        "previewTitle": "Import Preview",
+        "previewDescription": "Review the changes that will be applied when importing settings.",
+        "noChanges": "No changes to apply",
+        "willOverwrite": "settings will be overwritten",
+        "confirm": "Apply Import",
+        "addSkipped": "Cannot add - definition does not exist",
+        "type": {
+          "overwrite": "Overwrite",
+          "add": "New (skipped)",
+          "unchanged": "Unchanged"
+        }
+      },
+      "schema": {
+        "exportButton": "Export Schema",
+        "importButton": "Import Schema",
+        "previewTitle": "Schema Import Preview",
+        "previewDescription": "Review the schema changes that will be applied.",
+        "noChanges": "No schema changes to apply",
+        "willChange": "definitions will be changed",
+        "confirm": "Apply Schema",
+        "typeChangeWarning": "Type change will affect existing values",
+        "confirmTypeChange": "I understand that type changes may affect existing setting values",
+        "type": {
+          "new": "New",
+          "changed": "Modified",
+          "type_changed": "Type Changed",
+          "unchanged": "Unchanged"
+        }
+      },
+      "reset": {
+        "confirmTitle": "Reset Override",
+        "confirmDescription": "This will reset the override to use the default value. The setting will fall back to the parent level (agent or default).",
+        "key": "Setting key",
+        "confirmButton": "Reset Override"
+      }
+    },
+    "mcpPrompts": {
+      "title": "MCP Prompts",
+      "description": "Manage system prompts and tool descriptions for different AI agents and models.",
+      "howItWorks": "How it works",
+      "hint1": "Select a scope (Default, Claude, ChatGPT, etc.) to view/edit prompts for that agent",
+      "hint2": "Select a model to create model-specific overrides within an agent",
+      "hint3": "Empty value = uses parent level fallback (Model → Agent → Default)",
+      "systemPrompts": "System Prompts",
+      "toolDescriptions": "Tool Descriptions",
+      "history": {
+        "button": "History",
+        "version": "Version:",
+        "selectVersion": "Select version...",
+        "apply": "Apply",
+        "noEntries": "No history entries",
+        "diffCurrent": "vs Current",
+        "diffChanges": "Changes"
+      }
+    },
+    "dashboard": {
+      "title": "Admin Dashboard",
+      "loading": "Loading dashboard...",
+      "failedToLoad": "Failed to load dashboard",
+      "stats": {
+        "totalWorkflows": "Total Workflows",
+        "totalExecutions": "Total Executions",
+        "activeExecutions": "Active Executions",
+        "settingDefinitions": "Setting Definitions"
+      },
+      "systemHealth": {
+        "title": "System Health",
+        "backendStatus": "Backend Status",
+        "databaseSize": "Database Size"
+      },
+      "logoutAll": {
+        "title": "Session Management",
+        "button": "Logout All Users",
+        "confirmTitle": "Logout All Users?",
+        "confirmDescription": "This will terminate all user sessions except your current session. All users will be logged out and will need to sign in again.",
+        "confirm": "Logout All"
+      },
+      "recentActivity": {
+        "title": "Recent Activity",
+        "workflow": "Workflow"
+      },
+      "quickLinks": {
+        "title": "Quick Links",
+        "userManagement": "User Management",
+        "userManagementDesc": "Manage users and permissions",
+        "deletedWorkflows": "Deleted Workflows",
+        "deletedWorkflowsDesc": "Restore or permanently delete",
+        "systemSettings": "System Settings",
+        "systemSettingsDesc": "Manage setting definitions",
+        "allExecutions": "All Executions",
+        "allExecutionsDesc": "Monitor all user executions"
+      }
+    },
+    "analytics": {
+      "title": "Analytics Dashboard",
+      "loading": "Loading analytics...",
+      "selectTimeRange": "Select time range",
+      "timeRanges": {
+        "today": "Today",
+        "week": "Last 7 days",
+        "month": "Last 30 days",
+        "year": "Last year",
+        "all": "All time"
+      },
+      "cards": {
+        "totalExecutions": "Total Executions",
+        "successRate": "Success Rate",
+        "activeUsers": "Total Users",
+        "activeWorkflows": "Total Workflows"
+      },
+      "status": {
+        "completed": "Completed",
+        "active": "Active",
+        "failed": "Failed"
+      },
+      "executionsOverTime": "Executions Over Time",
+      "topWorkflows": "Top 10 Workflows",
+      "noWorkflowData": "No workflow data available for the selected time range",
+      "table": {
+        "workflow": "Workflow",
+        "executions": "Executions",
+        "completed": "Completed",
+        "failed": "Failed",
+        "successRate": "Success Rate",
+        "avgDuration": "Avg Duration"
+      },
+      "userActivity": {
+        "title": "User Activity",
+        "activeUsers": "Active Users",
+        "newUsers": "New Users",
+        "topUsers": "Most Active Users",
+        "executions": "executions",
+        "noData": "No user activity data available"
+      }
+    },
+    "executions": {
+      "title": "All Executions",
+      "subtitle": "Monitor workflow executions across all users",
+      "loading": "Loading executions...",
+      "retry": "Retry",
+      "filters": {
+        "user": "User",
+        "allUsers": "All users",
+        "status": "Status",
+        "allStatuses": "All statuses",
+        "running": "Running",
+        "waiting": "Waiting",
+        "completed": "Completed",
+        "failed": "Failed",
+        "search": "Search",
+        "searchPlaceholder": "Execution or workflow ID",
+        "clearFilters": "Clear filters"
+      },
+      "resultsCount": "{{count}} execution found",
+      "resultsCountPlural": "{{count}} executions found",
+      "noExecutions": "No executions found",
+      "table": {
+        "executionId": "Execution ID",
+        "user": "User",
+        "workflow": "Workflow",
+        "status": "Status",
+        "currentNode": "Current Node",
+        "created": "Created"
+      }
+    },
+    "executionInspector": {
+      "loading": "Loading execution...",
+      "notFound": "Execution not found",
+      "backToExecutions": "← Back to Admin Executions",
+      "execution": "Execution",
+      "workflow": "Workflow",
+      "owner": "Owner",
+      "selected": "Selected",
+      "current": "Current",
+      "clearSelection": "Clear selection",
+      "tabs": {
+        "context": "Context",
+        "errors": "Errors",
+        "steps": "Steps"
+      },
+      "context": {
+        "title": "Execution Context (Read-only)",
+        "fullscreen": "Fullscreen",
+        "close": "Close",
+        "viewer": "Execution Context Viewer"
+      },
+      "errors": {
+        "title": "Errors",
+        "executionError": "Execution Error",
+        "nodeErrors": "Node Errors",
+        "noErrors": "No errors",
+        "nodeId": "Node"
+      },
+      "steps": {
+        "noSteps": "No steps available",
+        "current": "Current"
+      }
+    },
+    "artifacts": {
+      "title": "Artifacts Management",
+      "subtitle": "View and manage artifacts across all users",
+      "loading": "Loading artifacts...",
+      "retry": "Retry",
+      "noArtifacts": "No artifacts found",
+      "resultsCount": "{{count}} artifacts found",
+      "stats": {
+        "totalArtifacts": "Total Artifacts",
+        "totalSize": "Total Size",
+        "totalUsers": "Users with Artifacts",
+        "expiredArtifacts": "Expired",
+        "deletedArtifacts": "Deleted"
+      },
+      "filters": {
+        "title": "Filters",
+        "userPlaceholder": "Filter by user ID or email...",
+        "includeExpired": "Include expired",
+        "includeDeleted": "Include deleted",
+        "clear": "Clear Filters"
+      },
+      "table": {
+        "user": "User",
+        "name": "Name",
+        "size": "Size",
+        "created": "Created",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "status": {
+        "active": "Active",
+        "expired": "Expired",
+        "deleted": "Deleted"
+      },
+      "actions": {
+        "openInNewTab": "Open in new tab",
+        "delete": "Delete"
+      },
+      "delete": {
+        "title": "Delete Artifact",
+        "description": "Are you sure you want to delete \"{{name}}\" owned by {{user}}? This action cannot be undone.",
+        "deleting": "Deleting..."
+      },
+      "pagination": {
+        "showing": "Showing {{from}} to {{to}} of {{total}}",
+        "page": "Page {{current}} of {{total}}",
+        "previous": "Previous",
+        "next": "Next"
+      },
+      "errors": {
+        "loadFailed": "Failed to load artifacts",
+        "deleteFailed": "Failed to delete artifact"
+      }
+    },
+    "userDetail": {
+      "loading": "Loading user...",
+      "notFound": "User not found",
+      "backToUsers": "Back to Users",
+      "status": {
+        "blocked": "Blocked",
+        "verified": "Verified",
+        "unverified": "Unverified",
+        "admin": "Admin"
+      },
+      "stats": {
+        "workflows": "Workflows",
+        "activeSessions": "Active Sessions",
+        "emailsSent": "Emails Sent"
+      },
+      "actions": {
+        "title": "Actions",
+        "blockUser": "Block User",
+        "unblockUser": "Unblock User",
+        "verifyEmail": "Verify Email",
+        "sendVerification": "Send Verification",
+        "sendPasswordReset": "Send Password Reset",
+        "revokeAllSessions": "Revoke All Sessions",
+        "processing": "Processing...",
+        "sending": "Sending...",
+        "revoking": "Revoking...",
+        "blockReason": "Enter reason for blocking (optional):",
+        "confirmUnblock": "Unblock this user?",
+        "confirmSendVerification": "Send verification email to this user?",
+        "confirmVerifyEmail": "Manually verify this user's email? This will allow them to log in.",
+        "confirmSendReset": "Send password reset email to this user?",
+        "confirmRevokeSessions": "Revoke all sessions for this user? They will be logged out everywhere."
+      },
+      "blocked": {
+        "label": "Blocked",
+        "reason": "Reason"
+      },
+      "userInfo": {
+        "title": "User Information",
+        "userId": "User ID",
+        "email": "Email",
+        "created": "Created",
+        "updated": "Updated"
+      },
+      "sessions": {
+        "title": "Active Sessions",
+        "noSessions": "No active sessions",
+        "ip": "IP",
+        "unknown": "Unknown",
+        "created": "Created",
+        "expires": "Expires"
+      },
+      "emailHistory": {
+        "title": "Email History",
+        "noEmails": "No emails sent",
+        "type": "Type",
+        "to": "To"
+      },
+      "security": {
+        "title": "Security Actions",
+        "activeSessions": "Active Sessions",
+        "oauthTokens": "OAuth Tokens",
+        "forcePasswordReset": "Force Password Reset",
+        "forcePasswordResetProcessing": "Processing...",
+        "revokeAllOAuth": "Revoke All OAuth Tokens",
+        "revokeAllOAuthProcessing": "Revoking...",
+        "confirmForcePasswordReset": "Force password reset for this user? They will be required to change their password on next login.",
+        "confirmClearPasswordReset": "Clear password reset requirement? User will no longer be forced to change password.",
+        "clearReset": "Clear Reset",
+        "clearResetProcessing": "Clearing...",
+        "passwordResetRequired": "Password Reset Required",
+        "passwordResetRequestedAt": "Requested",
+        "passwordResetRequestedBy": "Requested by"
+      },
+      "webSessions": {
+        "title": "Web Sessions",
+        "revokeAll": "Revoke All Sessions",
+        "ip": "IP",
+        "country": "Country",
+        "created": "Created",
+        "expires": "Expires",
+        "revoke": "Revoke",
+        "confirmRevokeSession": "Revoke this session?"
+      },
+      "oauthConnections": {
+        "title": "OAuth Connections",
+        "revokeAll": "Revoke All OAuth",
+        "noConnections": "No OAuth connections",
+        "scopes": "Scopes",
+        "connected": "Connected",
+        "tokens": "Tokens",
+        "revoke": "Revoke",
+        "confirmRevokeProvider": "Revoke OAuth tokens for provider {{provider}}?",
+        "confirmRevokeAll": "Revoke all OAuth tokens for this user? All their OAuth applications will lose access."
+      },
+      "artifactQuota": {
+        "title": "Artifact Quota",
+        "storage": "Storage",
+        "files": "Files",
+        "used": "used",
+        "override": "Override",
+        "overrideQuotaMb": "Storage Limit (MB)",
+        "overrideMaxFiles": "Max Files",
+        "resetToDefault": "Reset to Default",
+        "save": "Save",
+        "saving": "Saving...",
+        "usingDefault": "Using global default",
+        "customQuota": "Custom quota",
+        "nullHint": "Leave empty to use global default"
+      },
+      "tooltips": {
+        "revokeAllSessions": "Revoke all web sessions and OAuth tokens"
+      },
+      "blockedBy": "Blocked by",
+      "errors": {
+        "actionFailed": "Failed to {{action}}",
+        "loadFailed": "Failed to load user",
+        "revokeSessionFailed": "Failed to revoke session",
+        "revokeSessionsFailed": "Failed to revoke sessions",
+        "revokeOAuthFailed": "Failed to revoke OAuth tokens"
+      }
+    },
+    "auditLog": {
+      "title": "Audit Log",
+      "subtitle": "System audit trail with user actions and events",
+      "loading": "Loading audit log...",
+      "filters": {
+        "user": "User",
+        "allUsers": "All Users",
+        "actionType": "Action Type",
+        "selectActions": "Select actions...",
+        "selected": "{{count}} selected",
+        "searchActions": "Search actions...",
+        "resource": "Resource",
+        "resourcePlaceholder": "e.g. workflow, user",
+        "source": "Source",
+        "allSources": "All Sources",
+        "clearFilters": "Clear Filters",
+        "fromDate": "From Date",
+        "toDate": "To Date"
+      },
+      "table": {
+        "timestamp": "Timestamp",
+        "user": "User",
+        "action": "Action",
+        "resource": "Resource",
+        "source": "Source",
+        "ipCountry": "IP / Country"
+      },
+      "system": "System",
+      "noEntries": "No audit log entries found",
+      "pagination": {
+        "page": "Page {{page}} ({{count}} entries)",
+        "previous": "Previous",
+        "next": "Next"
+      },
+      "detail": {
+        "title": "Audit Entry Details",
+        "id": "ID",
+        "timestamp": "Timestamp",
+        "user": "User",
+        "action": "Action",
+        "resource": "Resource",
+        "resourceId": "Resource ID",
+        "source": "Source",
+        "ipAddress": "IP Address",
+        "country": "Country",
+        "userAgent": "User Agent",
+        "metadata": "Metadata",
+        "changes": "Changes",
+        "workflowId": "Workflow ID",
+        "fromNode": "From Node",
+        "toNode": "To Node",
+        "nodeId": "Node ID",
+        "totalSteps": "Total Steps",
+        "duration": "Duration",
+        "error": "Error",
+        "validationError": "Validation Error",
+        "input": "Step Input"
+      }
+    },
+    "settingsUnified": {
+      "title": "Settings",
+      "tabs": {
+        "definitions": "Definitions",
+        "values": "Values",
+        "maintenance": "Maintenance"
+      }
+    },
+    "systemSettings": {
+      "title": "System Settings",
+      "createNew": "Create New Definition",
+      "keyPlaceholder": "Key (e.g., telegram.bot_token)",
+      "selectType": "Select Type",
+      "categoryPlaceholder": "Category",
+      "labelPlaceholder": "Label",
+      "descriptionPlaceholder": "Description (optional)",
+      "required": "Required",
+      "adminOnly": "Admin Only",
+      "protected": "Protected",
+      "createButton": "Create Definition",
+      "loading": "Loading definitions...",
+      "type": "Type",
+      "category": "Category",
+      "delete": "Delete",
+      "confirmDelete": "Delete setting definition \"{{key}}\"?",
+      "fillRequired": "Please fill in all required fields",
+      "cancel": "Cancel",
+      "schema": {
+        "exportButton": "Export Schema",
+        "importButton": "Import Schema",
+        "previewTitle": "Schema Import Preview",
+        "previewDescription": "Review the schema changes that will be applied.",
+        "noChanges": "No schema changes to apply",
+        "willChange": "definitions will be changed",
+        "confirm": "Apply Schema",
+        "typeChangeWarning": "Type change will affect existing values",
+        "confirmTypeChange": "I understand that type changes may affect existing setting values",
+        "type": {
+          "new": "New",
+          "changed": "Modified",
+          "type_changed": "Type Changed",
+          "unchanged": "Unchanged"
+        }
+      },
+      "dbMaintenance": {
+        "title": "Database Maintenance",
+        "vacuum": {
+          "title": "Vacuum Database",
+          "description": "Optimize database by removing unused space",
+          "button": "Vacuum",
+          "confirm": "Vacuum database? This may take a few seconds.",
+          "success": "Database vacuumed successfully",
+          "error": "Failed to vacuum database"
+        },
+        "backup": {
+          "title": "Backup Database",
+          "description": "Create a backup copy of the database",
+          "button": "Backup",
+          "confirm": "Create database backup?",
+          "success": "Backup created: {{path}}",
+          "error": "Failed to create backup"
+        }
+      }
+    },
+    "userManagement": {
+      "title": "User Management",
+      "loading": "Loading users...",
+      "searchPlaceholder": "Search by email or name...",
+      "table": {
+        "email": "Email",
+        "name": "Name",
+        "status": "Status",
+        "role": "Role",
+        "workflows": "Workflows",
+        "created": "Created",
+        "actions": "Actions"
+      },
+      "status": {
+        "blocked": "Blocked",
+        "verified": "Verified",
+        "unverified": "Unverified"
+      },
+      "role": {
+        "admin": "Admin",
+        "user": "User"
+      },
+      "actions": {
+        "view": "View",
+        "edit": "Edit",
+        "delete": "Delete",
+        "save": "Save",
+        "cancel": "Cancel"
+      },
+      "confirmDelete": "Delete user \"{{email}}\"? This will also delete all their workflows.",
+      "noUsers": "No users found",
+      "noSearchResults": "No users match your search",
+      "resultsCount": "{{count}} users found",
+      "pagination": {
+        "previous": "Previous",
+        "next": "Next",
+        "page": "Page {{current}} of {{total}}"
+      }
+    },
+    "monitoringTest": {
+      "title": "Monitoring Test",
+      "description": "Generate test events for validating the monitoring pipeline. Each button triggers events that should appear in logs, metrics, and Grafana dashboards.",
+      "loading": "Loading...",
+      "frontendErrors": {
+        "title": "Frontend Errors",
+        "description": "Test client-side error logging (errors sent to /api/logs/client)",
+        "reactError": "React Error (ErrorBoundary)",
+        "windowError": "Window Error (onerror)",
+        "promiseError": "Promise Rejection"
+      },
+      "backendErrors": {
+        "title": "Backend Events",
+        "description": "Test backend logging and metrics generation",
+        "apiError": "API Error (500)",
+        "slowRequest": "Slow Request (3s)",
+        "logLevels": "Generate All Log Levels"
+      },
+      "eventHistory": {
+        "title": "Event History",
+        "clear": "Clear",
+        "empty": "No events generated yet. Click a button above to generate test events."
+      },
+      "verification": {
+        "title": "Verification Commands",
+        "dockerLogs": "Docker Logs (MonitoringTest)",
+        "metricsEndpoint": "Metrics Endpoint (after Etap 3)",
+        "clientLogs": "Client Error Logs"
+      },
+      "workflowTest": {
+        "title": "Workflow Execution",
+        "description": "Test workflow execution metrics (for validation after Etap 4)",
+        "startWorkflow": "Start Test Workflow"
+      },
+      "mcpTest": {
+        "title": "MCP Tool Calls",
+        "description": "Simulate MCP tool calls for metrics testing",
+        "successCall": "MCP Call (Success)",
+        "errorCall": "MCP Call (Error)"
+      }
+    },
+    "workflows": {
+      "title": "All Workflows",
+      "subtitle": "Browse workflows across all users",
+      "loading": "Loading workflows...",
+      "retry": "Retry",
+      "noWorkflows": "No workflows found",
+      "nodes": "nodes",
+      "public": "Public",
+      "private": "Private",
+      "filters": {
+        "searchPlaceholder": "Search by name or description...",
+        "allUsers": "All users",
+        "visibility": "Visibility",
+        "allVisibility": "All",
+        "validation": "Validation",
+        "allValidation": "All",
+        "valid": "Valid",
+        "invalid": "Invalid",
+        "unknown": "Unknown"
+      }
+    },
+    "deletedWorkflows": {
+      "title": "Deleted Workflows",
+      "loading": "Loading deleted workflows...",
+      "searchPlaceholder": "Search by workflow name or ID...",
+      "filters": {
+        "from": "From",
+        "to": "To",
+        "clearDates": "Clear Dates"
+      },
+      "table": {
+        "workflowId": "Workflow ID",
+        "name": "Name",
+        "deletedDate": "Deleted Date",
+        "deletedBy": "Deleted By",
+        "actions": "Actions"
+      },
+      "actions": {
+        "restore": "Restore",
+        "permanentDelete": "Permanent Delete"
+      },
+      "confirmRestore": "Restore workflow \"{{name}}\"?",
+      "confirmPermanentDelete": "PERMANENTLY delete workflow \"{{name}}\"? This action cannot be undone.",
+      "noDeletedWorkflows": "No deleted workflows",
+      "noMatchingWorkflows": "No workflows found matching filters",
+      "resultsCount": "{{count}} deleted workflows found",
+      "pagination": {
+        "previous": "Previous",
+        "next": "Next",
+        "page": "Page {{current}} of {{total}}"
+      }
+    },
+    "tokens": {
+      "title": "API Tokens",
+      "subtitle": "View and manage API tokens across all users",
+      "searchPlaceholder": "Search by token name or user email",
+      "allStatuses": "All statuses",
+      "statusActive": "Active",
+      "statusExpired": "Expired",
+      "statusRevoked": "Revoked",
+      "created": "Created",
+      "expires": "Expires",
+      "lastUsed": "Last used",
+      "revoke": "Revoke",
+      "revokeSuccess": "Token revoked successfully",
+      "revokeError": "Failed to revoke token",
+      "revokeConfirmTitle": "Revoke API Token",
+      "revokeConfirmDescription": "Are you sure you want to revoke token \"{{name}}\" belonging to {{email}}? This action cannot be undone.",
+      "noTokens": "No API tokens found",
+      "retry": "Retry"
+    },
+    "businessAnalytics": {
+      "title": "Business Analytics",
+      "conversionFunnel": {
+        "title": "User Conversion Funnel",
+        "registered": "Registered",
+        "verified": "Email Verified",
+        "firstWorkflow": "Started Workflow",
+        "active": "Active (2+ runs)",
+        "registrationTrend": "Registration Trend"
+      },
+      "topWorkflows": {
+        "title": "Top Workflows",
+        "executions": "Executions",
+        "successRate": "Success Rate",
+        "noData": "No workflow data"
+      },
+      "engagement": {
+        "title": "User Engagement",
+        "returningUsers": "Returning Users",
+        "avgExecutionsPerUser": "Avg Executions / User",
+        "timeToFirstWorkflow": "Time to First Workflow",
+        "activeUsersTrend": "Active Users Trend",
+        "days": "days",
+        "noData": "No engagement data"
+      }
+    },
+    "operational": {
+      "title": "Operational Metrics",
+      "autoRefreshOn": "Auto-refresh ON",
+      "autoRefreshOff": "Auto-refresh",
+      "lastUpdated": "Updated: {{time}}",
+      "unavailable": "Unavailable",
+      "trend": "Trend",
+      "timeSeriesTitle": "Time Series",
+      "multiSeriesTitle": "Multi-Series Comparison",
+      "multiSeries": {
+        "workflowComparison": "Workflows Started vs Completed",
+        "rateComparison": "Call Rates Comparison"
+      },
+      "granularity": {
+        "auto": "Auto",
+        "hourly": "Hourly",
+        "daily": "Daily"
+      },
+      "breakdowns": {
+        "byAction": "Top Actions",
+        "bySource": "By Source",
+        "byResource": "By Resource",
+        "name": "Name",
+        "count": "Count"
+      },
+      "metrics": {
+        "unique_users_per_day": "Unique Users / Day",
+        "total_calls_per_day": "Total Calls / Day",
+        "calls_per_second": "Calls / Second",
+        "workflows_started_per_day": "Workflows Started / Day",
+        "workflows_completed_per_day": "Workflows Completed / Day",
+        "mcp_calls_per_second": "MCP Calls / Second"
+      },
+      "filters": {
+        "action": "Action",
+        "source": "Source",
+        "resource": "Resource",
+        "allActions": "All Actions",
+        "allSources": "All Sources",
+        "allResources": "All Resources",
+        "clear": "Clear Filters"
+      },
+      "chartType": {
+        "area": "Area Chart",
+        "line": "Line Chart",
+        "bar": "Bar Chart"
+      }
+    },
+    "reportedArtifacts": {
+      "title": "Reported Artifacts",
+      "subtitle": "Review artifacts reported by viewers and take down abusive content",
+      "loading": "Loading reported artifacts...",
+      "retry": "Retry",
+      "resultsCount": "{{count}} reported artifacts",
+      "noReports": "No reported artifacts",
+      "owner": "Owner",
+      "takenDownBadge": "Taken down",
+      "defaultReason": "Taken down by admin after abuse report",
+      "takedownSuccess": "Artifact taken down",
+      "actions": {
+        "preview": "Preview",
+        "takedown": "Take down",
+        "takedownUser": "Take down all by user"
+      },
+      "takedown": {
+        "title": "Take down artifact",
+        "description": "Take down \"{{name}}\"? It will immediately stop being served publicly."
+      },
+      "takedownUser": {
+        "title": "Take down all artifacts by user",
+        "description": "Take down ALL artifacts owned by {{user}}? They will immediately stop being served publicly."
+      },
+      "errors": {
+        "loadFailed": "Failed to load reported artifacts",
+        "takedownFailed": "Failed to take down artifact"
+      }
+    }
+  },
+  "components": {
+    "workflowCard": {
+      "valid": "Valid",
+      "invalid": "Invalid",
+      "unknown": "Unknown",
+      "public": "Public",
+      "private": "Private",
+      "sharedWithYou": "Shared",
+      "delete": "Delete",
+      "deleteWorkflow": "Delete workflow"
+    },
+    "searchFilters": {
+      "searchPlaceholder": "Search workflows...",
+      "status": "Status",
+      "statusLabel": "Status",
+      "all": "All",
+      "valid": "Valid",
+      "invalid": "Invalid",
+      "warning": "Warning",
+      "visibility": "Visibility",
+      "visibilityLabel": "Visibility",
+      "public": "Public",
+      "private": "Private",
+      "sortLabel": "Sort",
+      "sortByDate": "Date",
+      "sortByName": "Name",
+      "newest": "Newest",
+      "oldest": "Oldest",
+      "reset": "Reset",
+      "clear": "Clear",
+      "page": "Page",
+      "of": "of",
+      "prev": "Prev",
+      "next": "Next"
+    },
+    "betaWarningBanner": {
+      "title": "Beta Version:",
+      "message": "The system is under development. Data loss, functionality changes, or terms of use modifications are possible. We do our best to prevent this. Thank you for understanding.",
+      "dismiss": "Dismiss beta warning"
+    },
+    "betaAgreementModal": {
+      "title": "Beta Version Agreement",
+      "description": "Please read and accept the following terms before using MCP Moira",
+      "aboutSystem": "About the System",
+      "aboutSystemText": "MCP Moira is in <strong>active development</strong>. The system is evolving, new features are being added.",
+      "importantInfo": "Important Information",
+      "dataWarning": "<strong>Data:</strong> Data loss is possible during system updates. We do our best to prevent this.",
+      "functionalityWarning": "<strong>Functionality:</strong> System behavior may change. We strive to minimize inconvenience.",
+      "termsWarning": "<strong>Terms of Use:</strong> May be modified as the project develops.",
+      "recommendations": "Recommendations",
+      "backupWorkflows": "Make backups of important workflows",
+      "reportIssues": "Report issues via GitHub Issues",
+      "helpImprove": "Help us improve the system with your feedback",
+      "acceptance": "By accepting, you confirm",
+      "understandDevelopment": "Understanding that the system is under development",
+      "readyForChanges": "Readiness for possible changes",
+      "agreeToTerms": "Agreement with the above terms",
+      "thankYou": "Thank you for your understanding and participation in project development! 🙏",
+      "decline": "Decline",
+      "acceptAndContinue": "Accept and Continue"
+    },
+    "errorBoundary": {
+      "title": "Something went wrong",
+      "subtitle": "The MCP Moira Web UI encountered an unexpected error",
+      "errorId": "Error ID",
+      "error": "Error",
+      "technicalDetails": "Technical Details",
+      "tryAgain": "Try Again",
+      "reloadPage": "Reload Page",
+      "goHome": "Go Home",
+      "copyErrorDetails": "Copy Error Details",
+      "errorCopied": "Error details copied to clipboard",
+      "helpTitle": "If this error persists:",
+      "helpRefresh": "Try refreshing the page",
+      "helpBackend": "Check if the backend server is running",
+      "helpReport": "Copy error details and report the issue"
+    },
+    "workflowSidebar": {
+      "description": "Description",
+      "tags": "Tags",
+      "nodes": "Nodes",
+      "totalNodes": "total nodes",
+      "philosophy": "Philosophy",
+      "nodeDetails": "Node Details",
+      "workflowInfo": "Workflow Info",
+      "showWorkflowInfo": "← Workflow",
+      "nodeId": "Node ID",
+      "from": "From",
+      "to": "To"
+    },
+    "workflowGraph": {
+      "loading": "Calculating layout...",
+      "controls": {
+        "fitView": "Fit View",
+        "fitViewTitle": "Fit to view",
+        "vertical": "Vertical",
+        "verticalTitle": "Vertical layout",
+        "horizontal": "Horizontal",
+        "horizontalTitle": "Horizontal layout"
+      },
+      "nodeDetails": {
+        "title": "Node Details",
+        "nodeSuffix": "Node",
+        "id": "ID",
+        "type": "Type",
+        "label": "Label",
+        "directive": "Directive",
+        "completionCondition": "Completion Condition",
+        "message": "Message",
+        "condition": "Condition",
+        "expressions": "Expressions",
+        "subgraphId": "Subgraph ID",
+        "validation": "Validation",
+        "inputSchema": "Input Schema",
+        "connections": "Connections"
+      }
+    },
+    "executionErrors": {
+      "title": "Error History",
+      "noErrors": "No errors recorded",
+      "node": "Node",
+      "timestamp": "Timestamp",
+      "message": "Message",
+      "input": "Input",
+      "copy": "Copy",
+      "copied": "Copied!",
+      "copyTooltip": "Copy error details for debugging",
+      "errorTypes": {
+        "validation": "Validation",
+        "handler": "Handler",
+        "system": "System"
+      }
+    }
+  },
+  "common": {
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "status": {
+      "completed": "Completed",
+      "failed": "Failed",
+      "running": "Running",
+      "waiting": "Waiting",
+      "pending": "Pending",
+      "cancelled": "Cancelled",
+      "locked": "Locked"
+    },
+    "errors": {
+      "failedToLoad": "Failed to load data",
+      "failedToSave": "Failed to save",
+      "failedToDelete": "Failed to delete",
+      "actionFailed": "Action failed",
+      "unknownError": "An unknown error occurred"
+    },
+    "units": {
+      "mb": "MB",
+      "kb": "KB",
+      "gb": "GB"
+    },
+    "pagination": {
+      "showing": "Showing {{from}}-{{to}} of {{total}}",
+      "page": "{{current}} / {{total}}",
+      "firstPage": "Go to first page",
+      "previousPage": "Go to previous page",
+      "nextPage": "Go to next page",
+      "lastPage": "Go to last page",
+      "pageEntries": "Page {{page}} ({{count}} entries)"
+    },
+    "listView": "List view",
+    "gridView": "Grid view",
+    "errorsLabel": "errors",
+    "filters": {
+      "search": "Search",
+      "reset": "Reset",
+      "sort": "Sort",
+      "status": "Status",
+      "user": "User",
+      "visibility": "Visibility",
+      "workflow": "Workflow",
+      "action": "Action",
+      "source": "Source",
+      "dateFrom": "From",
+      "dateTo": "To"
+    }
+  },
+  "lockedWidget": {
+    "title": "{{count}} locked execution(s)",
+    "showLess": "Show less",
+    "showMore": "Show {{count}} more"
+  }
+}

@@ -1,0 +1,104 @@
+---
+title: Marketing Campaign
+description: Marketing materials creation with differentiation focus
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Structured marketing materials creation workflow with differentiation and conversion focus. Solves the generic AI copy problem through competitive analysis and mandatory proof points.
+
+## Start
+
+```bash
+mcp__moira__start({ workflowId: "marketing-campaign" })
+```
+
+## Process
+
+```mermaid
+flowchart LR
+    A[Product] --> B[Audience]
+    B --> C[Competitive]
+    C --> D[Positioning]
+    D --> E[Proof Points]
+    E --> F[Brand Voice]
+    F --> G[Create]
+    G --> H[Review]
+```
+
+## Steps
+
+| Step | Action | Output |
+|------|--------|--------|
+| 1. Product | Understand product, USPs, problem solved | Product brief |
+| 2. Audience | Define target audience, pain points, decision criteria, channels | Audience profile |
+| 3. Competitive | Analyze competitors, their positioning, messages, weaknesses | Competitive analysis |
+| 4. Positioning | Define unique angle, key messages, value proposition, differentiator | Positioning statement |
+| 5. Proof Points | Gather proof for each claim (data/testimonial/case study) | Evidence library |
+| 6. Brand Voice | Define tone, style, banned phrases, good copy examples | Brand guidelines |
+| 7. Create | Create materials using positioning, proofs, brand voice | Marketing materials |
+| 8. Review | Check claims, brand fit, legal compliance | Approved materials |
+
+## Features
+
+<Aside type="tip">
+USPs must be specific and concrete, not buzzwords. "50% faster onboarding" beats "streamlined experience".
+</Aside>
+
+### Solving Generic AI Copy
+
+| Problem | Solution |
+|---------|----------|
+| Vague USPs | Require specific, measurable claims |
+| No differentiation | Mandatory competitive analysis |
+| Unsubstantiated claims | Proof points required for each claim |
+
+### Proof Point Types
+
+| Type | Example | Strength |
+|------|---------|----------|
+| Data point | "Reduces time by 50%" | High - quantifiable |
+| Testimonial | Customer quote | Medium - social proof |
+| Case study | Specific customer result | High - detailed evidence |
+
+<Aside type="caution">
+Each claim requires at least one proof point. Claims without evidence should be removed or rewritten.
+</Aside>
+
+### Brand Voice Consistency
+
+| Element | Purpose |
+|---------|---------|
+| Tone | Overall voice (professional, friendly, technical) |
+| Style | Writing conventions and patterns |
+| Banned phrases | Words and expressions to avoid |
+| Good examples | Reference copy to emulate |
+
+### Legal Compliance Review
+
+| Check | Description |
+|-------|-------------|
+| Misleading claims | Verify accuracy of all statements |
+| Disclaimers | Add required legal disclaimers |
+| Testimonial permissions | Confirm customer consent |
+| Competitive claims | Verify comparisons are fair |
+
+## Example Node Configuration
+
+```json
+{
+  "id": "competitive-analysis",
+  "type": "agent-directive",
+  "directive": "Analyze top 3 competitors. Document their positioning, key messages, and weaknesses. Identify gaps we can exploit.",
+  "completionCondition": "Competitive analysis complete with 3 competitors analyzed and positioning gaps identified",
+  "connections": {
+    "next": "define-positioning"
+  }
+}
+```
+
+## Related
+
+- [Content Creation](/docs/reference/workflows/content-creation/) — For blog posts and articles
+- [Verified Research Workflow](/docs/reference/workflows/verified-research/) — For market research
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates

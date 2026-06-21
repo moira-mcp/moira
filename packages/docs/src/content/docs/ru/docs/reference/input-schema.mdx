@@ -1,0 +1,347 @@
+---
+title: Справочник Input Schema
+description: Валидация JSON Schema для входных данных workflows
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Обзор
+
+Узлы agent-directive используют JSON Schema (Draft 7) для валидации ответов агента. Невалидные ответы вызывают повторную попытку с сообщениями об ошибках валидации.
+
+## Базовая структура
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "field_name": { "type": "string" }
+    },
+    "required": ["field_name"]
+  }
+}
+```
+
+## Определения типов
+
+### String
+
+```json
+{
+  "properties": {
+    "name": { "type": "string" },
+    "description": { "type": "string", "minLength": 10 },
+    "code": { "type": "string", "maxLength": 100 }
+  }
+}
+```
+
+### Number
+
+```json
+{
+  "properties": {
+    "score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "count": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+### Boolean
+
+```json
+{
+  "properties": {
+    "confirmed": { "type": "boolean" }
+  }
+}
+```
+
+### Array
+
+```json
+{
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 10
+    }
+  }
+}
+```
+
+### Object
+
+```json
+{
+  "properties": {
+    "config": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "value": { "type": "number" }
+      },
+      "required": ["enabled"]
+    }
+  }
+}
+```
+
+## Ограничения Enum
+
+### String Enum
+
+```json
+{
+  "properties": {
+    "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+    "decision": { "type": "string", "enum": ["yes", "no"] }
+  }
+}
+```
+
+### Boolean-подобный Enum
+
+Для ответов на русском:
+
+```json
+{
+  "properties": {
+    "confirmed": { "type": "string", "enum": ["да", "нет"] }
+  }
+}
+```
+
+<Aside type="tip">
+  Используйте строковые enum для да/нет вместо boolean. Это делает ответы агента более явными и
+  последовательными.
+</Aside>
+
+## Optional и Required
+
+### Обязательные поля
+
+```json
+{
+  "required": ["result", "confidence"]
+}
+```
+
+### Необязательные поля со значением по умолчанию
+
+```json
+{
+  "properties": {
+    "verbose": { "type": "boolean", "default": false }
+  }
+}
+```
+
+### Паттерн необязательного пропуска
+
+```json
+{
+  "properties": {
+    "result": { "type": "string" },
+    "skip": { "type": "string", "enum": ["yes"] }
+  }
+}
+```
+
+Агент предоставляет либо `result`, либо `skip`, но не оба.
+
+## Валидация по паттерну
+
+### Паттерн пути к файлу
+
+```json
+{
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9/_.-]+\\.(json|yaml|md)$"
+    }
+  }
+}
+```
+
+### Паттерн email
+
+```json
+{
+  "properties": {
+    "email": {
+      "type": "string",
+      "pattern": "^[^@]+@[^@]+\\.[^@]+$"
+    }
+  }
+}
+```
+
+### Паттерн URL
+
+```json
+{
+  "properties": {
+    "url": {
+      "type": "string",
+      "pattern": "^https?://"
+    }
+  }
+}
+```
+
+## Валидация массивов
+
+### Типизированные элементы массива
+
+```json
+{
+  "properties": {
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
+```
+
+### Объектные элементы массива
+
+```json
+{
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["done", "pending"] }
+        },
+        "required": ["name", "status"]
+      },
+      "minItems": 1
+    }
+  }
+}
+```
+
+## Дополнительные свойства
+
+### Строгая схема (по умолчанию)
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "result": { "type": "string" }
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}
+```
+
+Отклоняет любые поля, не определённые в properties. Движок автоматически применяет `additionalProperties: false` ко всем объектным схемам с `properties`, поэтому это поведение по умолчанию даже без явного указания.
+
+### Разрешить дополнительные поля
+
+```json
+{
+  "additionalProperties": true
+}
+```
+
+Явно укажите `additionalProperties: true` для разрешения дополнительных полей.
+
+## Описания для агентов
+
+Добавляйте описания, чтобы помочь агентам понять назначение полей:
+
+```json
+{
+  "properties": {
+    "quality_score": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Rate implementation quality from 1-10"
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Concrete proof that work is complete (test output, command results)"
+    }
+  }
+}
+```
+
+<Aside type="note">Описания показываются агентам в ошибках валидации и подсказках.</Aside>
+
+## Магические переменные
+
+Специальная переменная `execution_note` обновляет отслеживание execution:
+
+```json
+{
+  "properties": {
+    "execution_note": {
+      "type": "string",
+      "description": "Note to identify this execution"
+    }
+  }
+}
+```
+
+Подробнее в [Магические переменные](/ru/docs/reference/magic-variables/).
+
+## Типичные паттерны
+
+### Ответ Да/Нет
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "result": { "type": "string", "enum": ["yes", "no"] },
+    "reason": { "type": "string" }
+  },
+  "required": ["result"]
+}
+```
+
+### Число с доказательством
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "error_count": { "type": "number", "minimum": 0 },
+    "evidence": { "type": "string", "minLength": 10 }
+  },
+  "required": ["error_count", "evidence"]
+}
+```
+
+### Множественный выбор
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["create", "edit", "delete", "skip"]
+    },
+    "details": { "type": "string" }
+  },
+  "required": ["action"]
+}
+```
+
+## Смотрите также
+
+- [Магические переменные](/ru/docs/reference/magic-variables/) - Специальные поля ввода
+- [Валидация](/ru/docs/reference/validation/) - Как работает валидация

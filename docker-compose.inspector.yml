@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  mcp-inspector:
+    image: ghcr.io/modelcontextprotocol/inspector:latest
+    container_name: mcp-inspector
+    ports:
+      - "6274:6274" # Web UI
+      - "6277:6277" # MCP Proxy
+    environment:
+      # WARNING: Only for local development in trusted network
+      - DANGEROUSLY_OMIT_AUTH=true
+      - HOST=0.0.0.0
+    network_mode: bridge
+    restart: unless-stopped

@@ -1,0 +1,70 @@
+{
+  "slug": "simple-day-planning",
+  "metadata": {
+    "name": "Простое планирование дня",
+    "version": "1.0.0",
+    "description": "Простой workflow из 3 шагов для планирования рабочего дня"
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "get-priorities"
+      },
+      "initialData": {
+        "greeting": "Давайте спланируем ваш день!"
+      }
+    },
+    {
+      "id": "get-priorities",
+      "type": "agent-directive",
+      "directive": "Поприветствуйте пользователя и узнайте, какие 2-3 самые важные задачи ему нужно выполнить сегодня. Будьте дружелюбны и помогите сформулировать приоритеты.",
+      "completionCondition": "Пользователь указал 2-3 основные задачи на день",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "priorities": {
+            "type": "string",
+            "description": "Список приоритетных задач на день"
+          }
+        },
+        "required": [
+          "priorities"
+        ]
+      },
+      "connections": {
+        "success": "create-schedule"
+      }
+    },
+    {
+      "id": "create-schedule",
+      "type": "agent-directive",
+      "directive": "На основе указанных приоритетов: {{priorities}} - создайте простое расписание дня с временными интервалами. Учтите перерывы и реалистичные временные рамки. Сделайте план удобным и выполнимым.",
+      "completionCondition": "Создано четкое расписание дня с временными интервалами",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "schedule": {
+            "type": "string",
+            "description": "Готовое расписание дня"
+          }
+        },
+        "required": [
+          "schedule"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "priorities",
+        "schedule"
+      ]
+    }
+  ]
+}

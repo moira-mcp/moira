@@ -1,0 +1,347 @@
+---
+title: Input Schema Reference
+description: JSON Schema validation for workflow inputs
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+## Overview
+
+Agent-directive nodes use JSON Schema (Draft 7) to validate agent responses. Invalid responses trigger retry with validation error messages.
+
+## Basic Structure
+
+```json
+{
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "field_name": { "type": "string" }
+    },
+    "required": ["field_name"]
+  }
+}
+```
+
+## Type Definitions
+
+### String
+
+```json
+{
+  "properties": {
+    "name": { "type": "string" },
+    "description": { "type": "string", "minLength": 10 },
+    "code": { "type": "string", "maxLength": 100 }
+  }
+}
+```
+
+### Number
+
+```json
+{
+  "properties": {
+    "score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "count": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+### Boolean
+
+```json
+{
+  "properties": {
+    "confirmed": { "type": "boolean" }
+  }
+}
+```
+
+### Array
+
+```json
+{
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 10
+    }
+  }
+}
+```
+
+### Object
+
+```json
+{
+  "properties": {
+    "config": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "value": { "type": "number" }
+      },
+      "required": ["enabled"]
+    }
+  }
+}
+```
+
+## Enum Constraints
+
+### String Enum
+
+```json
+{
+  "properties": {
+    "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+    "decision": { "type": "string", "enum": ["yes", "no"] }
+  }
+}
+```
+
+### Boolean-like Enum
+
+For Russian responses:
+
+```json
+{
+  "properties": {
+    "confirmed": { "type": "string", "enum": ["да", "нет"] }
+  }
+}
+```
+
+<Aside type="tip">
+  Use string enums for yes/no instead of booleans. This makes agent responses more explicit and
+  consistent.
+</Aside>
+
+## Optional vs Required
+
+### Required Fields
+
+```json
+{
+  "required": ["result", "confidence"]
+}
+```
+
+### Optional Fields with Default
+
+```json
+{
+  "properties": {
+    "verbose": { "type": "boolean", "default": false }
+  }
+}
+```
+
+### Optional Skip Pattern
+
+```json
+{
+  "properties": {
+    "result": { "type": "string" },
+    "skip": { "type": "string", "enum": ["yes"] }
+  }
+}
+```
+
+Agent provides either `result` or `skip`, not both.
+
+## Pattern Validation
+
+### File Path Pattern
+
+```json
+{
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9/_.-]+\\.(json|yaml|md)$"
+    }
+  }
+}
+```
+
+### Email Pattern
+
+```json
+{
+  "properties": {
+    "email": {
+      "type": "string",
+      "pattern": "^[^@]+@[^@]+\\.[^@]+$"
+    }
+  }
+}
+```
+
+### URL Pattern
+
+```json
+{
+  "properties": {
+    "url": {
+      "type": "string",
+      "pattern": "^https?://"
+    }
+  }
+}
+```
+
+## Array Validation
+
+### Typed Array Items
+
+```json
+{
+  "properties": {
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
+```
+
+### Object Array Items
+
+```json
+{
+  "properties": {
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["done", "pending"] }
+        },
+        "required": ["name", "status"]
+      },
+      "minItems": 1
+    }
+  }
+}
+```
+
+## Additional Properties
+
+### Strict Schema (Default)
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "result": { "type": "string" }
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}
+```
+
+Rejects any fields not defined in properties. The engine automatically enforces `additionalProperties: false` on all object schemas with `properties`, so this is the default behavior even without explicit setting.
+
+### Allow Extra Fields
+
+```json
+{
+  "additionalProperties": true
+}
+```
+
+Explicitly set `additionalProperties: true` to allow undefined fields.
+
+## Description for Agents
+
+Add descriptions to help agents understand fields:
+
+```json
+{
+  "properties": {
+    "quality_score": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 10,
+      "description": "Rate implementation quality from 1-10"
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Concrete proof that work is complete (test output, command results)"
+    }
+  }
+}
+```
+
+<Aside type="note">Descriptions are shown to agents in validation errors and help prompts.</Aside>
+
+## Magic Variables
+
+Special variable `execution_note` updates execution tracking:
+
+```json
+{
+  "properties": {
+    "execution_note": {
+      "type": "string",
+      "description": "Note to identify this execution"
+    }
+  }
+}
+```
+
+See [Magic Variables](/docs/reference/magic-variables/) for details.
+
+## Common Patterns
+
+### Yes/No Response
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "result": { "type": "string", "enum": ["yes", "no"] },
+    "reason": { "type": "string" }
+  },
+  "required": ["result"]
+}
+```
+
+### Numeric with Evidence
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "error_count": { "type": "number", "minimum": 0 },
+    "evidence": { "type": "string", "minLength": 10 }
+  },
+  "required": ["error_count", "evidence"]
+}
+```
+
+### Multi-Choice
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["create", "edit", "delete", "skip"]
+    },
+    "details": { "type": "string" }
+  },
+  "required": ["action"]
+}
+```
+
+## See Also
+
+- [Magic Variables](/docs/reference/magic-variables/) - Special input fields
+- [Validation](/docs/reference/validation/) - How validation works
