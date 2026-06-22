@@ -3,7 +3,7 @@
   "name": "io.github.moira-mcp/moira",
   "title": "Moira",
   "description": "Agent Workflow Engine — multi-step MCP workflows with per-step directives and validation.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "websiteUrl": "https://github.com/moira-mcp/moira#readme",
   "repository": {
     "url": "https://github.com/moira-mcp/moira",
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/moira-mcp/moira:0.3.3",
+      "identifier": "ghcr.io/moira-mcp/moira:0.3.4",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:8080/mcp"
