@@ -99,6 +99,9 @@ RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
 # ===================================
 FROM core
 
+# MCP Registry: proves this image belongs to the published server entry.
+LABEL io.modelcontextprotocol.server.name="io.github.moira-mcp/moira"
+
 # Copy from base stage
 COPY --from=base /app/package*.json ./
 COPY --from=base /app/tsconfig*.json ./
