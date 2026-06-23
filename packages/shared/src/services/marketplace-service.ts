@@ -26,6 +26,14 @@ import type {
   LibraryEntryRepository,
   LibraryEntryRecord,
 } from "../database/repositories/library-entry-repository.js";
+import type {
+  MarketplaceReviewRepository,
+  MarketplaceReviewRecord,
+} from "../database/repositories/marketplace-review-repository.js";
+import type {
+  MarketplaceEventRepository,
+  MarketplaceEventType,
+} from "../database/repositories/marketplace-event-repository.js";
 import { isMarketplaceEnabled as defaultIsMarketplaceEnabled } from "../config/env.js";
 import { readWorkflowCatalog, isSystemOwner } from "./workflow-catalog.js";
 import { normalizeMarketplaceCategory } from "../marketplace/constants.js";
@@ -38,6 +46,8 @@ import {
   ListingAccessDeniedError,
   ListingNotAccessibleError,
   LibraryEntryNotFoundError,
+  SelfRatingError,
+  InvalidRatingError,
 } from "../errors/domain-errors.js";
 
 /** Where a library item came from. */
@@ -61,6 +71,13 @@ export interface LibraryItem {
 export interface AccessDecision {
   accessible: boolean;
   reason: "free" | "paid-coming-soon" | "purchase-required";
+}
+
+/** Result of `rate`: the stored review plus the recomputed listing aggregate. */
+export interface RateResult {
+  review: MarketplaceReviewRecord;
+  ratingAvg: number;
+  ratingCount: number;
 }
 
 /** Detail view: the listing plus the resolved workflow (null if caller lacks access). */
@@ -102,6 +119,8 @@ export class MarketplaceService {
   constructor(
     private listingRepo: MarketplaceListingRepository,
     private libraryRepo: LibraryEntryRepository,
+    private reviewRepo: MarketplaceReviewRepository,
+    private eventRepo: MarketplaceEventRepository,
     private workflowRepo: WorkflowRepository,
     private sharingRepo: WorkflowSharingRepository,
     private userRepo: UserRepository,
@@ -307,6 +326,7 @@ export class MarketplaceService {
       listingId,
     });
     await this.listingRepo.incrementInstallCount(listingId);
+    await this.eventRepo.record({ listingId, userId, type: "install" });
     return entry;
   }
 
@@ -355,7 +375,100 @@ export class MarketplaceService {
       listingId,
     });
     await this.listingRepo.incrementInstallCount(listingId);
+    await this.eventRepo.record({ listingId, userId, type: "install" });
     return { workflowId: saved.id, slug: saved.slug };
+  }
+
+  // ===== Ratings / reviews =====
+
+  /**
+   * Rate (and optionally review) a listing. One editable review per user; the
+   * author cannot rate their own listing. Recomputes the listing's rating
+   * aggregate transactionally and records a `rate` analytics event. Returns the
+   * review plus the new aggregate (so callers need not re-query the listing).
+   */
+  async rate(
+    userId: string,
+    listingId: string,
+    stars: number,
+    reviewText?: string | null,
+  ): Promise<RateResult> {
+    this.assertEnabled();
+
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      throw new InvalidRatingError(stars);
+    }
+    const listing = await this.requireListedListing(listingId);
+    if (listing.publishedBy === userId) {
+      throw new SelfRatingError();
+    }
+
+    const { review, aggregate } = await this.reviewRepo.upsertAndRecompute({
+      listingId,
+      userId,
+      stars,
+      reviewText: reviewText ?? null,
+    });
+    await this.eventRepo.record({ listingId, userId, type: "rate" });
+    return { review, ratingAvg: aggregate.ratingAvg, ratingCount: aggregate.ratingCount };
+  }
+
+  /**
+   * Remove the user's review and recompute the aggregate. Idempotent: a no-op
+   * (does not throw) when the user has no review for the listing.
+   */
+  async removeReview(userId: string, listingId: string): Promise<void> {
+    this.assertEnabled();
+    await this.reviewRepo.deleteAndRecompute(listingId, userId);
+  }
+
+  /** All reviews for a listing (newest first). */
+  async getReviews(listingId: string): Promise<MarketplaceReviewRecord[]> {
+    this.assertEnabled();
+    return this.reviewRepo.listByListing(listingId);
+  }
+
+  // ===== Analytics events / counters =====
+  // recordView/recordStart are fire-and-forget telemetry emitted FROM already-gated
+  // action sites (a resolved detail view / a started flow); they intentionally skip
+  // assertEnabled() so analytics never blocks or fails the user-facing action.
+
+  /** Record a listing-detail view (event + counter). */
+  async recordView(listingId: string, userId?: string | null): Promise<void> {
+    await this.recordSignal(listingId, userId, "view");
+  }
+
+  /** Record that a flow was started from the listing (event + counter). */
+  async recordStart(listingId: string, userId?: string | null): Promise<void> {
+    await this.recordSignal(listingId, userId, "start");
+  }
+
+  /**
+   * Trending listings: those with the most recent activity in the window, ranked
+   * highest first. Trending is derived from recent INSTALL and START signals
+   * (per the design) — view/rate noise is excluded. Only currently-listed listings
+   * are returned.
+   */
+  async getTrending(
+    options: { windowMs?: number; limit?: number } = {},
+  ): Promise<MarketplaceListingRecord[]> {
+    this.assertEnabled();
+    const windowMs = options.windowMs ?? 7 * 24 * 60 * 60 * 1000; // 7 days
+    const limit = options.limit ?? 20;
+    const entries = await this.eventRepo.trending({
+      sinceMs: Date.now() - windowMs,
+      limit,
+      types: ["install", "start"],
+    });
+
+    const listings: MarketplaceListingRecord[] = [];
+    for (const entry of entries) {
+      const listing = await this.listingRepo.getById(entry.listingId);
+      if (listing && listing.status === "listed") {
+        listings.push(listing);
+      }
+    }
+    return listings;
   }
 
   // ===== Access seam =====
@@ -389,6 +502,20 @@ export class MarketplaceService {
       throw new ListingNotFoundError(listingId);
     }
     return listing;
+  }
+
+  /** Append an analytics event and bump the matching denormalized counter. */
+  private async recordSignal(
+    listingId: string,
+    userId: string | null | undefined,
+    type: Extract<MarketplaceEventType, "view" | "start">,
+  ): Promise<void> {
+    await this.eventRepo.record({ listingId, userId, type });
+    if (type === "view") {
+      await this.listingRepo.incrementViewCount(listingId);
+    } else {
+      await this.listingRepo.incrementStartCount(listingId);
+    }
   }
 
   private assertAccessible(listing: MarketplaceListingRecord): void {

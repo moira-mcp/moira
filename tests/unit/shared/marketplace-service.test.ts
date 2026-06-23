@@ -15,6 +15,8 @@ import {
   MarketplaceService,
   MarketplaceListingRepository,
   LibraryEntryRepository,
+  MarketplaceReviewRepository,
+  MarketplaceEventRepository,
   WorkflowRepository,
   WorkflowSharingRepository,
   UserRepository,
@@ -24,6 +26,8 @@ import {
   ListingNotAccessibleError,
   LibraryEntryNotFoundError,
   ListingNotFoundError,
+  SelfRatingError,
+  InvalidRatingError,
 } from "@mcp-moira/shared";
 
 const MIGRATIONS_PATH = path.join(process.cwd(), "packages/web-backend/drizzle");
@@ -36,6 +40,8 @@ describe("MarketplaceService", () => {
   let db: BetterSQLite3Database<typeof schema>;
   let listingRepo: MarketplaceListingRepository;
   let libraryRepo: LibraryEntryRepository;
+  let reviewRepo: MarketplaceReviewRepository;
+  let eventRepo: MarketplaceEventRepository;
   let workflowRepo: WorkflowRepository;
   let sharingRepo: WorkflowSharingRepository;
   let userRepo: UserRepository;
@@ -77,11 +83,20 @@ describe("MarketplaceService", () => {
       isPaidEnabled?: () => boolean;
     } = {},
   ): MarketplaceService {
-    return new MarketplaceService(listingRepo, libraryRepo, workflowRepo, sharingRepo, userRepo, {
-      isMarketplaceEnabled: overrides.isMarketplaceEnabled ?? (() => true),
-      isPaidEnabled: overrides.isPaidEnabled ?? (() => false),
-      coreProvider: () => [], // deterministic: no bundled flows in unit tests
-    });
+    return new MarketplaceService(
+      listingRepo,
+      libraryRepo,
+      reviewRepo,
+      eventRepo,
+      workflowRepo,
+      sharingRepo,
+      userRepo,
+      {
+        isMarketplaceEnabled: overrides.isMarketplaceEnabled ?? (() => true),
+        isPaidEnabled: overrides.isPaidEnabled ?? (() => false),
+        coreProvider: () => [], // deterministic: no bundled flows in unit tests
+      },
+    );
   }
 
   beforeEach(() => {
@@ -92,6 +107,8 @@ describe("MarketplaceService", () => {
 
     listingRepo = new MarketplaceListingRepository(db);
     libraryRepo = new LibraryEntryRepository(db);
+    reviewRepo = new MarketplaceReviewRepository(db);
+    eventRepo = new MarketplaceEventRepository(db);
     workflowRepo = new WorkflowRepository(db);
     sharingRepo = new WorkflowSharingRepository(db);
     userRepo = new UserRepository(db);
@@ -349,6 +366,145 @@ describe("MarketplaceService", () => {
       await expect(
         service.getDetailByReference(`author/${wf.slug}`, CONSUMER),
       ).rejects.toBeInstanceOf(ListingNotFoundError);
+    });
+  });
+
+  describe("ratings / reviews", () => {
+    const RATER = "rater-1";
+    beforeEach(() => seedUser(RATER, "rater"));
+
+    async function publishFlow(): Promise<string> {
+      const wf = await createWorkflow(AUTHOR, "Rated Flow");
+      const listing = await service.publish(AUTHOR, wf.id);
+      return listing.id;
+    }
+
+    it("records a review and recomputes the listing aggregate", async () => {
+      const listingId = await publishFlow();
+      const result = await service.rate(CONSUMER, listingId, 4, "solid");
+
+      expect(result.review.stars).toBe(4);
+      expect(result.review.reviewText).toBe("solid");
+      expect(result.ratingAvg).toBe(4); // returned aggregate (no re-query needed)
+      expect(result.ratingCount).toBe(1);
+      const listing = await listingRepo.getById(listingId);
+      expect(listing?.ratingCount).toBe(1);
+      expect(listing?.ratingAvg).toBe(4);
+    });
+
+    it("removeReview is idempotent when the user has no review", async () => {
+      const listingId = await publishFlow();
+      await expect(service.removeReview(CONSUMER, listingId)).resolves.toBeUndefined();
+    });
+
+    it("replaces an existing review (one editable review per user)", async () => {
+      const listingId = await publishFlow();
+      await service.rate(CONSUMER, listingId, 2);
+      await service.rate(CONSUMER, listingId, 5);
+
+      const reviews = await service.getReviews(listingId);
+      expect(reviews.length).toBe(1);
+      expect(reviews[0].stars).toBe(5);
+      const listing = await listingRepo.getById(listingId);
+      expect(listing?.ratingCount).toBe(1);
+      expect(listing?.ratingAvg).toBe(5);
+    });
+
+    it("averages ratings across users", async () => {
+      const listingId = await publishFlow();
+      await service.rate(CONSUMER, listingId, 5);
+      await service.rate(RATER, listingId, 3);
+
+      const listing = await listingRepo.getById(listingId);
+      expect(listing?.ratingCount).toBe(2);
+      expect(listing?.ratingAvg).toBe(4); // (5 + 3) / 2
+    });
+
+    it("rejects the author rating their own listing", async () => {
+      const listingId = await publishFlow();
+      await expect(service.rate(AUTHOR, listingId, 5)).rejects.toBeInstanceOf(SelfRatingError);
+    });
+
+    it("rejects an out-of-range rating", async () => {
+      const listingId = await publishFlow();
+      await expect(service.rate(CONSUMER, listingId, 0)).rejects.toBeInstanceOf(InvalidRatingError);
+      await expect(service.rate(CONSUMER, listingId, 6)).rejects.toBeInstanceOf(InvalidRatingError);
+    });
+
+    it("removing a review recomputes the aggregate back to zero", async () => {
+      const listingId = await publishFlow();
+      await service.rate(CONSUMER, listingId, 5);
+      await service.removeReview(CONSUMER, listingId);
+
+      const listing = await listingRepo.getById(listingId);
+      expect(listing?.ratingCount).toBe(0);
+      expect(listing?.ratingAvg).toBe(0);
+      expect(await service.getReviews(listingId)).toHaveLength(0);
+    });
+
+    it("records a 'rate' analytics event", async () => {
+      const listingId = await publishFlow();
+      await service.rate(CONSUMER, listingId, 4);
+      const events = await eventRepo.listByListing(listingId);
+      expect(events.some((e) => e.type === "rate" && e.userId === CONSUMER)).toBe(true);
+    });
+  });
+
+  describe("analytics events / counters", () => {
+    it("add records an install event and increments the counter", async () => {
+      const wf = await createWorkflow(AUTHOR, "Flow");
+      const listing = await service.publish(AUTHOR, wf.id);
+      await service.add(CONSUMER, listing.id);
+
+      const events = await eventRepo.listByListing(listing.id);
+      expect(events.filter((e) => e.type === "install").length).toBe(1);
+      expect((await listingRepo.getById(listing.id))?.installCount).toBe(1);
+    });
+
+    it("recordView and recordStart bump events + counters", async () => {
+      const wf = await createWorkflow(AUTHOR, "Flow");
+      const listing = await service.publish(AUTHOR, wf.id);
+
+      await service.recordView(listing.id, CONSUMER);
+      await service.recordStart(listing.id, CONSUMER);
+
+      const updated = await listingRepo.getById(listing.id);
+      expect(updated?.viewCount).toBe(1);
+      expect(updated?.startCount).toBe(1);
+      const types = (await eventRepo.listByListing(listing.id)).map((e) => e.type);
+      expect(types).toContain("view");
+      expect(types).toContain("start");
+    });
+  });
+
+  describe("trending", () => {
+    it("orders listings by recent activity (most events first)", async () => {
+      const hot = await createWorkflow(AUTHOR, "Hot Flow");
+      const cold = await createWorkflow(AUTHOR, "Cold Flow");
+      const hotListing = await service.publish(AUTHOR, hot.id);
+      const coldListing = await service.publish(AUTHOR, cold.id);
+
+      // Trending counts install/start signals only (view is excluded). Hot gets two,
+      // cold gets one, so hot ranks first and cold still appears.
+      await eventRepo.record({ listingId: hotListing.id, userId: CONSUMER, type: "start" });
+      await eventRepo.record({ listingId: hotListing.id, userId: CONSUMER, type: "install" });
+      await eventRepo.record({ listingId: hotListing.id, userId: CONSUMER, type: "view" });
+      await eventRepo.record({ listingId: coldListing.id, userId: CONSUMER, type: "start" });
+
+      const trending = await service.getTrending();
+      const ids = trending.map((l) => l.id);
+      expect(ids).toContain(hotListing.id);
+      expect(ids).toContain(coldListing.id);
+      expect(ids.indexOf(hotListing.id)).toBeLessThan(ids.indexOf(coldListing.id));
+    });
+
+    it("excludes view-only listings from trending (install/start signals only)", async () => {
+      const viewed = await createWorkflow(AUTHOR, "Viewed Flow");
+      const viewedListing = await service.publish(AUTHOR, viewed.id);
+      await eventRepo.record({ listingId: viewedListing.id, userId: CONSUMER, type: "view" });
+
+      const trending = await service.getTrending();
+      expect(trending.map((l) => l.id)).not.toContain(viewedListing.id);
     });
   });
 });

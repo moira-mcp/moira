@@ -15,6 +15,8 @@ import { WorkflowSharingRepository } from "../database/repositories/workflow-sha
 import { LockRepository } from "../database/repositories/lock-repository.js";
 import { MarketplaceListingRepository } from "../database/repositories/marketplace-listing-repository.js";
 import { LibraryEntryRepository } from "../database/repositories/library-entry-repository.js";
+import { MarketplaceReviewRepository } from "../database/repositories/marketplace-review-repository.js";
+import { MarketplaceEventRepository } from "../database/repositories/marketplace-event-repository.js";
 import { MarketplaceService } from "./marketplace-service.js";
 import { WorkflowService } from "./workflow-service.js";
 import { NoteService } from "./note-service.js";
@@ -201,6 +203,7 @@ export {
   type LibraryItem,
   type LibraryOrigin,
   type AccessDecision,
+  type RateResult,
   type ListingDetail,
   type PublishOptions,
   type MarketplaceServiceOptions,
@@ -517,6 +520,8 @@ export function getMarketplaceService(): MarketplaceService {
     const db = getDatabase();
     const listingRepo = new MarketplaceListingRepository(db);
     const libraryRepo = new LibraryEntryRepository(db);
+    const reviewRepo = new MarketplaceReviewRepository(db);
+    const eventRepo = new MarketplaceEventRepository(db);
     const userRepo = new UserRepository(db);
     const workflowRepo = getWorkflowRepo();
     const sharingRepo = getSharingRepo();
@@ -528,6 +533,8 @@ export function getMarketplaceService(): MarketplaceService {
     marketplaceServiceInstance = new MarketplaceService(
       listingRepo,
       libraryRepo,
+      reviewRepo,
+      eventRepo,
       workflowRepo,
       sharingRepo,
       userRepo,

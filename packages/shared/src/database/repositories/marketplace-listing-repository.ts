@@ -128,10 +128,23 @@ export class MarketplaceListingRepository {
   async incrementInstallCount(listingId: string): Promise<void> {
     await this.db
       .update(marketplaceListing)
-      .set({
-        installCount: sql`${marketplaceListing.installCount} + 1`,
-        updatedAt: new Date(),
-      })
+      .set({ installCount: sql`${marketplaceListing.installCount} + 1`, updatedAt: new Date() })
+      .where(eq(marketplaceListing.id, listingId));
+  }
+
+  /** Increment the start counter (a flow was started from the listing). Atomic. */
+  async incrementStartCount(listingId: string): Promise<void> {
+    await this.db
+      .update(marketplaceListing)
+      .set({ startCount: sql`${marketplaceListing.startCount} + 1`, updatedAt: new Date() })
+      .where(eq(marketplaceListing.id, listingId));
+  }
+
+  /** Increment the view counter (a listing detail was viewed). Atomic. */
+  async incrementViewCount(listingId: string): Promise<void> {
+    await this.db
+      .update(marketplaceListing)
+      .set({ viewCount: sql`${marketplaceListing.viewCount} + 1`, updatedAt: new Date() })
       .where(eq(marketplaceListing.id, listingId));
   }
 }

@@ -511,6 +511,30 @@ export class LibraryEntryNotFoundError extends DomainError {
   }
 }
 
+/**
+ * An author cannot rate/review their own listing.
+ */
+export class SelfRatingError extends DomainError {
+  readonly code = "SELF_RATING_FORBIDDEN";
+  readonly httpStatus = 403;
+
+  constructor() {
+    super("You cannot rate your own listing");
+  }
+}
+
+/**
+ * Star rating is outside the allowed 1-5 range.
+ */
+export class InvalidRatingError extends DomainError {
+  readonly code = "INVALID_RATING";
+  readonly httpStatus = 400;
+
+  constructor(public readonly stars: number) {
+    super(`Invalid rating ${stars}: stars must be an integer from 1 to 5`);
+  }
+}
+
 // ===== Type Guards =====
 
 /**

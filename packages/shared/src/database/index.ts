@@ -32,6 +32,20 @@ export {
   type AddLibraryEntryInput,
 } from "./repositories/library-entry-repository.js";
 export {
+  MarketplaceReviewRepository,
+  type MarketplaceReviewRecord,
+  type RatingAggregate,
+  type UpsertReviewInput,
+} from "./repositories/marketplace-review-repository.js";
+export {
+  MarketplaceEventRepository,
+  type MarketplaceEventRecord,
+  type MarketplaceEventType,
+  type RecordEventInput,
+  type TrendingOptions,
+  type TrendingEntry,
+} from "./repositories/marketplace-event-repository.js";
+export {
   NoteRepository,
   MAX_VERSIONS_PER_NOTE,
   MAX_NOTE_SIZE,

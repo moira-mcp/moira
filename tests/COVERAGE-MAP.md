@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **302 files**, **3595 tests**
+- **46 domains**, **304 files**, **3616 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 3     | 28    | unit:3                                                         |
+| marketplace         | 5     | 49    | unit:5                                                         |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -498,13 +498,15 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**3 files, 28 tests**
+**5 files, 49 tests**
 
-**unit** (3 files)
+**unit** (5 files)
 
-- `tests/unit/shared/marketplace-service.test.ts` — 20 tests 🟢 (publish/unpublish with owner + already-listed + disabled guards; add-as-reference + idempotency + install counter; library resolver own/added/shared composition excluding arbitrary public flows; fork independent private copy with copy-provenance; reference-auto-updates vs fork-frozen; remove + not-found; canAccess free vs paid coming-soon + paid-add rejection; detail by handle/slug)
+- `tests/unit/shared/marketplace-service.test.ts` — 32 tests 🟢 (publish/unpublish guards; add-as-reference + idempotency + install counter; library resolver own/added/shared excluding arbitrary public; fork independent copy + provenance; reference-auto-updates vs fork-frozen; remove + not-found; canAccess free vs paid coming-soon + paid-add rejection; detail by handle/slug + stale-private rejection; ratings/reviews — record + recompute aggregate, one-editable-per-user, average-across-users, self-rating + out-of-range rejection, removeReview, rate event; analytics events + view/start counters; trending order by recent activity)
 - `tests/unit/shared/marketplace-listing-repository.test.ts` — 5 tests 🟢 (create defaults + read-back; delete by workflow; gallery predicate listed+public+not-deleted; category filter; install counter)
 - `tests/unit/shared/library-entry-repository.test.ts` — 3 tests 🟢 (add + get by user/workflow; list by user; remove with changed-rows result)
+- `tests/unit/shared/marketplace-review-repository.test.ts` — 5 tests 🟢 (upsert + transactional aggregate recompute; replace same-user review; average across users; read-back/list; delete + recompute, null when nothing to delete)
+- `tests/unit/shared/marketplace-event-repository.test.ts` — 4 tests 🟢 (append + nullable userId; trending ranks by event count; type filter; window exclusion)
 
 ### node-handlers
 
