@@ -19,6 +19,19 @@ export { AuditRepository } from "./repositories/audit-repository.js";
 export { GlobalSettingsRepository } from "./repositories/global-settings-repository.js";
 export { UserRepository } from "./repositories/user-repository.js";
 export {
+  MarketplaceListingRepository,
+  type MarketplaceListingRecord,
+  type CreateListingInput,
+  type GalleryFilter,
+} from "./repositories/marketplace-listing-repository.js";
+export {
+  LibraryEntryRepository,
+  type LibraryEntryRecord,
+  type LibrarySource,
+  type LibraryKind,
+  type AddLibraryEntryInput,
+} from "./repositories/library-entry-repository.js";
+export {
   NoteRepository,
   MAX_VERSIONS_PER_NOTE,
   MAX_NOTE_SIZE,

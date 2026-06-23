@@ -13,6 +13,9 @@ import { NoteRepository } from "../database/repositories/note-repository.js";
 import { ArtifactRepository } from "../database/repositories/artifact-repository.js";
 import { WorkflowSharingRepository } from "../database/repositories/workflow-sharing-repository.js";
 import { LockRepository } from "../database/repositories/lock-repository.js";
+import { MarketplaceListingRepository } from "../database/repositories/marketplace-listing-repository.js";
+import { LibraryEntryRepository } from "../database/repositories/library-entry-repository.js";
+import { MarketplaceService } from "./marketplace-service.js";
 import { WorkflowService } from "./workflow-service.js";
 import { NoteService } from "./note-service.js";
 import { ArtifactService } from "./artifact-service.js";
@@ -193,6 +196,17 @@ export {
   type FeatureContext,
 } from "../config/feature-resolver.js";
 
+export {
+  MarketplaceService,
+  type LibraryItem,
+  type LibraryOrigin,
+  type AccessDecision,
+  type ListingDetail,
+  type PublishOptions,
+  type MarketplaceServiceOptions,
+  type CoreFlow,
+} from "./marketplace-service.js";
+
 export { ExecutionRetentionService } from "./execution-retention-service.js";
 
 // Singleton service instances (lazy initialized)
@@ -209,6 +223,7 @@ let workflowMutationServiceInstance: WorkflowMutationService | null = null;
 let lockServiceInstance: LockService | null = null;
 let featureResolverInstance: FeatureResolver | null = null;
 let executionRetentionServiceInstance: ExecutionRetentionService | null = null;
+let marketplaceServiceInstance: MarketplaceService | null = null;
 
 // Shared repository instances for cross-service wiring
 let workflowRepoInstance: WorkflowRepository | null = null;
@@ -490,4 +505,34 @@ export function getLockService(): LockService {
     lockServiceInstance = new LockService(lockRepo, auditRepo);
   }
   return lockServiceInstance;
+}
+
+/**
+ * Get the MarketplaceService singleton. Reuses the shared WorkflowRepository (wired
+ * with the shared-access checker) and SharingRepository; the paid-workflows gate is
+ * resolved through the FeatureResolver so a cloud override is honored.
+ */
+export function getMarketplaceService(): MarketplaceService {
+  if (!marketplaceServiceInstance) {
+    const db = getDatabase();
+    const listingRepo = new MarketplaceListingRepository(db);
+    const libraryRepo = new LibraryEntryRepository(db);
+    const userRepo = new UserRepository(db);
+    const workflowRepo = getWorkflowRepo();
+    const sharingRepo = getSharingRepo();
+    // Ensure shared-access resolution works even if the marketplace service is
+    // built before the workflow service (idempotent — same checker either way).
+    workflowRepo.setSharedAccessChecker((workflowId, uid) =>
+      sharingRepo.hasAccess(workflowId, uid),
+    );
+    marketplaceServiceInstance = new MarketplaceService(
+      listingRepo,
+      libraryRepo,
+      workflowRepo,
+      sharingRepo,
+      userRepo,
+      { isPaidEnabled: () => getFeatureResolver().isEnabled("paidWorkflows") },
+    );
+  }
+  return marketplaceServiceInstance;
 }

@@ -428,6 +428,89 @@ export class InvalidArtifactTokenError extends DomainError {
   }
 }
 
+// ===== Marketplace Errors =====
+
+/**
+ * Marketplace is not enabled in this deployment.
+ */
+export class MarketplaceDisabledError extends DomainError {
+  readonly code = "MARKETPLACE_DISABLED";
+  readonly httpStatus = 404;
+
+  constructor() {
+    super("The marketplace is not enabled on this instance");
+  }
+}
+
+/**
+ * Marketplace listing not found.
+ */
+export class ListingNotFoundError extends DomainError {
+  readonly code = "LISTING_NOT_FOUND";
+  readonly httpStatus = 404;
+
+  constructor(
+    public readonly identifier: string,
+    public readonly identifierType: "id" | "workflowId" = "id",
+  ) {
+    super(`Marketplace listing not found: ${identifier}`);
+  }
+}
+
+/**
+ * The workflow already has a marketplace listing.
+ */
+export class WorkflowAlreadyListedError extends DomainError {
+  readonly code = "WORKFLOW_ALREADY_LISTED";
+  readonly httpStatus = 409;
+
+  constructor(public readonly workflowId: string) {
+    super(`Workflow '${workflowId}' is already published to the marketplace`);
+  }
+}
+
+/**
+ * Caller is not allowed to manage this listing (not the publisher/owner).
+ */
+export class ListingAccessDeniedError extends DomainError {
+  readonly code = "LISTING_ACCESS_DENIED";
+  readonly httpStatus = 403;
+
+  constructor(
+    public readonly identifier: string,
+    public readonly action: "publish" | "unpublish" | "manage" = "manage",
+  ) {
+    super(`Access denied: you cannot ${action} listing for '${identifier}'`);
+  }
+}
+
+/**
+ * The listing cannot be added/accessed (e.g. a paid listing while selling is off).
+ */
+export class ListingNotAccessibleError extends DomainError {
+  readonly code = "LISTING_NOT_ACCESSIBLE";
+  readonly httpStatus = 403;
+
+  constructor(
+    public readonly listingId: string,
+    public readonly reason: string,
+  ) {
+    super(`Listing '${listingId}' is not accessible: ${reason}`);
+  }
+}
+
+/**
+ * Library entry not found for this user/workflow.
+ */
+export class LibraryEntryNotFoundError extends DomainError {
+  readonly code = "LIBRARY_ENTRY_NOT_FOUND";
+  readonly httpStatus = 404;
+
+  constructor(public readonly workflowId: string) {
+    super(`Library entry not found for workflow '${workflowId}'`);
+  }
+}
+
 // ===== Type Guards =====
 
 /**
