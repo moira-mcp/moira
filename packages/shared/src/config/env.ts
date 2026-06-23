@@ -297,6 +297,27 @@ class ConfigSingleton {
   }
 
   // ============================================================================
+  // Marketplace
+  // ============================================================================
+
+  /**
+   * Whether the marketplace gallery is enabled.
+   *
+   * A config toggle (NOT a deployment-mode feature): `MARKETPLACE_ENABLED`
+   * overrides explicitly when set (`true`/`false`), so a self-host admin can
+   * opt in. When unset, it defaults by deployment mode — on for `saas`, off for
+   * `self-host` (publishing to a shared gallery is opt-in for self-hosters).
+   */
+  isMarketplaceEnabled(): boolean {
+    this.ensureInitialized();
+    const raw = process.env.MARKETPLACE_ENABLED;
+    if (raw !== undefined && raw !== "") {
+      return raw.trim().toLowerCase() === "true";
+    }
+    return this.getDeploymentMode() === "saas";
+  }
+
+  // ============================================================================
   // Load Testing
   // ============================================================================
 
@@ -529,6 +550,9 @@ export function isSelfHost(): boolean {
 }
 export function isSaas(): boolean {
   return config.getDeploymentMode() === "saas";
+}
+export function isMarketplaceEnabled(): boolean {
+  return config.isMarketplaceEnabled();
 }
 export function getLoadTestSecret(): string | undefined {
   return config.getLoadTestSecret();

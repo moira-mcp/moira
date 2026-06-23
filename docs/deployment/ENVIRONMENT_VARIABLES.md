@@ -58,6 +58,7 @@ An exception for the config module itself is configured in `.eslintrc.json` over
 **DEPLOYMENT MODE:**
 
 - `DEPLOYMENT_MODE` - deployment mode: `self-host` | `saas`. Fallback: `self-host`. An invalid value → start error (fail-fast). Getter: `getDeploymentMode()`; predicates `isSelfHost()` / `isSaas()` (`packages/shared/src/config/env.ts`).
+- `MARKETPLACE_ENABLED` - marketplace gallery toggle (config toggle, NOT a `Feature`). When set (`true`/`false`) it wins; when unset it defaults by mode — on for `saas`, off for `self-host` (a self-host admin can opt in). Getter: `isMarketplaceEnabled()` (`packages/shared/src/config/env.ts`).
 
 The mode sets the default behavior of SaaS-specific features through the `FeatureResolver` (type and default `ModeFeatureResolver` in `packages/shared/src/config/feature-resolver.ts`; the `getFeatureResolver()` / `setFeatureResolver()` accessors are exported from `packages/shared/src/services/index.ts`):
 
@@ -68,7 +69,7 @@ const resolver = getFeatureResolver(); // default: ModeFeatureResolver (driven b
 resolver.isEnabled("openRegistration"); // self-host → false, saas → true
 ```
 
-`Feature`: `openRegistration` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `socialLogin`. In `self-host` all are off; in `saas` all are on. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud).
+`Feature`: `openRegistration` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `socialLogin` | `paidWorkflows`. The first seven are off in `self-host` and on in `saas`; `paidWorkflows` (paid marketplace listings) is off in **both** modes — selling is not live anywhere yet. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud).
 
 **Auth behavior by mode** (`better-auth-config.ts`, `web-backend/.../auth-middleware.ts`):
 

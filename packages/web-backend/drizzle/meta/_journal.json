@@ -99,6 +99,13 @@
       "when": 1773216000000,
       "tag": "0012_self_host_quotas_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1782245977089,
+      "tag": "0014_marketplace_tables",
+      "breakpoints": true
     }
   ]
 }

@@ -64,6 +64,8 @@ export {
   getDeploymentMode,
   isSelfHost,
   isSaas,
+  // Marketplace
+  isMarketplaceEnabled,
   // Load Testing
   getLoadTestSecret,
   isLoadTestAuthEnabled,

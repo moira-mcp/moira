@@ -1,11 +1,11 @@
 {
   "slug": "software-development-flow-lite",
-  "owner": "system-admin",
+  "owner": "system-moira",
   "visibility": "public",
-  "id": "50c23256-c9d3-4d7e-94c6-763b295fc168",
+  "id": "45da3ac8-1a7e-4963-a55c-59a4f33234bb",
   "metadata": {
     "name": "Software Development Flow Lite",
-    "version": "1.2.1",
+    "version": "1.1.1",
     "description": "Simplified development flow for small tasks (1-5 steps). Core loop: plan → implement → test → review → commit.",
     "author": "mcp-moira-team",
     "tags": [
@@ -17,50 +17,6 @@
     {
       "type": "start",
       "id": "start",
-      "initialData": {
-        "variables": {
-          "workflow_version": {
-            "description": "Stores workflow version",
-            "value": "1.0.0"
-          },
-          "current_iteration": {
-            "description": "Stores current iteration",
-            "value": 1
-          },
-          "current_step_index": {
-            "description": "Index of the current step in the plan",
-            "value": 1
-          },
-          "test_quality_standards": {
-            "description": "Stores test quality standards",
-            "value": "QUALITY TESTING STANDARDS: Test reality: DO NOT write tests for the sake of tests, verify real use cases and user scenarios, avoid synthetic tests without practical value. Project structure: place tests in folders according to project architecture, follow naming patterns adopted in the project, use existing test utilities and helpers, follow test environment configuration. Reality coverage: cover ALL new functionality without gaps, test edge cases and error handling, cover integration points with other components. Isolation and independence: tests are independent of each other, do not affect execution order, use proper setup/teardown, clean up state after themselves. Readability and maintenance: clear test names describing what is being tested, clear test structure with arrange/act/assert, meaningful assertion messages, easy to update when code changes. Efficiency: tests run quickly without performance regression, optimized for CI/CD pipeline, use functional snapshots if framework supports for easier maintenance and updates. Project integration: use test run commands adopted in the project, follow project conventions, do not duplicate existing tests."
-          },
-          "fix_requirements": {
-            "description": "Product requirements",
-            "value": "FIX REQUIREMENTS: ROOT CAUSE ANALYSIS - find the root cause of the problem, do not fix symptoms, understand why the problem occurred. COMPLETE FIX - fix ALL problems completely without exceptions, superficial fixes DO NOT work and will be detected by the next check, do not leave unfinished work for later. MANDATORY SELF-CHECK BEFORE COMPLETION - VERIFY that the fix works through actual execution, RUN tests to validate the fix, ENSURE nothing is broken in existing functionality, TEST all affected areas, DO NOT proceed to execute_step without verifying the fix works. NO SHORTCUTS - do not look for workarounds and quick solutions, if major changes or global refactoring are needed - do them without hesitation, rewriting significant portions of code may be required - this is normal and correct. CYCLE ESCAPE STRATEGY - workflow checks will be executed anyway and will detect problems, the only way to escape the fix cycle is to do it right the first time, self-validation BEFORE submitting to workflow saves time and iterations, validate through running tests BEFORE claiming fixed."
-          },
-          "planning_requirements": {
-            "description": "Product requirements",
-            "value": "# PLANNING REQUIREMENTS\n\n## CRITICAL RULES (READ FIRST)\n\n### FORBIDDEN STEP TYPES - REJECT PLAN IF CONTAINS:\n- \"Testing\" / \"Write tests\" / \"Add tests\" as separate step\n- \"Final validation\" / \"Final check\" / \"Verification\"\n- \"E2E testing\" / \"Integration testing\" as separate step\n- \"Production deployment\" / \"Deploy and verify\"\n- \"Documentation\" as separate step (unless task IS documentation)\n- \"Cleanup\" / \"Code cleanup\" as separate step (unless task IS cleanup/refactoring)\n- ANY step that ONLY tests/validates without implementing NEW functionality or refactoring\n\n### WHY TESTS MUST BE BUILT-IN (NOT SEPARATE):\n- Separate test step = admission that previous step is incomplete\n- Gate validation requires working tests to verify step completion\n- \"Write tests\" as step means agent shipped untested code\n- Test proves step is complete - without tests, step is unverified\n\n### EACH STEP MUST:\n- Implement new functionality OR refactor existing code\n- Include tests for that functionality (built-in, not separate)\n- Include self-verification (built-in, not separate)\n- Leave code clean (no separate cleanup step needed)\n\n### BAD EXAMPLE (FORBIDDEN):\n```\nStep 1: Implement feature X\nStep 2: Write tests for feature X    ← FORBIDDEN: testing-only\nStep 3: Final validation             ← FORBIDDEN: validation-only\n```\n\n### BAD PLAN (REAL EXAMPLE - DO NOT COPY):\n```\nStep 1: Database layer for user isolation\nStep 2: API endpoints for workflows\nStep 3: E2E и Production             ← FORBIDDEN: testing-only step\nStep 4: Documentation и cleanup      ← FORBIDDEN: doc-only step\n```\n\n### GOOD EXAMPLE (CORRECT):\n```\nStep 1: Implement feature X with unit tests\n        Verify: feature works, tests pass\n\nStep 2: Implement feature Y with integration tests\n        Verify: X+Y work together, all tests pass\n```\n\n### CORRECT VERSION OF BAD PLAN:\n```\nStep 1: Database layer with unit tests\n        Verify: queries isolated per user, tests pass\n\nStep 2: API endpoints with integration tests\n        Verify: auth works, E2E passing, all tests pass\n```\n\n---\n\n## STEP SIZE - FUNCTIONAL BLOCKS\n\nStep = completed functional block with verifiable result.\n\nNOT too small: \"create a file\", \"add import\"\nNOT too large: \"implement entire frontend\"\n\nCORRECT granularity:\n- Database layer with user isolation\n- MCP integration with authentication\n- Web UI for workflow management\n\nWHY: Workflow has gate validation after each step - expensive in time.\n- Too small steps = dozens of checks instead of 3-5\n- Too large steps = agent gets lost\n\n---\n\n## STEP FEASIBILITY CHECK\n\nEach step must be:\n- Absolutely executable by agent\n- Maximally specific in functionality\n- Have clear completion criterion\n\n**HUGE STEP = RED FLAG** of task misunderstanding.\nActions: STOP → study project → ask user → web search → delegate analysis.\n\n**LARGE STEP = PLANNING FAILURE** - split it.\n\n---\n\n## ARCHITECTURE AT PLAN START\n\nMANDATORY Architecture section after Goal:\n- Overall solution architecture\n- Key components and interaction\n- Architectural decisions (technologies, approaches)\n- Diagrams if applicable (ASCII, Mermaid, text)\n\nNot too much - conceptual understanding is enough.\n\nPlan undergoes mandatory validation - user confirms architecture before execution.\n\n---\n\n## FORBIDDEN IN PLAN - SPECIFIC FILES AND CODE\n\nFORBIDDEN:\n- Specific file paths\n- Function/method names\n- Line numbers\n- Code examples (TypeScript, SQL, React)\n- \"Files Created/Modified\" lists\n\nCORRECT:\n- \"Implement authentication layer\"\n- \"Update database schema for user isolation\"\n- \"Create UI components for workflow display\"\n\nWHY: Agent must ITSELF analyze code and find where to implement.\nPlan with files creates false sense of completeness - agent forgets critical details.\n\n---\n\n## WHAT TO WRITE IN STEPS\n\nINCLUDE:\n- Functionality and behavior description\n- Integration points (conceptually)\n- Expected result after step\n- Verification criteria (what should work + tests pass)\n\nEXAMPLE:\n```\n## Step 2: API layer for user workflows\n\nImplement REST endpoints for workflow CRUD operations with integration tests covering auth scenarios.\nEndpoints use authenticated context from Step 1.\nInclude request validation and error handling.\n\nVerify: API returns user's workflows only, rejects unauthorized access. All integration tests pass.\n```\n\n---\n\n## PLAN FOR REVIEWER WITHOUT CONTEXT\n\nPlan must be detailed enough that reviewer WITHOUT conversation history can:\n- Fully understand what each step accomplishes\n- Verify work is complete\n\nBUT: Detail ≠ code and files. Detail = clear FUNCTIONALITY and RESULT description.\n\nReviewer runs WITHOUT CONTEXT - this is architectural system decision.\n\n---\n\n## GRADUAL BUILDUP (LAYER ORDER)\n\n1) Base layer: data models, core logic, services + unit tests\n2) Integration layer: API endpoints, MCP tools + integration tests\n3) UI layer: Web interface, forms + browser tests (Playwright)\n\nFROM CORE TO INTERFACE. Never start with UI.\n\n---\n\n## PLAN FORMAT\n\nStructure:\n```\n# Title\n## Goal (one sentence)\n## Architecture (components, decisions)\n## Step 1: [name] with [test type] tests. Verify: [criteria], tests pass.\n## Step 2: [name] with [test type] tests. Verify: [criteria], tests pass.\n...\n```\n\nFORBIDDEN sections:\n- Overview, Summary\n- Acceptance Criteria (separate)\n- Validation blocks with bash commands\n- Files Created/Modified\n- UPDATED REQUIREMENTS\n- Testing (as separate section)\n- Final validation\n\n---\n\n## PLAN VOLUME\n\n- Tiny task: 1 step is NORMAL and CORRECT\n- Simple task: 50-100 lines, 2-4 steps\n- Medium task: 100-200 lines, 5-7 steps\n- Complex task: 200-300 lines, 8-12 steps\n\n**ONE STEP IS OK**: If task is small - plan with 1 step is correct.\nDO NOT artificially inflate plan to have more steps.\nDO NOT split simple task into multiple steps just to \"look thorough\".\n\nIf >400 lines - you are writing code instead of plan.\n\n---\n\n## NO SUBITEMS\n\nPlan = simple list of steps: 1, 2, 3, 4\n\nFORBIDDEN: 5.1, 5.2, 5.3 subitems\n\nSubitems = sign that step is too large → split into separate steps.\n\n---\n\n## USER APPROVAL STEPS\n\nSome steps require user confirmation:\n- UI changes (visual)\n- Breaking changes\n- Architectural decisions\n- API changes\n\nMark in plan: `[USER APPROVAL]` before continuing.\n\n---\n\n## PLANNING PRINCIPLES\n\n- CODE RESEARCH for existing patterns\n- WEB RESEARCH for best practices\n- LIBRARY DOCUMENTATION for APIs\n- DO NOT ASSUME - only verified facts\n- CURRENT library versions\n\nGood plan = result of deep analysis, not guess.\n\n---\n\n## FORMULA\n\n```\nPlan = Architecture + Functional blocks (1-12 steps) + Verification criteria\nEach step: functionality + tests + verification (ALL BUILT-IN)\nWITHOUT: code, files, validation blocks, subitems, testing-only steps, cleanup steps\n```\n\nGood plan reads in 2 minutes and gives complete understanding."
-          },
-          "code_quality_principles": {
-            "description": "Stores code quality principles",
-            "value": "=== AGENT IDENTITY PROTOCOL === YOU ARE AN AI AGENT, NOT A HUMAN: You have NO fatigue, no time constraints, no desire to avoid difficulties. DO NOT IMITATE human weaknesses and limitations. TAKE THE BEST ENGINEER PATTERNS: full responsibility, deep understanding, completion without compromises. You can work with ANY complexity without limitations. SOLVE AT THE ROOT, do not work around problems due to perceived complexity. === WORKFLOW BLOCKING PROTOCOL === CRITICALLY IMPORTANT: DO NOT proceed to execute_step until ALL tasks are 100% COMPLETE. Workflow is BLOCKED until full completion. Any attempt to proceed with incomplete work - PROTOCOL VIOLATION. === TASK COMPLETION REQUIREMENTS === ANTI-AVOIDANCE RULES: FORBIDDEN to claim main goal achieved without 100% completion, use significant improvement to mask incompleteness, say comprehensive work ongoing instead of completing tasks, move to next task with current incomplete, avoid difficult parts of task. MANDATORY to complete ALL subtasks before claiming completion, provide specific numerical evidence for each claim, honestly report remaining problems with exact numbers, fix ALL identified problems before continuing, fulfill all requirements with tool-based verification. === BIG TASK PROTOCOL === DO NOT FEAR BIG TASKS! If task seems huge - this is NORMAL and EXPECTED: Break into subtasks but COMPLETE ALL without exceptions. DO NOT SKIP difficult parts for speed. DO NOT look for shortcuts and workarounds. Large changes and refactoring are NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. Complexity is NOT an excuse for incompleteness. === EVIDENCE PROTOCOL === COMPLETION EVIDENCE IS MANDATORY: Every completed must have tool-based verification. Every works correctly must have actual test execution. Every significantly improved must have exact before/after numbers. Every transition to execute_step must have completion verification. === QUALITY STANDARDS === TECHNICAL REQUIREMENTS: RESPONSIBILITY: You are experienced engineer - full responsibility for result. EVERYTHING depends on your work. QUALITY: Code must be clean, without issues, with proper typing. QUALITY CODE: No hacks, workarounds, temporary solutions - do it right immediately. PROBLEMS: Solve problems completely, do not work around them. ERRORS: Analyze causes, fix root of problem, not symptoms. SIMPLICITY: First look for simple solutions, then complicate if needed. CHECKS: After every significant change - testing and validation. DEAD CODE: Remove all unused, maintain cleanliness. RESULT: Focus on working solution, not on process for process sake. BIG CHANGES: DO NOT fear big changes and refactoring - this is NORMAL and NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. DO NOT SLACK: DO NOT try to quickly do something instead of proper solution. Flow checks are help, NOT replacement for your responsibility. ADDITIONAL DEVELOPMENT PRINCIPLES: CODE STUDY: DO NOT hesitate to study existing code for understanding patterns and integration points. WEB RESEARCH: Use internet to study best practices and solve problems. CURRENT VERSIONS: Use latest stable library versions, read their documentation. DO NOT ASSUME: If something does not work - read documentation, do not invent solutions. DOCUMENTATION: For library problems - official documentation first, then search. === CODEBASE MAINTENANCE PROTOCOL === RESPONSIBILITY FOR ENTIRE CODEBASE: CANNOT PASS BY PROBLEMS: If you see non-compliance with standards, issues, hacks, lints, warnings in EXISTING code you touch - FIX immediately. BROKEN TESTS: See failing tests, .skip, .only in project - FIX or delete, DO NOT write new tests leaving old ones broken. FIX ON TOUCH: TODO, FIXME, console.log, commented code in files you edit - remove immediately. IMPROVE CODE: DO NOT leave code worse than you found - improve quality on every touch. FULL RESPONSIBILITY: You are responsible for ENTIRE project, not just new code - maintain entire codebase at high level, you will be working with it. === SELF-MONITORING PROTOCOL === CRITICAL QUESTIONS BEFORE EACH execute_step: Can I prove this claim with tool output? Would this pass code review by human without access to my work? Am I avoiding something difficult here? Is this really finished or am I just tired of working on it? Do I have specific evidence for each claim? Are ALL requirements 100% fulfilled or am I masking incompleteness?"
-          },
-          "startup_check_directive": {
-            "description": "Stores startup check directive",
-            "value": "Use project startup instructions:\n---\n{{startup_info}}\n---"
-          },
-          "run_tests_directive": {
-            "description": "Stores run tests directive",
-            "value": "Use testing information:\n---\n{{test_info}}\n---\nRun all tests. Wait for ALL tests to complete. Count how many tests passed and how many failed."
-          },
-          "workspace_path": {
-            "description": "Working directory for plan files (empty = project root)",
-            "value": ""
-          }
-        }
-      },
       "connections": {
         "default": "get-initial-requirements"
       }
@@ -73,17 +29,17 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "project_checklist": {
+          "test_info": {
             "type": "string",
-            "description": "Project checklist CONTENT OR skip if none"
+            "description": "Testing information (command + rules) OR skip if no tests"
           },
-          "browser_ui_info": {
+          "agent_onboarding_info": {
             "type": "string",
-            "description": "Browser UI information (type, location) OR skip if none"
+            "description": "Key rules for agent from onboarding document OR skip if none"
           },
-          "project_summary": {
+          "documentation_standards": {
             "type": "string",
-            "description": "Brief description of project architecture"
+            "description": "Documentation rules from style guide OR skip if none"
           }
         },
         "required": [
@@ -96,10 +52,10 @@
           "project_summary"
         ],
         "globalInputs": [
-          "test_info",
           "startup_info",
-          "agent_onboarding_info",
-          "documentation_standards"
+          "project_checklist",
+          "browser_ui_info",
+          "project_summary"
         ]
       },
       "connections": {
@@ -109,7 +65,7 @@
     {
       "type": "agent-directive",
       "id": "study-project-foundation",
-      "directive": "Study project foundations independently.\n\n1) Use agent rules:\n---\n{{agent_onboarding_info}}\n---\n2) Understand how project starts (commands, environment, dependencies) but DO NOT start\n3) Do not assume - read files",
+      "directive": "Study project foundations independently.\n\n1) Use agent rules:\n---\n{{get-initial-requirements.agent_onboarding_info}}\n---\n2) Understand how project starts (commands, environment, dependencies) but DO NOT start\n3) Do not assume - read files",
       "completionCondition": "Project foundation studied: rules found, architecture understood, build system studied",
       "connections": {
         "success": "study-implementation-details"
@@ -132,15 +88,14 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "task_complexity_in_context": {
-            "type": "number",
-            "minimum": 1,
-            "maximum": 10,
-            "description": "Task complexity (1-4: express mode, 5-10: full development)"
-          },
-          "github_issues": {
+          "user_task_description": {
             "type": "string",
-            "description": "GitHub issue numbers if mentioned (e.g.: #123, #456)"
+            "minLength": 20,
+            "description": "Detailed task description from user"
+          },
+          "feature_name": {
+            "type": "string",
+            "description": "Short name for this feature/task (used in notifications)"
           }
         },
         "required": [
@@ -149,8 +104,8 @@
           "feature_name"
         ],
         "globalInputs": [
-          "user_task_description",
-          "feature_name"
+          "task_complexity_in_context",
+          "github_issues"
         ]
       },
       "connections": {
@@ -165,10 +120,10 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "acceptance_criteria": {
+          "development_plan_file": {
             "type": "string",
-            "minLength": 100,
-            "description": "ACCEPTANCE CRITERIA: what final result is expected, what should work, which use cases are solved, how to verify (commands, UI actions, tests)"
+            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/development-plan\\.md$",
+            "description": "Path to plan file: {{workspace_path}}/development-plan.md"
           }
         },
         "required": [
@@ -179,8 +134,8 @@
         ],
         "globalInputs": [
           "development_plan",
-          "development_plan_file",
-          "plan_summary"
+          "plan_summary",
+          "acceptance_criteria"
         ]
       },
       "connections": {
@@ -195,31 +150,10 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "issues_found": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "issue": {
-                  "type": "string",
-                  "description": "Issue description"
-                },
-                "affected_step": {
-                  "type": "string",
-                  "description": "Which step is affected"
-                },
-                "suggested_fix": {
-                  "type": "string",
-                  "description": "Suggested fix"
-                }
-              },
-              "required": [
-                "issue",
-                "affected_step",
-                "suggested_fix"
-              ]
-            },
-            "description": "List of found issues (empty if no issues)"
+          "review_issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of issues found in plan (0 if no issues)"
           }
         },
         "required": [
@@ -227,7 +161,7 @@
           "issues_found"
         ],
         "globalInputs": [
-          "review_issues_count"
+          "issues_found"
         ]
       },
       "connections": {
@@ -240,7 +174,7 @@
       "condition": {
         "operator": "gt",
         "left": {
-          "contextPath": "review_issues_count"
+          "contextPath": "agent-review-plan.review_issues_count"
         },
         "right": 0
       },
@@ -252,7 +186,7 @@
     {
       "type": "agent-directive",
       "id": "fix-plan-issues",
-      "directive": "FIX found issues in plan.\n\nREAD issues from {{workspace_path}}/plan-review-issues.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{development_plan_file}}\n3. Apply the fix according to suggested_fix\n4. Mark issue as addressed\n\nDO NOT skip any issue. ALL issues from the file must be resolved.\n\nAfter fixing ALL issues, save updated plan.\nPlan will be reviewed again to verify fixes.",
+      "directive": "FIX found issues in plan.\n\nREAD issues from {{workspace_path}}/plan-review-issues.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{analyze-and-plan.development_plan_file}}\n3. Apply the fix according to suggested_fix\n4. Mark issue as addressed\n\nDO NOT skip any issue. ALL issues from the file must be resolved.\n\nAfter fixing ALL issues, save updated plan.\nPlan will be reviewed again to verify fixes.",
       "completionCondition": "All issues fixed, plan updated",
       "connections": {
         "success": "agent-review-plan"
@@ -261,7 +195,7 @@
     {
       "type": "telegram-notification",
       "id": "notify-plan-ready",
-      "message": "📋 *Plan Created*\n\n🎯 **Task:** {{user_task_description}}\n📊 **Plan Steps:** {{development_plan.length}} stages\n\n**📋 Plan:**\n{{plan_summary}}",
+      "message": "📋 *Plan Created*\n\n🎯 **Task:** {{get-task-requirements.user_task_description}}\n📊 **Plan Steps:** {{development_plan.length}} stages\n\n**📋 Plan:**\n{{plan_summary}}",
       "parseMode": "Markdown",
       "connections": {
         "default": "present-plan-to-user"
@@ -275,16 +209,20 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "user_feedback_on_plan": {
+          "plan_approval": {
             "type": "string",
-            "description": "User feedback on plan (especially important for no)"
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "User plan approval: yes to approve, no for refinement"
           }
         },
         "required": [
           "plan_approval"
         ],
         "globalInputs": [
-          "plan_approval"
+          "user_feedback_on_plan"
         ]
       },
       "connections": {
@@ -297,7 +235,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "plan_approval"
+          "contextPath": "present-plan-to-user.plan_approval"
         },
         "right": "yes"
       },
@@ -313,19 +251,7 @@
       "completionCondition": "Plan refined based on user feedback, development_plan in context updated, ready for re-presentation",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "plan_file_updated": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation that development-plan.md file was updated BEFORE filling this response"
-          },
-          "refinement_summary": {
-            "type": "string",
-            "description": "What changed in plan"
-          }
-        },
+        "properties": {},
         "required": [
           "plan_file_updated",
           "development_plan",
@@ -333,8 +259,10 @@
           "refinement_summary"
         ],
         "globalInputs": [
+          "plan_file_updated",
           "development_plan",
-          "plan_summary"
+          "plan_summary",
+          "refinement_summary"
         ]
       },
       "connections": {
@@ -348,14 +276,19 @@
       "completionCondition": "Tracking system initialized, can start plan steps",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "total_steps": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Total number of steps in development plan"
+          }
+        },
         "required": [
           "current_step_name",
           "total_steps"
         ],
         "globalInputs": [
-          "current_step_name",
-          "total_steps"
+          "current_step_name"
         ]
       },
       "connections": {
@@ -369,11 +302,13 @@
       "completionCondition": "Step implemented, working functionality created and tested, results documented",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "implemented_functionality": {
+            "type": "string",
+            "description": "Description of implemented working functionality and its test results"
+          }
+        },
         "required": [
-          "implemented_functionality"
-        ],
-        "globalInputs": [
           "implemented_functionality"
         ]
       },
@@ -389,10 +324,10 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "tests_passed_count": {
+          "tests_failed_count": {
             "type": "number",
             "minimum": 0,
-            "description": "Number of passed tests"
+            "description": "Number of failed tests"
           }
         },
         "required": [
@@ -400,7 +335,7 @@
           "tests_failed_count"
         ],
         "globalInputs": [
-          "tests_failed_count"
+          "tests_passed_count"
         ]
       },
       "connections": {
@@ -416,14 +351,14 @@
           {
             "operator": "eq",
             "left": {
-              "contextPath": "test_info"
+              "contextPath": "get-initial-requirements.test_info"
             },
             "right": "skip"
           },
           {
             "operator": "eq",
             "left": {
-              "contextPath": "tests_failed_count"
+              "contextPath": "run-all-tests.tests_failed_count"
             },
             "right": 0
           }
@@ -441,21 +376,12 @@
       "completionCondition": "Test failure causes analyzed and fix strategy determined",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "failure_analysis": {
-            "type": "string",
-            "description": "Detailed analysis of test failure causes"
-          },
-          "fix_strategy": {
-            "type": "string",
-            "enum": [
-              "fix_implementation",
-              "update_tests"
-            ],
-            "description": "fix_implementation if code needs fixing, update_tests if tests need updating"
-          }
-        },
+        "properties": {},
         "required": [
+          "failure_analysis",
+          "fix_strategy"
+        ],
+        "globalInputs": [
           "failure_analysis",
           "fix_strategy"
         ]
@@ -471,16 +397,11 @@
       "completionCondition": "APPLICATION CODE FIXED for tests to pass",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "code_fixed": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation that code is fixed"
-          }
-        },
+        "properties": {},
         "required": [
+          "code_fixed"
+        ],
+        "globalInputs": [
           "code_fixed"
         ]
       },
@@ -495,11 +416,15 @@
       "completionCondition": "STANDARDS COUNT COMPLETED",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "total_standards_met_count": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 15,
+            "description": "Number of standards met out of 15 (10 quality + 5 architecture)"
+          }
+        },
         "required": [
-          "total_standards_met_count"
-        ],
-        "globalInputs": [
           "total_standards_met_count"
         ]
       },
@@ -513,7 +438,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "total_standards_met_count"
+          "contextPath": "check-code-quality-and-architecture.total_standards_met_count"
         },
         "right": 15
       },
@@ -529,16 +454,11 @@
       "completionCondition": "QUALITY AND ARCHITECTURE PROBLEMS FIXED",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "problems_fixed": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation of fix"
-          }
-        },
+        "properties": {},
         "required": [
+          "problems_fixed"
+        ],
+        "globalInputs": [
           "problems_fixed"
         ]
       },
@@ -554,10 +474,13 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "agent_review_file": {
+          "agent_issues_found": {
             "type": "string",
-            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/gate-review\\.md$",
-            "description": "Path to review file: {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/gate-review.md"
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Were blocking issues found by gate reviewer?"
           }
         },
         "required": [
@@ -565,7 +488,7 @@
           "agent_issues_found"
         ],
         "globalInputs": [
-          "agent_issues_found"
+          "agent_review_file"
         ]
       },
       "connections": {
@@ -578,7 +501,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "agent_issues_found"
+          "contextPath": "agent-validate-step.agent_issues_found"
         },
         "right": "no"
       },
@@ -594,26 +517,14 @@
       "completionCondition": "GATE REVIEWER ISSUES FIXED or plan update need determined",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "action_taken": {
-            "type": "string",
-            "enum": [
-              "fixes_applied",
-              "plan_needs_update"
-            ],
-            "description": "fixes_applied if fixed all issues, plan_needs_update if plan needs update"
-          },
-          "fixes_description": {
-            "type": "string",
-            "description": "DETAILED description of HOW EXACTLY gate reviewer issues were fixed (if action_taken = fixes_applied)"
-          },
-          "plan_issues_description": {
-            "type": "string",
-            "description": "Description of fundamental plan problems (if action_taken = plan_needs_update)"
-          }
-        },
+        "properties": {},
         "required": [
           "action_taken"
+        ],
+        "globalInputs": [
+          "action_taken",
+          "fixes_description",
+          "plan_issues_description"
         ]
       },
       "connections": {
@@ -627,13 +538,11 @@
       "completionCondition": "Stage committed to git, meaningful commit message created",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "commit_hash": {
-            "type": "string",
-            "description": "Hash of created git commit for plan stage"
-          }
-        },
+        "properties": {},
         "required": [
+          "commit_hash"
+        ],
+        "globalInputs": [
           "commit_hash"
         ]
       },
@@ -649,9 +558,13 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "approval_reason": {
+          "user_approval_needed": {
             "type": "string",
-            "description": "Why stage requires or doesn't require user approval"
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Is user review and approval required for this stage?"
           }
         },
         "required": [
@@ -659,7 +572,7 @@
           "approval_reason"
         ],
         "globalInputs": [
-          "user_approval_needed"
+          "approval_reason"
         ]
       },
       "connections": {
@@ -672,7 +585,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "user_approval_needed"
+          "contextPath": "check-user-approval-needed.user_approval_needed"
         },
         "right": "yes"
       },
@@ -689,9 +602,13 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "user_step_feedback": {
+          "user_step_approval": {
             "type": "string",
-            "description": "User feedback on stage for potential fixes"
+            "enum": [
+              "approved",
+              "needs_fixes"
+            ],
+            "description": "approved if user approves stage, needs_fixes if rework required"
           }
         },
         "required": [
@@ -699,7 +616,7 @@
           "user_step_feedback"
         ],
         "globalInputs": [
-          "user_step_approval"
+          "user_step_feedback"
         ]
       },
       "connections": {
@@ -712,7 +629,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "user_step_approval"
+          "contextPath": "user-review-step.user_step_approval"
         },
         "right": "approved"
       },
@@ -728,26 +645,14 @@
       "completionCondition": "USER FEEDBACK ADDRESSED or plan update need determined",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "action_taken": {
-            "type": "string",
-            "enum": [
-              "fixes_applied",
-              "plan_needs_update"
-            ],
-            "description": "fixes_applied if fixed implementation, plan_needs_update if plan needs update"
-          },
-          "fixes_description": {
-            "type": "string",
-            "description": "Description of addressed user feedback (if action_taken = fixes_applied)"
-          },
-          "plan_issues_description": {
-            "type": "string",
-            "description": "Description of plan problems (if action_taken = plan_needs_update)"
-          }
-        },
+        "properties": {},
         "required": [
           "action_taken"
+        ],
+        "globalInputs": [
+          "action_taken",
+          "fixes_description",
+          "plan_issues_description"
         ]
       },
       "connections": {
@@ -757,7 +662,7 @@
     {
       "type": "telegram-notification",
       "id": "notify-step-complete",
-      "message": "✅ *Stage {{current_step_name}} completed*\n\n📊 **Progress:** {{current_step_index}}/{{total_steps}}\n📦 **Implemented:** {{implemented_functionality}}",
+      "message": "✅ *Stage {{current_step_name}} completed*\n\n📊 **Progress:** {{current_step_index}}/{{initialize-plan-tracking.total_steps}}\n📦 **Implemented:** {{implement-step.implemented_functionality}}",
       "parseMode": "Markdown",
       "connections": {
         "default": "check-if-plan-complete"
@@ -772,7 +677,7 @@
           "contextPath": "current_step_index"
         },
         "right": {
-          "contextPath": "total_steps"
+          "contextPath": "initialize-plan-tracking.total_steps"
         }
       },
       "connections": {
@@ -802,7 +707,7 @@
     {
       "type": "telegram-notification",
       "id": "notify-step-start",
-      "message": "Stage \"{{current_step_name}}\" started ({{current_step_index}}/{{total_steps}})",
+      "message": "Stage \"{{current_step_name}}\" started ({{current_step_index}}/{{initialize-plan-tracking.total_steps}})",
       "parseMode": "Markdown",
       "connections": {
         "default": "implement-step"
@@ -811,7 +716,7 @@
     {
       "type": "telegram-notification",
       "id": "notify-development-complete",
-      "message": "🏆 *All plan stages completed*\n\n📊 **Stages:** {{total_steps}} completed\n🎯 **Task:** {{user_task_description}}",
+      "message": "🏆 *All plan stages completed*\n\n📊 **Stages:** {{initialize-plan-tracking.total_steps}} completed\n🎯 **Task:** {{get-task-requirements.user_task_description}}",
       "parseMode": "Markdown",
       "connections": {
         "default": "generate-final-report"
@@ -824,14 +729,11 @@
       "completionCondition": "Final comprehensive report created with analysis of all step results",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "final_report_file": {
-            "type": "string",
-            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/final-report\\.md$",
-            "description": "Path to final report: {{workspace_path}}/final-report.md"
-          }
-        },
+        "properties": {},
         "required": [
+          "final_report_file"
+        ],
+        "globalInputs": [
           "final_report_file"
         ]
       },
@@ -846,16 +748,11 @@
       "completionCondition": "Results presented to user, EXPLICIT user permission to continue workflow received",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "user_permission_to_continue": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "User allowed to continue with workflow - MUST get explicit permission"
-          }
-        },
+        "properties": {},
         "required": [
+          "user_permission_to_continue"
+        ],
+        "globalInputs": [
           "user_permission_to_continue"
         ]
       },
@@ -866,15 +763,18 @@
     {
       "type": "agent-directive",
       "id": "update-documentation",
-      "directive": "⚠️ CRITICALLY IMPORTANT - FINAL PROJECT DOCUMENTATION UPDATE\n\nDO NOT CONFUSE:\n❌ Working folder {{workspace_path}} - WILL BE COMPLETELY DELETED after completion\n✅ Project documentation - docs/, README.md - PERMANENT project files\n\n⚠️ UPDATE DOCUMENTATION FOR ALL PLAN STAGES, STARTING FROM THE FIRST!\nNOT just the last stage - for the ENTIRE feature!\nIf you forget something or mess up - all work will be lost!\n\nUpdate PROJECT DOCUMENTATION for the entire completed feature.\n\n1) Use documentation standards:\n---\n{{documentation_standards}}\n---\n\n2) Analyze ALL project changes across ALL plan stages\n3) Update PERMANENT project documentation files (README.md, docs/, etc.)\n4) Follow documentation rules:\n   - Technical facts only\n   - No change history\n   - No marketing\n   - DO NOT create new documents without necessity\n\nIn your response indicate:\n- Which PERMANENT project files were updated\n- Brief summary of completed workflow for final notification",
+      "directive": "⚠️ CRITICALLY IMPORTANT - FINAL PROJECT DOCUMENTATION UPDATE\n\nDO NOT CONFUSE:\n❌ Working folder {{workspace_path}} - WILL BE COMPLETELY DELETED after completion\n✅ Project documentation - docs/, README.md - PERMANENT project files\n\n⚠️ UPDATE DOCUMENTATION FOR ALL PLAN STAGES, STARTING FROM THE FIRST!\nNOT just the last stage - for the ENTIRE feature!\nIf you forget something or mess up - all work will be lost!\n\nUpdate PROJECT DOCUMENTATION for the entire completed feature.\n\n1) Use documentation standards:\n---\n{{get-initial-requirements.documentation_standards}}\n---\n\n2) Analyze ALL project changes across ALL plan stages\n3) Update PERMANENT project documentation files (README.md, docs/, etc.)\n4) Follow documentation rules:\n   - Technical facts only\n   - No change history\n   - No marketing\n   - DO NOT create new documents without necessity\n\nIn your response indicate:\n- Which PERMANENT project files were updated\n- Brief summary of completed workflow for final notification",
       "completionCondition": "Documentation updated for all feature changes, workflow summary prepared for notification",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "workflow_completion_summary": {
+            "type": "string",
+            "minLength": 30,
+            "description": "Brief final summary of entire completed workflow for final notification"
+          }
+        },
         "required": [
-          "workflow_completion_summary"
-        ],
-        "globalInputs": [
           "workflow_completion_summary"
         ]
       },
@@ -885,7 +785,7 @@
     {
       "type": "telegram-notification",
       "id": "notify-workflow-complete",
-      "message": "🏆 *Development Complete*\n\n🎯 **Feature:** {{feature_name}}\n👤 **Satisfaction:** N/A\n\n**📊 Summary:**\n{{workflow_completion_summary}}",
+      "message": "🏆 *Development Complete*\n\n🎯 **Feature:** {{get-task-requirements.feature_name}}\n👤 **Satisfaction:** N/A\n\n**📊 Summary:**\n{{update-documentation.workflow_completion_summary}}",
       "parseMode": "Markdown",
       "connections": {
         "default": "end"
@@ -958,34 +858,57 @@
     "run_tests_directive": {
       "type": "string",
       "description": "Stores run tests directive",
-      "default": "Use testing information:\n---\n{{test_info}}\n---\nRun all tests. Wait for ALL tests to complete. Count how many tests passed and how many failed."
+      "default": "Use testing information:\n---\n{{get-initial-requirements.test_info}}\n---\nRun all tests. Wait for ALL tests to complete. Count how many tests passed and how many failed."
     },
     "workspace_path": {
       "type": "string",
       "description": "Working directory for plan files (empty = project root)",
       "default": ""
     },
-    "agent_onboarding_info": {
+    "acceptance_criteria": {
       "type": "string",
-      "description": "Key rules for agent from onboarding document OR skip if none"
+      "description": "Workflow-global acceptance_criteria",
+      "minLength": 100
     },
-    "review_issues_count": {
-      "type": "number",
-      "description": "Number of issues found in plan (0 if no issues)"
-    },
-    "development_plan_file": {
+    "action_taken": {
       "type": "string",
-      "description": "Path to plan file: {{workspace_path}}/development-plan.md",
-      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/development-plan\\.md$"
+      "description": "Workflow-global action_taken",
+      "enum": [
+        "fixes_applied",
+        "plan_needs_update"
+      ]
     },
-    "user_task_description": {
+    "agent_review_file": {
       "type": "string",
-      "description": "Detailed task description from user",
-      "minLength": 20
+      "description": "Workflow-global agent_review_file",
+      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/gate-review\\.md$"
+    },
+    "approval_reason": {
+      "type": "string",
+      "description": "Workflow-global approval_reason"
+    },
+    "browser_ui_info": {
+      "type": "string",
+      "description": "Workflow-global browser_ui_info"
+    },
+    "code_fixed": {
+      "type": "string",
+      "description": "Workflow-global code_fixed",
+      "enum": [
+        "yes"
+      ]
+    },
+    "commit_hash": {
+      "type": "string",
+      "description": "Workflow-global commit_hash"
+    },
+    "current_step_name": {
+      "type": "string",
+      "description": "Workflow-global current_step_name"
     },
     "development_plan": {
       "type": "array",
-      "description": "List of development steps",
+      "description": "Workflow-global development_plan",
       "items": {
         "type": "string",
         "minLength": 20,
@@ -993,83 +916,118 @@
       },
       "minItems": 1
     },
+    "failure_analysis": {
+      "type": "string",
+      "description": "Workflow-global failure_analysis"
+    },
+    "final_report_file": {
+      "type": "string",
+      "description": "Workflow-global final_report_file",
+      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/final-report\\.md$"
+    },
+    "fix_strategy": {
+      "type": "string",
+      "description": "Workflow-global fix_strategy",
+      "enum": [
+        "fix_implementation",
+        "update_tests"
+      ]
+    },
+    "fixes_description": {
+      "type": "string",
+      "description": "Workflow-global fixes_description"
+    },
+    "github_issues": {
+      "type": "string",
+      "description": "Workflow-global github_issues"
+    },
+    "issues_found": {
+      "type": "array",
+      "description": "Workflow-global issues_found",
+      "items": {
+        "type": "object",
+        "properties": {
+          "issue": {
+            "type": "string",
+            "description": "Issue description"
+          },
+          "affected_step": {
+            "type": "string",
+            "description": "Which step is affected"
+          },
+          "suggested_fix": {
+            "type": "string",
+            "description": "Suggested fix"
+          }
+        },
+        "required": [
+          "issue",
+          "affected_step",
+          "suggested_fix"
+        ]
+      }
+    },
+    "plan_file_updated": {
+      "type": "string",
+      "description": "Workflow-global plan_file_updated",
+      "enum": [
+        "yes"
+      ]
+    },
+    "plan_issues_description": {
+      "type": "string",
+      "description": "Workflow-global plan_issues_description"
+    },
     "plan_summary": {
       "type": "string",
-      "description": "Brief description of full development plan for notifications",
+      "description": "Workflow-global plan_summary",
       "minLength": 50
     },
-    "plan_approval": {
+    "problems_fixed": {
       "type": "string",
-      "description": "User plan approval: yes to approve, no for refinement",
+      "description": "Workflow-global problems_fixed",
       "enum": [
-        "yes",
-        "no"
+        "yes"
       ]
     },
-    "test_info": {
+    "project_checklist": {
       "type": "string",
-      "description": "Testing information (command + rules) OR skip if no tests"
+      "description": "Workflow-global project_checklist"
     },
-    "tests_failed_count": {
-      "type": "number",
-      "description": "Number of failed tests"
-    },
-    "total_standards_met_count": {
-      "type": "number",
-      "description": "Number of standards met out of 15 (10 quality + 5 architecture)"
-    },
-    "agent_issues_found": {
+    "project_summary": {
       "type": "string",
-      "description": "Were blocking issues found by gate reviewer?",
-      "enum": [
-        "yes",
-        "no"
-      ]
+      "description": "Workflow-global project_summary"
     },
-    "user_approval_needed": {
+    "refinement_summary": {
       "type": "string",
-      "description": "Is user review and approval required for this stage?",
-      "enum": [
-        "yes",
-        "no"
-      ]
-    },
-    "user_step_approval": {
-      "type": "string",
-      "description": "approved if user approves stage, needs_fixes if rework required",
-      "enum": [
-        "approved",
-        "needs_fixes"
-      ]
-    },
-    "current_step_name": {
-      "type": "string",
-      "description": "First plan step name for use in templates"
-    },
-    "total_steps": {
-      "type": "number",
-      "description": "Total number of steps in development plan"
-    },
-    "implemented_functionality": {
-      "type": "string",
-      "description": "Description of implemented working functionality and its test results"
-    },
-    "documentation_standards": {
-      "type": "string",
-      "description": "Documentation rules from style guide OR skip if none"
-    },
-    "feature_name": {
-      "type": "string",
-      "description": "Short name for this feature/task (used in notifications)"
-    },
-    "workflow_completion_summary": {
-      "type": "string",
-      "description": "Brief final summary of entire completed workflow for final notification",
-      "minLength": 30
+      "description": "Workflow-global refinement_summary"
     },
     "startup_info": {
       "type": "string",
-      "description": "System startup instructions for development OR skip if none"
+      "description": "Workflow-global startup_info"
+    },
+    "task_complexity_in_context": {
+      "type": "number",
+      "description": "Workflow-global task_complexity_in_context"
+    },
+    "tests_passed_count": {
+      "type": "number",
+      "description": "Workflow-global tests_passed_count"
+    },
+    "user_feedback_on_plan": {
+      "type": "string",
+      "description": "Workflow-global user_feedback_on_plan"
+    },
+    "user_permission_to_continue": {
+      "type": "string",
+      "description": "Workflow-global user_permission_to_continue",
+      "enum": [
+        "yes"
+      ]
+    },
+    "user_step_feedback": {
+      "type": "string",
+      "description": "Workflow-global user_step_feedback"
     }
   }
 }

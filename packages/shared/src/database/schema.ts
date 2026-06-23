@@ -3,13 +3,16 @@
  * All tables: Better Auth + Workflows + Settings
  */
 
+import { sql } from "drizzle-orm";
 import {
   sqliteTable,
   text,
   integer,
+  real,
   primaryKey,
   uniqueIndex,
   index,
+  check,
 } from "drizzle-orm/sqlite-core";
 
 // ===== Better Auth Tables =====
@@ -492,5 +495,202 @@ export const executionLock = sqliteTable(
   (table) => ({
     executionIdx: index("execution_lock_execution_idx").on(table.executionId),
     statusIdx: index("execution_lock_status_idx").on(table.status),
+  }),
+);
+
+// ===== Marketplace Tables =====
+
+/**
+ * Marketplace Listing - the public-gallery record for a published workflow.
+ *
+ * One listing per workflow (workflowId is unique). A listing is created when an
+ * owner publishes their private workflow to the marketplace; it carries the
+ * gallery metadata (category/tags), moderation/verification state, denormalized
+ * rating + counter aggregates, and the paid-groundwork columns (off by default).
+ */
+export const marketplaceListing = sqliteTable(
+  "marketplaceListing",
+  {
+    id: text("id").primaryKey(),
+    // The workflow being listed. One listing per workflow.
+    workflowId: text("workflowId")
+      .notNull()
+      .references(() => workflow.id, { onDelete: "cascade" }),
+    // Owner who published the listing (denormalized for fast gallery queries / authorship).
+    publishedBy: text("publishedBy")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // Lifecycle: listed (visible) | unlisted (hidden by owner) | removed (admin takedown).
+    status: text("status").notNull().default("listed"),
+    title: text("title").notNull(),
+    summary: text("summary"),
+    // Fixed category from MARKETPLACE_CATEGORIES (free-form discovery is via tags).
+    category: text("category").notNull(),
+    tags: text("tags").notNull().default("[]"), // JSON string[]
+    // Verification: admin-granted trust badge; verifyCandidate flags auto-detected candidates.
+    verified: integer("verified", { mode: "boolean" }).notNull().default(false),
+    verifyCandidate: integer("verifyCandidate", { mode: "boolean" }).notNull().default(false),
+    verifiedAt: integer("verifiedAt", { mode: "timestamp_ms" }),
+    verifiedBy: text("verifiedBy").references(() => user.id, { onDelete: "set null" }),
+    featured: integer("featured", { mode: "boolean" }).notNull().default(false),
+    // Denormalized aggregates (maintained on review/event writes).
+    ratingAvg: real("ratingAvg").notNull().default(0),
+    ratingCount: integer("ratingCount").notNull().default(0),
+    // installCount = times added to a library (the "install" analytics signal); the
+    // gallery also surfaces it. Named to match the design's install vocabulary.
+    installCount: integer("installCount").notNull().default(0),
+    startCount: integer("startCount").notNull().default(0), // times started from the listing
+    viewCount: integer("viewCount").notNull().default(0), // denormalized view counter (extra)
+    // Paid groundwork - inert until paidWorkflows feature is enabled.
+    isPaid: integer("isPaid", { mode: "boolean" }).notNull().default(false),
+    price: integer("price"), // minor units (e.g. cents); null for free listings
+    currency: text("currency"), // ISO 4217, null for free listings
+    // Federation provenance: local (published here) | imported (from a remote marketplace).
+    origin: text("origin").notNull().default("local"),
+    importedFrom: text("importedFrom"), // remote marketplace URL/handle when origin=imported
+    importedAt: integer("importedAt", { mode: "timestamp_ms" }),
+    publishedAt: integer("publishedAt", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    workflowIdx: uniqueIndex("marketplace_listing_workflow_idx").on(table.workflowId),
+    statusIdx: index("marketplace_listing_status_idx").on(table.status),
+    categoryIdx: index("marketplace_listing_category_idx").on(table.category),
+    verifiedIdx: index("marketplace_listing_verified_idx").on(table.verified),
+    featuredIdx: index("marketplace_listing_featured_idx").on(table.featured),
+    ratingIdx: index("marketplace_listing_rating_idx").on(table.ratingAvg),
+    publishedByIdx: index("marketplace_listing_published_by_idx").on(table.publishedBy),
+  }),
+);
+
+/**
+ * Library Entry - a non-implicit membership in a user's personal library.
+ *
+ * The library the agent sees via list() is: bundled CORE ∪ the user's OWN
+ * workflows (workflow.userId = me) ∪ these rows. Core and own are resolved
+ * implicitly and are NOT stored here — libraryEntry only holds flows ADDED from
+ * the marketplace or SHARED via a private link. `source` records the origin and
+ * `kind` the linkage semantics:
+ *   - kind=reference → live pointer to the source workflow (auto-updates).
+ *   - kind=copy      → an independent frozen copy (its own workflow row): a
+ *                      marketplace fork or a self-host file import.
+ */
+export const libraryEntry = sqliteTable(
+  "libraryEntry",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    workflowId: text("workflowId")
+      .notNull()
+      .references(() => workflow.id, { onDelete: "cascade" }),
+    // Origin: added (from the marketplace) | shared (via a private share link).
+    source: text("source").notNull(),
+    // Linkage semantics: reference (live, auto-updates) | copy (frozen own workflow row).
+    kind: text("kind").notNull(),
+    // For marketplace/shared entries, the listing/share they came from (provenance + counters).
+    listingId: text("listingId").references(() => marketplaceListing.id, {
+      onDelete: "set null",
+    }),
+    addedAt: integer("addedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    userWorkflowIdx: uniqueIndex("library_entry_user_workflow_idx").on(
+      table.userId,
+      table.workflowId,
+    ),
+    userIdx: index("library_entry_user_idx").on(table.userId),
+    listingIdx: index("library_entry_listing_idx").on(table.listingId),
+  }),
+);
+
+/**
+ * Marketplace Review - a star rating (1-5) plus optional text for a listing.
+ *
+ * At most one review per (listing, user); a user cannot review their own listing
+ * (enforced in the service layer). Listing rating aggregates are recomputed on write.
+ */
+export const marketplaceReview = sqliteTable(
+  "marketplaceReview",
+  {
+    id: text("id").primaryKey(),
+    listingId: text("listingId")
+      .notNull()
+      .references(() => marketplaceListing.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    // 1..5; DB CHECK as defense-in-depth. The author-can't-rate-own rule and
+    // aggregate recomputation are enforced in the service layer (Step 3).
+    stars: integer("stars").notNull(),
+    reviewText: text("reviewText"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    listingUserIdx: uniqueIndex("marketplace_review_listing_user_idx").on(
+      table.listingId,
+      table.userId,
+    ),
+    listingIdx: index("marketplace_review_listing_idx").on(table.listingId),
+    starsRange: check("marketplace_review_stars_check", sql`${table.stars} between 1 and 5`),
+  }),
+);
+
+/**
+ * Marketplace Entitlement - records a user's right to a (paid) listing.
+ *
+ * Paid groundwork: free additions do not require an entitlement; this table backs
+ * purchase-gated downloads once the paidWorkflows feature is enabled. At most one
+ * active entitlement per (user, listing).
+ */
+export const marketplaceEntitlement = sqliteTable(
+  "marketplaceEntitlement",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    listingId: text("listingId")
+      .notNull()
+      .references(() => marketplaceListing.id, { onDelete: "cascade" }),
+    // How the right was granted: free | purchase | admin.
+    source: text("source").notNull(),
+    grantedAt: integer("grantedAt", { mode: "timestamp_ms" }).notNull(),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }), // null = perpetual
+  },
+  (table) => ({
+    userListingIdx: uniqueIndex("marketplace_entitlement_user_listing_idx").on(
+      table.userId,
+      table.listingId,
+    ),
+    userIdx: index("marketplace_entitlement_user_idx").on(table.userId),
+  }),
+);
+
+/**
+ * Marketplace Event - append-only analytics signal for a listing.
+ *
+ * Drives trending/popularity ranking and listing counters. userId is nullable
+ * (anonymous gallery views). No FK on userId to keep events durable across user
+ * deletion (anonymized analytics).
+ */
+export const marketplaceEvent = sqliteTable(
+  "marketplaceEvent",
+  {
+    id: text("id").primaryKey(),
+    listingId: text("listingId")
+      .notNull()
+      .references(() => marketplaceListing.id, { onDelete: "cascade" }),
+    userId: text("userId"), // nullable; no FK (anonymized, survives user deletion)
+    // Signal type: view | install | start | rate.
+    type: text("type").notNull(),
+    at: integer("at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    listingAtIdx: index("marketplace_event_listing_at_idx").on(table.listingId, table.at),
+    typeAtIdx: index("marketplace_event_type_at_idx").on(table.type, table.at),
   }),
 );

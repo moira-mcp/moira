@@ -37,7 +37,15 @@ export type Feature =
   /** Expose multi-user admin pages (user management, all executions, etc.). */
   | "multiUserAdmin"
   /** Offer GitHub/Google social (OAuth) login. */
-  | "socialLogin";
+  | "socialLogin"
+  /**
+   * Paid marketplace listings (purchase, entitlements, payout). Off everywhere
+   * for now — the schema/API groundwork exists, but selling is not yet live in
+   * any deployment. Distinct from `marketplace.enabled` (the gallery itself),
+   * which is a config toggle (see {@link isMarketplaceEnabled}), not a mode
+   * feature, so a self-host admin can opt in.
+   */
+  | "paidWorkflows";
 
 /**
  * Optional context for a feature decision. Reserved for future per-user /
@@ -68,6 +76,7 @@ const MODE_FEATURES: Record<DeploymentMode, Record<Feature, boolean>> = {
     betaNotices: false,
     multiUserAdmin: false,
     socialLogin: false,
+    paidWorkflows: false,
   },
   saas: {
     openRegistration: true,
@@ -77,6 +86,8 @@ const MODE_FEATURES: Record<DeploymentMode, Record<Feature, boolean>> = {
     betaNotices: true,
     multiUserAdmin: true,
     socialLogin: true,
+    // Selling is not live yet even in SaaS — flip on when payments ship.
+    paidWorkflows: false,
   },
 };
 

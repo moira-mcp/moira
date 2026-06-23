@@ -48,6 +48,9 @@ export * from "./email/index.js";
 // Services
 export * from "./services/index.js";
 
+// Marketplace domain (categories, enums, helpers)
+export * from "./marketplace/index.js";
+
 // Config
 export * from "./config/index.js";
 

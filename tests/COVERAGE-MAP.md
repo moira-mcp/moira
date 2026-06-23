@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **259 files**, **3222 tests**
+- **45 domains**, **296 files**, **3543 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -19,7 +19,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | auth                | 16    | 112   | api:4, e2e:10, integration:2                                   |
 | chat                | 3     | 53    | integration:1, unit:2                                          |
 | context             | 7     | 73    | integration:2, mcp-tools:1, unit:4                             |
-| deployment-mode     | 8     | 49    | unit:4, integration:1, api:2, e2e:1                            |
+| deployment-mode     | 11    | 76    | unit:7, integration:1, api:2, e2e:1                            |
 | email               | 1     | 22    | unit:1                                                         |
 | self-host-limits    | 2     | 12    | unit:2                                                         |
 | pin-hash            | 1     | 7     | unit:1                                                         |
@@ -221,12 +221,15 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### deployment-mode
 
-**8 files, 49 tests**
+**11 files, 76 tests**
 
-**unit** (4 files)
+**unit** (7 files)
 
 - `tests/unit/shared/deployment-mode-config.test.ts` — 10 tests 🟢 (DEPLOYMENT_MODE resolution: default self-host, case/whitespace normalization, invalid-value throws, isSelfHost/isSaas predicates)
 - `tests/unit/shared/feature-resolver.test.ts` — 9 tests 🟢 (ModeFeatureResolver per-mode flags, unknown-feature safe default, singleton get/override/reset)
+- `tests/unit/shared/marketplace-schema.test.ts` — 13 tests 🟢 (marketplace migration 0014: five tables + listing indexes created; listing column defaults; UNIQUE constraints — one listing/workflow, one review/(listing,user), one library entry/(user,workflow), one entitlement/(user,listing); review stars DB CHECK 1..5 boundary+reject; nullable event userId)
+- `tests/unit/shared/marketplace-categories.test.ts` — 7 tests 🟢 (fixed category set: non-empty unique ids, 'other' catch-all last, MARKETPLACE_CATEGORY_IDS derivation, isValidMarketplaceCategory, normalizeMarketplaceCategory fallback)
+- `tests/unit/shared/marketplace-feature-flags.test.ts` — 6 tests 🟢 (paidWorkflows off in both modes; isMarketplaceEnabled config toggle: mode defaults + MARKETPLACE_ENABLED opt-in/opt-out override)
 - `tests/unit/shared/secrets-bootstrap.test.ts` — 8 tests 🟢 (self-host secret generation+persist, mask vs expose, no-regenerate-when-present, restart idempotency, saas no-op, loadPersistedSecrets no-override + absent-file)
 - `tests/unit/shared/deployment-mode-safeguard.test.ts` — 6 tests 🟢 (unset-DEPLOYMENT_MODE safeguard: production+public→error/refuse-boot, non-prod+public→warn, mode-set/localhost/127.x/empty-host→ok)
 
