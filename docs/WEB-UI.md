@@ -196,6 +196,11 @@ Application routes:
 / (protected)                      - Dashboard (home page)
 /workflows (protected)             - Workflow explorer + viewer
 /executions (protected)            - Execution history
+/marketplace (protected)           - Marketplace gallery (search + sort recent/rating/installs/trending); nav entry hidden when the `marketplace` feature is off
+/marketplace/publish (protected)   - Publish form (owner-only workflow picker; paid pricing section disabled while `paidWorkflows` is off)
+/marketplace/library (protected)   - My Library (core/own/added/shared runnable workflows with per-item start command)
+/marketplace/my-listings (protected) - My Listings (publisher view + unpublish)
+/marketplace/flow/:handle/:slug (protected) - Flow detail (add/fork, ratings/reviews, disabled paid block, copy-a-prompt affordance)
 /artifacts (protected)             - User artifacts management
 /settings (protected)              - User settings (single scrollable page with all sections)
 /admin (protected)                 - Admin dashboard with merged analytics

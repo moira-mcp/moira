@@ -24,6 +24,8 @@ const ALL_OFF: FeatureFlags = {
   betaNotices: false,
   multiUserAdmin: false,
   socialLogin: false,
+  paidWorkflows: false,
+  marketplace: false,
 };
 
 interface FeaturesContextType {

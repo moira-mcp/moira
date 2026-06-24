@@ -69,6 +69,7 @@ export interface NavRoute {
   icon: string;
   adminOnly?: boolean;
   multiUserAdmin?: boolean; // Hidden when the multiUserAdmin feature is off (self-host)
+  marketplace?: boolean; // Hidden when the marketplace feature is off
   external?: boolean;
   sameWindow?: boolean; // For external links that should open in same window (e.g., Back to App)
 }
@@ -89,9 +90,13 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   const isCollapsed = state === "collapsed";
   const { isEnabled: isFeatureEnabled } = useFeatures();
   const multiUserAdmin = isFeatureEnabled("multiUserAdmin");
+  const marketplaceEnabled = isFeatureEnabled("marketplace");
 
   const filteredRoutes = routes.filter(
-    (route) => (!route.adminOnly || isAdmin) && (!route.multiUserAdmin || multiUserAdmin),
+    (route) =>
+      (!route.adminOnly || isAdmin) &&
+      (!route.multiUserAdmin || multiUserAdmin) &&
+      (!route.marketplace || marketplaceEnabled),
   );
 
   const isRouteActive = (path: string) => {

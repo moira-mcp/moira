@@ -24,6 +24,8 @@ const EXPECTED_FEATURES = [
   "betaNotices",
   "multiUserAdmin",
   "socialLogin",
+  "paidWorkflows",
+  "marketplace",
 ] as const;
 
 interface FeaturesResponse {

@@ -11,7 +11,13 @@ import { Router, Request, Response } from "express";
 
 import { ApiResponse } from "../types/index.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
-import { getDeploymentMode, getFeatureResolver, getMcpUrl, type Feature } from "@mcp-moira/shared";
+import {
+  getDeploymentMode,
+  getFeatureResolver,
+  getMcpUrl,
+  isMarketplaceEnabled,
+  type Feature,
+} from "@mcp-moira/shared";
 
 const router = Router();
 
@@ -24,11 +30,17 @@ const FEATURES: Feature[] = [
   "betaNotices",
   "multiUserAdmin",
   "socialLogin",
+  "paidWorkflows",
 ];
 
 export interface FeaturesResponse {
   deploymentMode: ReturnType<typeof getDeploymentMode>;
-  features: Record<Feature, boolean>;
+  /**
+   * Resolved feature flags, plus `marketplace` (the marketplace config toggle, which is
+   * not a deployment-mode Feature but is surfaced here so the SPA can show/hide the
+   * marketplace UI).
+   */
+  features: Record<Feature, boolean> & { marketplace: boolean };
   /**
    * MCP endpoint URL resolved at runtime from the server's own host config
    * (MOIRA_HOST), e.g. "http://localhost:8077/mcp". The frontend uses this
@@ -45,10 +57,11 @@ router.get(
   "/",
   asyncHandler(async (_req: Request, res: Response) => {
     const resolver = getFeatureResolver();
-    const features = Object.fromEntries(FEATURES.map((f) => [f, resolver.isEnabled(f)])) as Record<
+    const resolved = Object.fromEntries(FEATURES.map((f) => [f, resolver.isEnabled(f)])) as Record<
       Feature,
       boolean
     >;
+    const features = { ...resolved, marketplace: isMarketplaceEnabled() };
 
     const response: ApiResponse<FeaturesResponse> = {
       success: true,

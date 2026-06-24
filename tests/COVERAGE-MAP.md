@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **311 files**, **3691 tests**
+- **46 domains**, **312 files**, **3692 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -19,7 +19,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | auth                | 16    | 112   | api:4, e2e:10, integration:2                                   |
 | chat                | 3     | 53    | integration:1, unit:2                                          |
 | context             | 7     | 73    | integration:2, mcp-tools:1, unit:4                             |
-| deployment-mode     | 11    | 76    | unit:7, integration:1, api:2, e2e:1                            |
+| deployment-mode     | 8     | 50    | unit:4, integration:1, api:2, e2e:1                            |
 | email               | 1     | 22    | unit:1                                                         |
 | self-host-limits    | 2     | 12    | unit:2                                                         |
 | pin-hash            | 1     | 7     | unit:1                                                         |
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 12    | 124   | unit:5, integration:2, api:3, mcp-tools:1, e2e:1               |
+| marketplace         | 16    | 151   | unit:8, integration:2, api:3, mcp-tools:1, e2e:2               |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -222,15 +222,12 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### deployment-mode
 
-**11 files, 76 tests**
+**8 files, 50 tests**
 
-**unit** (7 files)
+**unit** (4 files)
 
 - `tests/unit/shared/deployment-mode-config.test.ts` — 10 tests 🟢 (DEPLOYMENT_MODE resolution: default self-host, case/whitespace normalization, invalid-value throws, isSelfHost/isSaas predicates)
 - `tests/unit/shared/feature-resolver.test.ts` — 9 tests 🟢 (ModeFeatureResolver per-mode flags, unknown-feature safe default, singleton get/override/reset)
-- `tests/unit/shared/marketplace-schema.test.ts` — 13 tests 🟢 (marketplace migration 0014: five tables + listing indexes created; listing column defaults; UNIQUE constraints — one listing/workflow, one review/(listing,user), one library entry/(user,workflow), one entitlement/(user,listing); review stars DB CHECK 1..5 boundary+reject; nullable event userId)
-- `tests/unit/shared/marketplace-categories.test.ts` — 7 tests 🟢 (fixed category set: non-empty unique ids, 'other' catch-all last, MARKETPLACE_CATEGORY_IDS derivation, isValidMarketplaceCategory, normalizeMarketplaceCategory fallback)
-- `tests/unit/shared/marketplace-feature-flags.test.ts` — 6 tests 🟢 (paidWorkflows off in both modes; isMarketplaceEnabled config toggle: mode defaults + MARKETPLACE_ENABLED opt-in/opt-out override)
 - `tests/unit/shared/secrets-bootstrap.test.ts` — 8 tests 🟢 (self-host secret generation+persist, mask vs expose, no-regenerate-when-present, restart idempotency, saas no-op, loadPersistedSecrets no-override + absent-file)
 - `tests/unit/shared/deployment-mode-safeguard.test.ts` — 6 tests 🟢 (unset-DEPLOYMENT_MODE safeguard: production+public→error/refuse-boot, non-prod+public→warn, mode-set/localhost/127.x/empty-host→ok)
 
@@ -498,10 +495,13 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**12 files, 124 tests**
+**16 files, 151 tests**
 
-**unit** (5 files)
+**unit** (8 files)
 
+- `tests/unit/shared/marketplace-schema.test.ts` — 13 tests 🟢 (marketplace migration 0014: five tables + listing indexes created; listing column defaults; UNIQUE constraints — one listing/workflow, one review/(listing,user), one library entry/(user,workflow), one entitlement/(user,listing); review stars DB CHECK 1..5 boundary+reject; nullable event userId)
+- `tests/unit/shared/marketplace-categories.test.ts` — 7 tests 🟢 (fixed category set: non-empty unique ids, 'other' catch-all last, MARKETPLACE_CATEGORY_IDS derivation, isValidMarketplaceCategory, normalizeMarketplaceCategory fallback)
+- `tests/unit/shared/marketplace-feature-flags.test.ts` — 6 tests 🟢 (paidWorkflows off in both modes; isMarketplaceEnabled config toggle: mode defaults + MARKETPLACE_ENABLED opt-in/opt-out override)
 - `tests/unit/shared/marketplace-service.test.ts` — 33 tests 🟢 (publish/unpublish guards + unpublish unlists (row kept) + re-publish re-lists; add-as-reference + idempotency + install counter; library resolver own/added/shared excluding arbitrary public; fork independent copy + provenance; reference-auto-updates vs fork-frozen; remove + not-found; canAccess free vs paid coming-soon + paid-add rejection; detail by handle/slug + stale-private rejection; ratings/reviews — record + recompute aggregate, one-editable-per-user, average-across-users, self-rating + out-of-range rejection, removeReview, rate event; analytics events + view/start counters; trending order by recent activity)
 - `tests/unit/shared/marketplace-listing-repository.test.ts` — 5 tests 🟢 (create defaults + read-back; delete by workflow; gallery predicate listed+public+not-deleted; category filter; install counter)
 - `tests/unit/shared/library-entry-repository.test.ts` — 3 tests 🟢 (add + get by user/workflow; list by user; remove with changed-rows result)
@@ -523,9 +523,10 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/mcp-tools/marketplace-tool.test.ts` — 8 tests 🟢 (agent path over real MCP: publish produces handle/slug ref; search finds the published flow; info accessible detail; add → appears in list(source:added) as origin 'added'; start runs the added flow by ref; rate records a rating; author cannot rate own flow); list(source:core) returns bundled flows startable by moira/<slug> id
 
-**e2e** (1 file)
+**e2e** (2 files)
 
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the detail page (backend, not SPA) with JSON-LD; missing flow 404s instead of SPA fallthrough)
+- `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); before/after screenshots captured)
 
 ### node-handlers
 

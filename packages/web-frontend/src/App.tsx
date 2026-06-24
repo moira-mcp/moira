@@ -33,6 +33,21 @@ import { APP_PREFIX, ROUTES } from "./constants/routes";
 const WorkflowDetail = lazy(() =>
   import("./pages/WorkflowDetail").then((m) => ({ default: m.WorkflowDetail })),
 );
+const MarketplaceExplore = lazy(() =>
+  import("./pages/marketplace/MarketplaceExplore").then((m) => ({ default: m.MarketplaceExplore })),
+);
+const MarketplaceDetail = lazy(() =>
+  import("./pages/marketplace/MarketplaceDetail").then((m) => ({ default: m.MarketplaceDetail })),
+);
+const PublishListing = lazy(() =>
+  import("./pages/marketplace/PublishListing").then((m) => ({ default: m.PublishListing })),
+);
+const MyLibrary = lazy(() =>
+  import("./pages/marketplace/MyLibrary").then((m) => ({ default: m.MyLibrary })),
+);
+const MyListings = lazy(() =>
+  import("./pages/marketplace/MyListings").then((m) => ({ default: m.MyListings })),
+);
 const Executions = lazy(() =>
   import("./pages/Executions").then((m) => ({ default: m.Executions })),
 );
@@ -147,6 +162,11 @@ const App: React.FC = () => {
                   <Route path="workflows/:id" element={<WorkflowDetail />} />
                   <Route path="executions" element={<Executions />} />
                   <Route path="executions/:id" element={<ExecutionInspectorPage />} />
+                  <Route path="marketplace" element={<MarketplaceExplore />} />
+                  <Route path="marketplace/publish" element={<PublishListing />} />
+                  <Route path="marketplace/library" element={<MyLibrary />} />
+                  <Route path="marketplace/my-listings" element={<MyListings />} />
+                  <Route path="marketplace/flow/:handle/:slug" element={<MarketplaceDetail />} />
                   <Route path="notes" element={<Notes />} />
                   <Route path="artifacts" element={<Artifacts />} />
                   <Route path="settings" element={<Settings />} />

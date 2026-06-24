@@ -20,6 +20,14 @@ import {
   WorkflowListRequest,
   WorkflowDetailRequest,
   WorkflowValidationRequest,
+  MarketplaceGalleryPage,
+  MarketplaceGalleryQuery,
+  MarketplaceListingDetail,
+  MarketplaceReview,
+  MarketplaceListing,
+  MarketplaceLibraryItem,
+  PublishListingRequest,
+  RateListingResult,
 } from "../types";
 
 // Public auth endpoints that should not trigger 401/403 interceptor redirects
@@ -3229,6 +3237,98 @@ export class MoiraApiClient {
       if (error instanceof ApiClientError) throw error;
       throw new ApiClientError("Failed to lock execution", ApiErrorCode.INTERNAL_ERROR);
     }
+  }
+
+  // ===== Marketplace =====
+
+  async getMarketplaceGallery(query: MarketplaceGalleryQuery = {}): Promise<MarketplaceGalleryPage> {
+    const params = new URLSearchParams();
+    if (query.search) params.append("search", query.search);
+    if (query.category) params.append("category", query.category);
+    if (query.tag) params.append("tag", query.tag);
+    if (query.sort) params.append("sort", query.sort);
+    if (query.limit !== undefined) params.append("limit", String(query.limit));
+    if (query.offset !== undefined) params.append("offset", String(query.offset));
+    const qs = params.toString();
+    const response = await this.client.get<ApiResponse<MarketplaceGalleryPage>>(
+      qs ? `/public/marketplace?${qs}` : "/public/marketplace",
+    );
+    return response.data.data!;
+  }
+
+  async getMarketplaceCategories(): Promise<Array<{ id: string; label: string }>> {
+    const response = await this.client.get<ApiResponse<{ categories: Array<{ id: string; label: string }> }>>(
+      "/public/marketplace/categories",
+    );
+    return response.data.data!.categories;
+  }
+
+  async getMarketplaceDetail(handle: string, slug: string): Promise<MarketplaceListingDetail> {
+    const response = await this.client.get<ApiResponse<MarketplaceListingDetail>>(
+      `/public/marketplace/listings/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`,
+    );
+    return response.data.data!;
+  }
+
+  async getMarketplaceReviews(handle: string, slug: string): Promise<MarketplaceReview[]> {
+    const response = await this.client.get<ApiResponse<{ reviews: MarketplaceReview[] }>>(
+      `/public/marketplace/listings/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}/reviews`,
+    );
+    return response.data.data!.reviews;
+  }
+
+  async publishListing(request: PublishListingRequest): Promise<MarketplaceListingDetail> {
+    const response = await this.client.post<ApiResponse<MarketplaceListingDetail>>(
+      "/marketplace/listings",
+      request,
+    );
+    return response.data.data!;
+  }
+
+  async getMyListings(): Promise<MarketplaceListing[]> {
+    const response = await this.client.get<ApiResponse<{ listings: MarketplaceListing[] }>>(
+      "/marketplace/me/listings",
+    );
+    return response.data.data!.listings;
+  }
+
+  async getMyLibrary(): Promise<MarketplaceLibraryItem[]> {
+    const response = await this.client.get<ApiResponse<{ items: MarketplaceLibraryItem[] }>>(
+      "/marketplace/me/library",
+    );
+    return response.data.data!.items;
+  }
+
+  async installListing(listingId: string): Promise<{ startRef: string }> {
+    const response = await this.client.post<ApiResponse<{ startRef: string }>>(
+      `/marketplace/listings/${encodeURIComponent(listingId)}/install`,
+      {},
+    );
+    return response.data.data!;
+  }
+
+  async forkListing(listingId: string): Promise<{ workflowId: string; slug: string }> {
+    const response = await this.client.post<ApiResponse<{ workflowId: string; slug: string }>>(
+      `/marketplace/listings/${encodeURIComponent(listingId)}/fork`,
+      {},
+    );
+    return response.data.data!;
+  }
+
+  async rateListing(
+    listingId: string,
+    stars: number,
+    reviewText?: string,
+  ): Promise<RateListingResult> {
+    const response = await this.client.post<ApiResponse<RateListingResult>>(
+      `/marketplace/listings/${encodeURIComponent(listingId)}/reviews`,
+      { stars, reviewText },
+    );
+    return response.data.data!;
+  }
+
+  async unpublishListing(listingId: string): Promise<void> {
+    await this.client.delete(`/marketplace/listings/${encodeURIComponent(listingId)}`);
   }
 }
 

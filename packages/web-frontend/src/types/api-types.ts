@@ -12,6 +12,100 @@ export interface ApiResponse<T = unknown> {
   timestamp: string;
 }
 
+// ===== Marketplace =====
+
+export type MarketplaceSort = "recent" | "rating" | "installs" | "trending";
+
+export interface MarketplaceListing {
+  id: string;
+  workflowId: string;
+  title: string;
+  summary: string | null;
+  category: string;
+  tags: string; // JSON string[]
+  status: string;
+  verified: boolean;
+  featured: boolean;
+  ratingAvg: number;
+  ratingCount: number;
+  installCount: number;
+  startCount: number;
+  isPaid: boolean;
+  price: number | null;
+  currency: string | null;
+  publishedAt: string;
+  updatedAt: string;
+}
+
+export type MarketplaceGalleryItem = MarketplaceListing & {
+  ownerHandle: string | null;
+  slug: string;
+};
+
+export interface MarketplaceGalleryPage {
+  items: MarketplaceGalleryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  sort: MarketplaceSort;
+}
+
+export interface MarketplaceEntitlement {
+  accessible: boolean;
+  reason: "free" | "paid-coming-soon" | "purchase-required";
+}
+
+export interface MarketplaceListingDetail {
+  listing: MarketplaceListing;
+  workflowId: string;
+  workflow: WorkflowGraph;
+  ownerHandle: string;
+  startRef: string;
+  entitlement: MarketplaceEntitlement;
+}
+
+export interface MarketplaceReview {
+  id: string;
+  stars: number;
+  reviewText: string | null;
+  authorHandle: string | null;
+  authorName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketplaceLibraryItem {
+  origin: "core" | "own" | "added" | "shared";
+  workflowId: string | null;
+  slug: string;
+  name: string;
+  ownerHandle: string | null;
+  kind?: "reference" | "copy";
+  listingId?: string | null;
+}
+
+export interface MarketplaceGalleryQuery {
+  search?: string;
+  category?: string;
+  tag?: string;
+  sort?: MarketplaceSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface PublishListingRequest {
+  workflowId: string;
+  category?: string;
+  tags?: string[];
+  title?: string;
+  summary?: string | null;
+}
+
+export interface RateListingResult {
+  ratingAvg: number;
+  ratingCount: number;
+}
+
 export type DeploymentMode = "self-host" | "saas";
 
 export type FeatureFlag =
@@ -21,7 +115,9 @@ export type FeatureFlag =
   | "legalConsents"
   | "betaNotices"
   | "multiUserAdmin"
-  | "socialLogin";
+  | "socialLogin"
+  | "paidWorkflows"
+  | "marketplace";
 
 export interface FeaturesResponse {
   deploymentMode: DeploymentMode;
