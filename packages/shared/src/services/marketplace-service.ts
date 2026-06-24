@@ -50,7 +50,19 @@ import {
   LibraryEntryNotFoundError,
   SelfRatingError,
   InvalidRatingError,
+  PaidListingsDisabledError,
+  InvalidListingStatusError,
 } from "../errors/domain-errors.js";
+
+/** Legal moderation statuses for a listing (admin status transitions are validated against this). */
+export const MARKETPLACE_LISTING_STATUSES = [
+  "listed",
+  "unlisted",
+  "pending",
+  "rejected",
+  "removed",
+] as const;
+export type MarketplaceListingStatus = (typeof MARKETPLACE_LISTING_STATUSES)[number];
 
 /** Where a library item came from. */
 export type LibraryOrigin = "core" | "own" | "added" | "shared";
@@ -147,6 +159,30 @@ export interface PublishOptions {
   summary?: string | null;
   category?: string;
   tags?: string[];
+  /** Paid fields — rejected while the `paidWorkflows` feature is disabled. */
+  isPaid?: boolean;
+  price?: number | null;
+  tier?: string | null;
+}
+
+/** Owner-editable listing fields (PATCH). */
+export interface UpdateListingOptions {
+  title?: string;
+  summary?: string | null;
+  category?: string;
+  tags?: string[];
+}
+
+/** Result of an entitlement check: free/owner are accessible; paid is gated. */
+export interface EntitlementResult {
+  hasAccess: boolean;
+  reason: "free" | "owner" | "paid-coming-soon" | "purchase-required";
+}
+
+/** Result of adopting a listing into the library (install). */
+export interface InstallResult {
+  entry: LibraryEntryRecord;
+  startRef: string;
 }
 
 /** Injectable feature predicates + core provider (defaults wire to the real ones). */
@@ -197,6 +233,7 @@ export class MarketplaceService {
     options: PublishOptions = {},
   ): Promise<MarketplaceListingRecord> {
     this.assertEnabled();
+    this.assertNoPaidFields(options);
 
     const ownership = await this.workflowRepo.getOwnership(workflowId);
     if (!ownership.exists || !ownership.id) {
@@ -205,7 +242,11 @@ export class MarketplaceService {
     if (ownership.ownerId !== userId) {
       throw new ListingAccessDeniedError(workflowId, "publish");
     }
-    if (await this.listingRepo.getByWorkflowId(workflowId)) {
+
+    // A workflow may carry at most one listing. A currently-listed row blocks
+    // re-publishing; an unlisted/removed row is re-listed (its history is kept).
+    const existing = await this.listingRepo.getByWorkflowId(workflowId);
+    if (existing && existing.status === "listed") {
       throw new WorkflowAlreadyListedError(workflowId);
     }
 
@@ -217,6 +258,19 @@ export class MarketplaceService {
     const category = normalizeMarketplaceCategory(options.category);
     const tags = options.tags ?? info?.metadata.tags ?? [];
 
+    if (existing) {
+      const relisted = await this.listingRepo.relist(existing.id, {
+        title,
+        summary,
+        category,
+        tags,
+      });
+      if (!relisted) {
+        throw new ListingNotFoundError(existing.id);
+      }
+      return relisted;
+    }
+
     return this.listingRepo.create({
       workflowId,
       publishedBy: userId,
@@ -227,7 +281,10 @@ export class MarketplaceService {
     });
   }
 
-  /** Unpublish: delete the listing and make the workflow private again. Owner only. */
+  /**
+   * Unpublish: set the listing `unlisted` (the row is kept so reviews/counters/history
+   * survive) and make the workflow private again. Owner only; idempotent.
+   */
   async unpublish(userId: string, workflowId: string): Promise<void> {
     this.assertEnabled();
 
@@ -239,8 +296,27 @@ export class MarketplaceService {
       throw new ListingAccessDeniedError(workflowId, "unpublish");
     }
 
-    await this.listingRepo.deleteByWorkflowId(workflowId);
+    await this.listingRepo.setStatus(listing.id, "unlisted");
     await this.workflowRepo.updateVisibility(workflowId, userId, "private");
+  }
+
+  /** Unpublish by listing id (authed HTTP path). Owner only; idempotent. */
+  async unpublishById(userId: string, listingId: string): Promise<void> {
+    this.assertEnabled();
+    const listing = await this.requireExistingListing(listingId);
+    if (listing.publishedBy !== userId) {
+      throw new ListingAccessDeniedError(listingId, "unpublish");
+    }
+    await this.listingRepo.setStatus(listing.id, "unlisted");
+    await this.workflowRepo.updateVisibility(listing.workflowId, userId, "private");
+  }
+
+  /** Reject paid publish fields while the `paidWorkflows` feature is disabled. */
+  private assertNoPaidFields(options: PublishOptions): void {
+    const wantsPaid = options.isPaid === true || options.price != null || options.tier != null;
+    if (wantsPaid && !this.isPaidEnabled()) {
+      throw new PaidListingsDisabledError();
+    }
   }
 
   // ===== Gallery / Detail =====
@@ -369,9 +445,7 @@ export class MarketplaceService {
    * workflow graph. Shared prefix for detail/reviews/export. Throws
    * ListingNotFoundError unless a `status='listed'` listing exists for the flow.
    */
-  private async resolveListedRef(
-    reference: string,
-  ): Promise<{
+  private async resolveListedRef(reference: string): Promise<{
     parsed: { handle: string; slug: string };
     workflowId: string;
     listing: MarketplaceListingRecord;
@@ -394,6 +468,165 @@ export class MarketplaceService {
       throw new ListingNotFoundError(reference);
     }
     return { parsed, workflowId, listing };
+  }
+
+  /**
+   * Resolve a listing detail by listing id (authed callers use the id, not the
+   * `handle/slug`). The caller must be able to access the workflow (public, or the
+   * owner). Used as the publish/PATCH response and by owner-facing reads.
+   */
+  async getDetailById(listingId: string, currentUserId: string): Promise<ListingDetail> {
+    this.assertEnabled();
+    const listing = await this.listingRepo.getById(listingId);
+    if (!listing) {
+      throw new ListingNotFoundError(listingId);
+    }
+    const info = await this.workflowRepo.getFullInfo(listing.workflowId, currentUserId);
+    if (!info) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return {
+      listing,
+      workflowId: listing.workflowId,
+      workflow: info.workflow,
+      ownerHandle: info.ownerHandle,
+      startRef: `${info.ownerHandle}/${info.slug}`,
+      entitlement: this.canAccess(listing),
+    };
+  }
+
+  // ===== Owner listing management =====
+
+  /** Listings published by the user (any status), for the owner dashboard. */
+  async getMyListings(userId: string): Promise<MarketplaceListingRecord[]> {
+    this.assertEnabled();
+    return this.listingRepo.listByPublisher(userId);
+  }
+
+  /** Apply owner metadata edits to a listing. Owner only. */
+  async updateListing(
+    userId: string,
+    listingId: string,
+    options: UpdateListingOptions,
+  ): Promise<MarketplaceListingRecord> {
+    this.assertEnabled();
+    const listing = await this.requireExistingListing(listingId);
+    if (listing.publishedBy !== userId) {
+      throw new ListingAccessDeniedError(listingId, "manage");
+    }
+    const patch: UpdateListingOptions = { ...options };
+    if (options.category !== undefined) {
+      patch.category = normalizeMarketplaceCategory(options.category);
+    }
+    const updated = await this.listingRepo.updateMetadata(listingId, patch);
+    if (!updated) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return updated;
+  }
+
+  /**
+   * Entitlement for the current user: the listing's owner and free listings are
+   * always accessible; paid listings are gated ("coming soon" while selling is off).
+   */
+  async getEntitlement(userId: string, listingId: string): Promise<EntitlementResult> {
+    this.assertEnabled();
+    const listing = await this.requireListedListing(listingId);
+    if (listing.publishedBy === userId) {
+      return { hasAccess: true, reason: "owner" };
+    }
+    const decision = this.canAccess(listing);
+    return { hasAccess: decision.accessible, reason: decision.reason };
+  }
+
+  /**
+   * Adopt a listing into the user's library as a live reference and return the
+   * `handle/slug` start reference (so the caller can `start()` it). Bumps
+   * `installCount` (via `add`). Idempotent.
+   */
+  async install(userId: string, listingId: string): Promise<InstallResult> {
+    this.assertEnabled();
+    const listing = await this.requireListedListing(listingId);
+    const entry = await this.add(userId, listingId);
+    return { entry, startRef: await this.referenceOf(listing) };
+  }
+
+  // ===== Admin moderation =====
+
+  /** Grant the verified badge. Admin only. */
+  async verifyListing(adminId: string, listingId: string): Promise<MarketplaceListingRecord> {
+    this.assertEnabled();
+    await this.requireExistingListing(listingId);
+    const updated = await this.listingRepo.setVerified(listingId, true, adminId);
+    if (!updated) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return updated;
+  }
+
+  /** Revoke the verified badge. Admin only. */
+  async unverifyListing(listingId: string): Promise<MarketplaceListingRecord> {
+    this.assertEnabled();
+    await this.requireExistingListing(listingId);
+    const updated = await this.listingRepo.setVerified(listingId, false, null);
+    if (!updated) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return updated;
+  }
+
+  /** Set the featured flag. Admin only. */
+  async setListingFeatured(
+    listingId: string,
+    featured: boolean,
+  ): Promise<MarketplaceListingRecord> {
+    this.assertEnabled();
+    await this.requireExistingListing(listingId);
+    const updated = await this.listingRepo.setFeatured(listingId, featured);
+    if (!updated) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return updated;
+  }
+
+  /** Moderation queue: listings in a given status (default `pending`). Admin only. */
+  async getModerationQueue(status = "pending"): Promise<MarketplaceListingRecord[]> {
+    this.assertEnabled();
+    return this.listingRepo.listByStatus(status);
+  }
+
+  /** Transition a listing's moderation status (approve/reject). Admin only. */
+  async setListingStatus(listingId: string, status: string): Promise<MarketplaceListingRecord> {
+    this.assertEnabled();
+    if (!(MARKETPLACE_LISTING_STATUSES as readonly string[]).includes(status)) {
+      throw new InvalidListingStatusError(status, MARKETPLACE_LISTING_STATUSES);
+    }
+    await this.requireExistingListing(listingId);
+    const updated = await this.listingRepo.setStatus(listingId, status);
+    if (!updated) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return updated;
+  }
+
+  /** Build the `handle/slug` reference for a listing's workflow. */
+  private async referenceOf(listing: MarketplaceListingRecord): Promise<string> {
+    const info = await this.workflowRepo.getFullInfo(listing.workflowId, listing.publishedBy);
+    const profiles = await this.userRepo.getPublicProfilesByIds([listing.publishedBy]);
+    const handle = profiles.get(listing.publishedBy)?.handle;
+    if (!info || !handle) {
+      throw new ListingNotFoundError(listing.id);
+    }
+    return `${handle}/${info.slug}`;
+  }
+
+  /** Fetch a listing of any status, or throw ListingNotFoundError. */
+  private async requireExistingListing(listingId: string): Promise<MarketplaceListingRecord> {
+    const listing = await this.listingRepo.getById(listingId);
+    if (!listing) {
+      throw new ListingNotFoundError(listingId);
+    }
+    return listing;
   }
 
   // ===== Library resolver =====

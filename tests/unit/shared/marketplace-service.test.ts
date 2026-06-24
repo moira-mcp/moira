@@ -168,14 +168,26 @@ describe("MarketplaceService", () => {
       );
     });
 
-    it("unpublish removes the listing and makes the workflow private", async () => {
+    it("unpublish unlists the listing (row kept) and makes the workflow private", async () => {
       const wf = await createWorkflow(AUTHOR, "Flow");
       await service.publish(AUTHOR, wf.id);
       await service.unpublish(AUTHOR, wf.id);
 
-      expect(await listingRepo.getByWorkflowId(wf.id)).toBeNull();
+      const listing = await listingRepo.getByWorkflowId(wf.id);
+      expect(listing?.status).toBe("unlisted"); // row kept for history, not deleted
       const ownership = await workflowRepo.getOwnership(wf.id);
       expect(ownership.visibility).toBe("private");
+    });
+
+    it("re-publishing an unlisted workflow re-lists the kept row", async () => {
+      const wf = await createWorkflow(AUTHOR, "Flow");
+      const first = await service.publish(AUTHOR, wf.id);
+      await service.unpublish(AUTHOR, wf.id);
+
+      const second = await service.publish(AUTHOR, wf.id, { category: "development" });
+      expect(second.id).toBe(first.id); // same row re-listed
+      expect(second.status).toBe("listed");
+      expect(second.category).toBe("development");
     });
 
     it("rejects unpublish by a non-owner", async () => {

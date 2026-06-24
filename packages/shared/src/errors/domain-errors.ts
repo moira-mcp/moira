@@ -535,6 +535,34 @@ export class InvalidRatingError extends DomainError {
   }
 }
 
+/**
+ * A paid listing was requested (publish with paid fields, or purchase) while the
+ * `paidWorkflows` feature is disabled.
+ */
+export class PaidListingsDisabledError extends DomainError {
+  readonly code = "PAID_LISTINGS_DISABLED";
+  readonly httpStatus = 400;
+
+  constructor() {
+    super("Paid listings are not available on this instance yet");
+  }
+}
+
+/**
+ * A listing status transition targeted a value outside the allowed set.
+ */
+export class InvalidListingStatusError extends DomainError {
+  readonly code = "INVALID_LISTING_STATUS";
+  readonly httpStatus = 400;
+
+  constructor(
+    public readonly status: string,
+    allowed: readonly string[],
+  ) {
+    super(`Invalid listing status '${status}': expected one of ${allowed.join(", ")}`);
+  }
+}
+
 // ===== Type Guards =====
 
 /**

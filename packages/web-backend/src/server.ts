@@ -65,6 +65,8 @@ import { artifactsRoutes } from "./routes/artifacts.js";
 import { artifactTokenRoutes } from "./routes/artifact-tokens.js";
 import { staticArtifactsRoutes } from "./routes/static-artifacts.js";
 import { marketplacePublicRoutes } from "./routes/marketplace-public.js";
+import { marketplaceAuthedRoutes } from "./routes/marketplace-authed.js";
+import { marketplaceAdminRoutes } from "./routes/marketplace-admin.js";
 import { workflowSharingRoutes } from "./routes/workflow-sharing.js";
 import { inviteAcceptRoutes } from "./routes/invite-accept.js";
 import { tokenRoutes } from "./routes/tokens.js";
@@ -358,6 +360,9 @@ class MoiraApiServer {
     // Workflow sharing routes MUST be before main workflow routes (more specific patterns first)
     this.app.use("/api/workflows", apiLimiter, requireAuth, workflowSharingRoutes);
     this.app.use("/api/workflows", apiLimiter, requireAuth, workflowRoutes);
+    // Marketplace admin must be registered before the authed routes (more specific prefix first).
+    this.app.use("/api/marketplace/admin", apiLimiter, requireAuth, marketplaceAdminRoutes);
+    this.app.use("/api/marketplace", apiLimiter, requireAuth, marketplaceAuthedRoutes);
     this.app.use("/api/invites", apiLimiter, optionalAuth, inviteAcceptRoutes); // Auth optional for GET, checked inside for POST
     this.app.use("/api/executions", apiLimiter, requireAuth, executionRoutes);
     this.app.use("/api/settings", apiLimiter, requireAuth, settingsRoutes);

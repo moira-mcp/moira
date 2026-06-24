@@ -51,6 +51,14 @@ export type GalleryItem = MarketplaceListingRecord & {
   slug: string;
 };
 
+/** Owner-editable listing metadata (PATCH). Undefined fields are left unchanged. */
+export interface UpdateListingMetadata {
+  title?: string;
+  summary?: string | null;
+  category?: string;
+  tags?: string[];
+}
+
 /** A minimal public reference (for the sitemap). */
 export interface PublicListingRef {
   ownerHandle: string | null;
@@ -109,7 +117,11 @@ export class MarketplaceListingRepository {
     return row ?? null;
   }
 
-  /** Delete the listing for a workflow. Returns true if a row was removed. */
+  /**
+   * Hard-delete the listing for a workflow. Returns true if a row was removed.
+   * Note: unpublish is a SOFT delete (`setStatus('unlisted')`, row kept for history);
+   * this is the hard-delete primitive, retained for admin/data-removal use.
+   */
   async deleteByWorkflowId(workflowId: string): Promise<boolean> {
     const result = await this.db
       .delete(marketplaceListing)
@@ -229,6 +241,87 @@ export class MarketplaceListingRepository {
       .update(marketplaceListing)
       .set({ viewCount: sql`${marketplaceListing.viewCount} + 1` })
       .where(eq(marketplaceListing.id, listingId));
+  }
+
+  // ===== Owner / moderation mutations =====
+
+  /** Listings published by a user (any status), newest first (owner dashboard). */
+  async listByPublisher(userId: string): Promise<MarketplaceListingRecord[]> {
+    return this.db
+      .select()
+      .from(marketplaceListing)
+      .where(eq(marketplaceListing.publishedBy, userId))
+      .orderBy(desc(marketplaceListing.createdAt));
+  }
+
+  /** Listings in a given moderation status, newest first. */
+  async listByStatus(status: string): Promise<MarketplaceListingRecord[]> {
+    return this.db
+      .select()
+      .from(marketplaceListing)
+      .where(eq(marketplaceListing.status, status))
+      .orderBy(desc(marketplaceListing.createdAt));
+  }
+
+  /** Apply owner metadata edits (content change → bumps `updatedAt`). Returns the row. */
+  async updateMetadata(
+    listingId: string,
+    patch: UpdateListingMetadata,
+  ): Promise<MarketplaceListingRecord | null> {
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (patch.title !== undefined) set.title = patch.title;
+    if (patch.summary !== undefined) set.summary = patch.summary;
+    if (patch.category !== undefined) set.category = patch.category;
+    if (patch.tags !== undefined) set.tags = JSON.stringify(patch.tags);
+    await this.db.update(marketplaceListing).set(set).where(eq(marketplaceListing.id, listingId));
+    return this.getById(listingId);
+  }
+
+  /** Set the listing status (e.g. listed → unlisted on unpublish; moderation transitions). */
+  async setStatus(listingId: string, status: string): Promise<MarketplaceListingRecord | null> {
+    await this.db
+      .update(marketplaceListing)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(marketplaceListing.id, listingId));
+    return this.getById(listingId);
+  }
+
+  /** Re-list a previously unlisted/removed listing, refreshing its metadata. */
+  async relist(
+    listingId: string,
+    patch: UpdateListingMetadata,
+  ): Promise<MarketplaceListingRecord | null> {
+    return this.updateMetadata(listingId, patch).then(() => this.setStatus(listingId, "listed"));
+  }
+
+  /** Grant or revoke the verified badge (admin). Sets verifiedAt/By when granting. */
+  async setVerified(
+    listingId: string,
+    verified: boolean,
+    verifiedBy: string | null,
+  ): Promise<MarketplaceListingRecord | null> {
+    await this.db
+      .update(marketplaceListing)
+      .set({
+        verified,
+        verifiedBy: verified ? verifiedBy : null,
+        verifiedAt: verified ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(marketplaceListing.id, listingId));
+    return this.getById(listingId);
+  }
+
+  /** Set the featured flag (admin). */
+  async setFeatured(
+    listingId: string,
+    featured: boolean,
+  ): Promise<MarketplaceListingRecord | null> {
+    await this.db
+      .update(marketplaceListing)
+      .set({ featured, updatedAt: new Date() })
+      .where(eq(marketplaceListing.id, listingId));
+    return this.getById(listingId);
   }
 }
 

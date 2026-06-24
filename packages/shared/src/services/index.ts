@@ -213,6 +213,9 @@ export {
   type GalleryPage,
   type ReviewWithAuthor,
   type ExportResult,
+  type UpdateListingOptions,
+  type EntitlementResult,
+  type InstallResult,
 } from "./marketplace-service.js";
 
 export { ExecutionRetentionService } from "./execution-retention-service.js";

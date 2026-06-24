@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **306 files**, **3641 tests**
+- **46 domains**, **308 files**, **3671 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 7     | 74    | unit:5, integration:1, api:1                                   |
+| marketplace         | 9     | 104   | unit:5, integration:2, api:2                                   |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -498,23 +498,25 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**7 files, 74 tests**
+**9 files, 104 tests**
 
 **unit** (5 files)
 
-- `tests/unit/shared/marketplace-service.test.ts` — 32 tests 🟢 (publish/unpublish guards; add-as-reference + idempotency + install counter; library resolver own/added/shared excluding arbitrary public; fork independent copy + provenance; reference-auto-updates vs fork-frozen; remove + not-found; canAccess free vs paid coming-soon + paid-add rejection; detail by handle/slug + stale-private rejection; ratings/reviews — record + recompute aggregate, one-editable-per-user, average-across-users, self-rating + out-of-range rejection, removeReview, rate event; analytics events + view/start counters; trending order by recent activity)
+- `tests/unit/shared/marketplace-service.test.ts` — 33 tests 🟢 (publish/unpublish guards + unpublish unlists (row kept) + re-publish re-lists; add-as-reference + idempotency + install counter; library resolver own/added/shared excluding arbitrary public; fork independent copy + provenance; reference-auto-updates vs fork-frozen; remove + not-found; canAccess free vs paid coming-soon + paid-add rejection; detail by handle/slug + stale-private rejection; ratings/reviews — record + recompute aggregate, one-editable-per-user, average-across-users, self-rating + out-of-range rejection, removeReview, rate event; analytics events + view/start counters; trending order by recent activity)
 - `tests/unit/shared/marketplace-listing-repository.test.ts` — 5 tests 🟢 (create defaults + read-back; delete by workflow; gallery predicate listed+public+not-deleted; category filter; install counter)
 - `tests/unit/shared/library-entry-repository.test.ts` — 3 tests 🟢 (add + get by user/workflow; list by user; remove with changed-rows result)
 - `tests/unit/shared/marketplace-review-repository.test.ts` — 5 tests 🟢 (upsert + transactional aggregate recompute; replace same-user review; average across users; read-back/list; delete + recompute, null when nothing to delete)
 - `tests/unit/shared/marketplace-event-repository.test.ts` — 4 tests 🟢 (append + nullable userId; trending ranks by event count; type filter; window exclusion)
 
-**integration** (1 file)
+**integration** (2 files)
 
 - `tests/integration/marketplace-public-api.test.ts` — 18 tests 🟢 (service-level public read against a migrated DB: gallery only-listed+public+total, category/search/tag filters, limit/offset pagination, sort rating/installs/trending (view-only excluded), categories, reviews-with-authors (handle resolved, userId not exposed), reviews-by-reference graph-free + unknown 404, sitemap refs + view does not move lastmod/updatedAt, detail by handle/slug with ownerHandle/startRef/entitlement + unknown 404, export free succeeds vs paid denied)
+- `tests/integration/marketplace-authed-api.test.ts` — 17 tests 🟢 (service-level authed/admin against a migrated DB: publish→listed/public, unpublish→unlisted (row kept) + non-owner rejection, owner metadata edit + non-owner rejection, my-listings incl unlisted, install→library reference + startRef + install counter, fork→independent owned copy (original untouched), share-by-link grant→recipient library 'shared', entitlement owner/free + paid coming-soon, paid-publish rejection while flag off + allowed when on, admin verify/unverify badge + featured + moderation queue/status + unknown-status rejection)
 
-**api** (1 file)
+**api** (2 files)
 
 - `tests/api/marketplace-public-api.test.ts` — 7 tests 🟢 (HTTP: gallery public no-auth + page envelope; sort/limit/offset query params; categories payload; sitemap.xml content-type; unknown detail/export/reviews → 404)
+- `tests/api/marketplace-authed-api.test.ts` — 12 tests 🟢 (HTTP auth gating: me/listings + me/library + publish without session → 401; authed me/listings + me/library → 200 envelope; error mapping publish/delete/entitlement unknown id → 404; admin queue no-session → 401, non-admin → 403, admin → 200 envelope, verify unknown id → 404)
 
 ### node-handlers
 

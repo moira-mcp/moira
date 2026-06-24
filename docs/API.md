@@ -3225,7 +3225,10 @@ Response:
     workflow: WorkflowGraph;
     ownerHandle: string;
     startRef: string; // "handle/slug"
-    entitlement: { accessible: boolean; reason: "free" | "paid-coming-soon" | "purchase-required" };
+    entitlement: {
+      accessible: boolean;
+      reason: "free" | "paid-coming-soon" | "purchase-required";
+    }
   }
   timestamp: string;
 }
@@ -3251,6 +3254,99 @@ Free flows export; paid flows are denied while selling is off.
 - 404: No listed public flow matches
 
 Authentication: Not required.
+
+## Authed Marketplace API
+
+Authenticated marketplace actions, mounted at `/api/marketplace` behind `apiLimiter`
+
+- `requireAuth`. The caller's id comes from the session. Domain errors map to HTTP via
+  `normalizeError` (403 ownership, 404 not-found, 400 paid-disabled).
+
+### POST /api/marketplace/listings
+
+Publish a workflow the caller owns. Body: `{ workflowId, category?, tags?, title?,
+summary? }`. Paid fields (`isPaid`/`price`/`tier`) are rejected with `400
+PAID_LISTINGS_DISABLED` while the `paidWorkflows` feature is off. Re-publishing a
+previously unlisted workflow re-lists the kept row. Sets `workflow.visibility='public'`.
+→ `201` + `ListingDetail`.
+
+### PATCH /api/marketplace/listings/:id
+
+Owner-only metadata edit. Body: `{ title?, summary?, category?, tags? }` → updated
+listing. 403 for non-owners.
+
+### DELETE /api/marketplace/listings/:id
+
+Owner-only unpublish: sets the listing `status='unlisted'` (the row is kept for
+history) and makes the workflow private. `204`. 403 for non-owners.
+
+### GET /api/marketplace/me/listings
+
+The caller's listings (any status) → `{ listings: MarketplaceListing[] }`.
+
+### GET /api/marketplace/me/library
+
+The caller's library (core ∪ own ∪ added ∪ shared) → `{ items: LibraryItem[] }`.
+
+### POST /api/marketplace/listings/:id/install
+
+Adopt a listing into the library as a live reference (auto-updates) and bump
+`installCount`. Idempotent. → `{ startRef: "handle/slug" }`.
+
+### POST /api/marketplace/listings/:id/fork
+
+Fork an independent, owned copy of the listing's workflow → `201` + `{ workflowId,
+slug }`.
+
+### DELETE /api/marketplace/library/:workflowId
+
+Remove a flow from the caller's library (does not delete the original). `204`.
+
+### POST /api/marketplace/listings/:id/reviews
+
+Rate/review a listing. Body: `{ stars (1-5), reviewText? }`. One editable review per
+user; the author cannot rate their own listing. → `{ review, ratingAvg, ratingCount }`.
+
+### DELETE /api/marketplace/listings/:id/reviews/me
+
+Remove the caller's own review and recompute aggregates. `204` (idempotent).
+
+### GET /api/marketplace/listings/:id/entitlement
+
+Access decision for the caller → `{ hasAccess, reason }`. `reason` is `owner` (the
+publisher), `free`, or `paid-coming-soon` (paid while selling is off).
+
+Authentication: Required for all of the above.
+
+## Admin Marketplace API
+
+Mounted at `/api/marketplace/admin` behind `apiLimiter` + `requireAuth`; every route
+additionally requires the admin role (`requireAdmin`).
+
+### POST /api/marketplace/admin/listings/:id/verify
+
+Grant the verified badge (sets `verifiedAt`/`verifiedBy`) → listing.
+
+### DELETE /api/marketplace/admin/listings/:id/verify
+
+Revoke the verified badge → listing.
+
+### POST /api/marketplace/admin/listings/:id/feature
+
+Set the featured flag. Body: `{ featured: boolean }` → listing.
+
+### GET /api/marketplace/admin/listings
+
+Moderation queue by status (query `status`, default `pending`) →
+`{ listings: MarketplaceListing[] }`.
+
+### POST /api/marketplace/admin/listings/:id/status
+
+Transition a listing's status. Body: `{ status, reason? }`. `status` must be one of
+`listed`, `unlisted`, `pending`, `rejected`, `removed` (else `400
+INVALID_LISTING_STATUS`). → listing.
+
+Authentication: Required (admin role) for all of the above.
 
 ## Middleware
 
