@@ -5,7 +5,7 @@
   "id": "50c23256-c9d3-4d7e-94c6-763b295fc168",
   "metadata": {
     "name": "Software Development Flow Lite",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "description": "Simplified development flow for small tasks (1-5 steps). Core loop: plan → implement → test → review → commit.",
     "author": "mcp-moira-team",
     "tags": [
