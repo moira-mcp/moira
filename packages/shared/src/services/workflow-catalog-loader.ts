@@ -55,6 +55,10 @@ export interface CatalogLoadResult {
 /** Minimal repository surface the loader needs (satisfied by WorkflowRepository). */
 export interface CatalogWorkflowRepo {
   resolveSlug(slug: string, ownerUserId: string): Promise<string | null>;
+  /** Resolve including soft-deleted rows — they still occupy the (owner, slug) uniqueness slot. */
+  resolveSlugIncludingDeleted(slug: string, ownerUserId: string): Promise<string | null>;
+  /** Un-delete a soft-deleted flow so the install can update it instead of colliding on INSERT. */
+  restore(workflowId: string, ownerUserId: string): Promise<boolean>;
   get(
     workflowId: string,
     userId: string,
@@ -116,11 +120,27 @@ export async function installCatalogEntry(
     return "invalid-version";
   }
 
-  const existingWorkflowId = await workflowRepo.resolveSlug(slug, owner);
-  const workflowExists = !!existingWorkflowId;
+  let existingWorkflowId = await workflowRepo.resolveSlug(slug, owner);
+  let workflowExists = !!existingWorkflowId;
 
+  // A soft-deleted row still occupies the (owner, slug) uniqueness slot, so a plain INSERT would
+  // collide ("slug already exists for this user") — resolveSlug hides it, but slugExists and the
+  // unique index do not. Restore it and take the update path: catalog install is idempotent and a
+  // bundled flow is meant to exist on the target. The subsequent save() update un-deletes and
+  // overwrites it (version-gated below).
+  if (!workflowExists) {
+    const softDeletedId = await workflowRepo.resolveSlugIncludingDeleted(slug, owner);
+    if (softDeletedId) {
+      await workflowRepo.restore(softDeletedId, owner);
+      existingWorkflowId = softDeletedId;
+      workflowExists = true;
+      log(`  ♻️  ${owner}/${slug} (restored soft-deleted flow)`);
+    }
+  }
+
+  // Invariant past this point: workflowExists ⟺ existingWorkflowId !== null (set together above).
   if (workflowExists && !force) {
-    const existing = await workflowRepo.get(existingWorkflowId, owner);
+    const existing = await workflowRepo.get(existingWorkflowId!, owner);
     const serverVersion = existing?.metadata?.version;
 
     if (localVersion && serverVersion && isValidSemver(serverVersion)) {
@@ -148,7 +168,7 @@ export async function installCatalogEntry(
   if (!workflowExists) {
     delete graphForSave.id;
   } else {
-    graphForSave.id = existingWorkflowId;
+    graphForSave.id = existingWorkflowId!;
   }
 
   await mutationService.save({
