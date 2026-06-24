@@ -817,14 +817,11 @@
       "loadFailed": "Не удалось загрузить маркетплейс",
       "emptyTitle": "Воркфлоу не найдены",
       "emptyDesc": "По вашему запросу пока нет опубликованных воркфлоу.",
-      "publishedCount": "Опубликовано: {{count}}",
       "back": "Маркетплейс",
-      "installs": "установок: {{count}}",
       "by": "автор @{{handle}}",
       "unrated": "Без оценок",
       "verified": "проверено",
       "paidSoon": "{{label}} · скоро",
-      "steps": "шагов: {{count}}",
       "detail": {
         "notAvailable": "Этот воркфлоу недоступен.",
         "notFound": "Не найдено.",
@@ -892,6 +889,40 @@
         "unpublish": "Снять с публикации",
         "unpublished": "Снято с публикации.",
         "failed": "Не удалось снять с публикации"
+      },
+      "installs_one": "{{count}} установка",
+      "installs_few": "{{count}} установки",
+      "installs_many": "{{count}} установок",
+      "installs_other": "{{count}} установки",
+      "steps_one": "{{count}} шаг",
+      "steps_few": "{{count}} шага",
+      "steps_many": "{{count}} шагов",
+      "steps_other": "{{count}} шага",
+      "publishedCount_one": "{{count}} опубликован",
+      "publishedCount_few": "{{count}} опубликовано",
+      "publishedCount_many": "{{count}} опубликовано",
+      "publishedCount_other": "{{count}} опубликовано",
+      "category": {
+        "development": "Разработка",
+        "research": "Исследования",
+        "content": "Контент",
+        "data": "Данные и анализ",
+        "design": "Дизайн и UX",
+        "testing": "Тестирование и QA",
+        "marketing": "Маркетинг",
+        "productivity": "Продуктивность",
+        "other": "Другое"
+      },
+      "status": {
+        "listed": "Опубликован",
+        "unlisted": "Снят с публикации",
+        "pending": "На модерации",
+        "rejected": "Отклонён",
+        "removed": "Удалён"
+      },
+      "kind": {
+        "reference": "Ссылка",
+        "copy": "Копия"
       }
     }
   },

@@ -120,7 +120,7 @@ export function PublishListing() {
             <SelectContent>
               {categories.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  {c.label}
+                  {t(`pages.marketplace.category.${c.id}`, { defaultValue: c.label })}
                 </SelectItem>
               ))}
             </SelectContent>

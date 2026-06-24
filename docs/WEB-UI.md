@@ -188,6 +188,16 @@ All shared components accept i18n label props for translatable strings — do no
 
 Usage rules documented in `packages/web-frontend/UI_STANDARDS.md`.
 
+### Pluralization
+
+User-facing counts use i18next CLDR plural keys (`key_one` / `key_few` / `key_many` /
+`key_other`) with `t(key, { count })`, so Russian declensions are correct (1 шаг / 2 шага /
+5 шагов), not naive single-form interpolation. A framework-free shared
+pluralization/declension primitive lives in `packages/shared/src/i18n/` (`pluralCategory`,
+`selectForm`, `formatCount` over `Intl.PluralRules`) for non-i18next/server-rendered text;
+the marketplace's canonical countable-noun and enum-label forms (EN+RU) live in
+`packages/shared/src/i18n/marketplace-labels.ts`.
+
 ## Routes
 
 Application routes:

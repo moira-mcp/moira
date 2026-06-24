@@ -817,14 +817,11 @@
       "loadFailed": "Failed to load the marketplace",
       "emptyTitle": "No workflows found",
       "emptyDesc": "No published workflows match your search yet.",
-      "publishedCount": "{{count}} published",
       "back": "Marketplace",
-      "installs": "{{count}} installs",
       "by": "by @{{handle}}",
       "unrated": "Unrated",
       "verified": "verified",
       "paidSoon": "{{label}} · soon",
-      "steps": "{{count}} steps",
       "detail": {
         "notAvailable": "This workflow is not available.",
         "notFound": "Not found.",
@@ -892,6 +889,34 @@
         "unpublish": "Unpublish",
         "unpublished": "Unpublished.",
         "failed": "Unpublish failed"
+      },
+      "installs_one": "{{count}} install",
+      "installs_other": "{{count}} installs",
+      "steps_one": "{{count}} step",
+      "steps_other": "{{count}} steps",
+      "publishedCount_one": "{{count}} published",
+      "publishedCount_other": "{{count}} published",
+      "category": {
+        "development": "Development",
+        "research": "Research",
+        "content": "Content",
+        "data": "Data & Analysis",
+        "design": "Design & UX",
+        "testing": "Testing & QA",
+        "marketing": "Marketing",
+        "productivity": "Productivity",
+        "other": "Other"
+      },
+      "status": {
+        "listed": "Listed",
+        "unlisted": "Unlisted",
+        "pending": "Pending",
+        "rejected": "Rejected",
+        "removed": "Removed"
+      },
+      "kind": {
+        "reference": "Reference",
+        "copy": "Copy"
       }
     }
   },

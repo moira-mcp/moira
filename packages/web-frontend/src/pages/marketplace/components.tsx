@@ -79,7 +79,9 @@ export function ListingCard({ item }: { item: MarketplaceGalleryItem }) {
           <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{item.summary}</p>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <Badge variant="outline">{item.category}</Badge>
+          <Badge variant="outline">
+            {t(`pages.marketplace.category.${item.category}`, { defaultValue: item.category })}
+          </Badge>
           <RatingStars avg={item.ratingAvg} count={item.ratingCount} />
           <span>{t("pages.marketplace.installs", { count: item.installCount })}</span>
           {item.ownerHandle && <span>{t("pages.marketplace.by", { handle: item.ownerHandle })}</span>}

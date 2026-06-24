@@ -127,7 +127,9 @@ export function MarketplaceDetail() {
           <h1 className="text-2xl font-semibold">{l.title}</h1>
           <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
             {l.verified && <VerifiedBadge />}
-            <Badge variant="outline">{l.category}</Badge>
+            <Badge variant="outline">
+              {t(`pages.marketplace.category.${l.category}`, { defaultValue: l.category })}
+            </Badge>
             <RatingStars avg={l.ratingAvg} count={l.ratingCount} />
             <span>{t("pages.marketplace.installs", { count: l.installCount })}</span>
             <span>{t("pages.marketplace.by", { handle: detail.ownerHandle })}</span>

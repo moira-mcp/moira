@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **312 files**, **3692 tests**
+- **46 domains**, **314 files**, **3705 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 16    | 151   | unit:8, integration:2, api:3, mcp-tools:1, e2e:2               |
+| marketplace         | 18    | 164   | unit:9, integration:2, api:3, mcp-tools:1, e2e:3               |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -495,10 +495,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**16 files, 151 tests**
+**18 files, 164 tests**
 
-**unit** (8 files)
+**unit** (9 files)
 
+- `tests/unit/shared/i18n-plural.test.ts` — 12 tests 🟢 (pluralization/declension primitive: EN one/other + RU one/few/many CLDR categories incl. boundaries 1/2/5/11/21/0; selectForm other-fallback; formatCount; toMarketplaceLocale normalization; formatMarketplaceCount RU declensions 1 шаг/2 шага/5 шагов; marketplaceEnumLabel category/status/kind EN+RU + unknown-value fallback; countable-noun + enum-label parity)
 - `tests/unit/shared/marketplace-schema.test.ts` — 13 tests 🟢 (marketplace migration 0014: five tables + listing indexes created; listing column defaults; UNIQUE constraints — one listing/workflow, one review/(listing,user), one library entry/(user,workflow), one entitlement/(user,listing); review stars DB CHECK 1..5 boundary+reject; nullable event userId)
 - `tests/unit/shared/marketplace-categories.test.ts` — 7 tests 🟢 (fixed category set: non-empty unique ids, 'other' catch-all last, MARKETPLACE_CATEGORY_IDS derivation, isValidMarketplaceCategory, normalizeMarketplaceCategory fallback)
 - `tests/unit/shared/marketplace-feature-flags.test.ts` — 6 tests 🟢 (paidWorkflows off in both modes; isMarketplaceEnabled config toggle: mode defaults + MARKETPLACE_ENABLED opt-in/opt-out override)
@@ -523,8 +524,9 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/mcp-tools/marketplace-tool.test.ts` — 8 tests 🟢 (agent path over real MCP: publish produces handle/slug ref; search finds the published flow; info accessible detail; add → appears in list(source:added) as origin 'added'; start runs the added flow by ref; rate records a rating; author cannot rate own flow); list(source:core) returns bundled flows startable by moira/<slug> id
 
-**e2e** (2 files)
+**e2e** (3 files)
 
+- `tests/e2e/marketplace-i18n.spec.ts` — 1 test 🟢 (Playwright SPA localization: with ?lang=ru the gallery/detail/My-Listings render translated enum labels (category→"Разработка", status→"Опубликован") and correct Russian CLDR plural counts (install/step declensions, e.g. "2 шага") with no raw enum strings)
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the detail page (backend, not SPA) with JSON-LD; missing flow 404s instead of SPA fallthrough)
 - `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); before/after screenshots captured)
 

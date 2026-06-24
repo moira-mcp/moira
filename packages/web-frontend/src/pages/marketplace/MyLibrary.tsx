@@ -68,7 +68,11 @@ export function MyLibrary() {
                   <Badge variant="secondary">
                     {t(ORIGIN_KEY[item.origin] ?? item.origin)}
                   </Badge>
-                  {item.kind && <Badge variant="outline">{item.kind}</Badge>}
+                  {item.kind && (
+                    <Badge variant="outline">
+                      {t(`pages.marketplace.kind.${item.kind}`, { defaultValue: item.kind })}
+                    </Badge>
+                  )}
                 </div>
               </CardContent>
             </Card>

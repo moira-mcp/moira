@@ -51,6 +51,9 @@ export * from "./services/index.js";
 // Marketplace domain (categories, enums, helpers)
 export * from "./marketplace/index.js";
 
+// i18n primitives (pluralization/declension + canonical marketplace labels)
+export * from "./i18n/index.js";
+
 // Config
 export * from "./config/index.js";
 

@@ -83,8 +83,12 @@ export function MyListings() {
                     {l.verified && <VerifiedBadge />}
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline">{l.category}</Badge>
-                    <Badge variant="secondary">{l.status}</Badge>
+                    <Badge variant="outline">
+                      {t(`pages.marketplace.category.${l.category}`, { defaultValue: l.category })}
+                    </Badge>
+                    <Badge variant="secondary">
+                      {t(`pages.marketplace.status.${l.status}`, { defaultValue: l.status })}
+                    </Badge>
                     <RatingStars avg={l.ratingAvg} count={l.ratingCount} />
                     <span>{t("pages.marketplace.installs", { count: l.installCount })}</span>
                   </div>
