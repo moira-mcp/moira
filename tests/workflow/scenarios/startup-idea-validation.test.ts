@@ -3,7 +3,21 @@
  *
  * Automated startup idea validation: intake -> research -> competitor analysis ->
  * tech assessment -> budget -> team -> risks -> alternatives -> final review -> HTML report.
- * Coverage target: 100% nodes (52), 100% branches (13 conditions x 2)
+ *
+ * Flow d2164606 v1.3.1 — 40 nodes, 9 conditions.
+ *
+ * Loop structure (simplified, no ask-user/reset machinery):
+ *   - competitors: verify-competitors -> check-competitors-count
+ *       (issues==0 ? save : check-fix-competitors-limit)
+ *       check-fix-competitors-limit: fix_competitors_iteration<3 ? fix-competitors : save
+ *   - budget: review-budget -> check-budget-review
+ *       check-refine-budget-limit: refine_budget_iteration<3 ? refine-budget : save
+ *   - risks: review-risks -> check-risks-review
+ *       check-refine-risks-limit: refine_risks_iteration<3 ? refine-risks : save
+ *   - final-review -> check-final-review (confidence>=7 && blocking==0 ? html : check-iteration-limit)
+ *       check-iteration-limit: enhance_iteration<3 ? enhance-analysis : generate-html-with-warnings
+ *
+ * Coverage target: 100% nodes (40), 100% branches (9 conditions x 2).
  */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
@@ -70,7 +84,6 @@ function svc(name: string, purpose: string, cost: string) {
 const COMP_A = ["Asana", "Monday", "Linear", "ClickUp", "Notion"];
 const COMP_B = ["ShopGPT", "Rufus", "Klarna AI", "Mercari", "Whatnot"];
 const COMP_C = ["MyChart", "HealthTap", "Medisafe", "CareZone", "PatientPop"];
-const COMP_D = ["Coursera", "EdX", "Udemy", "Skillshare", "Codecademy"];
 
 // --- Risk sets for different scenarios ---
 const RISKS_C = [
@@ -79,13 +92,6 @@ const RISKS_C = [
   risk("operational", "Regulation changes", 2, 2),
   risk("market", "Hospital adoption", 3, 2),
   risk("market", "Patient trust", 2, 2),
-];
-const RISKS_D = [
-  risk("technical", "Scaling", 3, 2),
-  risk("technical", "Latency", 2, 3),
-  risk("market", "Content quality", 2, 2),
-  risk("market", "University adoption", 3, 2),
-  risk("operational", "Student retention", 2, 2),
 ];
 
 describe("startup-idea-validation Scenarios", () => {
@@ -105,12 +111,13 @@ describe("startup-idea-validation Scenarios", () => {
     });
 
     it("should have expected cycles", () => {
+      // fix-competitors, refine-budget, refine-risks, enhance-analysis form retry loops.
       const cycles = detectCycles(workflow);
       expect(cycles.length).toBeGreaterThan(0);
     });
 
     it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(52);
+      expect(workflow.nodes.length).toBe(40);
     });
   });
 
@@ -119,6 +126,8 @@ describe("startup-idea-validation Scenarios", () => {
       const scenarios: TestScenario[] = [
         // ================================================================
         // SCENARIO 1: Happy path - everything clean
+        // Covers true branches of: check-intake-error, check-competitors-count,
+        // check-budget-review, check-risks-review, check-final-review.
         // ================================================================
         {
           name: "Happy path - all sections clean",
@@ -262,11 +271,13 @@ describe("startup-idea-validation Scenarios", () => {
             },
             "generate-html": {
               html_file_path: "/tmp/taskflow/report.html",
+              html_size_kb: 120,
               verification: "Generated",
             },
             "publish-artifact": {
               artifact_uuid: "uuid-1",
               artifact_url: "https://static.example.com/uuid-1.html",
+              artifact_expires: "2026-07-24",
             },
           },
           expect: {
@@ -276,13 +287,22 @@ describe("startup-idea-validation Scenarios", () => {
               "check-intake-error",
               "setup-workspace",
               "market-research",
+              "save-market-report",
+              "competitor-analysis",
               "verify-competitors",
               "check-competitors-count",
               "save-competitors-report",
+              "tech-assessment",
+              "budget-estimation",
               "review-budget",
               "check-budget-review",
+              "save-budget-report",
+              "team-requirements",
+              "risk-analysis",
               "review-risks",
               "check-risks-review",
+              "save-risks-report",
+              "alternatives-analysis",
               "final-review",
               "check-final-review",
               "generate-html",
@@ -292,9 +312,13 @@ describe("startup-idea-validation Scenarios", () => {
             ],
             avoids: [
               "end-error",
+              "check-fix-competitors-limit",
               "fix-competitors",
+              "check-refine-budget-limit",
               "refine-budget",
+              "check-refine-risks-limit",
               "refine-risks",
+              "check-iteration-limit",
               "enhance-analysis",
               "generate-html-with-warnings",
             ],
@@ -302,7 +326,8 @@ describe("startup-idea-validation Scenarios", () => {
         },
 
         // ================================================================
-        // SCENARIO 2: Intake error
+        // SCENARIO 2: Intake error -> end-error
+        // Covers false branch of check-intake-error and the end-error node.
         // ================================================================
         {
           name: "Intake error - product name is ERROR",
@@ -331,12 +356,17 @@ describe("startup-idea-validation Scenarios", () => {
         },
 
         // ================================================================
-        // SCENARIO 3: Fix within limits - 1 fix/refine/enhance iteration
+        // SCENARIO 3: Single fix/refine/enhance iteration (within limit)
+        // Covers true branches of: check-fix-competitors-limit,
+        // check-refine-budget-limit, check-refine-risks-limit,
+        // check-iteration-limit; false branches of check-competitors-count,
+        // check-budget-review, check-risks-review, check-final-review;
+        // and nodes fix-competitors, refine-budget, refine-risks, enhance-analysis.
         // ================================================================
         {
           name: "Fix within limits - single fix/refine/enhance iteration",
           description:
-            "Competitors fixed once, budget refined once, enhance once, all within limit",
+            "Competitors fixed once, budget refined once, risks refined once, enhanced once, all within limit",
           mockInputs: {
             intake: {
               product_name: "ShopBot",
@@ -377,6 +407,7 @@ describe("startup-idea-validation Scenarios", () => {
               competitive_advantages: ["Style AI"],
               competitors_count: 5,
             },
+            // verify-competitors: 1st pass has issues, 2nd pass clean (after fix)
             "verify-competitors": [
               {
                 issues_count: 2,
@@ -431,6 +462,7 @@ describe("startup-idea-validation Scenarios", () => {
               },
               cost_optimization_suggestions: ["Negotiate API pricing"],
             },
+            // review-budget: 1st pass has issues, 2nd pass clean (after refine)
             "review-budget": [
               {
                 issues_count: 1,
@@ -468,7 +500,19 @@ describe("startup-idea-validation Scenarios", () => {
               overall_risk_level: "medium" as const,
               risk_summary: "Manageable",
             },
-            "review-risks": { issues_count: 0 },
+            // review-risks: 1st pass has issues, 2nd pass clean (after refine)
+            "review-risks": [
+              { issues_count: 1, issues: ["Missing privacy risk"], missed_risks: ["Data privacy"] },
+              { issues_count: 0 },
+            ],
+            "refine-risks": {
+              risks: fiveRisks(),
+              high_priority_risks: ["Competition", "Scaling"],
+              overall_risk_level: "medium" as const,
+              changes_made: ["Added privacy risk"],
+              refine_risks_iteration: 1,
+              risk_summary: "Privacy risk added",
+            },
             "save-risks-report": { risks_report_saved: true, verification: "Saved" },
             "alternatives-analysis": {
               alternative_business_models: [
@@ -495,6 +539,7 @@ describe("startup-idea-validation Scenarios", () => {
               exit_strategies: [{ type: "Acquisition", timeline: "2-3 years" }],
             },
             "save-alternatives-report": { alternatives_report_saved: true, verification: "Saved" },
+            // final-review: 1st pass not confident, 2nd pass confident (after enhance)
             "final-review": [
               {
                 overall_confidence: 5,
@@ -522,11 +567,13 @@ describe("startup-idea-validation Scenarios", () => {
             },
             "generate-html": {
               html_file_path: "/tmp/shopbot/report.html",
+              html_size_kb: 130,
               verification: "Generated",
             },
             "publish-artifact": {
               artifact_uuid: "uuid-2",
               artifact_url: "https://static.example.com/uuid-2.html",
+              artifact_expires: "2026-07-24",
             },
           },
           expect: {
@@ -538,29 +585,32 @@ describe("startup-idea-validation Scenarios", () => {
               "check-budget-review",
               "check-refine-budget-limit",
               "refine-budget",
+              "check-risks-review",
+              "check-refine-risks-limit",
+              "refine-risks",
               "check-final-review",
               "check-iteration-limit",
               "enhance-analysis",
               "generate-html",
+              "end",
             ],
-            avoids: [
-              "end-error",
-              "refine-risks",
-              "generate-html-with-warnings",
-              "ask-user-competitors-fix-limit-reached",
-              "ask-user-budget-fix-limit-reached",
-            ],
+            avoids: ["end-error", "generate-html-with-warnings"],
           },
         },
 
         // ================================================================
-        // SCENARIO 4: All limits reached - competitors/budget continue,
-        //              risks reset, enhance continue -> html-with-warnings
+        // SCENARIO 4: All limits exhausted
+        // Competitors/budget/risks never converge (3 iterations each, then
+        // the limit condition routes to save). Final review never confident
+        // (3 enhances, then check-iteration-limit routes to warnings HTML).
+        // Covers false branches of: check-fix-competitors-limit,
+        // check-refine-budget-limit, check-refine-risks-limit,
+        // check-iteration-limit; and node generate-html-with-warnings.
         // ================================================================
         {
-          name: "All limits - competitors/budget continue, risks reset, enhance continue",
+          name: "All limits exhausted - loops max out, warnings HTML",
           description:
-            "All fix loops exhaust 3 iterations. Competitors/budget/enhance continue, risks reset.",
+            "Competitors/budget/risks/enhance loops all exhaust 3 iterations, route to save / warnings HTML",
           mockInputs: {
             intake: {
               product_name: "MedTrack",
@@ -605,30 +655,13 @@ describe("startup-idea-validation Scenarios", () => {
               competitive_advantages: ["Hospital integration"],
               competitors_count: 5,
             },
-            // verify-competitors: 4x all with issues -> limit reached
-            "verify-competitors": [
-              {
-                issues_count: 1,
-                issues: ["Missing pricing"],
-                competitors_verified: 5,
-              },
-              {
-                issues_count: 1,
-                issues: ["Outdated market share"],
-                competitors_verified: 5,
-              },
-              {
-                issues_count: 1,
-                issues: ["Missing integrations"],
-                competitors_verified: 5,
-              },
-              {
-                issues_count: 1,
-                issues: ["Incomplete features"],
-                competitors_verified: 5,
-              },
-            ],
-            // fix-competitors: 3x
+            // verify-competitors: always has issues (4 visits: initial + 3 after each fix).
+            // After 3rd fix sets iteration=3, check-fix-competitors-limit (3<3=false) -> save.
+            "verify-competitors": {
+              issues_count: 1,
+              issues: ["Persistent gap"],
+              competitors_verified: 5,
+            },
             "fix-competitors": [
               {
                 direct_competitors: fiveComp(COMP_C),
@@ -655,7 +688,6 @@ describe("startup-idea-validation Scenarios", () => {
                 fix_competitors_iteration: 3,
               },
             ],
-            "ask-user-competitors-fix-limit-reached": { decision: "continue" as const },
             "save-competitors-report": { competitors_report_saved: true, verification: "Saved" },
             "tech-assessment": {
               architecture: {
@@ -694,30 +726,12 @@ describe("startup-idea-validation Scenarios", () => {
               },
               cost_optimization_suggestions: ["Use HIPAA-certified PaaS"],
             },
-            // review-budget: 4x all with issues -> limit reached
-            "review-budget": [
-              {
-                issues_count: 1,
-                issues: ["Missing compliance costs"],
-                recommendations: ["Add HIPAA audit"],
-              },
-              {
-                issues_count: 1,
-                issues: ["Underestimated hosting"],
-                recommendations: ["Increase hosting"],
-              },
-              {
-                issues_count: 1,
-                issues: ["No contingency"],
-                recommendations: ["Add 20% buffer"],
-              },
-              {
-                issues_count: 1,
-                issues: ["Missing training"],
-                recommendations: ["Add training costs"],
-              },
-            ],
-            // refine-budget: 3x
+            // review-budget: always has issues (initial + 3 after each refine).
+            "review-budget": {
+              issues_count: 1,
+              issues: ["Persistent gap"],
+              recommendations: ["Add detail"],
+            },
             "refine-budget": [
               {
                 mvp_budget: bud("$220K", "6 months", ["Core", "V1"]),
@@ -741,7 +755,6 @@ describe("startup-idea-validation Scenarios", () => {
                 budget_assumptions: ["Added buffer"],
               },
             ],
-            "ask-user-budget-fix-limit-reached": { decision: "continue" as const },
             "save-budget-report": { budget_report_saved: true, verification: "Saved" },
             "team-requirements": {
               mvp_team: [
@@ -765,31 +778,12 @@ describe("startup-idea-validation Scenarios", () => {
               overall_risk_level: "high" as const,
               risk_summary: "High regulatory risk",
             },
-            // review-risks: 5x (4 issues + 1 clean after reset)
-            "review-risks": [
-              {
-                issues_count: 1,
-                issues: ["Missing HIPAA detail"],
-                missed_risks: [],
-              },
-              {
-                issues_count: 1,
-                issues: ["Breach response incomplete"],
-                missed_risks: [],
-              },
-              {
-                issues_count: 1,
-                issues: ["No insurance"],
-                missed_risks: [],
-              },
-              {
-                issues_count: 1,
-                issues: ["Vendor risk"],
-                missed_risks: [],
-              },
-              { issues_count: 0 },
-            ],
-            // refine-risks: 4x (3 before limit + 1 after reset)
+            // review-risks: always has issues (initial + 3 after each refine).
+            "review-risks": {
+              issues_count: 1,
+              issues: ["Persistent gap"],
+              missed_risks: [],
+            },
             "refine-risks": [
               {
                 risks: RISKS_C,
@@ -815,16 +809,7 @@ describe("startup-idea-validation Scenarios", () => {
                 refine_risks_iteration: 3,
                 risk_summary: "Added insurance",
               },
-              {
-                risks: RISKS_C,
-                high_priority_risks: ["HIPAA violation"],
-                overall_risk_level: "medium" as const,
-                changes_made: ["Final risk update"],
-                refine_risks_iteration: 1,
-                risk_summary: "Comprehensive risk plan",
-              },
             ],
-            "ask-user-risks-fix-limit-reached": { decision: "reset" as const },
             "save-risks-report": { risks_report_saved: true, verification: "Saved" },
             "alternatives-analysis": {
               alternative_business_models: [
@@ -853,46 +838,16 @@ describe("startup-idea-validation Scenarios", () => {
               exit_strategies: [{ type: "Acquisition", timeline: "2-3 years" }],
             },
             "save-alternatives-report": { alternatives_report_saved: true, verification: "Saved" },
-            // final-review: 4x all fail -> enhance limit -> continue -> html-with-warnings
-            "final-review": [
-              {
-                overall_confidence: 4,
-                blocking_issues: ["Regulatory gaps"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "needs_more_research" as const,
-                executive_summary: "Regulatory gaps",
-                section_scores: { market: 6, tech: 5, budget: 4, team: 6, risks: 4 },
-                recommendations: ["Address HIPAA"],
-              },
-              {
-                overall_confidence: 5,
-                blocking_issues: ["Budget uncertainty"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "needs_more_research" as const,
-                executive_summary: "Budget uncertain",
-                section_scores: { market: 6, tech: 5, budget: 5, team: 6, risks: 5 },
-                recommendations: ["Validate budget"],
-              },
-              {
-                overall_confidence: 6,
-                blocking_issues: ["Team timeline"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "go_with_conditions" as const,
-                executive_summary: "Team gaps",
-                section_scores: { market: 7, tech: 6, budget: 5, team: 5, risks: 5 },
-                recommendations: ["Hire faster"],
-              },
-              {
-                overall_confidence: 6,
-                blocking_issues: ["Persistent issues"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "go_with_conditions" as const,
-                executive_summary: "Max enhancement reached",
-                section_scores: { market: 7, tech: 6, budget: 6, team: 6, risks: 5 },
-                recommendations: ["Accept risk"],
-              },
-            ],
-            // enhance-analysis: 3x
+            // final-review: always not confident (initial + 3 after each enhance).
+            "final-review": {
+              overall_confidence: 5,
+              blocking_issues: ["Persistent issues"],
+              blocking_issues_count: 1,
+              go_no_go_recommendation: "needs_more_research" as const,
+              executive_summary: "Unresolved concerns",
+              section_scores: { market: 6, tech: 5, budget: 5, team: 6, risks: 5 },
+              recommendations: ["Address gaps"],
+            },
             "enhance-analysis": [
               {
                 changes_made: ["HIPAA deep-dive"],
@@ -910,7 +865,6 @@ describe("startup-idea-validation Scenarios", () => {
                 enhance_iteration: 3,
               },
             ],
-            "ask-user-enhance-fix-limit-reached": { decision: "continue" as const },
             "generate-html-with-warnings": {
               html_file_path: "/tmp/medtrack/report.html",
               verification: "With warnings",
@@ -919,435 +873,33 @@ describe("startup-idea-validation Scenarios", () => {
             "publish-artifact": {
               artifact_uuid: "uuid-3",
               artifact_url: "https://static.example.com/uuid-3.html",
+              artifact_expires: "2026-07-24",
             },
           },
           expect: {
             status: "completed",
             reaches: [
+              "check-competitors-count",
               "check-fix-competitors-limit",
-              "ask-user-competitors-fix-limit-reached",
-              "route-competitors-fix-limit-decision",
+              "fix-competitors",
+              "save-competitors-report",
+              "check-budget-review",
               "check-refine-budget-limit",
-              "ask-user-budget-fix-limit-reached",
-              "route-budget-fix-limit-decision",
+              "refine-budget",
+              "save-budget-report",
+              "check-risks-review",
               "check-refine-risks-limit",
-              "ask-user-risks-fix-limit-reached",
-              "route-risks-fix-limit-decision",
-              "expr-reset-risks-fix-counter",
+              "refine-risks",
+              "save-risks-report",
+              "check-final-review",
               "check-iteration-limit",
-              "ask-user-enhance-fix-limit-reached",
-              "route-enhance-fix-limit-decision",
+              "enhance-analysis",
               "generate-html-with-warnings",
+              "publish-artifact",
+              "notify-complete",
+              "end",
             ],
-            avoids: [
-              "end-error",
-              "generate-html",
-              "expr-reset-competitors-fix-counter",
-              "expr-reset-budget-fix-counter",
-              "expr-reset-enhance-fix-counter",
-            ],
-          },
-        },
-
-        // ================================================================
-        // SCENARIO 5: All limits reached - competitors/budget/enhance reset,
-        //              risks continue (opposite of scenario 4)
-        // ================================================================
-        {
-          name: "All limits - competitors/budget/enhance reset, risks continue",
-          description: "All fix loops exhaust iterations, opposite decisions from scenario 4",
-          mockInputs: {
-            intake: {
-              product_name: "EduStream",
-              product_description: "Live learning platform",
-              problem_statement: "Lacks real-time interaction",
-              target_audience: "University students",
-              key_features: ["Live coding", "Quizzes", "Peer review"],
-              unique_value_proposition: "Real-time collaborative learning",
-              geography: "North America",
-              business_model: "University licensing",
-              product_type: "web_app" as const,
-              tier1_problem_score: 7,
-              red_flags: [],
-              assumptions_made: ["Universities have budget"],
-            },
-            "setup-workspace": {
-              workspace_path: "/tmp/edustream",
-              idea_file_saved: true,
-              verification: "Created",
-            },
-            "market-research": {
-              tam: { value: "$8B", source: "HolonIQ 2024", year: 2024 },
-              sam: { value: "$1.5B", source: "NA EdTech", calculation_basis: "NA universities" },
-              som: { value: "$30M", timeframe: "3 years", assumptions: "2% SAM" },
-              market_growth: { cagr: "20%", trend: "growing", source: "HolonIQ" },
-              key_trends: ["EdTech growth", "Remote learning", "Interactive content"],
-              regulatory_requirements: [],
-              market_validation_signals: ["Coursera IPO"],
-            },
-            "save-market-report": { market_report_saved: true, verification: "Saved" },
-            "competitor-analysis": {
-              direct_competitors: fiveComp(COMP_D),
-              indirect_competitors: [{ name: "YouTube", alternative_approach: "Recorded content" }],
-              comparison_table_markdown: "| Feature |",
-              market_gaps: ["Real-time collab learning"],
-              competitive_advantages: ["Live coding env"],
-              competitors_count: 5,
-            },
-            // verify-competitors: 5x (4 issues + 1 clean after reset)
-            "verify-competitors": [
-              {
-                issues_count: 1,
-                issues: ["No pricing"],
-                competitors_verified: 5,
-              },
-              {
-                issues_count: 1,
-                issues: ["Missing courses count"],
-                competitors_verified: 5,
-              },
-              {
-                issues_count: 1,
-                issues: ["No user metrics"],
-                competitors_verified: 5,
-              },
-              {
-                issues_count: 1,
-                issues: ["Incomplete partnerships"],
-                competitors_verified: 5,
-              },
-              { issues_count: 0, competitors_verified: 5 },
-            ],
-            // fix-competitors: 4x (3 before + 1 after reset)
-            "fix-competitors": [
-              {
-                direct_competitors: fiveComp(COMP_D),
-                indirect_competitors: [{ name: "YouTube", alternative_approach: "Recorded" }],
-                comparison_table_markdown: "| V1 |",
-                competitors_count: 5,
-                fixes_applied: ["Added pricing"],
-                fix_competitors_iteration: 1,
-              },
-              {
-                direct_competitors: fiveComp(COMP_D),
-                indirect_competitors: [{ name: "YouTube", alternative_approach: "Recorded" }],
-                comparison_table_markdown: "| V2 |",
-                competitors_count: 5,
-                fixes_applied: ["Added courses"],
-                fix_competitors_iteration: 2,
-              },
-              {
-                direct_competitors: fiveComp(COMP_D),
-                indirect_competitors: [{ name: "YouTube", alternative_approach: "Recorded" }],
-                comparison_table_markdown: "| V3 |",
-                competitors_count: 5,
-                fixes_applied: ["Added metrics"],
-                fix_competitors_iteration: 3,
-              },
-              {
-                direct_competitors: fiveComp(COMP_D),
-                indirect_competitors: [{ name: "YouTube", alternative_approach: "Recorded" }],
-                comparison_table_markdown: "| V4 |",
-                competitors_count: 5,
-                fixes_applied: ["Final fix"],
-                fix_competitors_iteration: 1,
-              },
-            ],
-            "ask-user-competitors-fix-limit-reached": { decision: "reset" as const },
-            "save-competitors-report": { competitors_report_saved: true, verification: "Saved" },
-            "tech-assessment": {
-              architecture: {
-                frontend: "React",
-                backend: "Elixir Phoenix",
-                database: "PostgreSQL",
-                infrastructure: "AWS",
-                integrations: ["WebSocket", "Mux"],
-              },
-              recommended_stack: {
-                frontend_tech: "React 18",
-                backend_tech: "Elixir 1.16",
-                database_tech: "PostgreSQL 16",
-                hosting: "AWS",
-              },
-              complexity_score: 8,
-              complexity_factors: ["Real-time", "Sandbox", "Video streaming"],
-              technical_risks: [
-                { risk: "WebSocket scaling", severity: "high" as const, mitigation: "Clustering" },
-                { risk: "Sandbox security", severity: "high" as const, mitigation: "Docker" },
-              ],
-              third_party_services: [
-                svc("AWS", "Hosting", "$500/mo"),
-                svc("Mux", "Video", "$300/mo"),
-              ],
-            },
-            "save-tech-report": { tech_report_saved: true, verification: "Saved" },
-            "budget-estimation": {
-              mvp_budget: bud("$150K", "5 months", ["Live coding", "Quizzes"]),
-              full_budget: bud("$600K", "14 months", ["Full platform", "Video"]),
-              budget_assumptions: ["WebSocket $3K/mo", "5-month MVP"],
-              monthly_runway: {
-                burn_rate: "$30K",
-                runway_mvp: "5 months",
-                runway_full: "20 months",
-              },
-              cost_optimization_suggestions: ["Fly.io for WebSocket scaling"],
-            },
-            // review-budget: 5x (4 issues + 1 clean after reset)
-            "review-budget": [
-              {
-                issues_count: 1,
-                issues: ["Missing video costs"],
-                recommendations: ["Add Mux costs"],
-              },
-              {
-                issues_count: 1,
-                issues: ["CDN underbudgeted"],
-                recommendations: ["Increase CDN"],
-              },
-              {
-                issues_count: 1,
-                issues: ["No scaling plan"],
-                recommendations: ["Add scaling costs"],
-              },
-              {
-                issues_count: 1,
-                issues: ["Support missing"],
-                recommendations: ["Add support costs"],
-              },
-              { issues_count: 0 },
-            ],
-            // refine-budget: 4x (3 before + 1 after reset)
-            "refine-budget": [
-              {
-                mvp_budget: bud("$165K", "5 months", ["Core", "V1"]),
-                full_budget: bud("$650K", "14 months", ["Full", "V1"]),
-                changes_made: ["Added video"],
-                refine_budget_iteration: 1,
-                budget_assumptions: ["Video costs included"],
-              },
-              {
-                mvp_budget: bud("$180K", "5 months", ["Core", "V2"]),
-                full_budget: bud("$700K", "14 months", ["Full", "V2"]),
-                changes_made: ["CDN increase"],
-                refine_budget_iteration: 2,
-                budget_assumptions: ["CDN updated"],
-              },
-              {
-                mvp_budget: bud("$195K", "5 months", ["Core", "V3"]),
-                full_budget: bud("$750K", "14 months", ["Full", "V3"]),
-                changes_made: ["Scaling plan"],
-                refine_budget_iteration: 3,
-                budget_assumptions: ["Scaling included"],
-              },
-              {
-                mvp_budget: bud("$210K", "5 months", ["Core", "Final"]),
-                full_budget: bud("$780K", "14 months", ["Full", "Final"]),
-                changes_made: ["Final fix"],
-                refine_budget_iteration: 1,
-                budget_assumptions: ["Finalized"],
-              },
-            ],
-            "ask-user-budget-fix-limit-reached": { decision: "reset" as const },
-            "save-budget-report": { budget_report_saved: true, verification: "Saved" },
-            "team-requirements": {
-              mvp_team: [
-                member("Backend", "senior", "full-time", "$9K"),
-                member("Frontend", "middle", "full-time", "$6K"),
-              ],
-              full_team: [
-                member("Backend", "senior", "full-time", "$9K"),
-                member("Frontend", "middle", "full-time", "$6K"),
-                member("DevOps", "senior", "full-time", "$8K"),
-              ],
-              monthly_payroll: { mvp: "$18K", full: "$50K" },
-              key_competencies: { must_have: ["Elixir", "React"], nice_to_have: ["Docker"] },
-              hiring_recommendations: ["Find Elixir expert"],
-            },
-            "save-team-report": { team_report_saved: true, verification: "Saved" },
-            "risk-analysis": {
-              risks: RISKS_D,
-              high_priority_risks: ["Scaling", "Latency"],
-              overall_risk_level: "medium" as const,
-              risk_summary: "Technical risks primary",
-            },
-            // review-risks: 4x all issues -> limit reached -> continue
-            "review-risks": [
-              {
-                issues_count: 1,
-                issues: ["Missing scale metrics"],
-                missed_risks: [],
-              },
-              {
-                issues_count: 1,
-                issues: ["Latency underestimated"],
-                missed_risks: [],
-              },
-              {
-                issues_count: 1,
-                issues: ["No fallback plan"],
-                missed_risks: [],
-              },
-              {
-                issues_count: 1,
-                issues: ["Student load peaks"],
-                missed_risks: [],
-              },
-            ],
-            // refine-risks: 3x
-            "refine-risks": [
-              {
-                risks: RISKS_D,
-                high_priority_risks: ["Scaling"],
-                overall_risk_level: "medium" as const,
-                changes_made: ["Added benchmarks"],
-                refine_risks_iteration: 1,
-                risk_summary: "Scale metrics added",
-              },
-              {
-                risks: RISKS_D,
-                high_priority_risks: ["Scaling"],
-                overall_risk_level: "medium" as const,
-                changes_made: ["P99 measurement"],
-                refine_risks_iteration: 2,
-                risk_summary: "Latency measured",
-              },
-              {
-                risks: RISKS_D,
-                high_priority_risks: ["Scaling"],
-                overall_risk_level: "medium" as const,
-                changes_made: ["Fallback plan"],
-                refine_risks_iteration: 3,
-                risk_summary: "Degradation planned",
-              },
-            ],
-            "ask-user-risks-fix-limit-reached": { decision: "continue" as const },
-            "save-risks-report": { risks_report_saved: true, verification: "Saved" },
-            "alternatives-analysis": {
-              alternative_business_models: [
-                {
-                  model: "Corporate",
-                  description: "Training",
-                  pros: ["B2B"],
-                  cons: ["UX change"],
-                  fit_score: 5,
-                },
-                {
-                  model: "K-12",
-                  description: "Schools",
-                  pros: ["Scale"],
-                  cons: ["Procurement"],
-                  fit_score: 4,
-                },
-              ],
-              pivot_options: [
-                {
-                  pivot_type: "Market",
-                  description: "K-12 pivot",
-                  trigger: "University sales too slow",
-                },
-              ],
-              gtm_strategies: [
-                { strategy: "Partnership", description: "University licensing", recommended: true },
-              ],
-              recommended_approach: "University licensing with freemium",
-              exit_strategies: [{ type: "Acquisition", timeline: "2-3 years" }],
-            },
-            "save-alternatives-report": { alternatives_report_saved: true, verification: "Saved" },
-            // final-review: 5x (4 fail + 1 pass after reset)
-            "final-review": [
-              {
-                overall_confidence: 4,
-                blocking_issues: ["Scaling incomplete"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "needs_more_research" as const,
-                executive_summary: "Need scaling validation",
-                section_scores: { market: 6, tech: 5, budget: 5, team: 6, risks: 4 },
-                recommendations: ["Validate scaling"],
-              },
-              {
-                overall_confidence: 5,
-                blocking_issues: ["Cost uncertain"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "needs_more_research" as const,
-                executive_summary: "Cost concerns",
-                section_scores: { market: 6, tech: 5, budget: 5, team: 6, risks: 5 },
-                recommendations: ["Validate costs"],
-              },
-              {
-                overall_confidence: 6,
-                blocking_issues: ["GTM unclear"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "go_with_conditions" as const,
-                executive_summary: "GTM needs work",
-                section_scores: { market: 7, tech: 6, budget: 6, team: 6, risks: 5 },
-                recommendations: ["Define GTM"],
-              },
-              {
-                overall_confidence: 6,
-                blocking_issues: ["Partnership vague"],
-                blocking_issues_count: 1,
-                go_no_go_recommendation: "go_with_conditions" as const,
-                executive_summary: "Enhancement limit",
-                section_scores: { market: 7, tech: 6, budget: 6, team: 6, risks: 5 },
-                recommendations: ["Clarify partnerships"],
-              },
-              {
-                overall_confidence: 8,
-                blocking_issues: [] as string[],
-                blocking_issues_count: 0,
-                go_no_go_recommendation: "go_with_conditions" as const,
-                executive_summary: "Viable with partnerships",
-                section_scores: { market: 8, tech: 7, budget: 7, team: 7, risks: 7 },
-                recommendations: ["Start with partnerships"],
-              },
-            ],
-            // enhance-analysis: 4x (3 before + 1 after reset)
-            "enhance-analysis": [
-              {
-                changes_made: ["Scaling analysis"],
-                files_updated: ["tech-report.md"],
-                enhance_iteration: 1,
-              },
-              {
-                changes_made: ["Cost validation"],
-                files_updated: ["budget-report.md"],
-                enhance_iteration: 2,
-              },
-              {
-                changes_made: ["GTM strategy"],
-                files_updated: ["alternatives-report.md"],
-                enhance_iteration: 3,
-              },
-              {
-                changes_made: ["Partnership details"],
-                files_updated: ["alternatives-report.md"],
-                enhance_iteration: 1,
-              },
-            ],
-            "ask-user-enhance-fix-limit-reached": { decision: "reset" as const },
-            "generate-html": {
-              html_file_path: "/tmp/edustream/report.html",
-              verification: "Generated",
-            },
-            "publish-artifact": {
-              artifact_uuid: "uuid-4",
-              artifact_url: "https://static.example.com/uuid-4.html",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "expr-reset-competitors-fix-counter",
-              "route-competitors-fix-limit-decision",
-              "expr-reset-budget-fix-counter",
-              "route-budget-fix-limit-decision",
-              "check-refine-risks-limit",
-              "route-risks-fix-limit-decision",
-              "expr-reset-enhance-fix-counter",
-              "route-enhance-fix-limit-decision",
-              "generate-html",
-            ],
-            avoids: ["end-error", "generate-html-with-warnings", "expr-reset-risks-fix-counter"],
+            avoids: ["end-error", "generate-html"],
           },
         },
       ];
