@@ -7,9 +7,9 @@
  * workflow was unpublished or deleted must not surface.
  */
 
-import { eq, and, or, isNull, desc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, desc, sql, like, inArray, count } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { marketplaceListing, workflow } from "../schema.js";
+import { marketplaceListing, workflow, user } from "../schema.js";
 import type * as schema from "../schema.js";
 import { v4 as uuidv4 } from "uuid";
 
@@ -29,11 +29,34 @@ export interface CreateListingInput {
   currency?: string | null;
 }
 
-/** Gallery query filters (the advanced sort/search lands in a later step). */
+/** Gallery sort order. */
+export type GallerySort = "recent" | "rating" | "installs";
+
+/** Gallery query filters. */
 export interface GalleryFilter {
+  /** Free-text match against title/summary. */
+  search?: string;
   category?: string;
+  /** Match a single free-form tag. */
+  tag?: string;
+  /** Sort order (default: recent). Note: "trending" is computed in the service. */
+  sort?: GallerySort;
   limit?: number;
   offset?: number;
+}
+
+/** A gallery row: the listing plus its owner handle and workflow slug (for linking). */
+export type GalleryItem = MarketplaceListingRecord & {
+  ownerHandle: string | null;
+  slug: string;
+};
+
+/** A minimal public reference (for the sitemap). */
+export interface PublicListingRef {
+  ownerHandle: string | null;
+  slug: string;
+  title: string;
+  updatedAt: Date;
 }
 
 export class MarketplaceListingRepository {
@@ -96,30 +119,90 @@ export class MarketplaceListingRepository {
 
   /**
    * Gallery query: listings that are `status='listed'` AND whose workflow is
-   * `visibility='public'` AND not soft-deleted. Newest first.
+   * `visibility='public'` AND not soft-deleted, with optional search/category/tag
+   * filters and sort. Returns enriched items (owner handle + workflow slug).
    */
-  async listGallery(filter: GalleryFilter = {}): Promise<MarketplaceListingRecord[]> {
-    const conditions = [
-      eq(marketplaceListing.status, "listed"),
-      eq(workflow.visibility, "public"),
-      or(eq(workflow.deleted, false), isNull(workflow.deleted)),
-    ];
-    if (filter.category) {
-      conditions.push(eq(marketplaceListing.category, filter.category));
-    }
+  async listGallery(filter: GalleryFilter = {}): Promise<GalleryItem[]> {
+    const orderBy =
+      filter.sort === "rating"
+        ? [desc(marketplaceListing.ratingAvg), desc(marketplaceListing.ratingCount)]
+        : filter.sort === "installs"
+          ? [desc(marketplaceListing.installCount)]
+          : [desc(marketplaceListing.publishedAt)];
 
     const rows = await this.db
-      .select()
+      .select({
+        listing: marketplaceListing,
+        slug: workflow.slug,
+        ownerHandle: user.handle,
+      })
       .from(marketplaceListing)
       .innerJoin(workflow, eq(marketplaceListing.workflowId, workflow.id))
-      .where(and(...conditions))
-      .orderBy(desc(marketplaceListing.publishedAt))
-      .limit(filter.limit ?? 100)
+      .leftJoin(user, eq(marketplaceListing.publishedBy, user.id))
+      .where(and(...galleryConditions(filter)))
+      .orderBy(...orderBy)
+      .limit(filter.limit ?? 50)
       .offset(filter.offset ?? 0);
 
-    // innerJoin yields { marketplaceListing, workflow }; return only the listing.
-    return rows.map((r) => r.marketplaceListing);
+    return rows.map((r) => ({ ...r.listing, slug: r.slug, ownerHandle: r.ownerHandle }));
   }
+
+  /** Total gallery rows matching a filter (for pagination). */
+  async countGallery(filter: GalleryFilter = {}): Promise<number> {
+    const [row] = await this.db
+      .select({ total: count() })
+      .from(marketplaceListing)
+      .innerJoin(workflow, eq(marketplaceListing.workflowId, workflow.id))
+      .where(and(...galleryConditions(filter)));
+    return row?.total ?? 0;
+  }
+
+  /**
+   * Enriched gallery items for a set of listing ids, restricted to listed + public +
+   * not-deleted. Order is not guaranteed (the caller re-orders, e.g. by trending rank).
+   */
+  async getGalleryItemsByIds(ids: string[]): Promise<GalleryItem[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db
+      .select({
+        listing: marketplaceListing,
+        slug: workflow.slug,
+        ownerHandle: user.handle,
+      })
+      .from(marketplaceListing)
+      .innerJoin(workflow, eq(marketplaceListing.workflowId, workflow.id))
+      .leftJoin(user, eq(marketplaceListing.publishedBy, user.id))
+      .where(and(inArray(marketplaceListing.id, ids), ...galleryConditions()));
+    return rows.map((r) => ({ ...r.listing, slug: r.slug, ownerHandle: r.ownerHandle }));
+  }
+
+  /** Minimal references for every publicly listed flow (for the sitemap). */
+  async listPublicRefs(limit = 50000): Promise<PublicListingRef[]> {
+    const rows = await this.db
+      .select({
+        slug: workflow.slug,
+        ownerHandle: user.handle,
+        title: marketplaceListing.title,
+        updatedAt: marketplaceListing.updatedAt,
+      })
+      .from(marketplaceListing)
+      .innerJoin(workflow, eq(marketplaceListing.workflowId, workflow.id))
+      .leftJoin(user, eq(marketplaceListing.publishedBy, user.id))
+      .where(and(...galleryConditions()))
+      .orderBy(desc(marketplaceListing.updatedAt))
+      .limit(limit);
+    return rows.map((r) => ({
+      ownerHandle: r.ownerHandle,
+      slug: r.slug,
+      title: r.title,
+      updatedAt: r.updatedAt,
+    }));
+  }
+
+  // Counters are denormalized analytics, NOT content edits: they intentionally do
+  // NOT bump `updatedAt`. `updatedAt` is the listing's content-modified timestamp and
+  // feeds the sitemap `<lastmod>`; letting view/install/start traffic move it would
+  // corrupt the freshness signal (and create a crawl→view→lastmod feedback loop).
 
   /**
    * Increment the install counter (a flow was added to a library). Atomic
@@ -128,7 +211,7 @@ export class MarketplaceListingRepository {
   async incrementInstallCount(listingId: string): Promise<void> {
     await this.db
       .update(marketplaceListing)
-      .set({ installCount: sql`${marketplaceListing.installCount} + 1`, updatedAt: new Date() })
+      .set({ installCount: sql`${marketplaceListing.installCount} + 1` })
       .where(eq(marketplaceListing.id, listingId));
   }
 
@@ -136,7 +219,7 @@ export class MarketplaceListingRepository {
   async incrementStartCount(listingId: string): Promise<void> {
     await this.db
       .update(marketplaceListing)
-      .set({ startCount: sql`${marketplaceListing.startCount} + 1`, updatedAt: new Date() })
+      .set({ startCount: sql`${marketplaceListing.startCount} + 1` })
       .where(eq(marketplaceListing.id, listingId));
   }
 
@@ -144,7 +227,31 @@ export class MarketplaceListingRepository {
   async incrementViewCount(listingId: string): Promise<void> {
     await this.db
       .update(marketplaceListing)
-      .set({ viewCount: sql`${marketplaceListing.viewCount} + 1`, updatedAt: new Date() })
+      .set({ viewCount: sql`${marketplaceListing.viewCount} + 1` })
       .where(eq(marketplaceListing.id, listingId));
   }
+}
+
+/**
+ * Shared WHERE for gallery/sitemap queries: listed + public + not-deleted, plus the
+ * optional search/category/tag filters. Assumes the `workflow` table is joined.
+ */
+function galleryConditions(filter: GalleryFilter = {}) {
+  const conditions = [
+    eq(marketplaceListing.status, "listed"),
+    eq(workflow.visibility, "public"),
+    or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+  ];
+  if (filter.category) {
+    conditions.push(eq(marketplaceListing.category, filter.category));
+  }
+  if (filter.search) {
+    const q = `%${filter.search}%`;
+    conditions.push(or(like(marketplaceListing.title, q), like(marketplaceListing.summary, q)));
+  }
+  if (filter.tag) {
+    // tags is a JSON string array, e.g. ["a","b"]; match the quoted token.
+    conditions.push(like(marketplaceListing.tags, `%"${filter.tag}"%`));
+  }
+  return conditions;
 }

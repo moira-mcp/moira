@@ -21,7 +21,10 @@ import type {
   MarketplaceListingRepository,
   MarketplaceListingRecord,
   GalleryFilter,
+  GalleryItem,
+  PublicListingRef,
 } from "../database/repositories/marketplace-listing-repository.js";
+import { MARKETPLACE_CATEGORIES, normalizeMarketplaceCategory } from "../marketplace/constants.js";
 import type {
   LibraryEntryRepository,
   LibraryEntryRecord,
@@ -36,7 +39,6 @@ import type {
 } from "../database/repositories/marketplace-event-repository.js";
 import { isMarketplaceEnabled as defaultIsMarketplaceEnabled } from "../config/env.js";
 import { readWorkflowCatalog, isSystemOwner } from "./workflow-catalog.js";
-import { normalizeMarketplaceCategory } from "../marketplace/constants.js";
 import { parseWorkflowReference } from "../validation/slug-handle.js";
 import {
   MarketplaceDisabledError,
@@ -80,11 +82,63 @@ export interface RateResult {
   ratingCount: number;
 }
 
-/** Detail view: the listing plus the resolved workflow (null if caller lacks access). */
+/** Gallery sort options (adds `trending` over the repo's SQL sorts). */
+export type GallerySortOption = "recent" | "rating" | "installs" | "trending";
+
+/** Public gallery query parameters. */
+export interface GalleryQuery {
+  search?: string;
+  category?: string;
+  tag?: string;
+  sort?: GallerySortOption;
+  limit?: number;
+  offset?: number;
+}
+
+/** A page of gallery results with pagination metadata. */
+export interface GalleryPage {
+  items: GalleryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  sort: GallerySortOption;
+}
+
+/** A public review with the author's handle/name resolved (userId not exposed). */
+export interface ReviewWithAuthor {
+  id: string;
+  stars: number;
+  reviewText: string | null;
+  authorHandle: string | null;
+  authorName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Result of a purchase-gated export. */
+export interface ExportResult {
+  listing: MarketplaceListingRecord;
+  workflow: WorkflowGraph;
+}
+
+/** Recent-activity window for the trending sort (7 days). */
+const TRENDING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Upper bound on gallery offset — caps deep-paging cost on the public surface. */
+const MAX_GALLERY_OFFSET = 10_000;
+
+/**
+ * Detail view: the listing, its resolved workflow graph, and the render fields the
+ * SSR pages (Step 7) and Web UI (Step 8) consume — the owner handle, the `handle/slug`
+ * start reference, and the access decision (free vs paid-coming-soon).
+ */
 export interface ListingDetail {
   listing: MarketplaceListingRecord;
   workflowId: string;
-  workflow: WorkflowGraph | null;
+  workflow: WorkflowGraph;
+  ownerHandle: string;
+  startRef: string;
+  entitlement: AccessDecision;
 }
 
 /** Metadata overrides accepted at publish time. */
@@ -191,16 +245,138 @@ export class MarketplaceService {
 
   // ===== Gallery / Detail =====
 
-  /** Public gallery: listed + public + not-deleted listings. */
-  async getGallery(filter: GalleryFilter = {}): Promise<MarketplaceListingRecord[]> {
+  /**
+   * Public gallery with search/category/tag filters, sort (recent/rating/installs/
+   * trending) and pagination. Returns the page items + the total matching count.
+   */
+  async getGallery(query: GalleryQuery = {}): Promise<GalleryPage> {
     this.assertEnabled();
-    return this.listingRepo.listGallery(filter);
+    const limit = clamp(query.limit ?? 24, 1, 100);
+    // Clamp offset so an unauthenticated caller cannot force deep-paging scans.
+    const offset = clamp(query.offset ?? 0, 0, MAX_GALLERY_OFFSET);
+    const category = query.category ? normalizeMarketplaceCategory(query.category) : undefined;
+    const filter: GalleryFilter = { search: query.search, category, tag: query.tag };
+    const sort: GallerySortOption = query.sort ?? "recent";
+
+    if (sort === "trending") {
+      // Rank by recent install/start activity, then apply the gallery filters and
+      // paginate over the trending set.
+      const ranked = await this.eventRepo.trending({
+        sinceMs: Date.now() - TRENDING_WINDOW_MS,
+        limit: 500,
+        types: ["install", "start"],
+      });
+      const rank = new Map(ranked.map((e, i) => [e.listingId, i]));
+      const all = await this.listingRepo.getGalleryItemsByIds(ranked.map((e) => e.listingId));
+      const matched = all
+        .filter((item) => matchesGalleryFilter(item, filter))
+        .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+      return {
+        items: matched.slice(offset, offset + limit),
+        total: matched.length,
+        limit,
+        offset,
+        sort,
+      };
+    }
+
+    const items = await this.listingRepo.listGallery({ ...filter, sort, limit, offset });
+    const total = await this.listingRepo.countGallery(filter);
+    return { items, total, limit, offset, sort };
+  }
+
+  /** The fixed category set (id + label), for the public categories endpoint. */
+  getCategories(): ReadonlyArray<{ id: string; label: string }> {
+    return MARKETPLACE_CATEGORIES;
+  }
+
+  /**
+   * Reviews for a listed flow resolved by `handle/slug` (graph-free: reviews never
+   * need the workflow definition, so this avoids parsing it on the public hot path).
+   */
+  async getReviewsByReference(reference: string): Promise<ReviewWithAuthor[]> {
+    const { listing, workflowId } = await this.resolveListedRef(reference);
+    const ownership = await this.workflowRepo.getOwnership(workflowId);
+    if (ownership.visibility !== "public") {
+      throw new ListingNotFoundError(reference);
+    }
+    return this.getReviewsWithAuthors(listing.id);
+  }
+
+  /** Reviews for a listing with author handle/name resolved (no userId exposed). */
+  async getReviewsWithAuthors(listingId: string): Promise<ReviewWithAuthor[]> {
+    this.assertEnabled();
+    const reviews = await this.reviewRepo.listByListing(listingId);
+    const profiles = await this.userRepo.getPublicProfilesByIds([
+      ...new Set(reviews.map((r) => r.userId)),
+    ]);
+    return reviews.map((r) => {
+      const profile = profiles.get(r.userId);
+      return {
+        id: r.id,
+        stars: r.stars,
+        reviewText: r.reviewText,
+        authorHandle: profile?.handle ?? null,
+        authorName: profile?.name ?? null,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+  }
+
+  /** Minimal references for every publicly listed flow (for the sitemap). */
+  async getSitemapRefs(): Promise<PublicListingRef[]> {
+    this.assertEnabled();
+    return this.listingRepo.listPublicRefs();
+  }
+
+  /**
+   * Purchase-gated export: resolve a listed/public flow by `handle/slug` and return
+   * its workflow definition for download. Free flows are exportable; paid flows are
+   * denied unless accessible (entitlement) — currently "coming soon" while selling is off.
+   */
+  async exportListing(reference: string, currentUserId: string): Promise<ExportResult> {
+    const detail = await this.getDetailByReference(reference, currentUserId);
+    if (!detail.entitlement.accessible) {
+      throw new ListingNotAccessibleError(detail.listing.id, detail.entitlement.reason);
+    }
+    return { listing: detail.listing, workflow: detail.workflow };
   }
 
   /** Resolve a listing detail by `handle/slug`. Throws if no listed flow matches. */
   async getDetailByReference(reference: string, currentUserId: string): Promise<ListingDetail> {
-    this.assertEnabled();
+    const { parsed, workflowId, listing } = await this.resolveListedRef(reference);
+    // One read fetches visibility + the graph together (no separate getOwnership +
+    // get). getFullInfo returns null unless the caller may access the flow; require
+    // public so a stale listing on a now-private workflow is not detail-resolvable
+    // (predicate parity with the gallery), even when the caller is the owner.
+    const info = await this.workflowRepo.getFullInfo(workflowId, currentUserId);
+    if (!info || info.visibility !== "public") {
+      throw new ListingNotFoundError(reference);
+    }
+    return {
+      listing,
+      workflowId,
+      workflow: info.workflow,
+      ownerHandle: parsed.handle,
+      startRef: reference,
+      entitlement: this.canAccess(listing),
+    };
+  }
 
+  /**
+   * Resolve a `handle/slug` reference to its listed listing without fetching the
+   * workflow graph. Shared prefix for detail/reviews/export. Throws
+   * ListingNotFoundError unless a `status='listed'` listing exists for the flow.
+   */
+  private async resolveListedRef(
+    reference: string,
+  ): Promise<{
+    parsed: { handle: string; slug: string };
+    workflowId: string;
+    listing: MarketplaceListingRecord;
+  }> {
+    this.assertEnabled();
     const parsed = parseWorkflowReference(reference);
     if (!parsed) {
       throw new ListingNotFoundError(reference);
@@ -217,15 +393,7 @@ export class MarketplaceService {
     if (!listing || listing.status !== "listed") {
       throw new ListingNotFoundError(reference);
     }
-    // Predicate parity with the gallery: listed + public + not-deleted. resolveSlug
-    // already excludes deleted; require the workflow to be public so a stale listing
-    // on a now-private workflow is not detail-resolvable.
-    const ownership = await this.workflowRepo.getOwnership(workflowId);
-    if (ownership.visibility !== "public") {
-      throw new ListingNotFoundError(reference);
-    }
-    const workflow = await this.workflowRepo.get(workflowId, currentUserId);
-    return { listing, workflowId, workflow };
+    return { parsed, workflowId, listing };
   }
 
   // ===== Library resolver =====
@@ -524,6 +692,31 @@ export class MarketplaceService {
       throw new ListingNotAccessibleError(listing.id, decision.reason);
     }
   }
+}
+
+/** Clamp a number into [min, max]. */
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
+
+/** In-memory gallery filter (used for the trending path, post-ranking). */
+function matchesGalleryFilter(item: GalleryItem, filter: GalleryFilter): boolean {
+  if (filter.category && item.category !== filter.category) return false;
+  if (filter.search) {
+    const q = filter.search.toLowerCase();
+    const haystack = `${item.title} ${item.summary ?? ""}`.toLowerCase();
+    if (!haystack.includes(q)) return false;
+  }
+  if (filter.tag) {
+    let tags: string[] = [];
+    try {
+      tags = JSON.parse(item.tags) as string[];
+    } catch {
+      tags = [];
+    }
+    if (!tags.includes(filter.tag)) return false;
+  }
+  return true;
 }
 
 /** Default core provider: bundled system flows from the on-disk catalog. */

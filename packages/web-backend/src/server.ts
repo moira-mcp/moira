@@ -64,6 +64,7 @@ import { notesRoutes } from "./routes/notes.js";
 import { artifactsRoutes } from "./routes/artifacts.js";
 import { artifactTokenRoutes } from "./routes/artifact-tokens.js";
 import { staticArtifactsRoutes } from "./routes/static-artifacts.js";
+import { marketplacePublicRoutes } from "./routes/marketplace-public.js";
 import { workflowSharingRoutes } from "./routes/workflow-sharing.js";
 import { inviteAcceptRoutes } from "./routes/invite-accept.js";
 import { tokenRoutes } from "./routes/tokens.js";
@@ -339,6 +340,9 @@ class MoiraApiServer {
 
     // Public artifact token routes (token = authorization, no session required)
     this.app.use("/api/public/artifacts", apiLimiter, artifactTokenRoutes);
+
+    // Public marketplace read API (gallery/detail/reviews/categories/sitemap/export)
+    this.app.use("/api/public/marketplace", apiLimiter, marketplacePublicRoutes);
 
     // Public static artifact serving (separate domain in production)
     // Serves HTML with branding injection, security headers

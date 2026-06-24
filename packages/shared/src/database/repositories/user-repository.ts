@@ -7,7 +7,7 @@
  * - User lookup: by ID or by handle
  */
 
-import { eq, and, ne, like, or, sql, gt, asc, desc } from "drizzle-orm";
+import { eq, and, ne, like, or, sql, gt, asc, desc, inArray } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import {
   user,
@@ -150,6 +150,26 @@ export class UserRepository {
       .limit(1);
 
     return row ?? null;
+  }
+
+  /**
+   * Batch-resolve public profiles (handle + name) for a set of user ids. Returns a
+   * Map keyed by user id; missing ids are simply absent. Used to enrich marketplace
+   * reviews/listings with author handles without an N+1 query.
+   */
+  async getPublicProfilesByIds(
+    ids: string[],
+  ): Promise<Map<string, { handle: string; name: string | null }>> {
+    const result = new Map<string, { handle: string; name: string | null }>();
+    if (ids.length === 0) return result;
+    const rows = await this.db
+      .select({ id: user.id, handle: user.handle, name: user.name })
+      .from(user)
+      .where(inArray(user.id, ids));
+    for (const row of rows) {
+      result.set(row.id, { handle: row.handle, name: row.name });
+    }
+    return result;
   }
 
   /**

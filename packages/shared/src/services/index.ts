@@ -208,6 +208,11 @@ export {
   type PublishOptions,
   type MarketplaceServiceOptions,
   type CoreFlow,
+  type GallerySortOption,
+  type GalleryQuery,
+  type GalleryPage,
+  type ReviewWithAuthor,
+  type ExportResult,
 } from "./marketplace-service.js";
 
 export { ExecutionRetentionService } from "./execution-retention-service.js";

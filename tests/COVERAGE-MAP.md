@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **304 files**, **3616 tests**
+- **46 domains**, **306 files**, **3641 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 5     | 49    | unit:5                                                         |
+| marketplace         | 7     | 74    | unit:5, integration:1, api:1                                   |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -498,7 +498,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**5 files, 49 tests**
+**7 files, 74 tests**
 
 **unit** (5 files)
 
@@ -507,6 +507,14 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/unit/shared/library-entry-repository.test.ts` — 3 tests 🟢 (add + get by user/workflow; list by user; remove with changed-rows result)
 - `tests/unit/shared/marketplace-review-repository.test.ts` — 5 tests 🟢 (upsert + transactional aggregate recompute; replace same-user review; average across users; read-back/list; delete + recompute, null when nothing to delete)
 - `tests/unit/shared/marketplace-event-repository.test.ts` — 4 tests 🟢 (append + nullable userId; trending ranks by event count; type filter; window exclusion)
+
+**integration** (1 file)
+
+- `tests/integration/marketplace-public-api.test.ts` — 18 tests 🟢 (service-level public read against a migrated DB: gallery only-listed+public+total, category/search/tag filters, limit/offset pagination, sort rating/installs/trending (view-only excluded), categories, reviews-with-authors (handle resolved, userId not exposed), reviews-by-reference graph-free + unknown 404, sitemap refs + view does not move lastmod/updatedAt, detail by handle/slug with ownerHandle/startRef/entitlement + unknown 404, export free succeeds vs paid denied)
+
+**api** (1 file)
+
+- `tests/api/marketplace-public-api.test.ts` — 7 tests 🟢 (HTTP: gallery public no-auth + page envelope; sort/limit/offset query params; categories payload; sitemap.xml content-type; unknown detail/export/reviews → 404)
 
 ### node-handlers
 

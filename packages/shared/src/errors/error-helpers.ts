@@ -89,8 +89,21 @@ export function normalizeError(error: unknown): AppError {
       return new AuthorizationError(error.message, { code: error.code });
     }
 
-    // Unknown domain error - wrap as InternalError
-    return new InternalError(error.message, { code: error.code });
+    // Any other domain error: honor its declared httpStatus generically, so a new
+    // DomainError surfaces with the right HTTP status without being listed above.
+    const domainContext = { code: error.code };
+    switch (error.httpStatus) {
+      case 400:
+        return new ValidationError(error.message, domainContext);
+      case 403:
+        return new AuthorizationError(error.message, domainContext);
+      case 404:
+        return new NotFoundError(error.message, domainContext);
+      case 409:
+        return new ConflictError(error.message, domainContext);
+      default:
+        return new InternalError(error.message, domainContext);
+    }
   }
 
   if (error instanceof Error) {

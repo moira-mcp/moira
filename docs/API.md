@@ -3158,6 +3158,100 @@ Errors:
 
 Authentication: Required (admin role)
 
+## Public Marketplace API
+
+Unauthenticated read endpoints for the workflow marketplace, mounted at
+`/api/public/marketplace` behind `apiLimiter` (no `requireAuth`). Reads resolve
+under a synthetic `__anonymous__` principal that can only access PUBLIC workflows.
+Gallery predicate everywhere: `listing.status='listed' AND workflow.visibility='public'
+AND workflow.deleted=0`. Publish/rate/admin actions are authed and documented
+separately.
+
+### GET /api/public/marketplace
+
+Gallery of listed public flows.
+
+Query: `search` (title/summary), `category`, `tag`, `sort`
+(`recent` | `rating` | `installs` | `trending`; default `recent`), `limit`
+(1–100, default 24), `offset` (0–10000, default 0). `trending` ranks recent
+install/start activity over a 7-day window.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data: {
+    items: GalleryItem[]; // listing row + { ownerHandle, slug }
+    total: number;
+    limit: number;
+    offset: number;
+    sort: "recent" | "rating" | "installs" | "trending";
+  }
+  timestamp: string;
+}
+```
+
+Authentication: Not required.
+
+### GET /api/public/marketplace/categories
+
+Fixed marketplace category set. Response `data: { categories: { id, label }[] }`.
+
+Authentication: Not required.
+
+### GET /api/public/marketplace/sitemap.xml
+
+Dynamic XML sitemap (`Content-Type: application/xml`) of the `/explore` index plus
+each listed flow's canonical page `/w/{handle}/{slug}` with `<lastmod>` from the
+listing's content-modified timestamp (counter updates do not move it). Capped at
+50000 URLs.
+
+Authentication: Not required.
+
+### GET /api/public/marketplace/listings/:handle/:slug
+
+Flow detail by reference. Records a fire-and-forget view signal. 404 if no listed
+public flow matches.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data: {
+    listing: MarketplaceListingRecord;
+    workflowId: string;
+    workflow: WorkflowGraph;
+    ownerHandle: string;
+    startRef: string; // "handle/slug"
+    entitlement: { accessible: boolean; reason: "free" | "paid-coming-soon" | "purchase-required" };
+  }
+  timestamp: string;
+}
+```
+
+Authentication: Not required.
+
+### GET /api/public/marketplace/listings/:handle/:slug/reviews
+
+Reviews for a listed flow, author handle/name resolved; no `userId`/PII exposed.
+Response `data: { reviews: { id, stars, reviewText, authorHandle, authorName,
+createdAt, updatedAt }[] }`. 404 if no listed public flow matches.
+
+Authentication: Not required.
+
+### GET /api/public/marketplace/listings/:handle/:slug/export
+
+Purchase-gated workflow-definition download (`Content-Disposition: attachment`).
+Free flows export; paid flows are denied while selling is off.
+
+- 200: `{ listing: { id, title }, workflow }` JSON attachment (accessible flow)
+- 403: Listing not accessible (paid / coming-soon)
+- 404: No listed public flow matches
+
+Authentication: Not required.
+
 ## Middleware
 
 ### requireAuth

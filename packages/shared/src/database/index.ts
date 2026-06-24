@@ -23,6 +23,9 @@ export {
   type MarketplaceListingRecord,
   type CreateListingInput,
   type GalleryFilter,
+  type GallerySort,
+  type GalleryItem,
+  type PublicListingRef,
 } from "./repositories/marketplace-listing-repository.js";
 export {
   LibraryEntryRepository,
