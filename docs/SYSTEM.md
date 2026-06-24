@@ -60,7 +60,7 @@ const transport = new StreamableHTTPServerTransport({
 });
 
 // MCP Tools (short names)
-list(search?, visibility?, sort?, sortOrder?, limit?, offset?)  // Get workflows with filtering and pagination
+list(source?, search?, limit?, offset?)             // The user's LIBRARY (core ∪ own ∪ added ∪ shared); source filter core|own|added|shared|all; returns startable id per item
 start(workflowId: string, note?: string, parentExecutionId: string, skipTelegramCheck?: boolean)  // Initialize execution by UUID, slug, or handle/slug (e.g., "john/my-workflow"), optional note (max 500 chars), required parent link (use "none" for standalone), skip Telegram pre-flight check
 step(processId: string, input?: any)                // Process next step with enhanced input parsing
 manage(action: string, ...)                         // Workflow CRUD with action-based routing (create/edit/get/get-structure/get-node/search-nodes/validate/list-variables/get-variable/set-variable/delete-variable/diff)
@@ -71,6 +71,7 @@ token(action: string, ...)                          // Generate upload/download 
 notes(action: string, ...)                          // Persistent notes storage with versioning (list/get/save/delete/history/stats)
 artifacts(action: string, ...)                      // Static HTML artifacts hosting (upload/update/delete/list/stats/token)
 lock(action: string, executionId: string, ...)      // Execution lock management (status/list/unlock/lock)
+marketplace(action: string, ...)                    // Agent marketplace: search/info/add/remove/publish/unpublish/rate/share (store actions require marketplace enabled)
 
 // HTTP Endpoints
 POST /mcp     // JSON-RPC 2.0 requests

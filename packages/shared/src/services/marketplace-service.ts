@@ -38,12 +38,13 @@ import type {
   MarketplaceEventType,
 } from "../database/repositories/marketplace-event-repository.js";
 import { isMarketplaceEnabled as defaultIsMarketplaceEnabled } from "../config/env.js";
-import { readWorkflowCatalog, isSystemOwner } from "./workflow-catalog.js";
+import { readWorkflowCatalog } from "./workflow-catalog.js";
 import { parseWorkflowReference } from "../validation/slug-handle.js";
 import {
   MarketplaceDisabledError,
   ListingNotFoundError,
   WorkflowNotFoundError,
+  UserNotFoundError,
   WorkflowAlreadyListedError,
   ListingAccessDeniedError,
   ListingNotAccessibleError,
@@ -74,12 +75,17 @@ export interface LibraryItem {
   workflowId: string | null;
   slug: string;
   name: string;
+  /** Owner handle (for building a `handle/slug` start reference); null for core flows. */
+  ownerHandle: string | null;
   /** For `added` items: reference (live) vs copy (frozen). */
   kind?: "reference" | "copy";
   /** For `added` items: the listing it came from. */
   listingId?: string | null;
   workflow: WorkflowGraph;
 }
+
+/** Library source filter (for `getLibrary`): a single origin, or every origin. */
+export type LibrarySourceFilter = LibraryOrigin | "all";
 
 /** Result of a `canAccess` check. Reason vocabulary matches the design API contract. */
 export interface AccessDecision {
@@ -185,6 +191,19 @@ export interface InstallResult {
   startRef: string;
 }
 
+/** Options for sharing a workflow by link. */
+export interface ShareOptions {
+  /** Grant a specific user direct access; omit to create an invite link instead. */
+  userHandle?: string;
+}
+
+/** Result of a share: either a direct grant or a generated invite link token. */
+export interface ShareResult {
+  sharedWithHandle?: string;
+  inviteToken?: string;
+  expiresAt?: number;
+}
+
 /** Injectable feature predicates + core provider (defaults wire to the real ones). */
 export interface MarketplaceServiceOptions {
   isMarketplaceEnabled?: () => boolean;
@@ -198,6 +217,8 @@ export interface CoreFlow {
   workflowId: string | null;
   slug: string;
   name: string;
+  /** Owner handle for the start reference (`moira` for the public system owner). */
+  ownerHandle?: string | null;
   workflow: WorkflowGraph;
 }
 
@@ -609,6 +630,67 @@ export class MarketplaceService {
     return updated;
   }
 
+  // ===== Share-by-link (reuses workflowAccess / workflowInvite) =====
+
+  /**
+   * Share a workflow privately. With `userHandle`, grants that user direct access
+   * (appears as "shared" in their library). Without it, creates an invite link the
+   * owner can hand out. Owner only. Reuses the existing access/invite mechanism — no
+   * marketplace listing is created.
+   */
+  async share(
+    ownerId: string,
+    workflowId: string,
+    options: ShareOptions = {},
+  ): Promise<ShareResult> {
+    this.assertEnabled();
+    const ownership = await this.workflowRepo.getOwnership(workflowId);
+    if (!ownership.exists || !ownership.id) {
+      throw new WorkflowNotFoundError(workflowId);
+    }
+    if (ownership.ownerId !== ownerId) {
+      throw new ListingAccessDeniedError(workflowId, "manage");
+    }
+
+    if (options.userHandle) {
+      const targetUserId = await this.userRepo.resolveHandle(options.userHandle);
+      if (!targetUserId) {
+        throw new UserNotFoundError(options.userHandle);
+      }
+      await this.sharingRepo.grantAccess(workflowId, targetUserId, ownerId);
+      return { sharedWithHandle: options.userHandle };
+    }
+
+    const invite = await this.sharingRepo.createInvite({ workflowId, createdBy: ownerId });
+    return { inviteToken: invite.token, expiresAt: invite.expiresAt };
+  }
+
+  /**
+   * Fire-and-forget: if the started workflow (by id, slug, or `handle/slug`) is a
+   * listed flow, record a `start` analytics signal. Never throws — telemetry must not
+   * break the start path.
+   */
+  async recordStartForReference(identifier: string, userId?: string | null): Promise<void> {
+    try {
+      let workflowId = identifier;
+      if (identifier.includes("/")) {
+        const parsed = parseWorkflowReference(identifier);
+        if (!parsed) return;
+        const ownerId = await this.userRepo.resolveHandle(parsed.handle);
+        if (!ownerId) return;
+        const resolved = await this.workflowRepo.resolveSlug(parsed.slug, ownerId);
+        if (!resolved) return;
+        workflowId = resolved;
+      }
+      const listing = await this.listingRepo.getByWorkflowId(workflowId);
+      if (listing && listing.status === "listed") {
+        await this.recordStart(listing.id, userId ?? null);
+      }
+    } catch {
+      // Telemetry: swallow — a missing listing or unresolved reference is a no-op.
+    }
+  }
+
   /** Build the `handle/slug` reference for a listing's workflow. */
   private async referenceOf(listing: MarketplaceListingRecord): Promise<string> {
     const info = await this.workflowRepo.getFullInfo(listing.workflowId, listing.publishedBy);
@@ -635,22 +717,30 @@ export class MarketplaceService {
    * Compose the user's library: core ∪ own ∪ added ∪ shared. Deduplicated by
    * workflowId (own wins over added wins over shared). Arbitrary public flows the
    * user has not added/owned/shared are NOT included.
+   *
+   * The library is a LOCAL concept and does NOT require the marketplace store to be
+   * enabled (self-host still returns core + own + shared). `assertEnabled` gates only
+   * the store actions (search/info/add/publish/rate/share), not library resolution.
+   *
+   * `source` optionally restricts the result to a single origin (or "all").
    */
-  async getLibrary(userId: string): Promise<LibraryItem[]> {
-    this.assertEnabled();
-
+  async getLibrary(userId: string, source: LibrarySourceFilter = "all"): Promise<LibraryItem[]> {
+    const include = (origin: LibraryOrigin): boolean => source === "all" || source === origin;
     const items: LibraryItem[] = [];
     const seenWorkflowIds = new Set<string>();
 
     // core — bundled flows, available to everyone (resolved by slug, not stored per user).
-    for (const core of this.coreProvider()) {
-      items.push({
-        origin: "core",
-        workflowId: core.workflowId,
-        slug: core.slug,
-        name: core.name,
-        workflow: core.workflow,
-      });
+    if (include("core")) {
+      for (const core of this.coreProvider()) {
+        items.push({
+          origin: "core",
+          workflowId: core.workflowId,
+          slug: core.slug,
+          name: core.name,
+          ownerHandle: core.ownerHandle ?? null,
+          workflow: core.workflow,
+        });
+      }
     }
 
     // own — workflows the user owns. list() also surfaces public/shared flows for
@@ -658,11 +748,13 @@ export class MarketplaceService {
     const own = await this.workflowRepo.list(userId);
     for (const w of own.filter((w) => w.accessType === "owner")) {
       seenWorkflowIds.add(w.id);
+      if (!include("own")) continue;
       items.push({
         origin: "own",
         workflowId: w.id,
         slug: w.slug,
         name: w.metadata.name,
+        ownerHandle: w.ownerHandle,
         workflow: w.workflow,
       });
     }
@@ -675,11 +767,13 @@ export class MarketplaceService {
       const info = await this.workflowRepo.getFullInfo(entry.workflowId, userId);
       if (!info) continue; // author deleted/unpublished — skip silently
       seenWorkflowIds.add(entry.workflowId);
+      if (!include("added")) continue;
       items.push({
         origin: "added",
         workflowId: entry.workflowId,
         slug: info.slug,
         name: info.metadata.name,
+        ownerHandle: info.ownerHandle,
         kind: entry.kind as "reference" | "copy",
         listingId: entry.listingId,
         workflow: info.workflow,
@@ -693,11 +787,13 @@ export class MarketplaceService {
       const info = await this.workflowRepo.getFullInfo(sharedId, userId);
       if (!info) continue;
       seenWorkflowIds.add(sharedId);
+      if (!include("shared")) continue;
       items.push({
         origin: "shared",
         workflowId: sharedId,
         slug: info.slug,
         name: info.metadata.name,
+        ownerHandle: info.ownerHandle,
         workflow: info.workflow,
       });
     }
@@ -952,16 +1048,26 @@ function matchesGalleryFilter(item: GalleryItem, filter: GalleryFilter): boolean
   return true;
 }
 
-/** Default core provider: bundled system flows from the on-disk catalog. */
+/** Handle of the public system owner — core flows are referenced as `moira/<slug>`. */
+const SYSTEM_PUBLIC_OWNER = "system-moira";
+const SYSTEM_PUBLIC_HANDLE = "moira";
+
+/**
+ * Default core provider: the bundled PUBLIC system flows from the on-disk catalog.
+ * Only `system-moira` (public) flows are core for everyone — `system-admin` flows are
+ * private. The catalog's on-disk graph id is NOT the installed DB id, so cores carry no
+ * `workflowId`; they are started by their `moira/<slug>` reference instead.
+ */
 function defaultCoreProvider(): CoreFlow[] {
   return readWorkflowCatalog()
-    .filter((entry) => isSystemOwner(entry.owner))
+    .filter((entry) => entry.owner === SYSTEM_PUBLIC_OWNER)
     .map((entry) => {
       const graph = entry.graph as unknown as WorkflowGraph;
       return {
-        workflowId: typeof graph.id === "string" ? graph.id : null,
+        workflowId: null,
         slug: entry.slug,
         name: graph.metadata?.name ?? entry.slug,
+        ownerHandle: SYSTEM_PUBLIC_HANDLE,
         workflow: graph,
       };
     });

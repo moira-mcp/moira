@@ -198,6 +198,37 @@ describe("Marketplace authed + admin API (service integration)", () => {
       const shared = library.find((i) => i.workflowId === wf.id);
       expect(shared?.origin).toBe("shared");
     });
+
+    it("share(userHandle) grants the recipient access (appears as 'shared' in their library)", async () => {
+      const wf = await makeWorkflow(AUTHOR, "Direct Share");
+      const result = await service.share(AUTHOR, wf.id, { userHandle: "consumer" });
+      expect(result.sharedWithHandle).toBe("consumer");
+      const library = await service.getLibrary(CONSUMER);
+      expect(library.find((i) => i.workflowId === wf.id)?.origin).toBe("shared");
+    });
+
+    it("share() without a handle returns an invite link token", async () => {
+      const wf = await makeWorkflow(AUTHOR, "Link Share");
+      const result = await service.share(AUTHOR, wf.id);
+      expect(result.inviteToken).toBeTruthy();
+      expect(result.sharedWithHandle).toBeUndefined();
+    });
+
+    it("rejects share by a non-owner", async () => {
+      const wf = await makeWorkflow(AUTHOR, "Guarded Share");
+      await expect(
+        service.share(CONSUMER, wf.id, { userHandle: "consumer" }),
+      ).rejects.toBeInstanceOf(ListingAccessDeniedError);
+    });
+  });
+
+  describe("library source filter", () => {
+    it("getLibrary(source) restricts to a single origin and works when the store is enabled", async () => {
+      const flow = await publishFlow("Mine For Filter");
+      const ownOnly = await service.getLibrary(AUTHOR, "own");
+      expect(ownOnly.every((i) => i.origin === "own")).toBe(true);
+      expect(ownOnly.some((i) => i.workflowId === flow.workflowId)).toBe(true);
+    });
   });
 
   describe("entitlement", () => {

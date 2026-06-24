@@ -216,6 +216,9 @@ export {
   type UpdateListingOptions,
   type EntitlementResult,
   type InstallResult,
+  type LibrarySourceFilter,
+  type ShareOptions,
+  type ShareResult,
 } from "./marketplace-service.js";
 
 export { ExecutionRetentionService } from "./execution-retention-service.js";

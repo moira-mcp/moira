@@ -229,14 +229,15 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     // so the "overwrite with same ID" attack vector is no longer possible.
     // The system generates unique UUIDs for each workflow.
 
-    test("public workflow visible in list for non-owner", async () => {
+    test("arbitrary public workflow is NOT in a non-owner's library (must adopt it first)", async () => {
       const result = await callMCPTool(userClient, "list", {});
       const workflows = result.workflows || result;
 
-      // Match by slug since list id is now "handle/slug" format, not UUID
+      // list() now returns the user's LIBRARY (core ∪ own ∪ added ∪ shared). A public
+      // workflow the user has not adopted/owned/been-shared is NOT in the library — it is
+      // discoverable via the `marketplace` tool instead. (Breaking change, Step 6.)
       const found = workflows.find((w: any) => w.slug === publicWorkflowSlug);
-      expect(found).toBeDefined();
-      expect(found.name).toBe("Public Security Test");
+      expect(found).toBeUndefined();
     });
 
     test("owner can edit own public workflow", async () => {

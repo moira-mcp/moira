@@ -67,6 +67,7 @@ const TOOL_NAMES = [
   "notes",
   "artifacts",
   "lock",
+  "marketplace",
 ] as const;
 
 const TOOL_METADATA: Record<string, { label: string; sortOrder: number }> = {
@@ -81,6 +82,7 @@ const TOOL_METADATA: Record<string, { label: string; sortOrder: number }> = {
   notes: { label: "Manage Notes", sortOrder: 28 },
   artifacts: { label: "Manage Artifacts", sortOrder: 29 },
   lock: { label: "Manage Locks", sortOrder: 30 },
+  marketplace: { label: "Marketplace", sortOrder: 31 },
 };
 
 // --- Prompt Mappings ---

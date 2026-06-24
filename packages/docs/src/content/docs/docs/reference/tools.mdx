@@ -9,10 +9,14 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 
 ### Workflow Management
 
-- `list` - List available workflow templates
+- `list` - List your workflow library (core + own + added + shared)
 - `manage` - Create, edit, or get workflow details
 - `start` - Start new workflow execution
 - `step` - Advance workflow with agent input
+
+### Marketplace
+
+- `marketplace` - Search, adopt, publish, rate, and share workflows
 
 ### Session & Settings
 
@@ -36,21 +40,74 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 
 ## list
 
-Lists all available workflow templates with validation status.
+Returns **your library** — not the whole public catalog. The library is:
 
-**Parameters:** None
+- **core** — official bundled flows (quick-task, robust-task, …), available to everyone
+- **own** — workflows you created
+- **added** — marketplace flows you adopted (via `marketplace add`)
+- **shared** — private flows shared with you by link
+
+The marketplace's public flows are **not** in `list()` until you add them — browse the
+store with the [`marketplace`](#marketplace) tool. This keeps the agent's working set
+small and intentional as the catalog grows.
+
+:::note[Breaking change]
+`list()` previously returned all accessible public workflows. It now returns the library.
+Because the MCP tool set is cached at authorization time, clients must reconnect to pick
+up the new behavior and the new `marketplace` tool.
+:::
+
+**Parameters:**
+
+- `source` (string, optional) - Restrict to one origin: `core` | `own` | `added` | `shared` (default: all)
+- `search` (string, optional) - Filter by workflow name (substring)
+- `limit` / `offset` (number, optional) - Pagination (default: the whole library)
 
 **Returns:**
 
-- Array of workflow objects with metadata
-- Validation status for each workflow
-- File paths and last modified timestamps
+- `workflows` - array of `{ id, workflowId, slug, name, version, description, origin, kind? }`. Pass a result's `id` ("handle/slug" when known, else the workflow id) to `start()`.
+- `total` - the number of library entries matched
 
 **Example:**
 
 ```json
-list()
-→ [{ id: "example", name: "Example Workflow", valid: true, ... }]
+list({ source: "added" })
+→ { workflows: [{ id: "alice/data-pipeline", name: "Data Pipeline", origin: "added", kind: "reference" }], total: 1 }
+```
+
+---
+
+## marketplace
+
+Discover, adopt, publish, rate, and share workflows. The marketplace is agent-operated —
+everything the web UI does is also an MCP action, so the agent can browse and adopt flows
+headless (no copy-pasting commands).
+
+Store actions (`search` / `info` / `add` / `publish` / `rate` / `share`) require the
+marketplace to be enabled on the instance; where it is off they return a clear
+"marketplace not enabled" message, but your local library (`list`) still works.
+
+**Parameter:** `action` (string, required) selects the operation.
+
+| Action      | Inputs                                                                       | Returns                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `search`    | `q`, `category`, `tags`, `sort` (recent\|rating\|installs\|trending), `page` | store cards, each with a `ref` ("handle/slug")                                                          |
+| `info`      | `ref`                                                                        | full detail (description, ratings, author, node count, entitlement); records a view                     |
+| `add`       | `ref`, `fork` (true = editable copy; default = live reference)               | adopts the flow into your library; it then appears in `list()`                                          |
+| `remove`    | `ref`                                                                        | un-adopts the flow (does not delete the original)                                                       |
+| `publish`   | `workflowId`, `category`, `tags`, `summary`                                  | makes your workflow public (listed). Paid fields are rejected while selling is off                      |
+| `unpublish` | `workflowId`                                                                 | makes your listed workflow private again                                                                |
+| `rate`      | `ref`, `stars` (1-5), `review`                                               | upserts your rating/review (you cannot rate your own flow)                                              |
+| `share`     | `workflowId`, `userHandle?`                                                  | privately shares your workflow — grant a user directly, or omit `userHandle` to generate an invite link |
+
+**Typical agent flow:**
+
+```json
+marketplace({ action: "search", q: "data pipeline" })
+marketplace({ action: "info", ref: "alice/data-pipeline" })
+marketplace({ action: "add", ref: "alice/data-pipeline" })
+list({ source: "added" })          // the flow now appears here
+start({ workflowId: "alice/data-pipeline", parentExecutionId: "none" })
 ```
 
 ---

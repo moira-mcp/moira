@@ -424,54 +424,6 @@ class MCPEngineClass {
     };
   }
 
-  async listWorkflows(params?: {
-    search?: string;
-    visibility?: "public" | "private" | "all";
-    sort?: "createdAt" | "name";
-    sortOrder?: "asc" | "desc";
-    limit?: number;
-    offset?: number;
-  }): Promise<{
-    workflows: Array<{
-      id: string;
-      slug: string;
-      ownerHandle: string;
-      name: string;
-      version: string;
-      description: string;
-      visibility: string;
-      createdAt: string;
-    }>;
-    total: number;
-  }> {
-    const { userId } = getUserContext();
-    // NO try/catch - errors bubble up to boundary
-    const result = await this.repository.listWorkflowsWithFilters({
-      userId,
-      search: params?.search,
-      visibility: params?.visibility,
-      sort: params?.sort ?? "createdAt",
-      sortOrder: params?.sortOrder ?? "desc",
-      limit: params?.limit ?? 20,
-      offset: params?.offset ?? 0,
-    });
-
-    return {
-      workflows: result.workflows.map((item) => ({
-        // Use handle/slug as the primary identifier (e.g., "moira/test-planning")
-        id: `${item.ownerHandle}/${item.slug}`,
-        slug: item.slug,
-        ownerHandle: item.ownerHandle,
-        name: item.metadata.name,
-        version: item.metadata.version,
-        description: item.metadata.description,
-        visibility: item.visibility,
-        createdAt: new Date(item.createdAt).toISOString(),
-      })),
-      total: result.total,
-    };
-  }
-
   getRepository(): IDataRepository {
     return this.repository;
   }

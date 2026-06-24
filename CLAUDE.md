@@ -203,9 +203,12 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `lock`, `help`. The HTTP transport is `StreamableHTTPServerTransport`
-(stateless). See `docs/SYSTEM.md` for the full tool signatures and request/response
-shapes, and `packages/mcp-server/src/server.ts` for the registrations.
+`artifacts`, `lock`, `marketplace`, `help`. `list` returns the user's library
+(core ∪ own ∪ added ∪ shared), not the whole public catalog; `marketplace`
+(search/info/add/remove/publish/unpublish/rate/share) is the store surface. The HTTP
+transport is `StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the
+full tool signatures and request/response shapes, and
+`packages/mcp-server/src/server.ts` for the registrations.
 
 ## Node Types
 

@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **308 files**, **3671 tests**
+- **46 domains**, **309 files**, **3683 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 9     | 104   | unit:5, integration:2, api:2                                   |
+| marketplace         | 10    | 116   | unit:5, integration:2, api:2, mcp-tools:1                      |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -498,7 +498,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**9 files, 104 tests**
+**10 files, 116 tests**
 
 **unit** (5 files)
 
@@ -511,12 +511,16 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **integration** (2 files)
 
 - `tests/integration/marketplace-public-api.test.ts` — 18 tests 🟢 (service-level public read against a migrated DB: gallery only-listed+public+total, category/search/tag filters, limit/offset pagination, sort rating/installs/trending (view-only excluded), categories, reviews-with-authors (handle resolved, userId not exposed), reviews-by-reference graph-free + unknown 404, sitemap refs + view does not move lastmod/updatedAt, detail by handle/slug with ownerHandle/startRef/entitlement + unknown 404, export free succeeds vs paid denied)
-- `tests/integration/marketplace-authed-api.test.ts` — 17 tests 🟢 (service-level authed/admin against a migrated DB: publish→listed/public, unpublish→unlisted (row kept) + non-owner rejection, owner metadata edit + non-owner rejection, my-listings incl unlisted, install→library reference + startRef + install counter, fork→independent owned copy (original untouched), share-by-link grant→recipient library 'shared', entitlement owner/free + paid coming-soon, paid-publish rejection while flag off + allowed when on, admin verify/unverify badge + featured + moderation queue/status + unknown-status rejection)
+- `tests/integration/marketplace-authed-api.test.ts` — 21 tests 🟢 (service-level authed/admin against a migrated DB: publish→listed/public, unpublish→unlisted (row kept) + non-owner rejection, owner metadata edit + non-owner rejection, my-listings incl unlisted, install→library reference + startRef + install counter, fork→independent owned copy (original untouched), share-by-link grant→recipient library 'shared', entitlement owner/free + paid coming-soon, paid-publish rejection while flag off + allowed when on, admin verify/unverify badge + featured + moderation queue/status + unknown-status rejection); share(userHandle) grant + invite-link token + non-owner rejection; getLibrary(source) own-filter
 
 **api** (2 files)
 
 - `tests/api/marketplace-public-api.test.ts` — 7 tests 🟢 (HTTP: gallery public no-auth + page envelope; sort/limit/offset query params; categories payload; sitemap.xml content-type; unknown detail/export/reviews → 404)
 - `tests/api/marketplace-authed-api.test.ts` — 12 tests 🟢 (HTTP auth gating: me/listings + me/library + publish without session → 401; authed me/listings + me/library → 200 envelope; error mapping publish/delete/entitlement unknown id → 404; admin queue no-session → 401, non-admin → 403, admin → 200 envelope, verify unknown id → 404)
+
+**mcp-tools** (1 file)
+
+- `tests/mcp-tools/marketplace-tool.test.ts` — 8 tests 🟢 (agent path over real MCP: publish produces handle/slug ref; search finds the published flow; info accessible detail; add → appears in list(source:added) as origin 'added'; start runs the added flow by ref; rate records a rating; author cannot rate own flow); list(source:core) returns bundled flows startable by moira/<slug> id
 
 ### node-handlers
 

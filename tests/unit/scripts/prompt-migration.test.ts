@@ -150,10 +150,10 @@ describe("prompt-migration", () => {
   });
 
   describe("getPromptMappings", () => {
-    it("returns 15 default mappings when no promptsDir provided", () => {
+    it("returns 16 default mappings when no promptsDir provided", () => {
       const mappings = getPromptMappings();
 
-      expect(mappings.length).toBe(15);
+      expect(mappings.length).toBe(16);
 
       const keys = mappings.map((m) => m.dbKey);
       expect(keys).toContain("mcp.systemPrompt");
@@ -168,6 +168,8 @@ describe("prompt-migration", () => {
       expect(keys).toContain("mcp.toolDescription.session");
       expect(keys).toContain("mcp.toolDescription.notes");
       expect(keys).toContain("mcp.toolDescription.artifacts");
+      expect(keys).toContain("mcp.toolDescription.lock");
+      expect(keys).toContain("mcp.toolDescription.marketplace");
       expect(keys).toContain("mcp.errorMessages");
       expect(keys).toContain("mcp.validationHelp");
     });
@@ -195,8 +197,8 @@ describe("prompt-migration", () => {
       const mappings = getPromptMappings(promptsDir);
       const keys = mappings.map((m) => m.dbKey);
 
-      // 15 defaults + 4 agent overrides
-      expect(mappings.length).toBe(19);
+      // 16 defaults + 4 agent overrides
+      expect(mappings.length).toBe(20);
 
       expect(keys).toContain("mcp.agent.chatgpt.systemPrompt");
       expect(keys).toContain("mcp.agent.chatgpt.systemReminder");
@@ -241,7 +243,7 @@ describe("prompt-migration", () => {
       fs.mkdirSync(promptsDir, { recursive: true });
 
       const mappings = getPromptMappings(promptsDir);
-      expect(mappings.length).toBe(15);
+      expect(mappings.length).toBe(16);
     });
   });
 

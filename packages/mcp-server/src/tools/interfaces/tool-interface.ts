@@ -29,19 +29,33 @@ export interface WorkflowSummary {
   createdAt: string;
 }
 
-// Parameters for list workflows tool
+// Parameters for list (the user's library): core ∪ own ∪ added ∪ shared
 export interface ListWorkflowsParams {
+  /** Restrict to one library origin (default: all). */
+  source?: "core" | "own" | "added" | "shared" | "all";
+  /** Filter by workflow name (case-insensitive substring). */
   search?: string;
-  visibility?: "public" | "private" | "all";
-  sort?: "createdAt" | "name";
-  sortOrder?: "asc" | "desc";
   limit?: number;
   offset?: number;
 }
 
-// Result of list workflows with pagination
+// One library entry as returned by list()
+export interface LibraryListItem {
+  /** Startable reference ("handle/slug" when known, else the workflow id) — pass to start(). */
+  id: string;
+  workflowId: string | null;
+  slug: string;
+  name: string;
+  version: string;
+  description: string;
+  origin: "core" | "own" | "added" | "shared";
+  /** For `added` items: reference (live) vs copy (frozen). */
+  kind?: "reference" | "copy";
+}
+
+// Result of list() — the user's library
 export interface ListWorkflowsResult {
-  workflows: WorkflowSummary[];
+  workflows: LibraryListItem[];
   total: number;
 }
 

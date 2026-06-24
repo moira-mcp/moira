@@ -34,6 +34,7 @@ import {
   isPersistentToken,
   hashToken,
   validateTokenRecord,
+  getMarketplaceService,
   type McpPromptContext,
 } from "@mcp-moira/shared";
 
@@ -43,7 +44,7 @@ export const MCP_SERVER_VERSION: string = getMcpServerVersion() || "0.0.0";
 // Set global service for this process (MUST be first thing after imports)
 setGlobalService(Service.MCP_SERVER);
 import { eq } from "drizzle-orm";
-import { runWithMCPContext } from "./core/request-context.js";
+import { runWithMCPContext, getUserContext } from "./core/request-context.js";
 import { auth } from "./auth.js";
 import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
@@ -58,6 +59,7 @@ import { createWorkflowToken } from "./tools/create-workflow-token.js";
 import { getSessionInfo } from "./tools/get-session-info.js";
 import { manageNotes, manageNotesSchema } from "./tools/manage-notes.js";
 import { manageArtifacts, manageArtifactsSchema } from "./tools/manage-artifacts.js";
+import { manageMarketplace, manageMarketplaceSchema } from "./tools/manage-marketplace.js";
 import { manageLocks, manageLocksSchema } from "./tools/manage-locks.js";
 import { wrapSchemaWithAutoparse } from "./utils/flexible-json-parser.js";
 
@@ -151,10 +153,8 @@ function registerAllTools(
     async (params) => {
       try {
         const result = await listWorkflows({
+          source: params.source,
           search: params.search,
-          visibility: params.visibility,
-          sort: params.sort,
-          sortOrder: params.sortOrder,
           limit: params.limit,
           offset: params.offset,
         });
@@ -214,6 +214,12 @@ function registerAllTools(
           parentExecutionId,
           skipTelegramCheck,
         });
+        if (result.success) {
+          // Fire-and-forget: bump the marketplace `start` signal if this flow is listed.
+          void getMarketplaceService()
+            .recordStartForReference(workflowId, getUserContext().userId)
+            .catch(() => {});
+        }
         const resultText = result.success ? result.data : `Error: ${result.error}`;
         return { content: [{ type: "text" as const, text: resultText || LABELS.no_result }] };
       } catch (error) {
@@ -814,6 +820,35 @@ function registerAllTools(
     async (params) => {
       try {
         const result = await manageArtifacts(params as z.infer<typeof manageArtifactsSchema>);
+        const resultText = result.success
+          ? JSON.stringify(result.data, null, 2)
+          : `Error: ${result.error}`;
+        return {
+          content: [{ type: "text" as const, text: resultText }],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error: ${sanitizeMcpError(error)}`,
+            },
+          ],
+        };
+      }
+    },
+  );
+
+  // Marketplace tool — agent-facing store + library operations
+  mcpServer.registerTool(
+    "marketplace",
+    {
+      description: toolDescriptions.marketplace,
+      inputSchema: wrapSchemaWithAutoparse(manageMarketplaceSchema.shape),
+    },
+    async (params) => {
+      try {
+        const result = await manageMarketplace(params as z.infer<typeof manageMarketplaceSchema>);
         const resultText = result.success
           ? JSON.stringify(result.data, null, 2)
           : `Error: ${result.error}`;

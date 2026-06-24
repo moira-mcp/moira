@@ -35,10 +35,10 @@ describe("McpTextService Integration", () => {
       expect(description).toContain("workflow"); // Should mention workflows
     });
 
-    test("getAllToolDescriptions returns all 11 tool descriptions", async () => {
+    test("getAllToolDescriptions returns all 12 tool descriptions", async () => {
       const descriptions = await service.getAllToolDescriptions();
 
-      expect(Object.keys(descriptions)).toHaveLength(11);
+      expect(Object.keys(descriptions)).toHaveLength(12);
 
       for (const toolName of MCP_TOOL_NAMES) {
         expect(descriptions[toolName]).toBeDefined();

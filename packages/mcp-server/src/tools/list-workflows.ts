@@ -9,6 +9,7 @@ import {
   ToolResult,
   ListWorkflowsParams,
   ListWorkflowsResult,
+  LibraryListItem,
 } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import { formatErrorWithAgentInstructions } from "../messages/index.js";
@@ -18,25 +19,24 @@ import {
   createLogger,
   normalizeError,
   isOperationalError,
+  getMarketplaceService,
 } from "@mcp-moira/shared";
 import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "ListWorkflows" });
 
 export const listWorkflowsSchema = z.object({
-  search: z.string().optional().describe("Search in workflow name and description"),
-  visibility: z
-    .enum(["public", "private", "all"])
+  source: z
+    .enum(["core", "own", "added", "shared", "all"])
     .optional()
-    .describe("Filter by visibility (default: all accessible)"),
-  sort: z.enum(["createdAt", "name"]).optional().describe("Sort field (default: createdAt)"),
-  sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort order (default: desc)"),
+    .describe("Restrict to one library origin: core | own | added | shared (default all)"),
+  search: z.string().optional().describe("Filter the library by workflow name (substring)"),
   limit: z
     .number()
     .min(1)
     .max(100)
     .optional()
-    .describe("Number of results (default: 20, max: 100)"),
+    .describe("Number of results (default: 50, max: 100)"),
   offset: z.number().min(0).optional().describe("Offset for pagination (default: 0)"),
 });
 
@@ -48,17 +48,36 @@ export async function listWorkflows(
     const { userId } = getUserContext();
     const engine = MCPEngine.getInstance();
 
-    // Use singleton MCPEngine for shared state management
-    const result = await engine.listWorkflows({
-      search: params.search,
-      visibility: params.visibility,
-      sort: params.sort,
-      sortOrder: params.sortOrder,
-      limit: params.limit,
-      offset: params.offset,
-    });
+    // list() returns the user's LIBRARY (core ∪ own ∪ added ∪ shared), not the whole
+    // public catalog — see the marketplace MCP tool for browsing the store.
+    const library = await getMarketplaceService().getLibrary(userId, params.source ?? "all");
 
-    // Audit log for workflow list
+    const search = params.search?.toLowerCase();
+    const filtered = search
+      ? library.filter((i) => i.name.toLowerCase().includes(search))
+      : library;
+
+    // The library is a bounded set, so return it whole by default; only paginate when
+    // the caller explicitly asks (avoids hiding the caller's own flows behind core flows).
+    const offset = params.offset ?? 0;
+    const page =
+      params.limit !== undefined
+        ? filtered.slice(offset, offset + params.limit)
+        : filtered.slice(offset);
+    const items: LibraryListItem[] = page.map((i) => ({
+      id: i.ownerHandle ? `${i.ownerHandle}/${i.slug}` : (i.workflowId ?? i.slug),
+      workflowId: i.workflowId,
+      slug: i.slug,
+      name: i.name,
+      version: i.workflow?.metadata?.version ?? "",
+      description: i.workflow?.metadata?.description ?? "",
+      origin: i.origin,
+      ...(i.kind ? { kind: i.kind } : {}),
+    }));
+
+    const result: ListWorkflowsResult = { workflows: items, total: filtered.length };
+
+    // Audit log for library list
     await logAuditEventDirect(engine.repository as DatabaseRepository, {
       userId,
       action: AuditAction.MCP_WORKFLOW_LIST,
@@ -67,19 +86,10 @@ export async function listWorkflows(
       source: "mcp",
       metadata: {
         search: params.search,
-        visibility: params.visibility,
+        source: params.source,
         resultCount: result.workflows.length,
       },
     });
-
-    // Add hint if no workflows found
-    if (result.workflows.length === 0 && (params.search || params.visibility)) {
-      return {
-        success: true,
-        data: result,
-        // Add contextual hint for empty results
-      };
-    }
 
     return { success: true, data: result };
   } catch (error) {

@@ -51,15 +51,20 @@ describe("MCP Workflow Token Tools E2E", () => {
   });
 
   test("create_workflow_token download action generates valid token", async () => {
-    // Get a workflow ID first
-    const listResult = await callMCPTool(client, "list", {});
-    const workflows = listResult.workflows || listResult;
-    if (!workflows || workflows.length === 0) {
-      console.warn("No workflows available, skipping download token test");
-      return;
-    }
-
-    const workflowId = workflows[0].id;
+    // A download token requires a workflow the caller OWNS — list() now returns the
+    // library (which leads with bundled core flows), so create an own workflow first.
+    const created = await callMCPTool<{ workflowId: string }>(client, "manage", {
+      action: "create",
+      workflow: {
+        metadata: { name: "Token Download Test", version: "1.0.0", description: "x" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      },
+      overwrite: false,
+    });
+    const workflowId = created.workflowId;
 
     const rawResult = await callMCPTool<string>(client, "token", {
       action: "download",

@@ -41,6 +41,7 @@ export const MCP_TOOL_NAMES = [
   "notes",
   "artifacts",
   "lock",
+  "marketplace",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];

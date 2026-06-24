@@ -24,8 +24,8 @@ describe("McpTextService", () => {
   });
 
   describe("MCP_TOOL_NAMES", () => {
-    it("contains all 11 tool names", () => {
-      expect(MCP_TOOL_NAMES).toHaveLength(11);
+    it("contains all 12 tool names", () => {
+      expect(MCP_TOOL_NAMES).toHaveLength(12);
       expect(MCP_TOOL_NAMES).toContain("list");
       expect(MCP_TOOL_NAMES).toContain("start");
       expect(MCP_TOOL_NAMES).toContain("step");
@@ -36,6 +36,8 @@ describe("McpTextService", () => {
       expect(MCP_TOOL_NAMES).toContain("session");
       expect(MCP_TOOL_NAMES).toContain("notes");
       expect(MCP_TOOL_NAMES).toContain("artifacts");
+      expect(MCP_TOOL_NAMES).toContain("lock");
+      expect(MCP_TOOL_NAMES).toContain("marketplace");
     });
   });
 
@@ -82,7 +84,7 @@ describe("McpTextService", () => {
   });
 
   describe("getAllToolDescriptions", () => {
-    it("returns all 11 tool descriptions", async () => {
+    it("returns all 12 tool descriptions", async () => {
       // Mock each tool description
       mockGlobalSettingsRepo.getValue.mockImplementation((key: string) => {
         const descriptions: Record<string, string> = {
@@ -97,13 +99,14 @@ describe("McpTextService", () => {
           "mcp.toolDescription.notes": "Manage notes",
           "mcp.toolDescription.artifacts": "Manage artifacts",
           "mcp.toolDescription.lock": "Manage locks",
+          "mcp.toolDescription.marketplace": "Marketplace",
         };
         return Promise.resolve(descriptions[key] || null);
       });
 
       const result = await service.getAllToolDescriptions();
 
-      expect(Object.keys(result)).toHaveLength(11);
+      expect(Object.keys(result)).toHaveLength(12);
       expect(result.list).toBe("List workflows");
       expect(result.start).toBe("Start workflow");
       expect(result.step).toBe("Execute step");
@@ -115,6 +118,7 @@ describe("McpTextService", () => {
       expect(result.notes).toBe("Manage notes");
       expect(result.artifacts).toBe("Manage artifacts");
       expect(result.lock).toBe("Manage locks");
+      expect(result.marketplace).toBe("Marketplace");
     });
 
     it("returns empty strings for missing descriptions", async () => {
@@ -122,7 +126,7 @@ describe("McpTextService", () => {
 
       const result = await service.getAllToolDescriptions();
 
-      expect(Object.keys(result)).toHaveLength(11);
+      expect(Object.keys(result)).toHaveLength(12);
       for (const toolName of MCP_TOOL_NAMES) {
         expect(result[toolName]).toBe("");
       }
