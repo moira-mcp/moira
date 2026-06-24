@@ -9,7 +9,10 @@
  * the `inLibrary`/`isOwn` annotations) — they never carry secrets or other users' data.
  */
 
-import type { AnnotatedGalleryItem, AnnotatedListingDetail } from "@mcp-moira/shared";
+import type {
+  AnnotatedGalleryItem,
+  AnnotatedListingDetail,
+} from "@mcp-moira/shared/services/marketplace-service";
 import type { GalleryView, GalleryCardView, DetailView } from "./types.js";
 
 /** Build a `handle/slug` reference, falling back to the bare slug when no handle. */

@@ -9,6 +9,8 @@
     "./auth": "./src/auth/better-auth-config.ts",
     "./urls": "./src/config/urls.ts",
     "./mcp-clients": "./src/mcp-clients/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./services/marketplace-service": "./src/services/marketplace-service.ts",
     "./services/workflow-query-service": "./src/services/workflow-query-service.ts",
     "./utils/version-utils": "./src/utils/version-utils.ts",
     "./logging/logger": "./src/logging/logger.ts",

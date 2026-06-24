@@ -162,34 +162,25 @@ test.describe("Admin Executions Page", () => {
         { timeout: 30000 },
       );
 
-      // Verify execution details are displayed (workflow ID or name)
-      // The page may show either the full workflow ID or just the workflow name
-      const workflowIdVisible = await page
-        .locator(`text=${TEST_WORKFLOW_ID}`)
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-      const workflowNameVisible = await page
-        .locator("text=Verified Research")
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-      const workflowSlugVisible = await page
-        .locator("text=research")
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
+      // Verify execution details are displayed (workflow ID, name, or slug).
+      // Web-first assertion: a single auto-retrying wait for ANY workflow indicator is
+      // robust under full-suite parallel load, whereas three parallel 5s isVisible()
+      // snapshots all race to false if the detail data renders after that window.
+      await expect(
+        page
+          .locator(`text=${TEST_WORKFLOW_ID}`)
+          .or(page.locator("text=Verified Research"))
+          .or(page.locator("text=research"))
+          .first(),
+      ).toBeVisible({ timeout: 15000 });
 
-      expect(workflowIdVisible || workflowNameVisible || workflowSlugVisible).toBeTruthy();
-
-      // Verify owner info is shown (page shows user name, not email)
-      const ownerEmailVisible = await page
-        .locator(`text=${TEST_USER.email}`)
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-      const ownerNameVisible = await page
-        .locator(`text=${TEST_USER.name}`)
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-
-      expect(ownerEmailVisible || ownerNameVisible).toBeTruthy();
+      // Verify owner info is shown (page shows user name preferentially, else email).
+      await expect(
+        page
+          .locator(`text=${TEST_USER.email}`)
+          .or(page.locator(`text=${TEST_USER.name}`))
+          .first(),
+      ).toBeVisible({ timeout: 15000 });
 
       console.log(`✓ Admin can view execution details for other user's execution`);
     }

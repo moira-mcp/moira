@@ -8,7 +8,10 @@ export default {
   testTimeout: 180000,
   maxWorkers: 1,
   workerIdleMemoryLimit: "4GB",
-  setupFiles: ["<rootDir>/tests/config/jest-memory-setup.js"],
+  setupFiles: [
+    "<rootDir>/tests/config/jest-memory-setup.js",
+    "<rootDir>/tests/config/jest-fetch-retry.js",
+  ],
   // E2E tests only need HTTP/MCP client - no shared module imports
   setupFilesAfterEnv: [],
 };

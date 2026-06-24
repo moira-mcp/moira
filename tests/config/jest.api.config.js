@@ -8,7 +8,10 @@ export default {
   testTimeout: 90000,
   maxWorkers: 5, // WAL mode allows concurrent access; admin-logout-all removed to enable parallelism
   workerIdleMemoryLimit: "4GB",
-  setupFiles: ["<rootDir>/tests/config/jest-memory-setup.js"],
+  setupFiles: [
+    "<rootDir>/tests/config/jest-memory-setup.js",
+    "<rootDir>/tests/config/jest-fetch-retry.js",
+  ],
   // API tests only need HTTP client - no shared module imports
   // Override setupFilesAfterEnv to skip test-helpers that import @mcp-moira/*
   setupFilesAfterEnv: [],

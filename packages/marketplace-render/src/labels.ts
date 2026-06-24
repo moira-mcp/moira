@@ -14,7 +14,7 @@ import {
   formatMarketplaceCount,
   marketplaceEnumLabel,
   type MarketplaceLocale,
-} from "@mcp-moira/shared";
+} from "@mcp-moira/shared/i18n";
 
 /** Static (non-countable) presentation strings, per locale. */
 interface ChromeStrings {

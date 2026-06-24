@@ -1,228 +1,153 @@
 /**
  * Server-rendered PUBLIC marketplace pages (SEO) — mounted at the ROOT (not /api),
  * no auth, behind `apiLimiter`. Rendered server-side from the LIVE database per
- * request, so a flow published a second ago is immediately listed and crawlable with
- * no image rebuild (the freshness requirement). The HTML is fully readable with
- * JavaScript off (progressive enhancement); the SPA is linked for interactivity.
+ * request via the `@mcp-moira/marketplace-render` package: the SAME React components
+ * are rendered to an HTML string here and hydrated in the browser by the
+ * `marketplace-hydrate` bundle. A flow published a second ago is immediately listed
+ * and crawlable with no image rebuild (the freshness requirement). The HTML is fully
+ * readable with JavaScript off (progressive enhancement); hydration only upgrades
+ * interactivity.
  *
- *   GET /explore              gallery of listed flows (crawlable HTML + meta)
+ *   GET /explore              gallery of listed flows (component-rendered HTML + meta)
  *   GET /w/:handle/:slug      flow detail (HTML + OpenGraph + JSON-LD)
  *   GET /sitemap.xml          dynamic sitemap (/explore + every /w/{handle}/{slug})
  *
+ * This SUPERSEDES the interim string-template implementation: the hand-written
+ * `layout()/flowCard()/renderGallery()/renderDetail()` helpers are gone — markup now
+ * comes from the render package's components and SEO builders.
+ *
+ * Anonymous viewer only (this is Step 11): every page renders for `viewer = null`
+ * (no library/ownership pills). Session-aware rendering is Step 12.
+ *
  * nginx routes these paths to the web-backend instead of the SPA catch-all
- * (config/nginx-root.conf + config/nginx-app.conf).
+ * (config/nginx-root.conf + config/nginx-app.conf); the hydration bundle is served as
+ * a normal static asset from the web root.
  */
 
 import { Router, Request, Response } from "express";
 import {
   getMarketplaceService,
   getBaseUrl,
+  getAppPrefix,
   isDomainError,
   MarketplaceDisabledError,
-  type GalleryItem,
-  type ListingDetail,
+  toMarketplaceLocale,
+  type MarketplaceLocale,
 } from "@mcp-moira/shared";
+import {
+  renderExploreToHtml,
+  renderDetailToHtml,
+  toGalleryView,
+  toDetailView,
+  buildDocument,
+  makeLabels,
+  jsonLdSafe,
+  escapeHtml,
+  type GalleryView,
+  type DetailView,
+  type SeoContext,
+} from "@mcp-moira/marketplace-render";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
 
 const router = Router();
 
-// Render fresh per request, but let crawlers/CDNs cache the HTML briefly.
+// Render fresh per request, but let crawlers/CDNs cache the anonymous HTML briefly.
 const PAGE_CACHE_CONTROL = "public, max-age=60";
 
-function esc(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+/**
+ * Stable hydration bundle URL. The frontend webpack `marketplace-hydrate` entry emits
+ * `marketplace-hydrate.js` (no contenthash) so the server can reference it
+ * deterministically without a manifest. Served by nginx's static-asset location from
+ * the web root; the `defer` script reads the inlined initial-data island and calls
+ * `hydrateRoot` on `#root`. The path is base-path aware: root mode → `/…`, our `/app`
+ * deploy → `/app/…` (where the frontend dist — and thus this bundle — is published).
+ */
+function hydrateBundleUrl(): string {
+  return `${getAppPrefix()}/marketplace-hydrate.js`;
 }
 
 /**
- * Make a JSON string safe to embed inside a <script> element: escape `<` so a value
- * like "</script>" cannot break out of the tag. (U+2028/U+2029 need no handling — the
- * block is parsed as JSON-LD data, not executed as a JS string literal.)
+ * `window.__MP__` is the initial-data island: the exact view-model + context the server
+ * rendered, so the browser hydrates the SAME tree without a refetch. Serialized as JSON
+ * and `<`-escaped (same hardening as JSON-LD) so a malicious title containing
+ * `</script>` cannot break out of the inline `<script>` — the payload is parsed as data,
+ * never executed as a JS string literal.
  */
-function jsonLdSafe(json: string): string {
-  return json.replace(/</g, "\\u003c");
+interface HydrationIsland {
+  page: "explore" | "detail";
+  gallery?: GalleryView;
+  detail?: DetailView;
+  viewer: null;
+  seo: SeoContext;
 }
 
-function parseTags(tags: string): string[] {
-  try {
-    const parsed = JSON.parse(tags || "[]");
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-interface HeadOptions {
-  title: string;
-  description: string;
-  canonical: string;
-  ogType?: string;
-  jsonLd?: string;
-}
-
-/** A SEO-complete HTML document shell. */
-function layout(head: HeadOptions, body: string): string {
-  const description = esc(head.description).slice(0, 320);
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${esc(head.title)}</title>
-<meta name="description" content="${description}" />
-<link rel="canonical" href="${esc(head.canonical)}" />
-<meta property="og:type" content="${esc(head.ogType ?? "website")}" />
-<meta property="og:title" content="${esc(head.title)}" />
-<meta property="og:description" content="${description}" />
-<meta property="og:url" content="${esc(head.canonical)}" />
-<meta name="twitter:card" content="summary" />
-<meta name="twitter:title" content="${esc(head.title)}" />
-<meta name="twitter:description" content="${description}" />
-${head.jsonLd ? `<script type="application/ld+json">${jsonLdSafe(head.jsonLd)}</script>` : ""}
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #1f2328; margin: 0; line-height: 1.55; background: #fff; }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 20px 64px; }
-  a { color: #0969da; text-decoration: none; } a:hover { text-decoration: underline; }
-  header.site { border-bottom: 1px solid #d0d7de; padding-bottom: 14px; margin-bottom: 22px; }
-  header.site h1 { font-size: 1.4rem; margin: 0; }
-  .muted { color: #656d76; }
-  ul.flows { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
-  li.flow { border: 1px solid #d0d7de; border-radius: 10px; padding: 16px 18px; }
-  li.flow h2 { font-size: 1.05rem; margin: 0 0 4px; }
-  .meta { color: #656d76; font-size: 0.85rem; margin-top: 8px; }
-  .badge { display: inline-block; font-size: 0.75rem; border: 1px solid #d0d7de; border-radius: 999px; padding: 1px 8px; margin-right: 6px; }
-  .detail h1 { font-size: 1.5rem; margin: 0 0 6px; }
-  code { background: #f6f8fa; padding: 1px 5px; border-radius: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; }
-</style>
-</head>
-<body>
-<div class="wrap">
-${body}
-</div>
-</body>
-</html>
-`;
-}
-
-function flowCard(item: GalleryItem, baseUrl: string): string {
-  const ref = item.ownerHandle ? `${item.ownerHandle}/${item.slug}` : item.slug;
-  const url = `${baseUrl}/w/${esc(ref)}`;
-  const rating =
-    item.ratingCount > 0 ? `★ ${item.ratingAvg.toFixed(1)} (${item.ratingCount})` : "Unrated";
-  return `<li class="flow">
-  <h2><a href="${url}">${esc(item.title)}</a></h2>
-  ${item.summary ? `<p class="muted">${esc(item.summary)}</p>` : ""}
-  <div class="meta">
-    ${item.verified ? `<span class="badge">verified</span>` : ""}
-    <span class="badge">${esc(item.category)}</span>
-    ${rating} · ${item.installCount} installs${item.ownerHandle ? ` · by ${esc(item.ownerHandle)}` : ""}
-  </div>
-</li>`;
-}
-
-function renderGallery(items: GalleryItem[], total: number, baseUrl: string): string {
-  const list =
-    items.length > 0
-      ? `<ul class="flows">${items.map((i) => flowCard(i, baseUrl)).join("\n")}</ul>`
-      : `<p class="muted">No published workflows yet.</p>`;
-  const body = `<header class="site"><h1>Explore workflows</h1>
-  <p class="muted">${total} published workflow${total === 1 ? "" : "s"} in the marketplace.</p></header>
-  ${list}`;
-  return layout(
-    {
-      title: "Explore workflows — Moira Marketplace",
-      description:
-        "Browse published Moira workflows: ready-to-run agent processes you can adopt and run in your MCP client.",
-      canonical: `${baseUrl}/explore`,
-    },
-    body,
+/** Build the inline bootstrap `<script>`s (escaped island + deferred hydration bundle). */
+function hydrationScripts(island: HydrationIsland): string {
+  const json = jsonLdSafe(JSON.stringify(island));
+  return (
+    `<script id="mp-bootstrap" type="application/json">${json}</script>` +
+    `<script src="${hydrateBundleUrl()}" defer></script>`
   );
 }
 
-function detailJsonLd(detail: ListingDetail, baseUrl: string): string {
-  const l = detail.listing;
-  const data: Record<string, unknown> = {
-    "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: l.title,
-    description: l.summary ?? `${l.title} — a Moira workflow`,
-    applicationCategory: "DeveloperApplication",
-    operatingSystem: "Any",
-    url: `${baseUrl}/w/${detail.startRef}`,
-    offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-  };
-  if (detail.ownerHandle) data.author = { "@type": "Person", name: detail.ownerHandle };
-  if (l.ratingCount > 0) {
-    data.aggregateRating = {
-      "@type": "AggregateRating",
-      ratingValue: l.ratingAvg.toFixed(1),
-      ratingCount: l.ratingCount,
-    };
-  }
-  return JSON.stringify(data);
+/**
+ * Inject the hydration bootstrap before `</body>`. The render package returns a
+ * complete document ending in `</body>\n</html>`; we splice the scripts in just before
+ * the closing body so the SSR markup (and JSON-LD in `<head>`) is untouched and the
+ * page stays fully usable with JS disabled.
+ */
+function withHydration(html: string, island: HydrationIsland): string {
+  return html.replace("</body>", `${hydrationScripts(island)}\n</body>`);
 }
 
-function renderDetail(detail: ListingDetail, baseUrl: string): string {
-  const l = detail.listing;
-  const tags = parseTags(l.tags);
-  const nodeCount = Array.isArray(detail.workflow.nodes) ? detail.workflow.nodes.length : 0;
-  const rating =
-    l.ratingCount > 0 ? `★ ${l.ratingAvg.toFixed(1)} (${l.ratingCount} ratings)` : "Unrated";
-  const body = `<header class="site"><a href="${baseUrl}/explore">← Explore</a></header>
-  <div class="detail">
-    <h1>${esc(l.title)}</h1>
-    <div class="meta">
-      ${l.verified ? `<span class="badge">verified</span>` : ""}
-      <span class="badge">${esc(l.category)}</span>
-      ${rating} · ${l.installCount} installs${detail.ownerHandle ? ` · by ${esc(detail.ownerHandle)}` : ""}
-    </div>
-    ${l.summary ? `<p>${esc(l.summary)}</p>` : ""}
-    <p class="muted">${nodeCount} step${nodeCount === 1 ? "" : "s"}.${tags.length ? ` Tags: ${tags.map(esc).join(", ")}.` : ""}</p>
-    <p>Run it in your MCP client: <code>start("${esc(detail.startRef)}")</code> (add it first with <code>marketplace add</code>).</p>
-  </div>`;
-  return layout(
-    {
-      title: `${l.title} — Moira Marketplace`,
-      description: l.summary ?? `${l.title}: a published Moira workflow you can adopt and run.`,
-      canonical: `${baseUrl}/w/${detail.startRef}`,
-      ogType: "article",
-      jsonLd: detailJsonLd(detail, baseUrl),
-    },
-    body,
-  );
+/** Pick the render locale from Accept-Language (anonymous viewer has no cookie state). */
+function pickLocale(req: Request): MarketplaceLocale {
+  const accept = (req.headers["accept-language"] || "").toString();
+  const first = accept.split(",")[0]?.trim() ?? "";
+  return toMarketplaceLocale(first);
 }
 
-function disabledOrMissingPage(baseUrl: string, message: string): string {
-  return layout(
+/** A SEO-complete 404 page rendered via the package's document shell (not the SPA). */
+function notFoundPage(seo: SeoContext, message: string): string {
+  const labels = makeLabels(seo.locale);
+  const body =
+    `<main class="mp-notfound" data-mp="notfound">` +
+    `<header class="mp-header"><h1>${escapeHtml(labels.chrome.notFoundTitle)}</h1></header>` +
+    `<p class="mp-subtitle">${escapeHtml(message)}</p>` +
+    `<p><a href="${escapeHtml(seo.baseUrl)}/explore">${escapeHtml(labels.chrome.exploreTitle)}</a></p>` +
+    `</main>`;
+  return buildDocument(
+    seo.locale,
     {
-      title: "Not found — Moira Marketplace",
+      title: `${labels.chrome.notFoundTitle} — Moira Marketplace`,
       description: message,
-      canonical: `${baseUrl}/explore`,
+      canonical: `${seo.baseUrl}/explore`,
     },
-    `<header class="site"><h1>Not found</h1></header><p class="muted">${esc(message)}</p>
-     <p><a href="${baseUrl}/explore">Explore workflows</a></p>`,
+    body,
   );
 }
-
-const ANONYMOUS = "__anonymous__";
 
 // GET /explore — gallery
-router.get("/explore", apiLimiter, async (_req: Request, res: Response) => {
-  const baseUrl = getBaseUrl();
+router.get("/explore", apiLimiter, async (req: Request, res: Response) => {
+  const seo: SeoContext = { baseUrl: getBaseUrl(), locale: pickLocale(req) };
   try {
-    const page = await getMarketplaceService().getGallery({ sort: "recent", limit: 100 });
+    // Anonymous viewer (null) → all-false annotations, crawler fast-path.
+    const page = await getMarketplaceService().getGalleryAnnotated(
+      { sort: "recent", limit: 100 },
+      null,
+    );
+    const gallery = toGalleryView(page);
+    const { html } = renderExploreToHtml(gallery, null, seo);
     res.setHeader("Cache-Control", PAGE_CACHE_CONTROL);
-    res.type("html").send(renderGallery(page.items, page.total, baseUrl));
+    res
+      .type("html")
+      .send(withHydration(html, { page: "explore", gallery, viewer: null, seo }));
   } catch (error) {
     if (error instanceof MarketplaceDisabledError) {
       res
         .status(404)
         .type("html")
-        .send(disabledOrMissingPage(baseUrl, "The marketplace is not enabled on this instance."));
+        .send(notFoundPage(seo, "The marketplace is not enabled on this instance."));
       return;
     }
     throw error;
@@ -231,20 +156,23 @@ router.get("/explore", apiLimiter, async (_req: Request, res: Response) => {
 
 // GET /w/:handle/:slug — flow detail
 router.get("/w/:handle/:slug", apiLimiter, async (req: Request, res: Response) => {
-  const baseUrl = getBaseUrl();
+  const seo: SeoContext = { baseUrl: getBaseUrl(), locale: pickLocale(req) };
   const reference = `${req.params.handle}/${req.params.slug}`;
   try {
     const service = getMarketplaceService();
-    const detail = await service.getDetailByReference(reference, ANONYMOUS);
-    void service.recordView(detail.listing.id, null).catch(() => {});
+    // Anonymous viewer (null) → resolves only listed+public flows, no library/own pills.
+    const annotated = await service.getDetailByReferenceAnnotated(reference, null);
+    void service.recordView(annotated.listing.id, null).catch(() => {});
+    const detail = toDetailView(annotated);
+    const { html } = renderDetailToHtml(detail, null, seo);
     res.setHeader("Cache-Control", PAGE_CACHE_CONTROL);
-    res.type("html").send(renderDetail(detail, baseUrl));
+    res.type("html").send(withHydration(html, { page: "detail", detail, viewer: null, seo }));
   } catch (error) {
     if (isDomainError(error)) {
       res
         .status(404)
         .type("html")
-        .send(disabledOrMissingPage(baseUrl, "This workflow is not available."));
+        .send(notFoundPage(seo, "This workflow is not available."));
       return;
     }
     throw error;

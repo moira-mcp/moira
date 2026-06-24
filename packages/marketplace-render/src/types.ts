@@ -8,7 +8,7 @@
  * viewer — no secrets, no other user's data (see session-sharing design §8).
  */
 
-import type { MarketplaceLocale } from "@mcp-moira/shared";
+import type { MarketplaceLocale } from "@mcp-moira/shared/i18n";
 
 /**
  * Per-viewer annotations carried by each gallery/detail item. Produced by the

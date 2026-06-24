@@ -32,10 +32,22 @@ function getPublicPath() {
 }
 
 const config = {
-  entry: "./src/index.tsx",
+  entry: {
+    // Main SPA entry (Web UI). Content-hashed for long-term caching.
+    index: "./src/index.tsx",
+    // Public-catalog SSR hydration entry. STABLE filename (no contenthash) so the
+    // web-backend's SSR HTML can reference `/marketplace-hydrate.js` deterministically
+    // without a manifest. Loaded standalone on the SSR pages via a plain <script>, so
+    // it must be self-contained (excluded from the shared vendor splitChunks below).
+    "marketplace-hydrate": "./src/marketplace-hydrate.tsx",
+  },
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "[name].[contenthash].js",
+    // Per-entry filename: stable for the hydration bundle, content-hashed otherwise.
+    filename: (pathData) =>
+      pathData.chunk.name === "marketplace-hydrate"
+        ? "[name].js"
+        : "[name].[contenthash].js",
     clean: true,
     publicPath: getPublicPath(),
   },
@@ -48,13 +60,24 @@ const config = {
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
     extensionAlias: {
-      ".js": [".ts", ".js"],
+      // Resolve TS-style `.js` import specifiers to their `.tsx`/`.ts` source. `.tsx`
+      // is required for the marketplace-render components, which the SSR/hydration code
+      // imports as `./Component.js` (NodeNext convention).
+      ".js": [".tsx", ".ts", ".js"],
     },
     alias: {
       "@": path.resolve(__dirname, "src"),
       "@shared/types": path.resolve(__dirname, "src/types"),
       types: path.resolve(__dirname, "src/types"),
       "@mcp-moira/shared": path.resolve(__dirname, "../shared/src"),
+      // Hydration-only barrel (components + labels + view-model types). Mapped before
+      // the package root so the client bundle never pulls the server-side mappers /
+      // marketplace service. `$` makes this an exact-match alias.
+      "@mcp-moira/marketplace-render/hydrate$": path.resolve(
+        __dirname,
+        "../marketplace-render/src/hydrate-entry.ts",
+      ),
+      "@mcp-moira/marketplace-render": path.resolve(__dirname, "../marketplace-render/src"),
     },
   },
   module: {
@@ -86,6 +109,10 @@ const config = {
     new HtmlWebpackPlugin({
       template: "./public/index.html",
       title: "MCP Moira Workflow Visualizer",
+      // The SPA shell loads only the main entry; the SSR hydration bundle is injected
+      // by the web-backend's server-rendered pages, not the SPA index.html.
+      chunks: ["index"],
+      excludeChunks: ["marketplace-hydrate"],
     }),
     new DefinePlugin({
       "process.env.MCP_URL": JSON.stringify(getMcpUrl()),
@@ -94,19 +121,20 @@ const config = {
   ],
   optimization: {
     splitChunks: {
-      chunks: "all",
+      // Only split the SPA (`index`) entry. The `marketplace-hydrate` bundle is loaded
+      // standalone on the SSR pages (no vendor/runtime chunk is loaded there), so it
+      // must stay self-contained — exclude it from all shared cacheGroups.
+      chunks: (chunk) => chunk.name !== "marketplace-hydrate",
       cacheGroups: {
         vendor: {
           test: /[\\/]node_modules[\\/]/,
           name: "vendors",
           priority: 10,
-          chunks: "all",
         },
         reactflow: {
           test: /[\\/]node_modules[\\/]@xyflow[\\/]/,
           name: "reactflow",
           priority: 20,
-          chunks: "all",
         },
       },
     },

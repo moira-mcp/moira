@@ -9,6 +9,7 @@
   },
   "scripts": {},
   "dependencies": {
+    "@mcp-moira/marketplace-render": "*",
     "@mcp-moira/shared": "*",
     "@mcp-moira/workflow-engine": "*",
     "multer": "^2.0.2"

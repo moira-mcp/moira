@@ -8,7 +8,7 @@
 
 import { buildHead, type HeadOptions } from "../seo/head.js";
 import { escapeHtml } from "../seo/escape.js";
-import type { MarketplaceLocale } from "@mcp-moira/shared";
+import type { MarketplaceLocale } from "@mcp-moira/shared/i18n";
 
 /** Critical inline CSS — JS-free, SEO-fast first paint (ported from the interim shell). */
 const CRITICAL_CSS = `
@@ -21,8 +21,9 @@ const CRITICAL_CSS = `
   .mp-card-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
   .mp-card { border: 1px solid #d0d7de; border-radius: 10px; padding: 16px 18px; }
   .mp-card-title { font-size: 1.05rem; margin: 0 0 4px; }
-  .mp-card-meta, .mp-detail-meta, .mp-detail-stats { color: #656d76; font-size: 0.85rem; margin-top: 8px; }
-  .mp-badge { display: inline-block; font-size: 0.75rem; border: 1px solid #d0d7de; border-radius: 999px; padding: 1px 8px; margin-right: 6px; }
+  .mp-card-meta, .mp-detail-meta { color: #656d76; font-size: 0.85rem; margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+  .mp-detail-stats { color: #656d76; font-size: 0.85rem; margin-top: 8px; }
+  .mp-badge { display: inline-block; font-size: 0.75rem; border: 1px solid #d0d7de; border-radius: 999px; padding: 1px 8px; }
   .mp-pill { display: inline-block; font-size: 0.75rem; border-radius: 999px; padding: 1px 8px; margin-top: 8px; background: #ddf4ff; }
   .mp-detail-title { font-size: 1.5rem; margin: 0 0 6px; }
   code { background: #f6f8fa; padding: 1px 5px; border-radius: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; }

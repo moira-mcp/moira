@@ -31,6 +31,7 @@ FROM core AS base
 COPY package*.json ./
 COPY tsconfig*.json ./
 COPY packages/workflow-engine/package.json ./packages/workflow-engine/
+COPY packages/marketplace-render/package.json ./packages/marketplace-render/
 COPY packages/mcp-server/package.json ./packages/mcp-server/
 COPY packages/web-backend/package.json ./packages/web-backend/
 COPY packages/web-frontend/package.json ./packages/web-frontend/
@@ -41,9 +42,12 @@ COPY packages/docs/package.json ./packages/docs/
 RUN --mount=type=cache,target=/root/.npm \
     npm install
 
-# Copy library packages (needed by all)
+# Copy library packages (needed by all). marketplace-render is a tsc/tsx-consumable
+# render library imported BOTH by the web-backend (renderToString at runtime, via tsx)
+# and the web-frontend (hydration bundle), so it lives in the shared base stage.
 COPY packages/shared/ ./packages/shared/
 COPY packages/workflow-engine/ ./packages/workflow-engine/
+COPY packages/marketplace-render/ ./packages/marketplace-render/
 
 # ===================================
 # Build stage with environments
@@ -108,6 +112,8 @@ COPY --from=base /app/tsconfig*.json ./
 COPY --from=base /app/node_modules ./node_modules
 COPY --from=base /app/packages/shared ./packages/shared
 COPY --from=base /app/packages/workflow-engine ./packages/workflow-engine
+# marketplace-render: imported by the web-backend at runtime (tsx) for SSR renderToString.
+COPY --from=base /app/packages/marketplace-render ./packages/marketplace-render
 
 # Copy backend packages from backend-build stage
 COPY --from=backend-build /app/packages/mcp-server ./packages/mcp-server

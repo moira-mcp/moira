@@ -96,9 +96,17 @@ test.describe("Public marketplace pages (SSR)", () => {
     expect(res?.status()).toBe(200);
     await expect(page).toHaveTitle(new RegExp(FLOW_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     await expect(page.locator("h1")).toContainText(FLOW_NAME);
-    // JSON-LD structured data is present in the document head.
-    const ld = await page.locator('script[type="application/ld+json"]').textContent();
-    expect(ld).toContain("SoftwareApplication");
+    // JSON-LD structured data is present in the document head. The render package emits
+    // multiple blocks (SoftwareApplication + BreadcrumbList), so assert across all of
+    // them that the SoftwareApplication type is present.
+    const ldBlocks = await page.locator('script[type="application/ld+json"]').allTextContents();
+    expect(ldBlocks.length).toBeGreaterThanOrEqual(1);
+    expect(ldBlocks.join("")).toContain("SoftwareApplication");
+    // The hydration bootstrap (stable bundle ref + initial-data island) is present so
+    // the browser upgrades the server-rendered markup.
+    await expect(page.locator('script[src*="marketplace-hydrate.js"]')).toHaveCount(1);
+    const island = await page.locator("#mp-bootstrap").textContent();
+    expect(JSON.parse(island as string).page).toBe("detail");
     await page.screenshot({ path: path.join(SHOT_DIR, "02-detail.png"), fullPage: true });
   });
 

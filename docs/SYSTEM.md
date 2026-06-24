@@ -79,7 +79,11 @@ GET  /health  // Server health status
 
 // Public server-rendered marketplace pages (web-backend, no auth; nginx routes these
 // root paths to the backend, NOT the SPA). Rendered fresh from the live DB per request
-// (no rebuild on publish); crawlable HTML + OpenGraph + JSON-LD; 404 HTML when disabled.
+// (no rebuild on publish) via the @mcp-moira/marketplace-render package (React
+// renderToString), with a client hydration bundle (marketplace-hydrate.js) that upgrades
+// the pages in the browser — pages are fully readable with JavaScript disabled.
+// Crawlable HTML + OpenGraph + JSON-LD (SoftwareApplication / ItemList / BreadcrumbList);
+// 404 HTML when disabled.
 GET  /explore             // gallery of listed flows
 GET  /w/:handle/:slug     // flow detail (JSON-LD SoftwareApplication)
 GET  /sitemap.xml         // dynamic sitemap (/explore + every /w/{handle}/{slug})
