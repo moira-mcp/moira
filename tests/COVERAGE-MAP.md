@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **46 domains**, **314 files**, **3705 tests**
+- **47 domains**, **316 files**, **3726 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -36,6 +36,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
 | marketplace         | 18    | 164   | unit:9, integration:2, api:3, mcp-tools:1, e2e:3               |
+| marketplace-render  | 2     | 21    | unit:2                                                         |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -529,6 +530,15 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/e2e/marketplace-i18n.spec.ts` — 1 test 🟢 (Playwright SPA localization: with ?lang=ru the gallery/detail/My-Listings render translated enum labels (category→"Разработка", status→"Опубликован") and correct Russian CLDR plural counts (install/step declensions, e.g. "2 шага") with no raw enum strings)
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the detail page (backend, not SPA) with JSON-LD; missing flow 404s instead of SPA fallthrough)
 - `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); before/after screenshots captured)
+
+### marketplace-render
+
+**2 files, 21 tests**
+
+**unit** (2 files)
+
+- `tests/unit/marketplace-render/render-html.test.ts` — 13 tests 🟢 (@mcp-moira/marketplace-render server render: renderExploreToHtml crawlable semantic gallery HTML + real detail `<a href>` links + escaped SEO head (title/description/canonical/OG/Twitter) + well-formed ItemList+BreadcrumbList JSON-LD; renderDetailToHtml semantic `<article>` + start command + SoftwareApplication JSON-LD with/without aggregateRating + BreadcrumbList; localized counts EN vs RU CLDR forms (published/steps "2 шага"/installs "5 установок"/"1 install"); localized category enum (RU "Исследования"/"Данные и анализ", not raw) + "Unrated"/"Без оценок"; viewer pills only when authenticated+annotated; JSON-LD XSS-safety — malicious detail/gallery title+summary cannot break out of `<script type="application/ld+json">` (`<`-escaped, no raw `</script>`/`<script>alert`/`<img onerror`))
+- `tests/unit/marketplace-render/marketplace-viewer-annotation.test.ts` — 8 tests 🟢 (MarketplaceService viewer-annotation: getGalleryAnnotated/getDetailByReferenceAnnotated attach inLibrary/isOwn for owner (isOwn, not stored as library entry) / non-owner-who-added (inLibrary) / stranger (both false) / anonymous null viewer (both false, no library DB hit); gallery pagination metadata preserved; anonymous detail still resolves workflow + ownerHandle)
 
 ### node-handlers
 

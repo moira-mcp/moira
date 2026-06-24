@@ -122,6 +122,29 @@ export interface GalleryPage {
   sort: GallerySortOption;
 }
 
+/**
+ * Per-viewer annotations attached to a gallery item / detail by the viewer-annotation
+ * capability. For an anonymous viewer (null id) both flags are `false`. Consumed by the
+ * `@mcp-moira/marketplace-render` package to render session-aware public pages.
+ */
+export interface ViewerAnnotations {
+  /** The viewer already has this flow in their library. */
+  inLibrary: boolean;
+  /** The viewer published (owns) this flow. */
+  isOwn: boolean;
+}
+
+/** A gallery item annotated for the current viewer (gallery + `inLibrary`/`isOwn`). */
+export type AnnotatedGalleryItem = GalleryItem & ViewerAnnotations;
+
+/** A gallery page whose items carry per-viewer annotations. */
+export interface AnnotatedGalleryPage extends Omit<GalleryPage, "items"> {
+  items: AnnotatedGalleryItem[];
+}
+
+/** A listing detail annotated for the current viewer (detail + `inLibrary`/`isOwn`). */
+export type AnnotatedListingDetail = ListingDetail & ViewerAnnotations;
+
 /** A public review with the author's handle/name resolved (userId not exposed). */
 export interface ReviewWithAuthor {
   id: string;
@@ -141,6 +164,13 @@ export interface ExportResult {
 
 /** Recent-activity window for the trending sort (7 days). */
 const TRENDING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Sentinel "current user" id for anonymous detail resolution — a value that matches no
+ * real user, so the access predicate in `getDetailBy*` resolves only listed+public
+ * flows (same behavior as the interim public SSR route's `ANONYMOUS`).
+ */
+const ANONYMOUS_VIEWER = "__anonymous__";
 
 /** Upper bound on gallery offset — caps deep-paging cost on the public surface. */
 const MAX_GALLERY_OFFSET = 10_000;
@@ -514,6 +544,79 @@ export class MarketplaceService {
       startRef: `${info.ownerHandle}/${info.slug}`,
       entitlement: this.canAccess(listing),
     };
+  }
+
+  // ===== Viewer-annotated reads (session-aware public pages) =====
+
+  /**
+   * The public gallery annotated for a viewer: each item carries `inLibrary` (the
+   * viewer has it in their library) and `isOwn` (the viewer published it). Reuses
+   * {@link getGallery} for the data and a single batched library read — no duplicated
+   * query logic. A null/anonymous `viewerId` yields all-`false` annotations with no DB
+   * hit for the library (the crawler fast-path).
+   */
+  async getGalleryAnnotated(
+    query: GalleryQuery,
+    viewerId: string | null,
+  ): Promise<AnnotatedGalleryPage> {
+    const page = await this.getGallery(query);
+    const libraryWorkflowIds = await this.libraryWorkflowIds(viewerId);
+    const items = page.items.map((item) => ({
+      ...item,
+      isOwn: viewerId != null && item.publishedBy === viewerId,
+      inLibrary: libraryWorkflowIds.has(item.workflowId),
+    }));
+    return { ...page, items };
+  }
+
+  /**
+   * Resolve a listing detail by `handle/slug` annotated for a viewer. Reuses
+   * {@link getDetailByReference} (so all listed/public predicates apply identically),
+   * then attaches `inLibrary`/`isOwn`. Pass the real viewer id (or null/anonymous).
+   */
+  async getDetailByReferenceAnnotated(
+    reference: string,
+    viewerId: string | null,
+  ): Promise<AnnotatedListingDetail> {
+    // Resolve the detail with the viewer's own id so an owner sees their flow even if a
+    // (transient) visibility predicate would otherwise hide it; anonymous resolves with
+    // the existing ANONYMOUS sentinel used by the public SSR route.
+    const detail = await this.getDetailByReference(reference, viewerId ?? ANONYMOUS_VIEWER);
+    return this.annotateDetail(detail, viewerId);
+  }
+
+  /** Resolve a listing detail by listing id annotated for a viewer (authed callers). */
+  async getDetailByIdAnnotated(
+    listingId: string,
+    viewerId: string | null,
+  ): Promise<AnnotatedListingDetail> {
+    const detail = await this.getDetailById(listingId, viewerId ?? ANONYMOUS_VIEWER);
+    return this.annotateDetail(detail, viewerId);
+  }
+
+  /** Attach `inLibrary`/`isOwn` to a resolved detail for the given viewer. */
+  private async annotateDetail(
+    detail: ListingDetail,
+    viewerId: string | null,
+  ): Promise<AnnotatedListingDetail> {
+    const isOwn = viewerId != null && detail.listing.publishedBy === viewerId;
+    const inLibrary =
+      viewerId != null &&
+      (await this.libraryRepo.getByUserAndWorkflow(viewerId, detail.workflowId)) != null;
+    return { ...detail, isOwn, inLibrary };
+  }
+
+  /**
+   * The set of workflow ids in a viewer's stored library (added ∪ shared entries).
+   * Empty for an anonymous viewer (no DB hit). One batched read drives the gallery
+   * `inLibrary` annotation.
+   */
+  private async libraryWorkflowIds(viewerId: string | null): Promise<Set<string>> {
+    if (viewerId == null) {
+      return new Set<string>();
+    }
+    const entries = await this.libraryRepo.listByUser(viewerId);
+    return new Set(entries.map((entry) => entry.workflowId));
   }
 
   // ===== Owner listing management =====

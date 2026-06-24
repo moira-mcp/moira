@@ -31,6 +31,8 @@
       "@mcp-moira/web-frontend/*": ["packages/web-frontend/src/*"],
       "@mcp-moira/shared": ["packages/shared/src"],
       "@mcp-moira/shared/*": ["packages/shared/src/*"],
+      "@mcp-moira/marketplace-render": ["packages/marketplace-render/src"],
+      "@mcp-moira/marketplace-render/*": ["packages/marketplace-render/src/*"],
       "@mcp-moira/workflow-testing": ["packages/workflow-testing/src"],
       "@mcp-moira/workflow-testing/*": ["packages/workflow-testing/src/*"]
     }

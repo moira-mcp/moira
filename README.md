@@ -39,6 +39,7 @@ with those gates off by default (`DEPLOYMENT_MODE=self-host`).
 - **packages/mcp-server/** - MCP protocol HTTP server with tools
 - **packages/web-backend/** - Express API for workflow management
 - **packages/web-frontend/** - React UI for workflow visualization
+- **packages/marketplace-render/** - Server-side render library for the public marketplace catalog (React components + `renderToString` + SEO/JSON-LD builders), consumed by the web-backend
 - **packages/docs/** - Astro 5 + Starlight documentation site (EN+RU), built into the image and served at `/docs`
 - **packages/shared/** - Database layer (schema, connection, repositories) + Better Auth + logging
   - `database/` - Modular repositories (Workflow, Execution, Settings)
