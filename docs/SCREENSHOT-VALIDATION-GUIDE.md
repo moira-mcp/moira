@@ -281,3 +281,40 @@ The `step-report.html` (comprehensive gate review report) should reference or in
 2. **Combined**: `step-report.html` includes a "Screenshot Validation" section with embedded screenshots.
 
 Either approach works. The key: user can approve the step from the reports alone.
+
+## Hosting the Report as a Moira Artifact (shareable link)
+
+In addition to writing `step-report.html` to the workspace, upload it as a Moira
+artifact so the user gets a shareable HTTPS link instead of a local file path. Do this
+on every step that produces a report, and surface the link in the step report to the
+user.
+
+**Self-contained requirement:** an artifact is a single HTML file served from its own
+origin, so it has no access to the workspace `screenshots/` directory — all images MUST
+be inlined as `data:image/png;base64,...` URIs (the same base64 embedding used for the
+local report). A report that references screenshots by relative path will show broken
+images once hosted.
+
+**Upload via the one-time token (the `artifacts` MCP tool):**
+
+```
+artifacts({ action: "token", ttlMinutes: 30 })
+// → { token, uploadUrl: "<host>/api/public/artifacts/upload/<token>" }
+```
+
+Then POST the file to `uploadUrl` (follow redirects — the public host may 308-redirect to
+the canonical domain):
+
+```bash
+curl -sL -X POST "<uploadUrl>" \
+  -F "file=@/path/to/step-report-hosted.html;type=text/html;filename=step-report.html"
+# → { "success": true, "data": { "url": "https://<uuid>.static.<host>/", ... } }
+```
+
+The token route also accepts a JSON body `{ name, content }`; the multipart `file` form
+is preferred for large reports (avoids sending the whole HTML through the MCP tool
+argument). Return the resulting `url` to the user as the report link.
+
+Alternatively `artifacts({ action: "upload", name, content })` uploads directly, but the
+token + `curl` path keeps a large self-contained report out of the tool-call payload.
+Artifact limits: 5 MB/file, 30-day default TTL.
