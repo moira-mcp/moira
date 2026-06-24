@@ -262,6 +262,27 @@ export class WorkflowRepository {
   }
 
   /**
+   * Resolve a slug to a workflow ID INCLUDING soft-deleted rows.
+   *
+   * A soft-deleted row still occupies the (userId, slug) uniqueness slot — the unique index
+   * `workflow_user_slug_idx` does not exclude deleted rows — so a plain INSERT of the same
+   * (userId, slug) collides with "slug already exists". The catalog loader uses this to find such a
+   * row and restore + update it instead of inserting. Normal lookups must use `resolveSlug`, which
+   * ignores deleted flows.
+   */
+  async resolveSlugIncludingDeleted(slug: string, userId: string): Promise<string | null> {
+    const normalizedSlug = normalizeSlug(slug);
+
+    const [row] = await this.db
+      .select({ id: workflow.id })
+      .from(workflow)
+      .where(and(eq(workflow.slug, normalizedSlug), eq(workflow.userId, userId)))
+      .limit(1);
+
+    return row?.id ?? null;
+  }
+
+  /**
    * Resolve a slug to workflow ID, allowing public access
    * @param slug - Workflow slug
    * @param ownerUserId - Owner user ID (not current user)

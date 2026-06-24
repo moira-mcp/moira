@@ -199,6 +199,43 @@ describe("Workflow Catalog Loader Integration", () => {
     expect(await deps.workflowRepo.resolveSlug(slug, OWNER_B)).toBe(idB);
   });
 
+  test("restores and updates a soft-deleted flow instead of failing with a slug collision", async () => {
+    const slug = `loader-softdeleted-${Date.now()}`;
+
+    // Install, then soft-delete it — simulating a prod row that was previously soft-deleted while
+    // its (owner, slug) slot stays occupied by the unique index.
+    await installCatalogEntries([entry(OWNER_A, slug, "1.0.0")], deps);
+    const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    expect(id).toBeTruthy();
+    await deps.workflowRepo.softDelete(id!, OWNER_A);
+    expect(await deps.workflowRepo.resolveSlug(slug, OWNER_A)).toBeNull(); // hidden, but slot taken
+
+    // Re-installing the bundled flow must NOT throw "slug already exists" — it restores + updates.
+    const result = await installCatalogEntries([entry(OWNER_A, slug, "1.1.0")], deps);
+    expect(result.updated).toBe(1);
+    expect(result.installed).toBe(0);
+
+    // Same row is active again (same id), with the newer version.
+    const restoredId = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    expect(restoredId).toBe(id);
+    const stored = await deps.workflowRepo.get(restoredId!, OWNER_A);
+    expect(stored?.metadata?.version).toBe("1.1.0");
+  });
+
+  test("restores a soft-deleted flow even when the bundled version is unchanged", async () => {
+    const slug = `loader-softdeleted-same-${Date.now()}`;
+
+    await installCatalogEntries([entry(OWNER_A, slug, "1.0.0")], deps);
+    const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    await deps.workflowRepo.softDelete(id!, OWNER_A);
+    expect(await deps.workflowRepo.resolveSlug(slug, OWNER_A)).toBeNull();
+
+    // Same version + same content → no INSERT collision, and the flow is brought back to active.
+    const result = await installCatalogEntries([entry(OWNER_A, slug, "1.0.0")], deps);
+    expect(result.installed).toBe(0);
+    expect(await deps.workflowRepo.resolveSlug(slug, OWNER_A)).toBe(id);
+  });
+
   describe("multi-directory catalog → install (Step 2 end-to-end)", () => {
     const ORIGINAL_ENV = { ...process.env };
 
