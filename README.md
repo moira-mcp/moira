@@ -67,6 +67,40 @@ The image is pulled from the public registry by default. Data (SQLite + executio
 storage) persists in `./data`. See [Self-Hosting](#self-host-recommended) or the in-app docs
 at `/docs/` for the full reference.
 
+### Updating / Upgrading
+
+A self-host upgrade is just an image swap — your data in `./data` is untouched:
+
+```bash
+docker compose pull        # fetch the new ghcr.io/moira-mcp/moira image
+docker compose up -d        # recreate the container on the new image
+```
+
+On **every** container start, before the app serves traffic, the entrypoint runs
+database migrations and a **version-gated** workflow-catalog sync. So upgrading the
+image automatically:
+
+- applies schema migrations to your existing database, and
+- updates the **bundled** system workflows whose version was bumped in the new release
+  — a higher `metadata.version` is re-installed in place, unchanged ones are skipped,
+  and a previously soft-deleted bundled flow is restored and updated.
+
+What is **preserved** across an upgrade:
+
+- your **own** workflows (created/edited in the Web UI) — never touched,
+- all execution history, notes, artifacts, settings, and accounts,
+- everything else in `./data` (a host bind-mount that survives container recreation).
+
+What **changes**:
+
+- only the **system bundled** workflows are brought up to the versions shipped in the
+  new image.
+
+To pin a specific version instead of tracking `latest`, set the tag in
+`docker-compose.yml`, e.g. `image: ghcr.io/moira-mcp/moira:0.4.0`. Per-version release
+notes and the changelog are on the
+[GitHub Releases](https://github.com/moira-mcp/moira/releases) page.
+
 ### Local Development (from source)
 
 For contributors who want to build and run from the source tree, switch
