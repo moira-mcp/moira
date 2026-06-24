@@ -10,8 +10,18 @@ name: Publish Image
 # secret-free env file. Publishes the image only; it does not deploy anywhere.
 
 on:
+  # Primary path: called by release.yml after a semantic-release version is cut,
+  # to publish the versioned multi-arch image. `:latest` now tracks the latest
+  # release (not every master push). A tag created by release.yml's GITHUB_TOKEN
+  # does NOT re-trigger workflows, which is why this is invoked via workflow_call.
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version to tag the image with (e.g. 0.4.0)"
+        required: true
+        type: string
+  # Manual safety paths: a human pushing a v* tag, or a manual dispatch.
   push:
-    branches: [master]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -105,16 +115,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Under workflow_call the context is the caller's branch ref (refs/heads/master),
+      # so the `type=semver` lines below produce NOTHING — derive the version tags
+      # explicitly from the input instead. `minor` = version with the patch dropped
+      # (0.4.1 -> 0.4).
+      - name: Derive version tags
+        id: ver
+        if: ${{ inputs.version != '' }}
+        run: |
+          V='${{ inputs.version }}'
+          echo "full=$V"       >> "$GITHUB_OUTPUT"
+          echo "minor=${V%.*}" >> "$GITHUB_OUTPUT"
+
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
+            type=raw,value=${{ steps.ver.outputs.full }},enable=${{ inputs.version != '' }}
+            type=raw,value=${{ steps.ver.outputs.minor }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            type=sha
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Log in to GHCR
@@ -133,4 +157,4 @@ jobs:
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.version || steps.meta.outputs.version }}
