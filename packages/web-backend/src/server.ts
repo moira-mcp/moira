@@ -67,6 +67,7 @@ import { staticArtifactsRoutes } from "./routes/static-artifacts.js";
 import { marketplacePublicRoutes } from "./routes/marketplace-public.js";
 import { marketplaceAuthedRoutes } from "./routes/marketplace-authed.js";
 import { marketplaceAdminRoutes } from "./routes/marketplace-admin.js";
+import { marketplacePagesRoutes } from "./routes/marketplace-pages.js";
 import { workflowSharingRoutes } from "./routes/workflow-sharing.js";
 import { inviteAcceptRoutes } from "./routes/invite-accept.js";
 import { tokenRoutes } from "./routes/tokens.js";
@@ -377,6 +378,11 @@ class MoiraApiServer {
     this.app.use("/api/admin", adminUserSecurityRoutes); // Already has apiLimiter, requireAuth, requireAdmin inside
     this.app.use("/api/admin/analytics", apiLimiter, requireAuth, adminAnalyticsRoutes); // requireAdmin inside routes
     this.app.use("/api/admin/monitoring-test", apiLimiter, requireAuth, monitoringTestRoutes); // requireAdmin inside routes
+
+    // Server-rendered PUBLIC marketplace pages (SEO) at root paths (/explore, /w/*,
+    // /sitemap.xml) — nginx routes these to the backend instead of the SPA. apiLimiter
+    // is applied per-route inside the router.
+    this.app.use(marketplacePagesRoutes);
 
     // Default route for API documentation
     this.app.get("/api", (req, res) => {

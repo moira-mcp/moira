@@ -77,6 +77,13 @@ marketplace(action: string, ...)                    // Agent marketplace: search
 POST /mcp     // JSON-RPC 2.0 requests
 GET  /health  // Server health status
 
+// Public server-rendered marketplace pages (web-backend, no auth; nginx routes these
+// root paths to the backend, NOT the SPA). Rendered fresh from the live DB per request
+// (no rebuild on publish); crawlable HTML + OpenGraph + JSON-LD; 404 HTML when disabled.
+GET  /explore             // gallery of listed flows
+GET  /w/:handle/:slug     // flow detail (JSON-LD SoftwareApplication)
+GET  /sitemap.xml         // dynamic sitemap (/explore + every /w/{handle}/{slug})
+
 // Version Check
 // Server compares client's toolsVersion (stored at OAuth authorize) with current server version
 // If mismatch: HTTP 426 Upgrade Required with hint "/mcp reconnect moira"
