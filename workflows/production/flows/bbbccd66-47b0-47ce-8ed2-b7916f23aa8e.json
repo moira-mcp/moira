@@ -5,7 +5,7 @@
   "id": "bbbccd66-47b0-47ce-8ed2-b7916f23aa8e",
   "metadata": {
     "name": "Robust Task",
-    "version": "4.3.0",
+    "version": "4.4.1",
     "description": "Надёжное выполнение сложных задач с полной инфраструктурой: workspace на диске для восстановления контекста, валидация плана субагентом, retry механизм (до 3 попыток на шаг), Telegram уведомления, эскалация при проблемах. Structured process: UNDERSTAND → DECOMPOSE → VALIDATE → APPROVE → EXECUTE → VERIFY → DELIVER."
   },
   "nodes": [
@@ -38,7 +38,7 @@
     {
       "id": "understand-task",
       "type": "agent-directive",
-      "directive": "Gather complete understanding of the task from user.\n\nAsk:\n1. What needs to be done? (task description)\n2. What is the expected end result? (deliverable)\n3. What constraints exist? (time, resources, dependencies)\n4. How will we know the task is complete? (success criteria - must be specific and verifiable)\n\nRules:\n{{process_requirements}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until user explicitly responds\n- Record in user_response_text exactly what user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking",
+      "directive": "Gather complete understanding of the task from user.\n\nAsk:\n1. What needs to be done? (task description)\n2. What is the expected end result? (deliverable)\n3. What constraints exist? (time, resources, dependencies)\n4. How will we know the task is complete? (success criteria - must be specific and verifiable)\n\nPlanning standards (frame the questions around these):\n{{planning_standards}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until the user explicitly responds\n- Record in user_response_text exactly what the user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate a short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking",
       "completionCondition": "User EXPLICITLY answered questions (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -74,13 +74,11 @@
           "task_short_name",
           "expected_deliverable",
           "success_criteria",
-          "user_response_text",
-          "execution_note"
+          "user_response_text"
         ],
         "globalInputs": [
           "task_short_name",
-          "user_response_text",
-          "execution_note"
+          "user_response_text"
         ]
       },
       "connections": {
@@ -124,7 +122,7 @@
     {
       "id": "setup-workspace",
       "type": "agent-directive",
-      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}\nExample: ./moira-ws/auth-fix-20251212-1030\n\n1) Create workspace folder with current date and time\n2) Save current workflow process ID to file {workspace}/process-id.txt for recovery after archival\n3) Create file {workspace}/task-requirements.md with:\n   - Task description: {{understand-task.task_description}}\n   - Expected result: {{understand-task.expected_deliverable}}\n   - Success criteria: {{understand-task.success_criteria}}\n   - Constraints: {{understand-task.constraints}}\n4) Create file {workspace}/planning-standards.md with:\n   {{planning_standards}}\n\nConfirm workspace creation.",
+      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/  (must end with a trailing slash)\nExample: ./moira-ws/auth-fix-20251212-1030/\n\n1) Create the workspace folder with the current date and time\n2) Save the current workflow process ID to {workspace}process-id.txt for recovery after archival\n3) Create {workspace}task-requirements.md with:\n   - Task description: {{understand-task.task_description}}\n   - Expected result: {{understand-task.expected_deliverable}}\n   - Success criteria: {{understand-task.success_criteria}}\n   - Constraints: {{understand-task.constraints}}\n4) Create {workspace}planning-standards.md with:\n   {{planning_standards}}\n\nReturn workspace_path ending with a trailing slash. Confirm workspace creation.",
       "completionCondition": "Workspace created, process ID and requirements saved",
       "inputSchema": {
         "type": "object",
@@ -147,16 +145,13 @@
     {
       "id": "decompose-into-steps",
       "type": "agent-directive",
-      "directive": "Break down task '{{understand-task.task_description}}' into specific executable steps.\n\nRequirements:\n- As many steps as the task genuinely needs — small tasks may have a few, large tasks may have 20-40. Do NOT pad or truncate the plan to hit a target number; let the task's real scope decide.\n- Each step = one specific action\n- For each step specify expected_output (how to verify step is complete)\n- Steps should lead to deliverable: {{understand-task.expected_deliverable}}\n\nDecomposition rules:\n{{process_requirements}}\n\nPlan writing requirements:\n{{plan_writing_requirements}}\n\n{{#if has_file_access}}⚠️ ADDITIONALLY: After creating plan, save it to file {{workspace_path}}/plan.md in readable markdown format.{{/if}}",
+      "directive": "Break down task '{{understand-task.task_description}}' into specific executable steps.\n\nRequirements:\n- As many steps as the task genuinely needs — small tasks may have a few, large tasks may have 20-40. Do NOT pad or truncate the plan to hit a target number; let the task's real scope decide.\n- Each step = one specific action\n- For each step specify expected_output (how to verify step is complete)\n- Steps should lead to deliverable: {{understand-task.expected_deliverable}}\n\nPlanning standards:\n{{planning_standards}}\n\n{{#if has_file_access}}Save the plan to {{workspace_path}}/plan.md in readable markdown (one numbered item per step). Return only total_steps and plan_saved_to_file — do NOT echo the plan back.{{else}}NO file access: you MUST return the full steps[] array AND current_step_action + current_step_expected_output of step 1 — the plan lives only in context (there is no plan.md).{{/if}}",
       "completionCondition": "Plan created with one action per step, each step has expected_output{{#if has_file_access}}, plan saved to file{{/if}}",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "steps",
-          "total_steps",
-          "current_step_action",
-          "current_step_expected_output"
+          "total_steps"
         ],
         "globalInputs": [
           "steps",
@@ -173,7 +168,7 @@
     {
       "id": "validate-plan",
       "type": "agent-directive",
-      "directive": "Re-validation pass {{validation_round}} of up to {{max_validation_rounds}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user. Just validate the current plan.\n\nDelegate plan validation to subagent via Task tool.\n\nCRITICALLY IMPORTANT: DO NOT validate plan yourself - delegate to independent subagent.\n\n1) Pass to subagent ONLY necessary:\n   {{#if has_file_access}}- Path to plan: {{workspace_path}}/plan.md\n   - Path to requirements: {{workspace_path}}/task-requirements.md\n   - Path to standards: {{workspace_path}}/planning-standards.md{{else}}- Plan from context: {{steps}}\n   - Requirements: {{understand-task.task_description}}, {{understand-task.expected_deliverable}}, {{understand-task.success_criteria}}\n   - Standards: {{planning_standards}}{{/if}}\n\n2) Prompt for subagent (pass verbatim):\n   YOU ARE plan validator. Your assessment determines if plan can proceed.\n\n   {{#if has_file_access}}READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}/plan.md\n   - Requirements: {{workspace_path}}/task-requirements.md\n   - Planning standards: {{workspace_path}}/planning-standards.md{{/if}}\n\n   CHECK each step against criteria:\n   - Is step self-contained? (executable without other steps)\n   - Are actions explicit? (concrete commands, not \"configure\")\n   - Is expected_output measurable? (easy to verify completion)\n   - Are file paths complete?\n   - ATOMICITY (S9): does each item restate the nuances it needs and duplicate cross-cutting actions (e.g. progress report, run tests, commit) rather than relying on a global scope?\n\n   CHECK REQUIREMENTS COVERAGE:\n   - Does plan address ALL user requirements?\n   - Is every requirement from task-requirements.md covered by at least one step?\n   - Are there gaps in coverage?\n\n   CHECK STANDARDS COMPLIANCE:\n   - Does plan follow ALL planning standards from planning-standards.md?\n   - Step granularity appropriate?\n   - Dependencies correct?\n   - Verifiability ensured?\n\n   COUNT issues found. RETURN issues_count (0 = valid) and a FLAT list of specific issues (every issue mandatory; no severity tiers).\n\n3) Save subagent result:\n   - issues_count: number of issues found\n   - validation_issues: list of issues (if any)\n\n{{#if has_file_access}}4) Save validation issues to file {{workspace_path}}/plan-validation-issues.md:\n   # Plan Validation Issues\n\n   Total issues: [count]\n\n   ## Issues Found\n\n   ### 1. [issue description]\n   Category: [structure/requirements/standards]\n   Recommendation: [how to fix]\n\n   ### 2. [issue description]\n   ...\n{{/if}}\n\nHonestly pass subagent result. Your opinion doesn't matter - reviewer findings matter.",
+      "directive": "Re-validation pass {{validation_round}} of up to {{max_validation_rounds}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user. Just validate the current plan.\n\nDelegate plan validation to an INDEPENDENT reviewer subagent (do NOT validate the plan yourself).\n\nGive the reviewer ONLY paths/inputs:\n{{#if has_file_access}}- Plan: {{workspace_path}}/plan.md\n- Requirements: {{workspace_path}}/task-requirements.md\n- Standards: {{workspace_path}}/planning-standards.md{{else}}- Plan from context: {{steps}}\n- Requirements: {{understand-task.task_description}}, {{understand-task.expected_deliverable}}, {{understand-task.success_criteria}}\n- Standards: {{planning_standards}}{{/if}}\n\nReviewer brief (verbatim):\n  YOU ARE the plan validator. Your assessment determines if the plan can proceed.\n  {{#if has_file_access}}Read the plan, requirements, and standards files directly — do not trust summaries.{{/if}}\n  CHECK each step: self-contained? explicit actions (not \"configure\")? expected_output measurable? full file paths? ATOMICITY (S9 — each item restates the nuances it needs and duplicates cross-cutting actions rather than relying on a global scope)?\n  CHECK requirements coverage: is every requirement covered by at least one step? any gaps?\n  CHECK standards compliance: granularity, dependencies, verifiability, and no tail degradation (S11).\n  RETURN issues_count (0 = valid) and a FLAT list of specific issues (every issue mandatory; no severity tiers).\n\n{{#if has_file_access}}Write the issues to {{workspace_path}}/plan-validation-issues.md:\n   # Plan Validation Issues\n   Total issues: [count]\n   ## Issues Found\n   ### 1. [issue]\n   Category: [structure/requirements/standards]\n   Recommendation: [how to fix]\n{{/if}}\n\nRecord the reviewer's result honestly — reviewer findings are authoritative, your opinion does not override them.",
       "completionCondition": "Plan validated, issues_count specified",
       "inputSchema": {
         "type": "object",
@@ -232,14 +227,12 @@
     {
       "id": "fix-plan-issues",
       "type": "agent-directive",
-      "directive": "CRITICAL: FIX THE ISSUES - NO REPORTS!\n\nFix all plan validation issues completely.\n\n{{#if has_file_access}}READ {{workspace_path}}/plan-validation-issues.md{{else}}Issues from context: {{validate-plan.validation_issues}}{{/if}}\n\nFor EACH issue found by reviewer:\n1. Understand the issue and recommendation\n2. Apply the fix completely - no partial fixes\n3. Verify the issue is resolved\n4. Document what was done\n\nCurrent plan:\n{{steps}}\n\nPlan writing requirements:\n{{plan_writing_requirements}}\n\nDO NOT skip any issue. ALL reviewer findings must be addressed.\nIf issue seems minor - still address it explicitly.\nReviewer findings are authoritative - your opinion doesn't override them.\n\n{{#if has_file_access}}After fixing, update file {{workspace_path}}/plan.md{{/if}}\n\nFix each issue and return updated plan.",
+      "directive": "CRITICAL: FIX THE ISSUES — NO REPORTS!\n\nFix all plan validation issues completely.\n\n{{#if has_file_access}}READ {{workspace_path}}/plan-validation-issues.md{{else}}Issues from context: {{validate-plan.validation_issues}}{{/if}}\n\nFor EACH issue: understand it, apply the fix completely (no partial fixes), verify it is resolved.\nReviewer findings are authoritative — do not skip any, even minor ones.\n\nPlanning standards:\n{{planning_standards}}\n\n{{#if has_file_access}}After fixing, update {{workspace_path}}/plan.md. Return only fixes_applied — do NOT echo the plan.{{/if}}",
       "completionCondition": "Issues fixed, plan updated",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "steps",
-          "total_steps",
           "fixes_applied"
         ],
         "globalInputs": [
@@ -265,7 +258,7 @@
     {
       "id": "present-plan",
       "type": "agent-directive",
-      "directive": "Show user the task execution plan.\n\nTask: {{understand-task.task_description}}\nExpected result: {{understand-task.expected_deliverable}}\n\nPlan ({{total_steps}} steps):\n{{steps}}\n\nSuccess will be measured by criteria:\n{{understand-task.success_criteria}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Do you confirm the plan? (yes/no)'\n- STOP and wait until user writes response\n- DO NOT fill plan_approved until user explicitly says yes or no\n- Showing plan ≠ getting confirmation\n- Record in user_response_text exactly what user answered\n\n⚠️ HANDLING FEEDBACK:\n- If user gives comments, suggests changes, or says anything other than pure 'yes' → plan_approved: 'no'\n- Record comments in revision_feedback\n- 'Yes, but...' = NO (there are comments)\n- 'Good, just change...' = NO (there are comments)\n- Only pure 'yes'/'ok'/'confirm' without reservations = YES\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "directive": "Show user the task execution plan.\n\nTask: {{understand-task.task_description}}\nExpected result: {{understand-task.expected_deliverable}}\n\n{{#if has_file_access}}Present the plan from {{workspace_path}}/plan.md ({{total_steps}} steps).{{else}}Plan ({{total_steps}} steps):\n{{steps}}{{/if}}\n\nSuccess will be measured by criteria:\n{{understand-task.success_criteria}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Do you confirm the plan? (yes/no)'\n- STOP and wait until the user writes a response\n- DO NOT fill plan_approved until the user explicitly says yes or no\n- Showing the plan ≠ getting confirmation\n- Record in user_response_text exactly what the user answered\n\n⚠️ HANDLING FEEDBACK:\n- Any comment, suggested change, or anything other than a pure 'yes' → plan_approved: 'no'\n- Record comments in revision_feedback\n- 'Yes, but...' = NO; 'Good, just change...' = NO\n- Only a pure 'yes'/'ok'/'confirm' without reservations = YES\n\nDO NOT fix the plan yourself. Reply plan_approved = 'no' with revision_feedback — the workflow routes to the fix branch.\n\nIf the user does NOT approve, do NOT use teleport-replan and do NOT fix the plan yourself — just answer plan_approved='no' with revision_feedback; the workflow routes to the revise-plan branch. teleport-replan is ONLY for mid-execution replans, not plan rejection.",
       "completionCondition": "User EXPLICITLY answered yes or no (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -313,22 +306,19 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Revise plan based on user comments.\n\nComments: {{present-plan.revision_feedback}}\n\nCurrent plan:\n{{steps}}\n\nFix plan considering feedback.\n\n{{#if has_file_access}}⚠️ After fixing, update file {{workspace_path}}/plan.md{{/if}}",
+      "directive": "Revise plan based on user comments.\n\nComments: {{present-plan.revision_feedback}}\n\n{{#if has_file_access}}Read the current plan from {{workspace_path}}/plan.md, revise it per the feedback, and update {{workspace_path}}/plan.md.{{else}}Current plan:\n{{steps}}\n\nFix the plan considering the feedback. NO file access: you MUST return the full revised steps[] array AND current_step_action + current_step_expected_output of step 1 — the plan lives only in context (there is no plan.md).{{/if}}",
       "completionCondition": "Plan revised considering comments",
       "inputSchema": {
         "type": "object",
         "properties": {},
-        "required": [
-          "steps",
-          "total_steps"
-        ],
+        "required": [],
         "globalInputs": [
           "steps",
           "total_steps"
         ]
       },
       "connections": {
-        "success": "reinitialize-after-revision"
+        "success": "expr-reset-after-revision"
       }
     },
     {
@@ -351,7 +341,7 @@
     {
       "id": "execute-current-step",
       "type": "agent-directive",
-      "directive": "Execute step {{current_step}} of {{total_steps}}.\n\n{{#if has_file_access}}Read current step from file {{workspace_path}}/plan.md (step number {{current_step}}).{{else}}Step text: {{current_step_action}}{{/if}}\n\nMANDATORY provide EVIDENCE of completion:\n- Screenshot, link, file\n- Or detailed text description of EXACTLY what was done\n\nRules:\n{{validation_criteria}}\n\nAvoid mistakes:\n{{common_mistakes}}",
+      "directive": "Execute step {{current_step}} of {{total_steps}}.\n\nSame rigor as step 1 — no tail degradation, you have no fatigue. This step must serve the deliverable: {{understand-task.expected_deliverable}}. If the remaining plan no longer fits what's been built — teleport-replan.\n\n{{#if has_file_access}}Read step {{current_step}} from {{workspace_path}}/plan.md by its index. If you lost the thread, re-read {{workspace_path}}/task-requirements.md before acting.{{else}}Step text: {{current_step_action}}{{/if}}\n\nProvide EVIDENCE of completion (screenshot, link, file, or a detailed description of exactly what was done).\n{{#if has_file_access}}Write the evidence to {{workspace_path}}/step-{{current_step}}/evidence.md.{{/if}}\n\nRules:\n{{validation_criteria}}\n\nAvoid mistakes:\n{{common_mistakes}}",
       "completionCondition": "Step completed with evidence",
       "inputSchema": {
         "type": "object",
@@ -372,7 +362,7 @@
     {
       "id": "verify-step-execution",
       "type": "agent-directive",
-      "directive": "Delegate step execution verification to subagent via Task tool.\n\nCRITICALLY IMPORTANT: DO NOT verify execution yourself - delegate to independent subagent.\n\n1) Pass to subagent:\n   {{#if has_file_access}}- Path to plan: {{workspace_path}}/plan.md, step: {{current_step}}{{else}}- Expected step output: {{current_step_expected_output}}{{/if}}\n   - Evidence from execution: {{evidence}}\n\n2) Prompt for subagent (pass verbatim):\n   YOU ARE step execution verifier.\n   COMPARE expected_output with provided evidence.\n   CHECK: Does evidence FULLY match expected_output?\n   - 80% match = NOT verified (partial completion)\n   - No concrete evidence = NOT verified\n   - Missing elements = NOT verified\n   RETURN step_verified (yes/no) and verification_details explaining your assessment.\n\n3) Save subagent result:\n   - step_verified: yes or no\n   - verification_details: verification details\n\n{{#if has_file_access}}4) If step_verified = no, save issues to file {{workspace_path}}/step-{{current_step}}/verification-issues.md:\n   # Step {{current_step}} Verification Issues\n\n   Step verified: no\n\n   ## Issues Found\n\n   ### 1. [issue description]\n   Expected: [what was expected]\n   Actual: [what was found]\n   Gap: [what's missing]\n\n   ### 2. [issue description]\n   ...\n{{/if}}\n\nHonestly pass subagent result. If reviewer said no - pass no.",
+      "directive": "GATE REVIEW of step {{current_step}} — delegate to an INDEPENDENT reviewer subagent (do NOT review it yourself).\n\nGive the reviewer ONLY paths, not content:\n{{#if has_file_access}}- Plan: {{workspace_path}}/plan.md (read step {{current_step}})\n- Step evidence: {{workspace_path}}/step-{{current_step}}/evidence.md{{else}}- Expected step output: {{current_step_expected_output}}\n- Evidence: {{evidence}}{{/if}}\n\nReviewer brief (verbatim):\n  YOU ARE an independent gate reviewer for step {{current_step}}.\n  Read the full plan and this step's evidence directly — do not trust summaries.\n  Judge step {{current_step}} for PLAN INTEGRITY: does it correctly build on PREVIOUS steps and set up the FUTURE steps, with no drift, regression, or quality degradation versus earlier steps?\n  Verify the evidence FULLY matches the step's expected output (80% = NOT verified; no concrete evidence = NOT verified; missing elements = NOT verified).\n  RETURN step_verified (yes/no), a FLAT list of issues_found, and verification_details explaining the verdict.\n\nRecord the reviewer's verdict honestly — if the reviewer says no, return no.\n\n{{#if has_file_access}}If step_verified = no, write the issues to {{workspace_path}}/step-{{current_step}}/verification-issues.md:\n   # Step {{current_step}} Verification Issues\n\n   Step verified: no\n\n   ## Issues Found\n   ### 1. [issue]\n   Expected: [what the plan required]\n   Actual: [what the evidence shows]\n   Gap: [what is missing or inconsistent with the rest of the plan]\n{{/if}}",
       "completionCondition": "Verification complete, verdict delivered",
       "inputSchema": {
         "type": "object",
@@ -424,28 +414,21 @@
     {
       "id": "complete-step",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} completed successfully.\n\nEvidence: {{evidence}}\n\n1. Record step result\n2. Increment counter: current_step = {{current_step}} + 1, step_retry = 0\n3. {{#if has_file_access}}Read next step data from file {{workspace_path}}/plan.md and fill current_step_action and current_step_expected_output.{{else}}Find step with id = ({{current_step}} + 1) in steps array and fill current_step_action (its action) and current_step_expected_output (its expected_output). If no next step - leave empty.{{/if}}\n4. Update execution_note to: \"{{task_short_name}}. Step ({{current_step}}+1)/{{total_steps}}\"",
+      "directive": "Step {{current_step}} completed successfully.\n\nEvidence: {{evidence}}\n\nRecord the step result{{#if has_file_access}} (the cursor advances automatically — do not change current_step yourself).{{else}}. NO file access: also return current_step_action + current_step_expected_output of the NEXT step (id = current_step+1) from the steps array — the cursor advances automatically, do not change current_step yourself.{{/if}} The workflow increments the step counter via an expression node next.",
       "completionCondition": "Result recorded, counter incremented, next step data extracted",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "step_result_saved",
-          "current_step",
-          "step_retry",
-          "execution_note"
+          "step_result_saved"
         ],
         "globalInputs": [
           "step_result_saved",
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output",
           "execution_note"
         ]
       },
       "connections": {
-        "success": "check-all-steps-done"
+        "success": "expr-inc-current-step"
       }
     },
     {
@@ -478,7 +461,7 @@
     {
       "id": "retry-step-feedback",
       "type": "agent-directive",
-      "directive": "Attempt {{step_retry}} of {{max_retries}} failed.\n\n{{#if has_file_access}}READ {{workspace_path}}/step-{{current_step}}/verification-issues.md{{else}}Issues from context: {{verify-step-execution.issues_found}}{{/if}}\n\nFor EACH issue found by verifier:\n1. Understand what was missing or incorrect\n2. Determine a different approach to address the gap\n3. Plan specific actions to fix\n\nAnalyze why step was not completed and try again with different approach.\n\nDO NOT skip any issue. ALL verification findings must be addressed.\n\nAvoid mistakes:\n{{common_mistakes}}",
+      "directive": "Attempt {{step_retry}} of {{max_retries}} failed.\n\n{{#if has_file_access}}READ {{workspace_path}}/step-{{current_step}}/verification-issues.md{{else}}Issues from context: {{verify-step-execution.issues_found}}{{/if}}\n\nFor EACH issue found by the verifier:\n1. Understand what was missing or incorrect\n2. Determine a different approach to address the gap\n3. Plan specific actions to fix\n\nAnalyze why the step was not completed and try again with a different approach.\n\nDO NOT skip any issue. ALL verification findings must be addressed.\n\nAvoid mistakes:\n{{common_mistakes}}",
       "completionCondition": "Feedback given, ready for retry",
       "inputSchema": {
         "type": "object",
@@ -507,7 +490,7 @@
     {
       "id": "ask-user-skip-or-escalate",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problem\n  4. reset - reset retry counter and try againms'\n- STOP and wait until user writes response\n- DO NOT fill user_decision until user explicitly responds\n- Record in user_response_text exactly what user answered\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
+      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problem\n  4. reset - reset retry counter and try again'\n- STOP and wait until the user writes a response\n- DO NOT fill user_decision until the user explicitly responds\n- Record in user_response_text exactly what the user answered\n\nDO NOT fix anything yourself — the workflow routes to the chosen branch.",
       "completionCondition": "User EXPLICITLY chose action (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -572,14 +555,12 @@
     {
       "id": "revise-plan-from-escalation",
       "type": "agent-directive",
-      "directive": "Revise plan considering execution problems.\n\nStep {{current_step}} could not be completed after {{max_retries}} attempts.\n\nCurrent plan:\n{{steps}}\n\nAnalyze why step cannot be executed and revise plan:\n- Maybe step needs to be split into smaller ones?\n- Maybe different approach is needed?\n- Maybe dependencies weren't considered?\n\nRequirements for new plan:\n{{plan_writing_requirements}}\n\n{{#if has_file_access}}⚠️ After revision, update file {{workspace_path}}/plan.md{{/if}}",
+      "directive": "Revise plan considering execution problems.\n\nStep {{current_step}} could not be completed after {{max_retries}} attempts.\n\n{{#if has_file_access}}Read the current plan from {{workspace_path}}/plan.md.{{else}}Current plan:\n{{steps}}{{/if}}\n\nAnalyze why the step cannot be executed and revise the plan:\n- Maybe the step needs to be split into smaller ones?\n- Maybe a different approach is needed?\n- Maybe dependencies were not considered?\n\nPlanning standards:\n{{planning_standards}}\n\n{{#if has_file_access}}After revision, update {{workspace_path}}/plan.md.{{/if}}",
       "completionCondition": "Plan revised considering problems",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "steps",
-          "total_steps",
           "revision_reason"
         ],
         "globalInputs": [
@@ -589,65 +570,33 @@
         ]
       },
       "connections": {
-        "success": "reinitialize-after-revision"
-      }
-    },
-    {
-      "id": "reinitialize-after-revision",
-      "type": "agent-directive",
-      "directive": "Plan revised. Reset counters and start execution from first step of new plan.\n\nSet current_step = 1, step_retry = 0.\n\nExtract first step data:\n{{#if has_file_access}}Read from file {{workspace_path}}/plan.md{{else}}From steps array{{/if}} - fill current_step_action and current_step_expected_output.",
-      "completionCondition": "Counters reset, first step data extracted",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output"
-        ],
-        "globalInputs": [
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output"
-        ]
-      },
-      "connections": {
-        "success": "validate-plan"
+        "success": "expr-restart-from-first"
       }
     },
     {
       "id": "mark-step-skipped",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} skipped.\n\nReason: {{ask-user-skip-or-escalate.skip_reason}}\n\nRecord that step is skipped and move to next.\n\n1. Increment counter: current_step = {{current_step}} + 1, step_retry = 0\n2. {{#if has_file_access}}Read next step data from file {{workspace_path}}/plan.md.{{else}}Find step with id = ({{current_step}} + 1) in steps array.{{/if}}\n3. Update execution_note.",
+      "directive": "Step {{current_step}} skipped.\n\nReason: {{ask-user-skip-or-escalate.skip_reason}}\n\nRecord that the step was skipped. The cursor advances automatically via an expression node next — do not change current_step yourself.{{#if has_file_access}}{{else}} NO file access: also return current_step_action + current_step_expected_output of the NEXT step (id = current_step+1) from the steps array.{{/if}}",
       "completionCondition": "Step marked as skipped, counter incremented",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "skipped_recorded",
-          "current_step",
-          "step_retry",
-          "execution_note"
+          "skipped_recorded"
         ],
         "globalInputs": [
           "skipped_recorded",
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output",
           "execution_note"
         ]
       },
       "connections": {
-        "success": "check-all-steps-done"
+        "success": "expr-inc-current-step"
       }
     },
     {
       "id": "user-handles-step",
       "type": "agent-directive",
-      "directive": "User takes over step {{current_step}} execution.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Wait until user completes step and provides evidence\n- DO NOT fill user_completed until user explicitly confirms completion\n- Record in user_response_text exactly what user answered",
+      "directive": "User takes over step {{current_step}} execution.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Wait until the user completes the step and provides evidence\n- DO NOT fill user_completed until the user explicitly confirms completion\n- Record in user_response_text exactly what the user answered",
       "completionCondition": "User EXPLICITLY confirmed completion with evidence (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -670,7 +619,7 @@
     {
       "id": "verify-criteria",
       "type": "agent-directive",
-      "directive": "Re-verification pass {{criteria_round}} of up to {{max_criteria_rounds}} — this is a normal completeness loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nCOMPLETENESS SELF-REVIEW (verify ONLY — DO NOT fix here).\n\nVerify that EVERY success criterion is ACTUALLY satisfied by the REAL deliverable — check the actual artifact (code, files, command output, tests), NOT documentation, NOT claims, NOT your own memory.\n\nSuccess criteria (the frozen source of truth):\n{{understand-task.success_criteria}}\n\nExpected deliverable: {{understand-task.expected_deliverable}}\n\nRules:\n- ONE check per success criterion — go through them one at a time, do not batch-approve.\n- For each criterion: find the concrete EVIDENCE in the real artifact (file path + what proves it; for code tasks, read the real code and/or run the tests). If you cannot point to concrete evidence, it is a GAP.\n- \"Looks done\" / \"should work\" / \"documented as complete\" is NOT evidence.\n\nFor each criterion specify:\n- Completed? (yes/no)\n- Evidence of completion (concrete: file path, output, test result)\n\nVerification rules:\n{{validation_criteria}}\n\n{{#if has_file_access}}Save a coverage report to {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md AND the gaps to {{workspace_path}}/criteria-gaps.md:\n# Success Criteria Coverage (attempt {{validation_attempt_count}})\n\n## Summary\nTotal criteria: [count]\nCompleted: [count]\nGaps: [count]\n\n## Per-criterion\n### 1. [criterion]\nStatus: MET | NOT MET\nEvidence: [concrete evidence OR what is missing]\n\n### 2. [criterion]\n...\n{{/if}}",
+      "directive": "Re-verification pass {{criteria_round}} of up to {{max_criteria_rounds}} — this is a normal completeness loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nCOMPLETENESS SELF-REVIEW (verify ONLY — DO NOT fix here). This is a light pre-pass; an independent final review runs after it.\n\nVerify that EVERY success criterion is ACTUALLY satisfied by the REAL deliverable — check the actual artifact (code, files, command output, tests), NOT documentation, NOT claims, NOT your own memory.\n\nSuccess criteria (the frozen source of truth):\n{{understand-task.success_criteria}}\n\nExpected deliverable: {{understand-task.expected_deliverable}}\n\nRules:\n- ONE check per success criterion — go through them one at a time, do not batch-approve.\n- For each criterion: find the concrete EVIDENCE in the real artifact (file path + what proves it; for code tasks, read the real code and/or run the tests). If you cannot point to concrete evidence, it is a GAP.\n- \"Looks done\" / \"should work\" / \"documented as complete\" is NOT evidence.\n\nFor each criterion specify:\n- Completed? (yes/no)\n- Evidence of completion (concrete: file path, output, test result)\n\nVerification rules:\n{{validation_criteria}}\n\n{{#if has_file_access}}Save a coverage report to {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md AND the gaps to {{workspace_path}}/criteria-gaps.md:\n# Success Criteria Coverage (attempt {{validation_attempt_count}})\n\n## Summary\nTotal criteria: [count]\nCompleted: [count]\nGaps: [count]\n\n## Per-criterion\n### 1. [criterion]\nStatus: MET | NOT MET\nEvidence: [concrete evidence OR what is missing]\n{{/if}}",
       "completionCondition": "All success criteria verified against the real deliverable with concrete evidence",
       "inputSchema": {
         "type": "object",
@@ -714,7 +663,7 @@
         "right": "yes"
       },
       "connections": {
-        "true": "deliver-result",
+        "true": "final-review",
         "false": "fix-gaps"
       }
     },
@@ -736,7 +685,7 @@
         ]
       },
       "connections": {
-        "success": "expr-inc-criteria-round"
+        "success": "expr-inc-validation-attempt"
       }
     },
     {
@@ -836,7 +785,7 @@
       },
       "connections": {
         "true": "ask-user-validation-limit-reached",
-        "false": "reinitialize-after-revision"
+        "false": "expr-reset-after-revision"
       }
     },
     {
@@ -890,7 +839,7 @@
         "validation_round = 0"
       ],
       "connections": {
-        "default": "reinitialize-after-revision"
+        "default": "expr-reset-after-revision"
       }
     },
     {
@@ -977,34 +926,112 @@
     {
       "type": "teleport",
       "id": "teleport-replan",
-      "hint": "Use when you realize the current plan needs restructuring — jumps to rebuild the plan with all loop counters reset. Appropriate when: the current approach is fundamentally wrong, new requirements emerged that invalidate the plan, or steps must be added/removed/reordered.",
-      "directive": "Assess what needs to change in the task plan.\n\n1. Review the current plan{{#if has_file_access}} at {{workspace_path}}/plan.md{{/if}}.\n2. Identify what went wrong or what changed.\n3. Describe the required plan modifications in revision_reason.\n4. All loop counters will be reset — you start fresh after replanning.\n\nCurrent state: step {{current_step}} of {{total_steps}}.",
+      "hint": "Use MID-EXECUTION when the remaining plan no longer fits what is already built — closes the current step, keeps completed steps, reshapes/extends only the tail (does NOT restart from step 1). Not for rejecting a plan before execution (use the plan-approval branch).",
+      "directive": "Step-close replan. The current step {{current_step}} is now closed as-is (record honestly what was actually done — it MAY be partial; the step need not be fully complete).\n\nCurrent state: step {{current_step}} of {{total_steps}}.\n\n{{#if has_file_access}}In {{workspace_path}}/plan.md:{{else}}In the plan:{{/if}}\n- Do NOT touch completed steps 1..{{current_step}} — keep them as they are.\n- Move any unfinished part of step {{current_step}} forward into a NEW step {{current_step}}+1.\n- Rewrite/extend ONLY the steps AFTER {{current_step}} to fit revision_reason; record honestly what was actually done.\n- Recount the steps and return the refreshed total_steps.\n\nDescribe what changed and why in revision_reason.",
       "completionCondition": "Required plan changes documented in revision_reason",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "revision_reason"
+          "revision_reason",
+          "total_steps"
         ],
         "globalInputs": [
-          "revision_reason"
+          "revision_reason",
+          "total_steps"
         ]
       },
       "connections": {
-        "success": "expr-reset-for-replan"
+        "success": "expr-replan-advance"
       }
     },
     {
       "type": "expression",
-      "id": "expr-reset-for-replan",
+      "id": "expr-inc-current-step",
       "expressions": [
-        "validation_round = 0",
-        "criteria_round = 0",
-        "step_retry = 0",
-        "current_step = 1"
+        "current_step = current_step + 1",
+        "step_retry = 0"
       ],
       "connections": {
-        "default": "decompose-into-steps"
+        "default": "check-all-steps-done"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-replan-advance",
+      "expressions": [
+        "current_step = current_step + 1",
+        "step_retry = 0",
+        "validation_round = 0",
+        "criteria_round = 0"
+      ],
+      "connections": {
+        "default": "validate-plan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-after-revision",
+      "expressions": [
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "validate-plan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-validation-attempt",
+      "expressions": [
+        "validation_attempt_count = validation_attempt_count + 1"
+      ],
+      "connections": {
+        "default": "expr-inc-criteria-round"
+      }
+    },
+    {
+      "id": "final-review",
+      "type": "agent-directive",
+      "directive": "FINAL INDEPENDENT REVIEW — delegate to an INDEPENDENT reviewer subagent (do NOT self-review).\n\nThe reviewer RE-DERIVES success-criteria coverage from the FROZEN requirements and the REAL artifacts (not claims).\n\nGive the reviewer ONLY paths/inputs:\n{{#if has_file_access}}- Frozen requirements: {{workspace_path}}/task-requirements.md\n- Step artifacts: {{workspace_path}}/step-*/ (evidence per step)\n- Prior self-pass coverage: {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md{{else}}- Success criteria: {{understand-task.success_criteria}}\n- Expected deliverable: {{understand-task.expected_deliverable}}{{/if}}\n\nReviewer brief (verbatim):\n  YOU ARE the final independent reviewer. Read the frozen requirements and the real step artifacts directly — do not trust the executor's claims.\n  ONE check per success criterion: find concrete evidence in the real artifact (file path + what proves it; run/inspect for code). No concrete evidence = a gap.\n  RETURN final_issues_count (number of unmet criteria; 0 = fully covered) and a FLAT list of gaps.\n\n{{#if has_file_access}}Write the verdict to {{workspace_path}}/final-review.md (criteria, MET/NOT MET, evidence or gap).{{/if}}\n\nReturn final_issues_count honestly — reviewer findings are authoritative.",
+      "completionCondition": "Independent review complete; final_issues_count returned",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "final_issues_count"
+        ],
+        "globalInputs": [
+          "final_issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-final-review"
+      }
+    },
+    {
+      "id": "route-final-review",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "final_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "deliver-result",
+        "false": "fix-gaps"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-restart-from-first",
+      "expressions": [
+        "current_step = 1",
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "validate-plan"
       }
     }
   ],
@@ -1056,11 +1083,6 @@
       "description": "Output or result",
       "default": ""
     },
-    "process_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "TASK EXECUTION PROCESS REQUIREMENTS:\n\n1. DECOMPOSITION:\n- Break large task into 3-10 specific steps\n- Each step = one action with measurable result\n- Output of each step becomes input for the next\n- Define dependencies between steps\n\n2. STRUCTURED REASONING:\n- Use chain-of-thought for complex steps\n- Explicitly define methods and output formats\n- Document reasoning for each decision\n\n3. CLEAR SUCCESS CRITERIA:\n- Define criteria BEFORE starting work\n- Criteria must be verifiable (measurable)\n- Agent works within these boundaries\n\n4. HUMAN-IN-THE-LOOP:\n- Show plan before execution\n- Escalation for problematic steps\n- User review at critical points"
-    },
     "validation_criteria": {
       "type": "string",
       "description": "Criteria for validation",
@@ -1071,20 +1093,10 @@
       "description": "Stores common mistakes",
       "default": "COMMON MISTAKES AND HOW TO AVOID:\n\n❌ 'Done!' without verification → ✅ Always provide evidence\n❌ Silently skipping steps → ✅ Explicitly mark skip with reason\n❌ 80% complete = done → ✅ Only 100% = done\n❌ Hallucinations ('sent', 'created') → ✅ Only facts with evidence\n❌ Losing context → ✅ Use step structure from plan\n❌ Mixing action and verification → ✅ Separate: first do, then verify"
     },
-    "plan_writing_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "PLAN WRITING REQUIREMENTS:\n\nMain problem: agent loses context (session archival, forgetting). Plan must be written so any item can be given to agent WITHOUT the rest of the plan — and they could execute it.\n\nREQUIREMENTS:\n- Flat linear list — no hierarchy, no nested sub-items, just 1, 2, 3...\n- One item = one task — not a micro-step ('download file'), but a complete task ('update workflow to v2.1.0')\n- Full self-sufficiency of item — contains EVERYTHING for execution: why to do it, what to do, which files to read/modify, where to save, what to commit\n- NO 'global rules' separately — everything needed for item must be IN the item\n- Explicit actions — not 'as usual', but specifically: 'upload to server', 'make commit', 'write issues to file X'\n- Redundancy is allowed — better to repeat 'make commit' in each item than forget\n- Full file paths — not 'in appropriate folder', but /full/path/to/file.json\n- Measurable result — easy to verify item is complete\n\nITEM STRUCTURE:\n```\nN. **Task name** (what we're doing)\n\n   Why: (what problem we're solving)\n\n   What to do:\n   - specific action 1 with file paths\n   - specific action 2\n   - save to /full/path/to/file.json\n   - make commit\n```\n\n9. ATOMICITY & REDUNDANCY (no \"global scope\"):\n- An agent often receives ONE plan item's directive in isolation — other items and any \"general rules\" stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every implementation nuance it needs, even if obvious.\n- Repeat the original task requirements relevant to the item INSIDE the item.\n- DUPLICATE cross-cutting actions into EVERY item (e.g. \"append a progress report to /full/path/report.md\", \"run the tests\", \"make a commit\").\n- There is NO shared/global scope — redundancy across items is REQUIRED, not a smell.\n- Every item carries: why (problem + original requirement), what to do (explicit actions + full paths), the cross-cutting actions, and a measurable expected_output."
-    },
-    "plan_validation_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "PLAN VALIDATION REQUIREMENTS:\n\nPlan must be verified BEFORE showing to user.\n\nVALIDATION CRITERIA:\n1. STEP SELF-SUFFICIENCY:\n   - Each step contains ALL information for execution\n   - No references to 'previous steps' or 'as usual'\n   - Full file paths, not relative\n\n2. EXPLICIT ACTIONS:\n   - Each step starts with action verb\n   - Specific commands, not 'configure' or 'prepare'\n   - Specified where to save result\n\n3. MEASURABLE RESULTS:\n   - expected_output for each step is specific\n   - Easy to verify if step is complete or not\n   - No subjective criteria like 'works well'\n\n4. COMPLETENESS:\n   - All files specified with full paths\n   - All commands specified completely\n   - All dependencies explicitly stated"
-    },
     "planning_standards": {
       "type": "string",
       "description": "No description",
-      "default": "TASK DECOMPOSITION PLANNING STANDARDS:\n\n1. STEP GRANULARITY:\n- Each step = one logical unit of work (not too small, not too large)\n- Step should take 5-30 minutes to execute\n- Avoid micro-steps (\"create file\") and mega-steps (\"implement feature\")\n\n2. DEPENDENCIES:\n- Steps must be in correct execution order\n- Each step's output should enable the next step\n- No circular dependencies\n\n3. VERIFIABILITY:\n- Every step must have clear expected_output\n- Expected output must be objectively verifiable\n- Avoid subjective criteria (\"works well\", \"looks good\")\n\n4. COMPLETENESS:\n- All user requirements must be covered by steps\n- No implicit assumptions about what will be done\n- Each step explicitly states what files/artifacts it produces\n\n5. SELF-SUFFICIENCY:\n- Each step contains ALL information needed for execution\n- No references to \"previous steps\" or \"as mentioned before\"\n- Full file paths, not relative references\n\n6. RESILIENCE:\n- Plan should work even if agent loses context between steps\n- Each step can be executed in isolation with its description\n\n9. ATOMICITY & REDUNDANCY (no \"global scope\"):\n- An agent often receives ONE plan item's directive in isolation — other items and any \"general rules\" stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every implementation nuance it needs, even if obvious.\n- Repeat the original task requirements relevant to the item INSIDE the item.\n- DUPLICATE cross-cutting actions into EVERY item (e.g. \"append a progress report to /full/path/report.md\", \"run the tests\", \"make a commit\").\n- There is NO shared/global scope — redundancy across items is REQUIRED, not a smell.\n- Every item carries: why (problem + original requirement), what to do (explicit actions + full paths), the cross-cutting actions, and a measurable expected_output."
+      "default": "TASK DECOMPOSITION PLANNING STANDARDS (single canon):\n\n1. STEP GRANULARITY:\n- Each step = one logical unit of work (not too small, not too large)\n- One item = one complete task (e.g. \"update workflow to v2.1.0\"), not a micro-step (\"download file\")\n- Avoid micro-steps (\"create file\") and mega-steps (\"implement feature\")\n\n2. DEPENDENCIES:\n- Steps must be in correct execution order\n- Each step's output should enable the next step\n- No circular dependencies\n\n3. VERIFIABILITY:\n- Every step must have clear, measurable expected_output (easy to verify completion)\n- Avoid subjective criteria (\"works well\", \"looks good\")\n\n4. COMPLETENESS:\n- All user requirements must be covered by steps\n- No implicit assumptions about what will be done\n- Each step explicitly states what files/artifacts it produces\n\n5. SELF-SUFFICIENCY:\n- Each step contains ALL information needed for execution: why, what to do, which files to read/modify, where to save, what to commit\n- No references to \"previous steps\" or \"as mentioned before\"\n- Full file paths, not relative references\n\n6. RESILIENCE:\n- Plan must work even if the agent loses context between steps (session archival, forgetting)\n- Each step can be executed in isolation with only its own description\n\n7. STRUCTURED REASONING:\n- Use chain-of-thought for complex steps\n- Explicitly define methods and output formats\n- Document reasoning for non-obvious decisions\n\n8. SUCCESS CRITERIA & HUMAN-IN-THE-LOOP:\n- Success criteria are defined BEFORE work starts and are verifiable (measurable)\n- Plan is shown to the user before execution; escalation is available for problematic steps\n\n9. ATOMICITY & REDUNDANCY (no \"global scope\"):\n- An agent often receives ONE plan item's directive in isolation — other items and any \"general rules\" stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every implementation nuance it needs, even if obvious.\n- Repeat the original task requirements relevant to the item INSIDE the item.\n- DUPLICATE cross-cutting actions into EVERY item (e.g. \"append a progress report to /full/path/report.md\", \"run the tests\", \"make a commit\").\n- There is NO shared/global scope — redundancy across items is REQUIRED, not a smell.\n- Every item carries: why (problem + original requirement), what to do (explicit actions + full paths), the cross-cutting actions, and a measurable expected_output.\n\n10. ITEM STRUCTURE (template for each plan item):\nN. **Task name** (what we're doing)\n   Why: (what problem we're solving)\n   What to do:\n   - specific action 1 with full file paths\n   - specific action 2\n   - save to /full/path/to/file\n   - the cross-cutting actions (progress report, tests, commit)\n   Expected output: (specific, measurable)\n\n11. NO TAIL DEGRADATION:\n- The last items of the plan carry the SAME level of detail and quality as the first ones.\n- Context volume is never an excuse to cut corners on the tail of the plan."
     },
     "artifacts": {
       "type": "array",
@@ -1300,6 +1312,11 @@
     "plan_iteration": {
       "type": "number",
       "description": "Plan revision iteration counter",
+      "default": 0
+    },
+    "final_issues_count": {
+      "type": "number",
+      "description": "Count of gaps from final independent review (0 = all criteria covered)",
       "default": 0
     }
   }

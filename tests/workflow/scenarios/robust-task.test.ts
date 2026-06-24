@@ -5,7 +5,7 @@
  * Supports two modes: with files (plan saved to disk) and without files (in-memory).
  * Structure: ONBOARD → UNDERSTAND → DECOMPOSE → VALIDATE → EXECUTE → VERIFY → DELIVER
  *
- * Coverage target: 100% nodes (36), 100% branches (47)
+ * Coverage target: 100% nodes (55), 100% branches
  */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
@@ -44,8 +44,8 @@ describe("robust-task Scenarios", () => {
     it("should have expected validation loops (cycles are intentional)", () => {
       const cycles = detectCycles(workflow);
       // This workflow has intentional loops:
-      // - fix-plan-issues → reinitialize-after-revision → validate-plan
-      // - revise-plan → reinitialize-after-revision → validate-plan → present-plan
+      // - fix-plan-issues → expr-inc-validation-round → ... → expr-reset-after-revision → validate-plan
+      // - revise-plan → expr-reset-after-revision → validate-plan → present-plan
       // - fix-gaps → verify-criteria loop
       // - retry-step-feedback → execute-current-step loop
       // - complete-step → check-all-steps-done → execute-current-step loop
@@ -53,7 +53,7 @@ describe("robust-task Scenarios", () => {
     });
 
     it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(50);
+      expect(workflow.nodes.length).toBe(55);
     });
   });
 
@@ -78,7 +78,6 @@ describe("robust-task Scenarios", () => {
               constraints: ["Must use JWT", "2 day deadline"],
               success_criteria: ["Users can log in", "Users can log out", "Sessions persist"],
               user_response_text: "I need to implement user authentication with JWT tokens",
-              execution_note: "auth-module",
             },
             "suggest-task-name": {
               task_name: "auth-module-impl",
@@ -144,26 +143,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Implement login endpoint",
-                current_step_expected_output: "POST /auth/login working",
                 execution_note: "auth-module. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Implement logout endpoint",
-                current_step_expected_output: "POST /auth/logout working",
                 execution_note: "auth-module. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "auth-module. Step 4/3",
               },
             ],
@@ -179,6 +166,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Complete authentication module with JWT-based login/logout",
               summary: "Implemented user model, login and logout endpoints with JWT",
@@ -204,7 +192,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Button is blue"],
               user_response_text: "Fix the login button color to blue",
-              execution_note: "login-btn-fix",
             },
             "decompose-into-steps": {
               steps: [
@@ -253,26 +240,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Change color to blue",
-                current_step_expected_output: "Color changed to #0066cc",
                 execution_note: "login-btn-fix. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Verify change",
-                current_step_expected_output: "Button displays as blue",
                 execution_note: "login-btn-fix. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "login-btn-fix. Step 4/3",
               },
             ],
@@ -286,6 +261,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Login button now displays with blue color",
               summary: "Changed CSS color property from red to blue",
@@ -310,7 +286,6 @@ describe("robust-task Scenarios", () => {
               constraints: ["Use SendGrid"],
               success_criteria: ["Emails are sent", "Templates work"],
               user_response_text: "I need email notifications using SendGrid",
-              execution_note: "email-notify",
             },
             "suggest-task-name": {
               task_name: "email-notifications",
@@ -368,12 +343,6 @@ describe("robust-task Scenarios", () => {
               total_steps: 3,
               fixes_applied: ["Added specific file paths to all steps"],
             },
-            "reinitialize-after-revision": {
-              current_step: 1,
-              step_retry: 0,
-              current_step_action: "Add SENDGRID_API_KEY to .env.local",
-              current_step_expected_output: "API key in .env.local",
-            },
             "present-plan": {
               plan_approved: "yes",
               user_response_text: "yes looks good",
@@ -406,26 +375,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Create templates in /emails/",
-                current_step_expected_output: "Email templates in /emails/",
                 execution_note: "email-notify. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Implement sendEmail in /lib/email.ts",
-                current_step_expected_output: "sendEmail() exports",
                 execution_note: "email-notify. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "email-notify. Step 4/3",
               },
             ],
@@ -436,6 +393,7 @@ describe("robust-task Scenarios", () => {
                 { criterion: "Templates work", met: true, evidence: "Templates render correctly" },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Email notification system with SendGrid integration",
               summary: "Configured SendGrid, created templates, implemented send function",
@@ -460,7 +418,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Toggle works", "Preference persists"],
               user_response_text: "Add dark mode to the app",
-              execution_note: "dark-mode",
             },
             "decompose-into-steps": {
               steps: [
@@ -499,12 +456,6 @@ describe("robust-task Scenarios", () => {
               ],
               total_steps: 4,
             },
-            "reinitialize-after-revision": {
-              current_step: 1,
-              step_retry: 0,
-              current_step_action: "Detect system preference",
-              current_step_expected_output: "prefers-color-scheme detected",
-            },
             "execute-current-step": [
               {
                 step_completed: "yes",
@@ -539,34 +490,18 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Add toggle button",
-                current_step_expected_output: "Toggle visible",
                 execution_note: "dark-mode. Step 2/4",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Add CSS variables",
-                current_step_expected_output: "CSS variables defined",
                 execution_note: "dark-mode. Step 3/4",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "Add localStorage",
-                current_step_expected_output: "Preference saved",
                 execution_note: "dark-mode. Step 4/4",
               },
               {
                 step_result_saved: "yes",
-                current_step: 5,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "dark-mode. Step 5/4",
               },
             ],
@@ -581,6 +516,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Dark mode with system detection and persistence",
               summary: "Added system detection, toggle, CSS variables, localStorage",
@@ -605,7 +541,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Endpoint returns 200"],
               user_response_text: "Fix the /api/users endpoint that's returning 500",
-              execution_note: "api-fix",
             },
             "decompose-into-steps": {
               steps: [
@@ -659,26 +594,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Fix the bug",
-                current_step_expected_output: "Bug fixed",
                 execution_note: "api-fix. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Test endpoint",
-                current_step_expected_output: "Returns 200",
                 execution_note: "api-fix. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "api-fix. Step 4/3",
               },
             ],
@@ -691,6 +614,7 @@ describe("robust-task Scenarios", () => {
                 { criterion: "Endpoint returns 200", met: true, evidence: "curl returns 200 OK" },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Fixed /api/users endpoint",
               summary: "Added null checks to prevent NullPointerException",
@@ -715,7 +639,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["App accessible on prod URL"],
               user_response_text: "Deploy the app to production",
-              execution_note: "deploy-prod",
             },
             "decompose-into-steps": {
               steps: [
@@ -778,18 +701,10 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Upload to server",
-                current_step_expected_output: "Files on server",
                 execution_note: "deploy-prod. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "deploy-prod. Step 4/3",
               },
             ],
@@ -804,10 +719,6 @@ describe("robust-task Scenarios", () => {
             },
             "mark-step-skipped": {
               skipped_recorded: "yes",
-              current_step: 3,
-              step_retry: 0,
-              current_step_action: "Restart service",
-              current_step_expected_output: "Service running",
               execution_note: "deploy-prod. Step 3/3",
             },
             "verify-criteria": {
@@ -820,6 +731,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "App deployed to production (step 2 done manually)",
               summary: "Built app, user uploaded via FTP, service restarted",
@@ -844,7 +756,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Backup runs daily", "Backup can be restored"],
               user_response_text: "Set up automated database backups",
-              execution_note: "db-backup",
             },
             "decompose-into-steps": {
               steps: [
@@ -903,26 +814,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Set up cron job",
-                current_step_expected_output: "Cron configured",
                 execution_note: "db-backup. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Test restore",
-                current_step_expected_output: "Restore successful",
                 execution_note: "db-backup. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "db-backup. Step 4/3",
               },
             ],
@@ -946,6 +845,7 @@ describe("robust-task Scenarios", () => {
                 { criterion: "Backup can be restored", met: true, evidence: "Restore test passed" },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Automated daily database backup system",
               summary: "Created backup script, user configured cron, restore tested",
@@ -955,6 +855,9 @@ describe("robust-task Scenarios", () => {
         },
 
         // Scenario 8: Step escalation - revise plan
+        // Covers expr-restart-from-first (v4.4.1): revise-plan-from-escalation.success now
+        // routes through this expression node (current_step=1, step_retry=0) → validate-plan,
+        // restarting execution from the first step of the revised plan.
         {
           name: "Step escalation with plan revision",
           description: "Step fails, user chooses to revise plan",
@@ -970,7 +873,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Can process payments"],
               user_response_text: "Integrate Stripe for payments",
-              execution_note: "payment-gateway",
             },
             "decompose-into-steps": {
               steps: [
@@ -1039,42 +941,22 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Configure webhook",
-                current_step_expected_output: "Webhook receiving events",
                 execution_note: "payment-gateway. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Set up ngrok tunnel",
-                current_step_expected_output: "HTTPS tunnel active",
                 execution_note: "payment-gateway. Step 2/4",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Configure webhook",
-                current_step_expected_output: "Webhook receiving events",
                 execution_note: "payment-gateway. Step 3/4",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "Test payment",
-                current_step_expected_output: "Test payment processed",
                 execution_note: "payment-gateway. Step 4/4",
               },
               {
                 step_result_saved: "yes",
-                current_step: 5,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "payment-gateway. Step 5/4",
               },
             ],
@@ -1096,20 +978,6 @@ describe("robust-task Scenarios", () => {
               total_steps: 4,
               revision_reason: "Need HTTPS tunnel before webhook setup",
             },
-            "reinitialize-after-revision": [
-              {
-                current_step: 1,
-                step_retry: 0,
-                current_step_action: "Install Stripe SDK",
-                current_step_expected_output: "SDK installed",
-              },
-              {
-                current_step: 1,
-                step_retry: 0,
-                current_step_action: "Install Stripe SDK",
-                current_step_expected_output: "SDK installed",
-              },
-            ],
             "verify-criteria": {
               all_criteria_met: "yes",
               criteria_results: [
@@ -1120,6 +988,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Stripe payment integration with webhook support",
               summary: "Installed SDK, set up ngrok, configured webhook, tested payment",
@@ -1148,7 +1017,6 @@ describe("robust-task Scenarios", () => {
                 "Error messages show",
               ],
               user_response_text: "Create user registration form with validation",
-              execution_note: "reg-form",
             },
             "decompose-into-steps": {
               steps: [
@@ -1192,26 +1060,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Add validation",
-                current_step_expected_output: "Validation working",
                 execution_note: "reg-form. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Add submit handler",
-                current_step_expected_output: "Data submits",
                 execution_note: "reg-form. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "reg-form. Step 4/3",
               },
             ],
@@ -1249,6 +1105,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "User registration form with validation and error display",
               summary: "Created form, added validation, submit handler, error messages",
@@ -1273,7 +1130,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Pipeline runs on push", "Tests run automatically"],
               user_response_text: "Set up CI/CD pipeline using GitHub Actions",
-              execution_note: "ci-cd-setup",
             },
             "decompose-into-steps": {
               steps: [
@@ -1352,26 +1208,14 @@ describe("robust-task Scenarios", () => {
             "complete-step": [
               {
                 step_result_saved: "yes",
-                current_step: 2,
-                step_retry: 0,
-                current_step_action: "Configure test job",
-                current_step_expected_output: "Test job runs npm test",
                 execution_note: "ci-cd-setup. Step 2/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 3,
-                step_retry: 0,
-                current_step_action: "Configure deploy job",
-                current_step_expected_output: "Deploy triggers on main branch",
                 execution_note: "ci-cd-setup. Step 3/3",
               },
               {
                 step_result_saved: "yes",
-                current_step: 4,
-                step_retry: 0,
-                current_step_action: "",
-                current_step_expected_output: "",
                 execution_note: "ci-cd-setup. Step 4/3",
               },
             ],
@@ -1398,6 +1242,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "GitHub Actions CI/CD pipeline with test and deploy jobs",
               summary: "Created workflow YAML, configured test and deploy jobs",
@@ -1423,7 +1268,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Reports still generate correctly"],
               user_response_text: "Refactor the legacy reporting module",
-              execution_note: "report-refactor",
             },
             "decompose-into-steps": {
               steps: [
@@ -1487,12 +1331,6 @@ describe("robust-task Scenarios", () => {
               decision: "reset",
               user_response_text: "reset, keep fixing the plan",
             },
-            "reinitialize-after-revision": {
-              current_step: 1,
-              step_retry: 0,
-              current_step_action: "Refactor report generator in /src/reports/generator.ts",
-              current_step_expected_output: "Generator refactored, tests pass",
-            },
             "present-plan": {
               plan_approved: "yes",
               user_response_text: "yes",
@@ -1508,10 +1346,6 @@ describe("robust-task Scenarios", () => {
             },
             "complete-step": {
               step_result_saved: "yes",
-              current_step: 2,
-              step_retry: 0,
-              current_step_action: "",
-              current_step_expected_output: "",
               execution_note: "report-refactor. Step 2/1",
             },
             "verify-criteria": {
@@ -1524,6 +1358,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Refactored reporting module with passing tests",
               summary: "Refactored generator, verified reports still work",
@@ -1549,7 +1384,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Relevant results rank higher"],
               user_response_text: "Tune the search ranking algorithm",
-              execution_note: "search-tune",
             },
             "decompose-into-steps": {
               steps: [
@@ -1604,12 +1438,6 @@ describe("robust-task Scenarios", () => {
               decision: "continue",
               user_response_text: "continue, accept the plan as-is",
             },
-            "reinitialize-after-revision": {
-              current_step: 1,
-              step_retry: 0,
-              current_step_action: "Adjust ranking weights in /src/search/ranker.ts",
-              current_step_expected_output: "NDCG improves on eval set",
-            },
             "present-plan": {
               plan_approved: "yes",
               user_response_text: "yes",
@@ -1625,10 +1453,6 @@ describe("robust-task Scenarios", () => {
             },
             "complete-step": {
               step_result_saved: "yes",
-              current_step: 2,
-              step_retry: 0,
-              current_step_action: "",
-              current_step_expected_output: "",
               execution_note: "search-tune. Step 2/1",
             },
             "verify-criteria": {
@@ -1641,6 +1465,7 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Tuned search ranking with improved NDCG",
               summary: "Adjusted ranking weights, verified relevance improvement",
@@ -1666,7 +1491,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["All fields are validated"],
               user_response_text: "Add input validation to the contact form",
-              execution_note: "contact-validate",
             },
             "decompose-into-steps": {
               steps: [
@@ -1699,10 +1523,6 @@ describe("robust-task Scenarios", () => {
             },
             "complete-step": {
               step_result_saved: "yes",
-              current_step: 2,
-              step_retry: 0,
-              current_step_action: "",
-              current_step_expected_output: "",
               execution_note: "contact-validate. Step 2/1",
             },
             // 5 criteria rounds not met (criteria_round 0→5), then met after reset
@@ -1783,6 +1603,7 @@ describe("robust-task Scenarios", () => {
               decision: "reset",
               user_response_text: "reset, keep closing the gaps",
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Contact form with full field validation",
               summary: "Added validation to every contact form field",
@@ -1808,7 +1629,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Dashboard passes a11y audit"],
               user_response_text: "Improve accessibility of the dashboard",
-              execution_note: "a11y-dashboard",
             },
             "decompose-into-steps": {
               steps: [
@@ -1841,10 +1661,6 @@ describe("robust-task Scenarios", () => {
             },
             "complete-step": {
               step_result_saved: "yes",
-              current_step: 2,
-              step_retry: 0,
-              current_step_action: "",
-              current_step_expected_output: "",
               execution_note: "a11y-dashboard. Step 2/1",
             },
             // 5 criteria rounds not met (criteria_round 0→5), then user continues
@@ -1928,10 +1744,13 @@ describe("robust-task Scenarios", () => {
         },
 
         // Scenario 15: Teleport-replan jump resets counters and restarts decomposition
+        // F1 fix regression: after a teleport replan (teleport-replan → expr-replan-advance →
+        // validate-plan), a subsequent validation issue must NOT reset current_step to 1 — the
+        // replan path advances rather than restarting from the first step.
         {
           name: "Teleport replan resets and restarts plan",
           description:
-            "After the first plan presentation, teleport to teleport-replan → expr-reset-for-replan → decompose-into-steps, then complete normally",
+            "After the first plan presentation, teleport to teleport-replan → expr-replan-advance → validate-plan, then complete normally",
           expect: { status: "completed" },
           teleportAfter: {
             afterNode: "present-plan",
@@ -1949,7 +1768,6 @@ describe("robust-task Scenarios", () => {
               constraints: [],
               success_criteria: ["Config loads with new schema"],
               user_response_text: "Migrate the config loader to the new schema",
-              execution_note: "config-migrate",
             },
             "decompose-into-steps": {
               steps: [
@@ -1973,6 +1791,7 @@ describe("robust-task Scenarios", () => {
             },
             "teleport-replan": {
               revision_reason: "New schema requirements emerged; the plan must be rebuilt",
+              total_steps: 2,
             },
             "execute-current-step": {
               step_completed: "yes",
@@ -1985,11 +1804,7 @@ describe("robust-task Scenarios", () => {
             },
             "complete-step": {
               step_result_saved: "yes",
-              current_step: 2,
-              step_retry: 0,
-              current_step_action: "",
-              current_step_expected_output: "",
-              execution_note: "config-migrate. Step 2/1",
+              execution_note: "config-migrate. Step 3/2",
             },
             "verify-criteria": {
               all_criteria_met: "yes",
@@ -2001,10 +1816,93 @@ describe("robust-task Scenarios", () => {
                 },
               ],
             },
+            "final-review": { final_issues_count: 0 },
             "deliver-result": {
               deliverable: "Config loader migrated to the new schema",
               summary: "Rebuilt the plan after replan, updated loader, verified config loads",
               artifacts: ["/src/config/loader.ts"],
+            },
+          },
+        },
+
+        // Scenario 16: Final independent review finds a gap, fix-gaps loop, second review clean
+        {
+          name: "Final review gap then clean",
+          description:
+            "verify-criteria passes, but the independent final-review returns issues>0 once → route-final-review false → fix-gaps loop → verify-criteria → final-review clean → deliver",
+          expect: { status: "completed" },
+          mockInputs: {
+            "check-file-access": {
+              has_file_access: "no",
+            },
+            "understand-task": {
+              task_description: "Add a health check endpoint to the service",
+              task_short_name: "health-check",
+              expected_deliverable: "Working /health endpoint",
+              constraints: [],
+              success_criteria: ["GET /health returns 200"],
+              user_response_text: "Add a /health endpoint that returns 200",
+            },
+            "decompose-into-steps": {
+              steps: [
+                {
+                  id: 1,
+                  action: "Add /health route",
+                  expected_output: "Route returns 200",
+                },
+              ],
+              total_steps: 1,
+              current_step_action: "Add /health route",
+              current_step_expected_output: "Route returns 200",
+              plan_saved_to_file: "no",
+            },
+            "validate-plan": {
+              issues_count: 0,
+            },
+            "present-plan": {
+              plan_approved: "yes",
+              user_response_text: "yes",
+            },
+            "execute-current-step": {
+              step_completed: "yes",
+              evidence: "Added GET /health route returning 200",
+            },
+            "verify-step-execution": {
+              step_verified: "yes",
+              verification_details: "/health returns 200 in local test",
+              issues_found: [],
+            },
+            "complete-step": {
+              step_result_saved: "yes",
+              execution_note: "health-check. Step 2/1",
+            },
+            "verify-criteria": {
+              all_criteria_met: "yes",
+              criteria_results: [
+                {
+                  criterion: "GET /health returns 200",
+                  met: true,
+                  evidence: "curl /health returns 200 OK",
+                },
+              ],
+              gaps: ["Independent review flagged: health check does not verify dependencies"],
+            },
+            // First independent review finds a gap, second review is clean
+            "final-review": [{ final_issues_count: 1 }, { final_issues_count: 0 }],
+            "fix-gaps": {
+              gaps_fixed: "yes",
+              fix_evidence: [
+                {
+                  gap: "Health endpoint missing dependency check",
+                  fix: "Added DB ping to health check",
+                  evidence: "/health now verifies DB connectivity",
+                },
+              ],
+            },
+            "deliver-result": {
+              deliverable: "Health check endpoint with dependency verification",
+              summary: "Added /health route and DB connectivity check after review",
+              artifacts: ["/src/routes/health.ts"],
             },
           },
         },
