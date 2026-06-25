@@ -1,0 +1,58 @@
+name: Release
+
+# Automated releases via semantic-release (Conventional Commits).
+#
+# On every push to master (i.e. a merged PR), the `release` job analyzes commits
+# since the last tag and, if there is a releasable change (fix/feat/breaking),
+# creates a git tag `v<version>` + a GitHub Release with generated notes. It does
+# NOT push any commit back to master (tags-only) — so it needs no bypass of branch
+# protection and the default GITHUB_TOKEN suffices.
+#
+# The `publish` job then builds + pushes the versioned multi-arch GHCR image by
+# calling publish-image.yml as a reusable workflow with the computed version.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: semantic-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the git tag + GitHub Release
+      issues: write
+      pull-requests: write
+    outputs:
+      published: ${{ steps.semantic.outputs.new_release_published }}
+      version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so commit analysis sees all tags
+
+      - name: semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish versioned image
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
