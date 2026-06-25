@@ -37,6 +37,18 @@ const logger = createLogger({ component: "BetterAuth" });
 const LOAD_TEST_DOMAIN = "load-testing-noverify.local";
 
 /**
+ * Fields read off the sign-up request body in the auth hooks. Better Auth's
+ * middleware context types `ctx.body` as `unknown` under bundler module
+ * resolution (the web-frontend's tsconfig), so we read it through this explicit
+ * shape rather than relying on inferred context typing that differs by resolver.
+ */
+interface SignUpRequestBody {
+  email?: string;
+  acceptedTermsAt?: string;
+  acceptedNotRussianResidentAt?: string;
+}
+
+/**
  * Generate a handle from email prefix
  * Rules:
  * - Extract part before @
@@ -163,11 +175,11 @@ const baseConfig = {
       user,
       url,
     }: {
-      user: { id: string; email: string };
+      user: { id: string; email?: string };
       url: string;
     }) => {
-      if (!isEmailConfigured()) {
-        logger.warn("Email not configured, skipping password reset email");
+      if (!isEmailConfigured() || !user.email) {
+        logger.warn("Email not configured or missing, skipping password reset email");
         return;
       }
       await sendEmail(user.id, "password_reset", {
@@ -194,11 +206,11 @@ const baseConfig = {
       user,
       url,
     }: {
-      user: { id: string; email: string };
+      user: { id: string; email?: string };
       url: string;
     }) => {
-      if (!isEmailConfigured()) {
-        logger.warn("Email not configured, skipping verification email");
+      if (!isEmailConfigured() || !user.email) {
+        logger.warn("Email not configured or missing, skipping verification email");
         return;
       }
       // Fix callbackURL to go to /app instead of / (landing page)
@@ -443,13 +455,15 @@ const baseConfig = {
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      const body = (ctx.body ?? {}) as SignUpRequestBody;
+
       // Public self-service registration is open only in saas. In self-host the
       // admin creates users (seeded at migration time), so the sign-up endpoint
       // is closed. Load-test sign-ups bypass via the X-Load-Test path.
       if (
         ctx.path === "/sign-up/email" &&
         !getFeatureResolver().isEnabled("openRegistration") &&
-        !isValidLoadTestRequest(ctx.body?.email, ctx.headers)
+        !isValidLoadTestRequest(body.email, ctx.headers)
       ) {
         throw new APIError("FORBIDDEN", {
           message: "Open registration is disabled. Contact your administrator for an account.",
@@ -460,7 +474,7 @@ const baseConfig = {
       // Validate legal consent on sign-up (saas only). In self-host registration
       // does not require terms/residency consent.
       if (ctx.path === "/sign-up/email" && getFeatureResolver().isEnabled("legalConsents")) {
-        const { acceptedTermsAt, acceptedNotRussianResidentAt } = ctx.body || {};
+        const { acceptedTermsAt, acceptedNotRussianResidentAt } = body;
 
         if (!acceptedTermsAt) {
           throw new APIError("BAD_REQUEST", {
@@ -483,7 +497,7 @@ const baseConfig = {
       // there is no verification step, so this resend flow is skipped.
       if (
         ctx.path === "/sign-up/email" &&
-        ctx.body?.email &&
+        body.email &&
         getFeatureResolver().isEnabled("emailVerificationGate")
       ) {
         const db = getDatabase();
@@ -493,7 +507,7 @@ const baseConfig = {
             emailVerified: user.emailVerified,
           })
           .from(user)
-          .where(eq(user.email, ctx.body.email))
+          .where(eq(user.email, body.email))
           .limit(1);
 
         if (existingUser.length > 0 && !existingUser[0].emailVerified) {
@@ -502,7 +516,7 @@ const baseConfig = {
             message:
               "Email not verified. Please check your inbox or request a new verification email.",
             code: "EMAIL_NOT_VERIFIED_RESEND",
-            cause: { userId: existingUser[0].id, email: ctx.body.email },
+            cause: { userId: existingUser[0].id, email: body.email },
           });
         }
       }

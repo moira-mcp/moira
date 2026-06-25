@@ -1548,7 +1548,7 @@ export class GraphValidator {
       }
       // start node seeds its initialData
       if (node.type === "start") {
-        const init = (node as { initialData?: Record<string, unknown> }).initialData;
+        const init = (node as { initialData?: unknown }).initialData;
         if (init && typeof init === "object") {
           for (const k of Object.keys(init)) seededOrWritten.add(k);
           const vars = (init as { variables?: Record<string, unknown> }).variables;
