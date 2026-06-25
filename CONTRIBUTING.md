@@ -59,6 +59,35 @@ git commit -s -m "your message"
 
 This adds a `Signed-off-by: Your Name <your@email>` line to the commit message.
 
+## Releases & versioning
+
+Releases are automated with [semantic-release](https://semantic-release.gitbook.io/)
+driven by [Conventional Commits](https://www.conventionalcommits.org/). Write your
+commit subjects accordingly:
+
+| Commit type | Effect |
+| --- | --- |
+| `fix: …` | patch release (`0.0.X`) |
+| `feat: …` | minor release (`0.X.0`) |
+| `feat!: …` or a `BREAKING CHANGE:` footer | major release (`X.0.0`) |
+| `docs:` / `chore:` / `refactor:` / `test:` / `ci:` | no release on their own |
+
+**How a release happens.** `master` is protected — there are no direct pushes, and
+only the maintainer merges PRs. Each merge to `master` runs the **Release** workflow:
+semantic-release analyzes the commits since the last tag and, on a releasable change,
+creates a git tag `v<version>` and a **GitHub Release** with generated notes (this is
+the changelog). The release then publishes a versioned multi-arch image to
+`ghcr.io/moira-mcp/moira` — `:<version>`, `:<major>.<minor>`, and `:latest`. No
+secrets or manual steps are involved (the release uses only the built-in
+`GITHUB_TOKEN`; it creates tags/releases, never pushing to `master`).
+
+Self-host users upgrade simply by pulling the new image — see
+[Updating / Upgrading](README.md#updating--upgrading) in the README.
+
+**CI on pull requests** runs Lint, Unit, Integration, and a Docker build + API/MCP
+tests. The Playwright **E2E** suite is flaky on shared runners, so it runs nightly
+(and on demand) via `.github/workflows/e2e.yml` rather than gating PRs.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
@@ -67,7 +96,7 @@ By contributing, you agree that your contributions will be licensed under the
 ## Documentation changes
 
 When modifying the public documentation under
-`packages/landing-page/src/content/docs/`:
+`packages/docs/src/content/docs/`:
 
 - [ ] Page exists in **both** languages: `docs/` (English) and `ru/docs/` (Russian)
 - [ ] Page is added to the sidebar configuration
