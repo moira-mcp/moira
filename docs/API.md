@@ -1257,6 +1257,15 @@ Errors:
 
 Authentication: Required (owner only)
 
+### GET /api/workflows/:id/export
+
+Download an accessible workflow's graph as a JSON file — the source side of the
+offline transfer path (no cloud call). Accepts UUID, slug, or `handle/slug`. Returns
+the graph as `application/json` with `Content-Disposition: attachment;
+filename="<slug>.moira.json"`. Not gated by the marketplace feature (exporting your
+own flow is always available; the import half, `POST /api/marketplace/import`, is the
+gated part). `404` if the workflow is not found / not accessible.
+
 ### POST /api/workflows/:id/copy
 
 Copy workflow as template (creates private copy).
@@ -3316,6 +3325,17 @@ Adopt a listing into the library as a live reference (auto-updates) and bump
 
 Fork an independent, owned copy of the listing's workflow → `201` + `{ workflowId,
 slug }`.
+
+### POST /api/marketplace/import
+
+Import a workflow from an uploaded file into the caller's library (the offline
+adoption path — NO cloud call). `multipart/form-data` with a `workflow` field (a
+`.moira.json` file, 10MB max). Parses + validates the graph, then saves it as an
+independent private workflow owned by the caller plus a library copy entry
+(`source='added'`, `kind='copy'`, no listing). Gated by the local marketplace
+feature (`MarketplaceDisabledError` when off). Invalid JSON / non-workflow files →
+`400`. → `201` + `{ workflowId, slug, name }`. The imported flow is runnable from the
+library like a forked one. The export half is `GET /api/workflows/:id/export`.
 
 ### DELETE /api/marketplace/library/:workflowId
 

@@ -15,8 +15,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Upload } from "lucide-react";
 import { WorkflowFileInfo } from "types";
+import { Button } from "../components/ui/button";
 import { WorkflowExplorer } from "../components/workflow/WorkflowExplorer";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
@@ -40,7 +41,9 @@ function parseOrigin(value: string | null): OriginTab {
 export const Workflows: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { publicStore } = useFeatures();
+  const { publicStore, isEnabled } = useFeatures();
+  const importInputRef = React.useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = parseOrigin(searchParams.get("origin"));
 
@@ -121,6 +124,26 @@ export const Workflows: React.FC = () => {
     }
   };
 
+  // Import-from-file: the offline adoption path (no cloud call). Reads a workflow JSON
+  // file and posts it to the gated import endpoint; the imported copy lands in Mine.
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so the same file can be re-selected
+    if (!file) return;
+    setImporting(true);
+    try {
+      const result = await apiClient.importWorkflowFile(file);
+      toast.success(t("pages.workflows.home.importSuccess", { name: result.name }));
+      setRefreshKey((k) => k + 1);
+      setActiveTab("mine");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : t("pages.workflows.home.importError");
+      toast.error(message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // Publish-from-management: map own workflowId → its active listing (for unpublish + the
   // public "View on marketplace" link). Listings carry the listing id and the source
   // workflow id; the public handle/slug come from the workflow row itself in the Mine tab.
@@ -181,16 +204,40 @@ export const Workflows: React.FC = () => {
       title={t("pages.workflows.title")}
       description={t("pages.workflows.subtitle")}
       actions={
-        <a
-          href={catalogHref}
-          target={promoteStore ? "_blank" : undefined}
-          rel={promoteStore ? "noopener noreferrer" : undefined}
-          data-testid="browse-catalog-link"
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-        >
-          {t("pages.workflows.home.browseCatalog")}
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
+        <div className="flex items-center gap-4">
+          {isEnabled("marketplace") && (
+            <>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                data-testid="import-workflow-input"
+                onChange={handleImportFile}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={importing}
+                onClick={() => importInputRef.current?.click()}
+                data-testid="import-workflow-button"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                {t("pages.workflows.home.import")}
+              </Button>
+            </>
+          )}
+          <a
+            href={catalogHref}
+            target={promoteStore ? "_blank" : undefined}
+            rel={promoteStore ? "noopener noreferrer" : undefined}
+            data-testid="browse-catalog-link"
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            {t("pages.workflows.home.browseCatalog")}
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        </div>
       }
     >
       <Tabs

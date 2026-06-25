@@ -388,6 +388,38 @@ router.get(
 );
 
 /**
+ * GET /api/workflows/:id/export - Download a workflow as a JSON file.
+ *
+ * The source side of the offline transfer path: returns the accessible workflow's
+ * graph as a downloadable attachment (no cloud call). Accepts UUID, slug, or
+ * handle/slug. Registered before /:handle/:slug so the two-segment "/:id/export"
+ * match wins. Not gated by the marketplace feature — exporting your own flow is
+ * always available; importing (into a library) is the gated half.
+ */
+router.get(
+  "/:id/export",
+  validateParams({ id: paramValidators.workflowId }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).userId;
+
+    const workflowId = await resolveWorkflowId(id, userId);
+    if (!workflowId) {
+      throw createApiError.notFound(`Workflow not found: ${id}`);
+    }
+    const info = await workflowService.getFullInfo(workflowId, userId);
+    if (!info || !info.workflow) {
+      throw createApiError.notFound(`Workflow not found: ${id}`);
+    }
+
+    const filename = `${info.slug || workflowId}.moira.json`;
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(JSON.stringify(info.workflow, null, 2));
+  }),
+);
+
+/**
  * GET /api/workflows/:handle/:slug - Get workflow by handle/slug reference
  *
  * This is the canonical user-facing URL format for workflows.

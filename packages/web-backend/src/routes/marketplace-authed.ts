@@ -19,12 +19,19 @@
  */
 
 import { Router, Request, Response } from "express";
-import { asyncHandler } from "../middleware/error-middleware.js";
+import multer from "multer";
+import { WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { ApiResponse } from "../types/index.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import { getMarketplaceService } from "@mcp-moira/shared";
+import { WorkflowValidationService } from "../services/validation-service.js";
 
 const router = Router();
+
+// File import uploads (the offline adoption path) — in-memory, 10MB cap, matching
+// the token upload limit.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 function ok<T>(res: Response, data: T, status = 200): void {
   const body: ApiResponse<T> = { success: true, data, timestamp: new Date().toISOString() };
@@ -118,6 +125,43 @@ router.post(
   "/listings/:id/fork",
   asyncHandler(async (req: Request, res: Response) => {
     const result = await getMarketplaceService().fork(userId(req), req.params.id);
+    ok(res, result, 201);
+  }),
+);
+
+// POST /api/marketplace/import — import a workflow from an uploaded file into the
+// library (offline adoption, NO cloud call). Gated by the local marketplace feature
+// via the service's assertEnabled(); validates the graph before saving the copy.
+router.post(
+  "/import",
+  upload.single("workflow"),
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!req.file) {
+      throw createApiError.validationFailed("No file uploaded");
+    }
+
+    let graph: WorkflowGraph;
+    try {
+      graph = JSON.parse(req.file.buffer.toString("utf-8")) as WorkflowGraph;
+    } catch {
+      throw createApiError.validationFailed("Invalid JSON format");
+    }
+    if (!graph || typeof graph !== "object" || !Array.isArray(graph.nodes) || !graph.metadata) {
+      throw createApiError.validationFailed(
+        "Not a workflow file: expected an object with metadata and a nodes array",
+      );
+    }
+
+    // Validate against a temporary id (the import drops it and assigns a fresh one).
+    const validation = await new WorkflowValidationService().validateWorkflow({
+      ...graph,
+      id: graph.id ?? "import-validation-id",
+    });
+    if (!validation.isValid) {
+      throw createApiError.validationFailed("Workflow validation failed", { validation });
+    }
+
+    const result = await getMarketplaceService().importFromFile(userId(req), graph);
     ok(res, result, 201);
   }),
 );

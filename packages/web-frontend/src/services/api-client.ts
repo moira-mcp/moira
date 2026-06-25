@@ -3321,6 +3321,33 @@ export class MoiraApiClient {
     return response.data.data!;
   }
 
+  /**
+   * Import a workflow from a file into the library (offline adoption, no cloud call).
+   * Gated by the local marketplace feature server-side.
+   */
+  async importWorkflowFile(
+    file: File,
+  ): Promise<{ workflowId: string; slug: string; name: string }> {
+    const form = new FormData();
+    form.append("workflow", file);
+    const response = await this.client.post<
+      ApiResponse<{ workflowId: string; slug: string; name: string }>
+    >("/marketplace/import", form, {
+      // Drop the default application/json so the browser sets the multipart
+      // boundary itself; otherwise the upload is unparseable server-side.
+      headers: { "Content-Type": undefined },
+    });
+    return response.data.data!;
+  }
+
+  /** Download a workflow's definition as a JSON file blob (the export source side). */
+  async exportWorkflow(id: string): Promise<Blob> {
+    const response = await this.client.get(`/workflows/${encodeURIComponent(id)}/export`, {
+      responseType: "blob",
+    });
+    return response.data as Blob;
+  }
+
   async rateListing(
     listingId: string,
     stars: number,

@@ -239,6 +239,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **api** (2 files)
 
 - `tests/api/auth/self-host-auth.test.ts` — 2 tests 🟢 (HTTP self-host auth branch: open registration closed (REGISTRATION_DISABLED) vs saas consent-enforced; admin token issuance on requireVerifiedAuth route; mode auto-detected from sign-up behavior)
+- `tests/api/marketplace-file-transfer.test.ts` — 4 tests 🟢 (self-host export/import endpoints (Step 16) over HTTP: GET /api/workflows/:id/export downloads a `.moira.json` attachment with the source graph; export→import round-trips into an independent library copy (fresh id, appears in me/library); non-JSON / non-workflow files → 400; import requires auth → 401)
 - `tests/api/features-api.test.ts` — 5 tests 🟢 (public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host; public-store promotion gate shape — boolean promotionEnabled + absolute store URL, true on the non-store test container)
 
 **e2e** (1 file)
@@ -324,6 +325,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/mcp-tools/execution-audit.test.ts` — 12 tests 🟢
 - `tests/mcp-tools/execution-errors.test.ts` — 5 tests 🟢
+- `tests/mcp-tools/workflow-import-run.test.ts` — 1 test 🟢 (Step 16 runnability: one user creates + exports a flow over HTTP, imports the file into their library (POST /api/marketplace/import, no cloud call), then starts the IMPORTED workflow via the MCP `start` tool — the offline-adopted flow runs like any owned flow, returning a process id)
 - `tests/mcp-tools/workflow-execution.test.ts` — 8 tests 🟢
 
 **e2e** (3 files)
@@ -535,6 +537,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); the old /marketplace/library redirects into the unified Workflows home where the added reference shows under the "Added" origin; before/after screenshots captured)
 - `tests/e2e/marketplace-unified-home.spec.ts` — 4 tests 🟢 (Playwright: the unified origin-tabbed Workflows home (Step 14). Publish-from-management — a Mine row's Publish action opens the publish form PRE-FILLED via `?workflowId` and publishing makes the row offer "View on marketplace" resolving to the public `/w/:handle/:slug` page; an owned flow shows in Mine with a Listed badge while a consumer's added-by-reference flow shows in Added with a ROOT `/w/...` source link (asserted equal to `/w/handle/slug` and 200-resolving); old `/marketplace/library` redirects to `?origin=added`; the top-of-home "Browse the public catalog" link resolves to the promoted public-store URL reported by `/api/features` (external) — see public-store-promotion for the local-fallback case)
 - `tests/e2e/marketplace-public-store-promotion.spec.ts` — 4 tests 🟢 (Playwright: public-store promotion gate (Step 15), orthogonal to the local marketplace feature. The live `/api/features` reports `publicStore.promotionEnabled` true with a store URL on this non-store instance; the "Public store" sidebar link renders pointing at that URL (external). Via mocked `/api/features` + reload: with the local `marketplace` feature OFF the promotion link + home catalog link still target the store while the Marketplace nav item is gone (local catalog gracefully absent); on the canonical store (`promotionEnabled` false) the promotion link is suppressed and the home catalog link falls back to the local `/explore` path)
+- `tests/e2e/marketplace-file-transfer.spec.ts` — 2 tests 🟢 (Playwright, self-host file transfer (Step 16): from the Mine tab, a flow's export action downloads a `.moira.json` file (captured + parsed) which is then set on the "Import from file" control → a success toast and the imported copy appears alongside the source (count 2); the import control is gated by the local `marketplace` feature (absent when mocked off) while the per-card export action stays available)
 
 ### marketplace-render
 
@@ -627,6 +630,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/integration/cors-rate-limit-middleware.test.ts` — 5 tests 🟢 (CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6)
 - `tests/integration/features-public-store.test.ts` — 3 tests 🟢 (REAL GET /api/features handler in-process via supertest, env-toggled (Step 15): publicStore.promotionEnabled true + default store URL for a non-store origin; true in BOTH MARKETPLACE_ENABLED states (orthogonal gate); false on the canonical store where own origin == store URL)
+- `tests/integration/marketplace-import.test.ts` — 6 tests 🟢 (offline file import (Step 16) at the service level against a migrated DB: importFromFile saves an independent private workflow owned by the importer with a fresh id + intact graph; records a library copy entry (source=added, kind=copy, listingId null); surfaces in getLibrary deduped to origin=own; makes NO cloud call (no listing/event row); gated by the local marketplace feature (throws MarketplaceDisabledError when off); repeated import yields distinct ids/slugs)
 
 **unit** (1 files)
 

@@ -123,8 +123,8 @@ at runtime.
 
 Two independent things, both off-by-default-friendly for self-host:
 
-- **Local marketplace** (publish flows, a local catalog) is **off by default** in
-  self-host. Opt in with `MARKETPLACE_ENABLED=true`.
+- **Local marketplace** (publish flows, a local library, and **importing flows from
+  a file**) is **off by default** in self-host. Opt in with `MARKETPLACE_ENABLED=true`.
 - **Public store promotion** — a "Public store" link in the app that points at the
   hosted catalog at [moira-mcp.com](https://moira-mcp.com). It is shown by default
   on any self-host install (it does not require the local marketplace) so you can
@@ -136,6 +136,20 @@ Two independent things, both off-by-default-friendly for self-host:
 
   The promotion link is automatically hidden only when an instance's own origin
   (scheme + host + port) matches this URL (i.e. the store does not link to itself).
+
+### Moving a flow between instances (offline, no cloud)
+
+Flows transfer by file — no account on the hosted store and no outbound call required:
+
+1. **Export** (always available): on the **Workflows** page, open the **Mine** tab and
+   use a flow's export action to download it as a `.moira.json` file.
+2. **Import** (requires `MARKETPLACE_ENABLED=true` on the destination): on the
+   **Workflows** page, click **Import from file** and choose the `.moira.json` file. The
+   flow is saved as a private copy in your library and is immediately runnable — tell
+   your agent to run it by name, just like any other library flow.
+
+Export is ungated (you can always download your own flows); importing into the library
+is part of the local marketplace feature and so follows `MARKETPLACE_ENABLED`.
 
 ## Build From Source
 

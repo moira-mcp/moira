@@ -18,15 +18,18 @@ import {
   Users,
   Trash2,
   Upload,
+  Download,
   Store,
   ExternalLink,
 } from "lucide-react";
+import { toast } from "sonner";
 import { WorkflowFileInfo } from "types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { apiClient } from "../../services/api-client";
 import { publicFlowPath } from "../../pages/marketplace/components";
 import type { MarketplaceListing } from "../../types/api-types";
 
@@ -90,6 +93,39 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   // marketplace" link; unlisted ones offer Publish.
   const isOwn = workflow.accessType === "owner";
   const canManageListing = isOwn && (onPublish || onUnpublish);
+
+  // Export (download the flow as a JSON file) — the source side of the offline
+  // transfer path. Available for the user's own flows; not gated by the marketplace
+  // feature (importing is the gated half).
+  const handleExport = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation();
+    try {
+      const blob = await apiClient.exportWorkflow(workflow.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${workflow.slug || workflow.id}.moira.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t("pages.workflows.home.exportError"));
+    }
+  };
+  const exportAction = isOwn ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={handleExport}
+      className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted"
+      title={t("pages.workflows.home.export")}
+      aria-label={t("pages.workflows.home.export")}
+      data-testid="export-workflow"
+    >
+      <Download className="w-3.5 h-3.5" />
+    </Button>
+  ) : null;
   const marketplaceActions = canManageListing ? (
     <>
       {listing ? (
@@ -184,6 +220,7 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
                 <span className="hidden md:inline">{t("pages.workflows.home.listed")}</span>
               </Badge>
             )}
+            {exportAction}
             {marketplaceActions}
             {canDelete && (
               <Button
@@ -339,7 +376,8 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
             </Badge>
           )}
 
-          {/* Publish / unpublish / view-on-marketplace */}
+          {/* Export / publish / unpublish / view-on-marketplace */}
+          {exportAction}
           {marketplaceActions}
 
           {/* Delete button - hidden until hover */}

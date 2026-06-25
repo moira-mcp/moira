@@ -218,6 +218,11 @@
       "home": {
         "loadFailed": "Failed to load your library",
         "browseCatalog": "Browse the public catalog",
+        "import": "Import from file",
+        "importSuccess": "Imported \"{{name}}\" into your library",
+        "importError": "Import failed",
+        "export": "Export to file",
+        "exportError": "Export failed",
         "tab": {
           "mine": "Mine",
           "added": "Added",

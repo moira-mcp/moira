@@ -979,6 +979,43 @@ export class MarketplaceService {
     return { workflowId: saved.id, slug: saved.slug };
   }
 
+  /**
+   * Import a workflow from a file (the offline adoption path — NO cloud call).
+   * Saves the supplied graph as an independent private workflow owned by the user
+   * (a frozen copy, id dropped so a fresh one is assigned) and records it in the
+   * library as kind=copy with no listing provenance. Gated by the local marketplace
+   * feature, like {@link fork}/{@link install}; the imported flow is runnable from
+   * the user's library exactly like a forked one. The caller is responsible for
+   * validating the graph before calling this.
+   */
+  async importFromFile(
+    userId: string,
+    graph: WorkflowGraph,
+  ): Promise<{ workflowId: string; slug: string; name: string }> {
+    this.assertEnabled();
+
+    // Deep clone, drop the id so save() assigns a fresh one (independent row).
+    const clone = JSON.parse(JSON.stringify(graph)) as WorkflowGraph;
+    delete clone.id;
+    const name = clone.metadata?.name ?? "imported-workflow";
+    const slug = await this.workflowRepo.generateUniqueSlug(userId, name);
+    const saved = await this.workflowRepo.save({
+      graph: clone,
+      userId,
+      slug,
+      visibility: "private",
+    });
+
+    await this.libraryRepo.add({
+      userId,
+      workflowId: saved.id,
+      source: "added",
+      kind: "copy",
+      listingId: null,
+    });
+    return { workflowId: saved.id, slug: saved.slug, name };
+  }
+
   // ===== Ratings / reviews =====
 
   /**
