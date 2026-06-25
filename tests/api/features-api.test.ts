@@ -34,6 +34,7 @@ interface FeaturesResponse {
     deploymentMode: "self-host" | "saas";
     features: Record<string, boolean>;
     mcpUrl: string;
+    publicStore: { promotionEnabled: boolean; url: string };
   };
   timestamp: string;
 }
@@ -84,5 +85,18 @@ describe("GET /api/features", () => {
     // value is resolved from server config, not a build-time-baked default.
     const apiHost = new URL(BASE_URL).hostname;
     expect(parsed.hostname).toBe(apiHost);
+  });
+
+  test("exposes the public-store promotion gate (boolean + absolute store URL)", async () => {
+    const res = await fetch(`${BASE_URL}/api/features`);
+    const body = (await res.json()) as FeaturesResponse;
+
+    expect(typeof body.data.publicStore?.promotionEnabled).toBe("boolean");
+    const storeUrl = new URL(body.data.publicStore.url);
+    expect(["http:", "https:"]).toContain(storeUrl.protocol);
+
+    // The test container is not the canonical store (it serves on the request
+    // host, not the store origin), so it promotes the store.
+    expect(body.data.publicStore.promotionEnabled).toBe(true);
   });
 });

@@ -45,6 +45,18 @@ describe("public-store promotion gate", () => {
       const { getMarketplacePublicUrl } = await importEnvModule();
       expect(getMarketplacePublicUrl()).toBe("https://store.example.com");
     });
+
+    it("normalizes a scheme-less value to an https URL", async () => {
+      process.env.MARKETPLACE_PUBLIC_URL = "store.example.com";
+      const { getMarketplacePublicUrl } = await importEnvModule();
+      expect(getMarketplacePublicUrl()).toBe("https://store.example.com");
+    });
+
+    it("leaves an explicit http scheme untouched", async () => {
+      process.env.MARKETPLACE_PUBLIC_URL = "http://localhost:8078";
+      const { getMarketplacePublicUrl } = await importEnvModule();
+      expect(getMarketplacePublicUrl()).toBe("http://localhost:8078");
+    });
   });
 
   describe("isPublicStorePromotionEnabled()", () => {
@@ -86,6 +98,15 @@ describe("public-store promotion gate", () => {
     it("compares by origin only — path, trailing slash and case are ignored", async () => {
       process.env.MOIRA_HOST = "moira-mcp.com";
       process.env.MARKETPLACE_PUBLIC_URL = "https://MOIRA-MCP.com/explore/";
+      const { isPublicStorePromotionEnabled } = await importEnvModule();
+      expect(isPublicStorePromotionEnabled()).toBe(false);
+    });
+
+    it("suppresses self-promotion even when the store URL is configured scheme-less", async () => {
+      // A scheme-less MARKETPLACE_PUBLIC_URL must still normalize so the store
+      // does not promote itself (regression guard for the string-fallback edge).
+      process.env.MOIRA_HOST = "moira-mcp.com";
+      process.env.MARKETPLACE_PUBLIC_URL = "moira-mcp.com";
       const { isPublicStorePromotionEnabled } = await importEnvModule();
       expect(isPublicStorePromotionEnabled()).toBe(false);
     });

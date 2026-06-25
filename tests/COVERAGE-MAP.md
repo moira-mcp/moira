@@ -239,7 +239,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **api** (2 files)
 
 - `tests/api/auth/self-host-auth.test.ts` — 2 tests 🟢 (HTTP self-host auth branch: open registration closed (REGISTRATION_DISABLED) vs saas consent-enforced; admin token issuance on requireVerifiedAuth route; mode auto-detected from sign-up behavior)
-- `tests/api/features-api.test.ts` — 4 tests 🟢 (public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host)
+- `tests/api/features-api.test.ts` — 5 tests 🟢 (public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host; public-store promotion gate shape — boolean promotionEnabled + absolute store URL, true on the non-store test container)
 
 **e2e** (1 file)
 
@@ -504,7 +504,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/unit/shared/marketplace-schema.test.ts` — 13 tests 🟢 (marketplace migration 0014: five tables + listing indexes created; listing column defaults; UNIQUE constraints — one listing/workflow, one review/(listing,user), one library entry/(user,workflow), one entitlement/(user,listing); review stars DB CHECK 1..5 boundary+reject; nullable event userId)
 - `tests/unit/shared/marketplace-categories.test.ts` — 7 tests 🟢 (fixed category set: non-empty unique ids, 'other' catch-all last, MARKETPLACE_CATEGORY_IDS derivation, isValidMarketplaceCategory, normalizeMarketplaceCategory fallback)
 - `tests/unit/shared/marketplace-feature-flags.test.ts` — 6 tests 🟢 (paidWorkflows off in both modes; isMarketplaceEnabled config toggle: mode defaults + MARKETPLACE_ENABLED opt-in/opt-out override)
-- `tests/unit/shared/public-store-promotion-config.test.ts` — 6 tests 🟢 (public-store promotion gate (Step 15): getMarketplacePublicUrl default + MARKETPLACE_PUBLIC_URL override; isPublicStorePromotionEnabled true for a non-store origin in BOTH marketplace-flag states (orthogonal gates), false on the canonical store and when a custom store URL matches own origin, origin-only comparison ignoring path/slash/case)
+- `tests/unit/shared/public-store-promotion-config.test.ts` — 9 tests 🟢 (public-store promotion gate (Step 15): getMarketplacePublicUrl default + MARKETPLACE_PUBLIC_URL override + scheme-less→https normalization + explicit-http untouched; isPublicStorePromotionEnabled true for a non-store origin in BOTH marketplace-flag states (orthogonal gates), false on the canonical store, when a custom store URL matches own origin, and when the store URL is configured scheme-less, origin-only comparison ignoring path/slash/case)
 - `tests/unit/shared/marketplace-service.test.ts` — 33 tests 🟢 (publish/unpublish guards + unpublish unlists (row kept) + re-publish re-lists; add-as-reference + idempotency + install counter; library resolver own/added/shared excluding arbitrary public; fork independent copy + provenance; reference-auto-updates vs fork-frozen; remove + not-found; canAccess free vs paid coming-soon + paid-add rejection; detail by handle/slug + stale-private rejection; ratings/reviews — record + recompute aggregate, one-editable-per-user, average-across-users, self-rating + out-of-range rejection, removeReview, rate event; analytics events + view/start counters; trending order by recent activity)
 - `tests/unit/shared/marketplace-listing-repository.test.ts` — 5 tests 🟢 (create defaults + read-back; delete by workflow; gallery predicate listed+public+not-deleted; category filter; install counter)
 - `tests/unit/shared/library-entry-repository.test.ts` — 3 tests 🟢 (add + get by user/workflow; list by user; remove with changed-rows result)
@@ -626,6 +626,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **integration** (1 files)
 
 - `tests/integration/cors-rate-limit-middleware.test.ts` — 5 tests 🟢 (CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6)
+- `tests/integration/features-public-store.test.ts` — 3 tests 🟢 (REAL GET /api/features handler in-process via supertest, env-toggled (Step 15): publicStore.promotionEnabled true + default store URL for a non-store origin; true in BOTH MARKETPLACE_ENABLED states (orthogonal gate); false on the canonical store where own origin == store URL)
 
 **unit** (1 files)
 

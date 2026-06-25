@@ -332,7 +332,13 @@ class ConfigSingleton {
   getMarketplacePublicUrl(): string {
     this.ensureInitialized();
     const raw = process.env.MARKETPLACE_PUBLIC_URL;
-    return raw && raw.trim() ? raw.trim() : DEFAULT_MARKETPLACE_PUBLIC_URL;
+    if (!raw || !raw.trim()) return DEFAULT_MARKETPLACE_PUBLIC_URL;
+    const trimmed = raw.trim();
+    // Normalize a scheme-less value (e.g. "moira-mcp.com") to a parseable URL so
+    // the origin comparison in isPublicStorePromotionEnabled() stays robust — an
+    // unparseable value would otherwise fall back to a raw string compare and let
+    // the canonical store promote itself.
+    return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   }
 
   /**
