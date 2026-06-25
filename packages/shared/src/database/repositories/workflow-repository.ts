@@ -349,6 +349,24 @@ export class WorkflowRepository {
   }
 
   /**
+   * Resolve every non-deleted flow owned by `ownerId` to a `slug → id` map in a
+   * single query. Used by the library resolver to attach real workflow ids to the
+   * bundled (catalog) flows without an N+1 of {@link resolveSlug}.
+   */
+  async getOwnerSlugIds(ownerId: string): Promise<Map<string, string>> {
+    const rows = await this.db
+      .select({ id: workflow.id, slug: workflow.slug })
+      .from(workflow)
+      .where(
+        and(
+          eq(workflow.userId, ownerId),
+          or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+        ),
+      );
+    return new Map(rows.map((row) => [row.slug, row.id]));
+  }
+
+  /**
    * Check if a slug exists for a user
    */
   async slugExists(slug: string, userId: string, excludeWorkflowId?: string): Promise<boolean> {

@@ -14,3 +14,10 @@ export {
   isValidMarketplaceCategory,
   normalizeMarketplaceCategory,
 } from "./constants.js";
+
+export {
+  type OfficialOwnerId,
+  OFFICIAL_OWNER_IDS,
+  OFFICIAL_BASE_FLOW_SLUGS,
+  isOfficialOwner,
+} from "./official.js";

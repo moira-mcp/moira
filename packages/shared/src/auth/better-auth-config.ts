@@ -28,7 +28,7 @@ import {
   getExtraTrustedOrigins,
 } from "../config/env.js";
 import { getMcpServerVersion } from "../config/mcp-version.js";
-import { getFeatureResolver } from "../services/index.js";
+import { getFeatureResolver, getMarketplaceService } from "../services/index.js";
 
 const logger = createLogger({ component: "BetterAuth" });
 
@@ -319,6 +319,21 @@ const baseConfig = {
 
           logger.info("Generated handle for new user", { email, handle });
           return { data: { ...userData, handle } };
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        after: async (newUser: any) => {
+          // Seed the curated official base flows into the new user's library. Fires for
+          // ALL user creations (email + OAuth) since it runs on the adapter create, not
+          // on a specific sign-up path. Best-effort: a seeding failure must NEVER break
+          // sign-up, so it is fully wrapped — the user is created regardless.
+          try {
+            const { seeded } = await getMarketplaceService().seedDefaultLibrary(newUser.id);
+            logger.info("Seeded default library for new user", { userId: newUser.id, seeded });
+          } catch (error) {
+            logger.error("Failed to seed default library for new user", error, {
+              userId: newUser.id,
+            });
+          }
         },
       },
     },

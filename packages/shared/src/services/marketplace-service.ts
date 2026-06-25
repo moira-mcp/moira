@@ -25,6 +25,7 @@ import type {
   PublicListingRef,
 } from "../database/repositories/marketplace-listing-repository.js";
 import { MARKETPLACE_CATEGORIES, normalizeMarketplaceCategory } from "../marketplace/constants.js";
+import { OFFICIAL_BASE_FLOW_SLUGS, isOfficialOwner } from "../marketplace/official.js";
 import type {
   LibraryEntryRepository,
   LibraryEntryRecord,
@@ -77,6 +78,8 @@ export interface LibraryItem {
   name: string;
   /** Owner handle (for building a `handle/slug` start reference); null for core flows. */
   ownerHandle: string | null;
+  /** True when the flow is owned by an official system account (system-moira/system-admin). */
+  official: boolean;
   /** For `added` items: reference (live) vs copy (frozen). */
   kind?: "reference" | "copy";
   /** For `added` items: the listing it came from. */
@@ -832,18 +835,29 @@ export class MarketplaceService {
     const items: LibraryItem[] = [];
     const seenWorkflowIds = new Set<string>();
 
-    // core — bundled flows, available to everyone (resolved by slug, not stored per user).
-    if (include("core")) {
-      for (const core of this.coreProvider()) {
-        items.push({
-          origin: "core",
-          workflowId: core.workflowId,
-          slug: core.slug,
-          name: core.name,
-          ownerHandle: core.ownerHandle ?? null,
-          workflow: core.workflow,
-        });
-      }
+    // core — bundled flows, available to everyone (resolved by slug, not stored per
+    // user). Each core flow is resolved to its real (installed) workflow id and that id
+    // is claimed in `seenWorkflowIds` BEFORE added/shared are processed — so a base flow
+    // that was ALSO seeded as an `added` library entry is listed once (as core), never
+    // twice. Core flows are bundled system-moira flows, hence always official. Ids are
+    // claimed even when core is filtered out (mirrors the own-origin dedup precedence).
+    const cores = this.coreProvider();
+    const coreSlugIds = cores.some((c) => c.workflowId == null)
+      ? await this.workflowRepo.getOwnerSlugIds(SYSTEM_PUBLIC_OWNER)
+      : new Map<string, string>();
+    for (const core of cores) {
+      const workflowId = core.workflowId ?? coreSlugIds.get(core.slug) ?? null;
+      if (workflowId) seenWorkflowIds.add(workflowId);
+      if (!include("core")) continue;
+      items.push({
+        origin: "core",
+        workflowId,
+        slug: core.slug,
+        name: core.name,
+        ownerHandle: core.ownerHandle ?? null,
+        official: true,
+        workflow: core.workflow,
+      });
     }
 
     // own — workflows the user owns. list() also surfaces public/shared flows for
@@ -858,6 +872,7 @@ export class MarketplaceService {
         slug: w.slug,
         name: w.metadata.name,
         ownerHandle: w.ownerHandle,
+        official: isOfficialOwner(w.userId),
         workflow: w.workflow,
       });
     }
@@ -877,6 +892,7 @@ export class MarketplaceService {
         slug: info.slug,
         name: info.metadata.name,
         ownerHandle: info.ownerHandle,
+        official: isOfficialOwner(info.userId),
         kind: entry.kind as "reference" | "copy",
         listingId: entry.listingId,
         workflow: info.workflow,
@@ -897,11 +913,53 @@ export class MarketplaceService {
         slug: info.slug,
         name: info.metadata.name,
         ownerHandle: info.ownerHandle,
+        official: isOfficialOwner(info.userId),
         workflow: info.workflow,
       });
     }
 
     return items;
+  }
+
+  /**
+   * Seed the curated official base flows ({@link OFFICIAL_BASE_FLOW_SLUGS}) into a
+   * user's library as live references. Called on signup and by the one-time backfill.
+   *
+   * - LOCAL-only: resolves the bundled `system-moira` flows by slug and never makes a
+   *   cloud call. Deliberately does NOT call {@link assertEnabled} — base flows are
+   *   seeded even when the marketplace store feature is off.
+   * - IDEMPOTENT: skips a flow already in the user's library; re-running adds nothing.
+   * - TOLERANT: a base slug that is not installed on this instance is skipped, not an
+   *   error. No install event is recorded (this is provisioning, not adoption).
+   *
+   * Returns the number of entries newly added.
+   */
+  async seedDefaultLibrary(userId: string): Promise<{ seeded: number }> {
+    // Never seed into a system/official account's own library (system-moira owns the base
+    // flows; self-referential entries make no sense). Use the same official-owner check the
+    // backfill uses, so both paths skip the same accounts symmetrically.
+    if (isOfficialOwner(userId)) {
+      return { seeded: 0 };
+    }
+
+    let seeded = 0;
+    for (const slug of OFFICIAL_BASE_FLOW_SLUGS) {
+      const workflowId = await this.workflowRepo.resolveSlug(slug, SYSTEM_PUBLIC_OWNER);
+      if (!workflowId) continue; // not installed on this instance — skip silently
+
+      const existing = await this.libraryRepo.getByUserAndWorkflow(userId, workflowId);
+      if (existing) continue; // idempotent
+
+      await this.libraryRepo.add({
+        userId,
+        workflowId,
+        source: "added",
+        kind: "reference",
+        listingId: null,
+      });
+      seeded++;
+    }
+    return { seeded };
   }
 
   // ===== Add / Remove / Fork =====

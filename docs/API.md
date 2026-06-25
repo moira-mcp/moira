@@ -3315,7 +3315,16 @@ The caller's listings (any status) → `{ listings: MarketplaceListing[] }`.
 
 ### GET /api/marketplace/me/library
 
-The caller's library (core ∪ own ∪ added ∪ shared) → `{ items: LibraryItem[] }`.
+The caller's library (core ∪ own ∪ added ∪ shared) → `{ items: LibraryItem[] }`. Each
+`LibraryItem` carries `official: boolean` — true when the flow is owned by a system/official
+account (`system-moira` / `system-admin`); it is derived from ownership, not a stored flag.
+
+On user creation, the curated **official base flows** (a small everyday set — e.g.
+quick-task, robust-task, workflow-management-flow, verified-research, user-onboarding,
+software-development-flow) are **seeded** into the new user's library as `source='added'`,
+`kind='reference'` entries (idempotent; flag-independent — seeded even when the marketplace
+feature is off; no cloud call). Existing users are back-filled once on deploy. A seeded base
+flow is de-duplicated against the bundled `core` set, so it appears once.
 
 ### POST /api/marketplace/listings/:id/install
 

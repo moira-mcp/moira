@@ -687,4 +687,14 @@ export class UserRepository {
       .where(and(eq(user.isAdmin, true), eq(user.blocked, false)));
     return rows.map((r) => r.id);
   }
+
+  /**
+   * Return every user id. Used by the one-time default-library backfill to seed the
+   * official base flows into each existing user's library. Cheap (id-only select);
+   * the backfill is idempotent per user.
+   */
+  async getAllUserIds(): Promise<string[]> {
+    const rows = await this.db.select({ id: user.id }).from(user);
+    return rows.map((r) => r.id);
+  }
 }

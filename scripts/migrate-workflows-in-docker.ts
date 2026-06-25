@@ -31,10 +31,12 @@ import {
   WorkflowRepository,
   UserRepository,
   getWorkflowMutationService,
+  getMarketplaceService,
   initializeWorkflowValidationCache,
   readWorkflowCatalogs,
   getWorkflowsDirs,
   installCatalogEntries,
+  isOfficialOwner,
   CatalogContentMismatchError,
 } from "@mcp-moira/shared";
 
@@ -91,6 +93,32 @@ async function migrate(): Promise<void> {
   console.log("\n🔍 Running validation cache migration...");
   await initializeWorkflowValidationCache();
   console.log("✅ Validation cache migration complete");
+
+  // One-time backfill: seed the curated official base flows into every existing user's
+  // library. Runs here because both users (run-migrations.ts) and the catalog flows
+  // (above) now exist. Idempotent and cheap — safe to run on every deploy; system
+  // owners are skipped. seedDefaultLibrary skips entries already present per user.
+  console.log("\n📚 Backfilling default library for existing users...");
+  const marketplaceService = getMarketplaceService();
+  const userIds = await userRepo.getAllUserIds();
+  let backfilledUsers = 0;
+  let backfilledEntries = 0;
+  for (const uid of userIds) {
+    if (isOfficialOwner(uid)) continue; // system accounts have no seeded library
+    // Isolate each user: one user's seeding failure must not abort the whole backfill.
+    try {
+      const { seeded } = await marketplaceService.seedDefaultLibrary(uid);
+      if (seeded > 0) {
+        backfilledUsers++;
+        backfilledEntries += seeded;
+      }
+    } catch (error) {
+      console.error(`⚠️  Default library backfill failed for user ${uid}:`, error);
+    }
+  }
+  console.log(
+    `✅ Default library backfill complete: ${backfilledEntries} entries across ${backfilledUsers} user(s) (${userIds.length} scanned)`,
+  );
 
   if (result.invalid > 0) {
     console.error("\n❌ Migration completed with invalid flows");
