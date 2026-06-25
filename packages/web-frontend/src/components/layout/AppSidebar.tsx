@@ -22,6 +22,7 @@ import {
   StickyNote,
   TrendingUp,
   Package,
+  Globe,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -51,6 +52,7 @@ const iconMap: Record<string, LucideIcon> = {
   "⚙️": Settings,
   "🔧": Shield,
   "📚": BookOpen,
+  "🌐": Globe,
   "📝": StickyNote,
   "📄": FileCode,
   // Admin icons
@@ -70,6 +72,12 @@ export interface NavRoute {
   adminOnly?: boolean;
   multiUserAdmin?: boolean; // Hidden when the multiUserAdmin feature is off (self-host)
   marketplace?: boolean; // Hidden when the marketplace feature is off
+  /**
+   * Public-store promotion link. Hidden unless `publicStore.promotionEnabled`
+   * (i.e. this instance is not itself the store). The href is resolved at render
+   * from `publicStore.url`, so `path` is only a stable React key placeholder.
+   */
+  promotion?: boolean;
   external?: boolean;
   sameWindow?: boolean; // For external links that should open in same window (e.g., Back to App)
 }
@@ -88,7 +96,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   const location = useLocation();
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
-  const { isEnabled: isFeatureEnabled } = useFeatures();
+  const { isEnabled: isFeatureEnabled, publicStore } = useFeatures();
   const multiUserAdmin = isFeatureEnabled("multiUserAdmin");
   const marketplaceEnabled = isFeatureEnabled("marketplace");
 
@@ -96,7 +104,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     (route) =>
       (!route.adminOnly || isAdmin) &&
       (!route.multiUserAdmin || multiUserAdmin) &&
-      (!route.marketplace || marketplaceEnabled),
+      (!route.marketplace || marketplaceEnabled) &&
+      (!route.promotion || (publicStore.promotionEnabled && !!publicStore.url)),
   );
 
   const isRouteActive = (path: string) => {
@@ -138,11 +147,14 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 // External links - may open in new tab or same window
                 if (route.external) {
                   const openInNewTab = !route.sameWindow;
+                  // Promotion links resolve their href at render from the
+                  // server-reported store URL; `route.path` is only a key.
+                  const href = route.promotion ? publicStore.url : route.path;
                   return (
                     <SidebarMenuItem key={route.path}>
                       <SidebarMenuButton asChild tooltip={route.label}>
                         <a
-                          href={route.path}
+                          href={href}
                           target={openInNewTab ? "_blank" : undefined}
                           rel={openInNewTab ? "noopener noreferrer" : undefined}
                           className="flex items-center gap-2"

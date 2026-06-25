@@ -10,7 +10,7 @@
  */
 
 import { createLogger } from "../logging/logger.js";
-import { validateHostFormat } from "./urls.js";
+import { validateHostFormat, getBaseUrl } from "./urls.js";
 import { loadPersistedSecrets } from "./secrets-bootstrap.js";
 import dotenv from "dotenv";
 import path from "path";
@@ -31,6 +31,12 @@ export type DeploymentMode = "self-host" | "saas";
 export const DEPLOYMENT_MODES: readonly DeploymentMode[] = ["self-host", "saas"] as const;
 
 export const DEFAULT_DEPLOYMENT_MODE: DeploymentMode = "self-host";
+
+/**
+ * Canonical public hosted marketplace ("the store") that self-host instances
+ * promote when `MARKETPLACE_PUBLIC_URL` is unset.
+ */
+export const DEFAULT_MARKETPLACE_PUBLIC_URL = "https://moira-mcp.com";
 
 /** Message shown when DEPLOYMENT_MODE is unset on a public host. */
 export const UNSET_MODE_PUBLIC_HOST_MESSAGE =
@@ -317,6 +323,38 @@ class ConfigSingleton {
     return this.getDeploymentMode() === "saas";
   }
 
+  /**
+   * URL of the public hosted marketplace ("the store") that self-host instances
+   * promote. `MARKETPLACE_PUBLIC_URL` overrides; defaults to the canonical
+   * hosted store. Used both for the promotion links and to detect whether THIS
+   * instance is itself the store (see {@link isPublicStorePromotionEnabled}).
+   */
+  getMarketplacePublicUrl(): string {
+    this.ensureInitialized();
+    const raw = process.env.MARKETPLACE_PUBLIC_URL;
+    return raw && raw.trim() ? raw.trim() : DEFAULT_MARKETPLACE_PUBLIC_URL;
+  }
+
+  /**
+   * Whether to show public-store PROMOTION links (a growth funnel, gated ONLY by
+   * deployment topology — independent of the local `MARKETPLACE_ENABLED` feature).
+   * Shown whenever this instance is NOT itself the canonical hosted store, i.e.
+   * its own origin differs from the public-store origin. The canonical store
+   * therefore suppresses self-links, while every self-host install (and any
+   * non-canonical deployment) shows the promotion in both flag states.
+   */
+  isPublicStorePromotionEnabled(): boolean {
+    this.ensureInitialized();
+    const sameOrigin = (a: string, b: string): boolean => {
+      try {
+        return new URL(a).origin.toLowerCase() === new URL(b).origin.toLowerCase();
+      } catch {
+        return a.replace(/\/+$/, "").toLowerCase() === b.replace(/\/+$/, "").toLowerCase();
+      }
+    };
+    return !sameOrigin(getBaseUrl(), this.getMarketplacePublicUrl());
+  }
+
   // ============================================================================
   // Load Testing
   // ============================================================================
@@ -553,6 +591,12 @@ export function isSaas(): boolean {
 }
 export function isMarketplaceEnabled(): boolean {
   return config.isMarketplaceEnabled();
+}
+export function getMarketplacePublicUrl(): string {
+  return config.getMarketplacePublicUrl();
+}
+export function isPublicStorePromotionEnabled(): boolean {
+  return config.isPublicStorePromotionEnabled();
 }
 export function getLoadTestSecret(): string | undefined {
   return config.getLoadTestSecret();

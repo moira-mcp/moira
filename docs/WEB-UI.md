@@ -238,19 +238,25 @@ Application routes:
 
 Protected routes require authentication (ProtectedRoute wrapper).
 
-Sidebar navigation (6 items):
+Sidebar navigation (config-driven from `MAIN_APP_ROUTES`):
 
 - Home (/)
 - Workflows (/workflows)
 - Executions (/executions)
 - Notes (/notes)
 - Artifacts (/artifacts)
-- Documentation (/docs/) - external link, opens in same tab
-
+- Marketplace (/marketplace) — hidden when the `marketplace` feature is off
+- Public store — external promotion link, shown only when
+  `publicStore.promotionEnabled` (this instance is not itself the store); href
+  resolved at render from `publicStore.url`
 - Settings (/settings)
+- Documentation (/docs/) - external link, opens in same tab
 - Admin (/admin) — visible only for admin users
 
-Active route highlighting via NavLink isActive.
+Active route highlighting via NavLink isActive. External items (`external: true`)
+render an `<a>` with an external-link indicator; `promotion: true` additionally
+gates on the public-store promotion flag and pulls its href from the features
+endpoint.
 
 ### Quick Start Card
 
@@ -998,9 +1004,16 @@ interface BetaWarningBannerProps {
 ### Feature-Mode Gating
 
 `FeaturesProvider` / `useFeatures()` (`hooks/useFeatures.tsx`) load
-`GET /api/features` once at startup and expose `{deploymentMode, features, mcpUrl, isEnabled}`.
-Mounted above `AuthProvider`. Default while loading / on error: all flags off
-(self-host baseline — SaaS UI never flashes before the server confirms it).
+`GET /api/features` once at startup and expose
+`{deploymentMode, features, mcpUrl, publicStore, isEnabled}`. Mounted above
+`AuthProvider`. Default while loading / on error: all flags off and
+`publicStore.promotionEnabled` false (self-host baseline — SaaS UI and the
+store-promotion link never flash before the server confirms them).
+
+`publicStore` (`{ promotionEnabled, url }`) drives the public-store growth funnel
+independently of the `marketplace` feature: the "Public store" sidebar item and
+the workflows-home catalog link point at `url` when `promotionEnabled`, and the
+catalog link falls back to the local `/explore` route otherwise.
 
 SaaS-specific UI is hidden in self-host based on the flags:
 
@@ -1269,7 +1282,7 @@ src/
     "SIGN_IN_DESCRIPTION": "..."
   },
   "layout": {
-    "nav": { "home", "workflows", "executions", "artifacts", "settings", "admin", "docs" },
+    "nav": { "home", "workflows", "executions", "artifacts", "marketplace", "publicStore", "settings", "admin", "docs" },
     "adminNav": { "dashboard", "users", "auditLog", "systemSettings", "deletedWorkflows", "backToApp" },
     "userMenu": { "user", "theme", "language", "settings", "logout" },
     "sidebar": { "collapse", "expand", "show" },

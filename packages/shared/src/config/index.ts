@@ -66,6 +66,8 @@ export {
   isSaas,
   // Marketplace
   isMarketplaceEnabled,
+  getMarketplacePublicUrl,
+  isPublicStorePromotionEnabled,
   // Load Testing
   getLoadTestSecret,
   isLoadTestAuthEnabled,
@@ -81,6 +83,7 @@ export type { DeploymentMode } from "./env.js";
 export {
   DEPLOYMENT_MODES,
   DEFAULT_DEPLOYMENT_MODE,
+  DEFAULT_MARKETPLACE_PUBLIC_URL,
   evaluateUnsetModeSafeguard,
   UNSET_MODE_PUBLIC_HOST_MESSAGE,
 } from "./env.js";

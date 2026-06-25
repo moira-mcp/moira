@@ -128,6 +128,16 @@ export interface FeaturesResponse {
    * URL matches the actual host/port instead of a build-time-baked value.
    */
   mcpUrl: string;
+  /**
+   * Public hosted marketplace promotion gate. `promotionEnabled` is true on every
+   * instance that is not itself the canonical store (so self-host promotes the
+   * store regardless of the local marketplace flag), false on the store itself.
+   * `url` is the store address to link to.
+   */
+  publicStore: {
+    promotionEnabled: boolean;
+    url: string;
+  };
 }
 
 export interface ApiError {

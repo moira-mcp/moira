@@ -16,6 +16,8 @@ import {
   getFeatureResolver,
   getMcpUrl,
   isMarketplaceEnabled,
+  getMarketplacePublicUrl,
+  isPublicStorePromotionEnabled,
   type Feature,
 } from "@mcp-moira/shared";
 
@@ -48,6 +50,17 @@ export interface FeaturesResponse {
    * on whatever host/port the running instance is actually served from.
    */
   mcpUrl: string;
+  /**
+   * Public hosted marketplace ("the store") promotion gate. Orthogonal to the
+   * `marketplace` local feature: `promotionEnabled` is true whenever this
+   * instance is NOT itself the canonical store (so every self-host install
+   * promotes the store in both marketplace-flag states), and false on the store
+   * itself (no self-promotion). `url` is the store address to link to.
+   */
+  publicStore: {
+    promotionEnabled: boolean;
+    url: string;
+  };
 }
 
 /**
@@ -65,7 +78,15 @@ router.get(
 
     const response: ApiResponse<FeaturesResponse> = {
       success: true,
-      data: { deploymentMode: getDeploymentMode(), features, mcpUrl: getMcpUrl() },
+      data: {
+        deploymentMode: getDeploymentMode(),
+        features,
+        mcpUrl: getMcpUrl(),
+        publicStore: {
+          promotionEnabled: isPublicStorePromotionEnabled(),
+          url: getMarketplacePublicUrl(),
+        },
+      },
       timestamp: new Date().toISOString(),
     };
 

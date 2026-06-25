@@ -21,6 +21,7 @@ import { WorkflowExplorer } from "../components/workflow/WorkflowExplorer";
 import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { publicCatalogPath } from "./marketplace/components";
+import { useFeatures } from "../hooks/useFeatures";
 import { OriginLibraryList } from "../components/workflow/OriginLibraryList";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Badge } from "../components/ui/badge";
@@ -39,8 +40,15 @@ function parseOrigin(value: string | null): OriginTab {
 export const Workflows: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { publicStore } = useFeatures();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = parseOrigin(searchParams.get("origin"));
+
+  // The catalog promo affordance: point at the public hosted store when this
+  // instance promotes it (growth funnel, gated only by deployment topology),
+  // otherwise fall back to the local catalog (gated by the marketplace feature).
+  const promoteStore = publicStore.promotionEnabled && !!publicStore.url;
+  const catalogHref = promoteStore ? publicStore.url : publicCatalogPath();
 
   const [currentUserHandle, setCurrentUserHandle] = useState<string | undefined>();
   const [isAdmin, setIsAdmin] = useState(false);
@@ -174,7 +182,10 @@ export const Workflows: React.FC = () => {
       description={t("pages.workflows.subtitle")}
       actions={
         <a
-          href={publicCatalogPath()}
+          href={catalogHref}
+          target={promoteStore ? "_blank" : undefined}
+          rel={promoteStore ? "noopener noreferrer" : undefined}
+          data-testid="browse-catalog-link"
           className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
         >
           {t("pages.workflows.home.browseCatalog")}

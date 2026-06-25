@@ -38,6 +38,16 @@ export const MainAppLayout: React.FC = () => {
       icon: "🛍️",
       marketplace: true,
     },
+    {
+      // Growth funnel: link to the public hosted store. Shown on every instance
+      // that is not itself the store, independent of the local marketplace flag.
+      // `path` is only a React key — AppSidebar resolves the href from features.
+      path: "#public-store",
+      label: t("layout.nav.publicStore"),
+      icon: "🌐",
+      external: true,
+      promotion: true,
+    },
     { path: ROUTES.SETTINGS, label: t("layout.userMenu.settings"), icon: "⚙️" },
     { path: ROUTES.ADMIN, label: t("layout.nav.admin"), icon: "🔧", adminOnly: true },
     {

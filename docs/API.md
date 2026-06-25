@@ -66,8 +66,9 @@ Execution context size 12.00MB exceeds maximum 10MB limit
 ### GET /api/features
 
 Public (no auth). Returns the deployment mode, the resolved feature flags so
-the frontend can hide SaaS-specific UI in self-host, and the runtime-resolved
-MCP endpoint URL. Read pre-auth by the login/register pages.
+the frontend can hide SaaS-specific UI in self-host, the runtime-resolved MCP
+endpoint URL, and the public-store promotion gate. Read pre-auth by the
+login/register pages.
 
 Response:
 
@@ -83,20 +84,37 @@ Response:
       legalConsents: boolean;
       betaNotices: boolean;
       multiUserAdmin: boolean;
+      socialLogin: boolean;
+      paidWorkflows: boolean;
+      marketplace: boolean; // local marketplace feature (config toggle)
     }
     mcpUrl: string;
+    publicStore: {
+      promotionEnabled: boolean;
+      url: string;
+    }
   }
   timestamp: string;
 }
 ```
 
 Flags are resolved via `getFeatureResolver()` (`ModeFeatureResolver` by
-`DEPLOYMENT_MODE`): all off in `self-host`, all on in `saas`.
+`DEPLOYMENT_MODE`): all off in `self-host`, all on in `saas`. `marketplace` is
+the separate `isMarketplaceEnabled()` config toggle (not a mode `Feature`).
 
 `mcpUrl` is `getMcpUrl()` — `<protocol>://<MOIRA_HOST>/mcp`, resolved from the
 server's host configuration at request time. The frontend uses it as the MCP
 endpoint shown in the Web UI so the value matches the actual host/port the
 instance is served from.
+
+`publicStore` is the **public-store promotion gate**, orthogonal to the
+`marketplace` feature. `promotionEnabled` (`isPublicStorePromotionEnabled()`) is
+`true` whenever this instance's own origin differs from the public store's
+(`getMarketplacePublicUrl()`, default `https://moira-mcp.com`, overridable via
+`MARKETPLACE_PUBLIC_URL`) — so every self-host install promotes the store in
+both marketplace-flag states — and `false` on the store itself (no
+self-promotion). The frontend uses it to show a "Public store" nav link and to
+target the workflows-home catalog link at `url`.
 
 Authentication: Not required.
 

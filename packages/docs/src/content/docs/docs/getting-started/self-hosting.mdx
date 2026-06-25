@@ -119,6 +119,24 @@ shadow the bundled catalog. Unset → just the bundled `./workflows/production`.
 your extra directory into the container (e.g. via a compose volume) so the path exists
 at runtime.
 
+## Marketplace and the Public Store
+
+Two independent things, both off-by-default-friendly for self-host:
+
+- **Local marketplace** (publish flows, a local catalog) is **off by default** in
+  self-host. Opt in with `MARKETPLACE_ENABLED=true`.
+- **Public store promotion** — a "Public store" link in the app that points at the
+  hosted catalog at [moira-mcp.com](https://moira-mcp.com). It is shown by default
+  on any self-host install (it does not require the local marketplace) so you can
+  browse community flows. It is controlled by `MARKETPLACE_PUBLIC_URL`:
+
+  ```bash
+  MARKETPLACE_PUBLIC_URL=https://moira-mcp.com   # default
+  ```
+
+  The promotion link is automatically hidden only when an instance's own host
+  equals this URL (i.e. the store does not link to itself).
+
 ## Build From Source
 
 Building locally is an alternative for contributors who need to modify the image.

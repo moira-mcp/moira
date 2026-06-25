@@ -38,6 +38,13 @@ interface FeaturesContextType {
    * host/port instead of a build-time-baked value.
    */
   mcpUrl: string | null;
+  /**
+   * Public hosted marketplace promotion gate. `promotionEnabled` is true on any
+   * instance that is not itself the canonical store (self-host promotes the store
+   * regardless of the local marketplace flag); false on the store itself and until
+   * loaded (fail-safe — no promotion link flashes before the server confirms it).
+   */
+  publicStore: { promotionEnabled: boolean; url: string };
   loaded: boolean;
   isEnabled: (feature: FeatureFlag) => boolean;
 }
@@ -48,6 +55,10 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
   const [deploymentMode, setDeploymentMode] = useState<DeploymentMode | null>(null);
   const [features, setFeatures] = useState<FeatureFlags>(ALL_OFF);
   const [mcpUrl, setMcpUrl] = useState<string | null>(null);
+  const [publicStore, setPublicStore] = useState<{ promotionEnabled: boolean; url: string }>({
+    promotionEnabled: false,
+    url: "",
+  });
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -59,6 +70,7 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
         setDeploymentMode(res.deploymentMode);
         setFeatures({ ...ALL_OFF, ...res.features });
         setMcpUrl(res.mcpUrl ?? null);
+        if (res.publicStore) setPublicStore(res.publicStore);
       })
       .catch(() => {
         // Keep the fail-safe ALL_OFF defaults on error.
@@ -74,7 +86,9 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
   const isEnabled = (feature: FeatureFlag) => features[feature] ?? false;
 
   return (
-    <FeaturesContext.Provider value={{ deploymentMode, features, mcpUrl, loaded, isEnabled }}>
+    <FeaturesContext.Provider
+      value={{ deploymentMode, features, mcpUrl, publicStore, loaded, isEnabled }}
+    >
       {children}
     </FeaturesContext.Provider>
   );

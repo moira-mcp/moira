@@ -207,13 +207,27 @@ test.describe("Unified Workflows home", () => {
     await expect(page.getByTestId("origin-list-added")).toBeVisible({ timeout: 10000 });
   });
 
-  test("the home top-level 'Browse the public catalog' link is a ROOT /explore path", async ({
+  test("the home top-level 'Browse the public catalog' link resolves to the promoted store", async ({
     page,
   }) => {
     await login(page, PUBLISHER.email, PUBLISHER.password);
     await page.goto(`${BASE_URL}/workflows`);
-    const browse = page.getByRole("link", { name: /Browse the public catalog/ });
+
+    // This instance is not the canonical store, so the home catalog link is the
+    // promo affordance → the public store URL reported by /api/features (external).
+    // (When the instance IS the store, it falls back to the local /explore path —
+    // covered in marketplace-public-store-promotion.spec.ts.)
+    const realRes = await page.request.get(`${BASE_URL}/api/features`);
+    const store = (
+      (await realRes.json()) as {
+        data: { publicStore: { promotionEnabled: boolean; url: string } };
+      }
+    ).data.publicStore;
+    expect(store.promotionEnabled).toBe(true);
+
+    const browse = page.getByTestId("browse-catalog-link");
     await expect(browse).toBeVisible();
-    expect(await browse.getAttribute("href")).toBe("/explore");
+    expect(await browse.getAttribute("href")).toBe(store.url);
+    expect(await browse.getAttribute("target")).toBe("_blank");
   });
 });
