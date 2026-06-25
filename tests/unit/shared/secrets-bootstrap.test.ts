@@ -134,5 +134,40 @@ describe("secrets-bootstrap", () => {
       expect(() => loadPersistedSecrets()).not.toThrow();
       expect(process.env.BETTER_AUTH_SECRET).toBeUndefined();
     });
+
+    it("overrides a baked build placeholder with the persisted real secret", () => {
+      // The public image bakes a non-empty placeholder into .env; a persisted
+      // real secret must win over it (otherwise the placeholder reaches config).
+      fs.writeFileSync(secretsFile, `TELEGRAM_ENCRYPTION_KEY=${"a".repeat(64)}\n`);
+      process.env.TELEGRAM_ENCRYPTION_KEY = "0123456789abcdef".repeat(4); // weak build placeholder
+
+      loadPersistedSecrets();
+
+      expect(process.env.TELEGRAM_ENCRYPTION_KEY).toBe("a".repeat(64));
+    });
+  });
+
+  describe("build placeholders are treated as missing", () => {
+    const AUTH_PLACEHOLDER = "public-image-build-placeholder-not-used-at-runtime";
+    const TELEGRAM_WEAK = "0123456789abcdef".repeat(4);
+
+    it("regenerates real secrets over the baked build placeholders", () => {
+      // Reproduces the self-host first-start bug: the image's .env sets these to
+      // non-empty placeholders, which must NOT be reused as real secrets.
+      process.env.DEPLOYMENT_MODE = "self-host";
+      process.env.BETTER_AUTH_SECRET = AUTH_PLACEHOLDER;
+      process.env.TELEGRAM_ENCRYPTION_KEY = TELEGRAM_WEAK;
+
+      const results = bootstrapSelfHostSecrets();
+
+      expect(results.find((x) => x.key === "BETTER_AUTH_SECRET")?.generated).toBe(true);
+      expect(results.find((x) => x.key === "TELEGRAM_ENCRYPTION_KEY")?.generated).toBe(true);
+      expect(process.env.BETTER_AUTH_SECRET).toMatch(/^[0-9a-f]{64}$/);
+      expect(process.env.TELEGRAM_ENCRYPTION_KEY).toMatch(/^[0-9a-f]{64}$/);
+      expect(process.env.BETTER_AUTH_SECRET).not.toBe(AUTH_PLACEHOLDER);
+      expect(process.env.TELEGRAM_ENCRYPTION_KEY).not.toBe(TELEGRAM_WEAK);
+      // And the generated values are persisted for reuse across restarts.
+      expect(fs.existsSync(secretsFile)).toBe(true);
+    });
   });
 });

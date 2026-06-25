@@ -36,6 +36,29 @@ export interface GeneratedSecret {
 const DB_PATH_DEFAULT = "./data/moira.db";
 const SECRETS_FILE_NAME = ".secrets.env";
 
+/**
+ * Build-time placeholder values baked into the public image's env file
+ * (`.env.selfhost` → `.env`) so the image BUILD doesn't fail, but which are NOT
+ * real secrets. They are deliberately non-empty, so at runtime they must be
+ * treated as "absent" — otherwise the auto-generated real secret is never
+ * written over them and a fresh self-host install boots with (or rejects) the
+ * public placeholder. Keep in sync with `config/.env.selfhost` and the
+ * weak-key check in `env.ts`.
+ */
+const BUILD_PLACEHOLDERS: Record<string, string> = {
+  BETTER_AUTH_SECRET: "public-image-build-placeholder-not-used-at-runtime",
+  TELEGRAM_ENCRYPTION_KEY: "0123456789abcdef".repeat(4),
+};
+
+/**
+ * A secret counts as "missing" (so it should be generated / overridden by a
+ * persisted value) when it is unset, empty, OR equal to the known build-time
+ * placeholder for that key. An operator-provided real value is never touched.
+ */
+export function needsSecret(key: string, value: string | undefined): boolean {
+  return value === undefined || value === "" || value === BUILD_PLACEHOLDERS[key];
+}
+
 /** Resolve the durable secrets file path, alongside the SQLite database. */
 export function getSecretsFilePath(): string {
   const dbPath = path.resolve(process.env.DB_PATH || DB_PATH_DEFAULT);
@@ -43,8 +66,9 @@ export function getSecretsFilePath(): string {
 }
 
 /**
- * Load persisted secrets into `process.env` WITHOUT overriding values already
- * set (explicit env / `.env` always wins over generated ones).
+ * Load persisted secrets into `process.env` WITHOUT overriding real
+ * operator-provided values (explicit env / `.env` always wins). A baked-in
+ * build placeholder is NOT a real value, so a persisted secret DOES override it.
  * No-op if the file does not exist.
  */
 export function loadPersistedSecrets(filePath: string = getSecretsFilePath()): void {
@@ -53,7 +77,7 @@ export function loadPersistedSecrets(filePath: string = getSecretsFilePath()): v
   }
   const parsed = dotenv.parse(fs.readFileSync(filePath));
   for (const [key, value] of Object.entries(parsed)) {
-    if (process.env[key] === undefined || process.env[key] === "") {
+    if (needsSecret(key, process.env[key])) {
       process.env[key] = value;
     }
   }
@@ -119,7 +143,9 @@ export function bootstrapSelfHostSecrets(
 
   const ensure = (key: string, gen: () => string, exposeValue = false): void => {
     const current = process.env[key];
-    if (current !== undefined && current !== "") {
+    // Reuse only a REAL operator-provided value; a baked build placeholder
+    // (or empty/unset) must be replaced with a freshly generated secret.
+    if (!needsSecret(key, current)) {
       results.push({ key, generated: false });
       return;
     }
