@@ -65,11 +65,11 @@ Releases are automated with [semantic-release](https://semantic-release.gitbook.
 driven by [Conventional Commits](https://www.conventionalcommits.org/). Write your
 commit subjects accordingly:
 
-| Commit type | Effect |
-| --- | --- |
-| `fix: …` | patch release (`0.0.X`) |
-| `feat: …` | minor release (`0.X.0`) |
-| `feat!: …` or a `BREAKING CHANGE:` footer | major release (`X.0.0`) |
+| Commit type                                        | Effect                  |
+| -------------------------------------------------- | ----------------------- |
+| `fix: …`                                           | patch release (`0.0.X`) |
+| `feat: …`                                          | minor release (`0.X.0`) |
+| `feat!: …` or a `BREAKING CHANGE:` footer          | major release (`X.0.0`) |
 | `docs:` / `chore:` / `refactor:` / `test:` / `ci:` | no release on their own |
 
 **How a release happens.** `master` is protected — there are no direct pushes, and
