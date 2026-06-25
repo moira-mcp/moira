@@ -297,6 +297,9 @@ export class MoiraApiClient {
       if (request?.visibility) {
         params.append("visibility", request.visibility);
       }
+      if (request?.ownedOnly) {
+        params.append("ownedOnly", "true");
+      }
       if (request?.sort) {
         params.append("sort", request.sort);
       }
@@ -3241,7 +3244,9 @@ export class MoiraApiClient {
 
   // ===== Marketplace =====
 
-  async getMarketplaceGallery(query: MarketplaceGalleryQuery = {}): Promise<MarketplaceGalleryPage> {
+  async getMarketplaceGallery(
+    query: MarketplaceGalleryQuery = {},
+  ): Promise<MarketplaceGalleryPage> {
     const params = new URLSearchParams();
     if (query.search) params.append("search", query.search);
     if (query.category) params.append("category", query.category);
@@ -3257,9 +3262,9 @@ export class MoiraApiClient {
   }
 
   async getMarketplaceCategories(): Promise<Array<{ id: string; label: string }>> {
-    const response = await this.client.get<ApiResponse<{ categories: Array<{ id: string; label: string }> }>>(
-      "/public/marketplace/categories",
-    );
+    const response = await this.client.get<
+      ApiResponse<{ categories: Array<{ id: string; label: string }> }>
+    >("/public/marketplace/categories");
     return response.data.data!.categories;
   }
 
@@ -3293,9 +3298,10 @@ export class MoiraApiClient {
   }
 
   async getMyLibrary(): Promise<MarketplaceLibraryItem[]> {
-    const response = await this.client.get<ApiResponse<{ items: MarketplaceLibraryItem[] }>>(
-      "/marketplace/me/library",
-    );
+    const response =
+      await this.client.get<ApiResponse<{ items: MarketplaceLibraryItem[] }>>(
+        "/marketplace/me/library",
+      );
     return response.data.data!.items;
   }
 

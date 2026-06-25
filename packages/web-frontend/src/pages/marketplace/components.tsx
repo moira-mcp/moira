@@ -51,6 +51,24 @@ export function flowDetailPath(handle: string | null, slug: string): string {
   return `${ROUTES.MARKETPLACE}/flow/${handle ?? "unknown"}/${slug}`;
 }
 
+/**
+ * Cross-links from the SPA into the PUBLIC server-rendered catalog.
+ *
+ * The catalog pages (`/explore`, `/w/:handle/:slug`) are mounted at the ROOT by the
+ * web-backend and routed there by nginx (config/nginx-root.conf + config/nginx-app.conf)
+ * INDEPENDENTLY of the SPA `APP_BASE_PATH` — both the self-host (`/`) and our hosted
+ * (`/app`) deploys serve them at the bare root. So these helpers intentionally return
+ * ROOT-relative paths and must NOT be prefixed with `ROUTES`/`APP_PREFIX`.
+ */
+export function publicCatalogPath(): string {
+  return "/explore";
+}
+
+/** ROOT path to a flow's public catalog detail page (handle/slug). */
+export function publicFlowPath(handle: string | null, slug: string): string {
+  return `/w/${handle ?? "unknown"}/${slug}`;
+}
+
 /** A single flow card for the gallery grid. */
 export function ListingCard({ item }: { item: MarketplaceGalleryItem }) {
   const { t } = useTranslation();
@@ -84,7 +102,9 @@ export function ListingCard({ item }: { item: MarketplaceGalleryItem }) {
           </Badge>
           <RatingStars avg={item.ratingAvg} count={item.ratingCount} />
           <span>{t("pages.marketplace.installs", { count: item.installCount })}</span>
-          {item.ownerHandle && <span>{t("pages.marketplace.by", { handle: item.ownerHandle })}</span>}
+          {item.ownerHandle && (
+            <span>{t("pages.marketplace.by", { handle: item.ownerHandle })}</span>
+          )}
         </div>
         {tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">

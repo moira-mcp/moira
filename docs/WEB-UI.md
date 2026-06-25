@@ -204,11 +204,11 @@ Application routes:
 
 ```
 / (protected)                      - Dashboard (home page)
-/workflows (protected)             - Workflow explorer + viewer
+/workflows (protected)             - Unified Workflows home, organized by origin tabs (?origin=mine|added|shared|core, default mine). Mine = the user's OWN workflows with full management (filters/sort/pagination, edit/delete/visibility) + per-row publish/unpublish/view-on-marketplace and a Listed badge. Added/Shared/Core = the agent-library origins (run by asking your agent in natural language); Added rows link to their source listing on the public catalog. Cross-links to the public catalog use a single root-mounted helper.
 /executions (protected)            - Execution history
 /marketplace (protected)           - Marketplace gallery (search + sort recent/rating/installs/trending); nav entry hidden when the `marketplace` feature is off
-/marketplace/publish (protected)   - Publish form (owner-only workflow picker; paid pricing section disabled while `paidWorkflows` is off)
-/marketplace/library (protected)   - My Library (core/own/added/shared runnable workflows with per-item start command)
+/marketplace/publish (protected)   - Publish form (owner-only workflow picker; reads ?workflowId= to preselect when launched from a workflow row; paid pricing section disabled while `paidWorkflows` is off)
+/marketplace/library (protected)   - Redirects to /workflows?origin=added (My Library folded into the unified Workflows home)
 /marketplace/my-listings (protected) - My Listings (publisher view + unpublish)
 /marketplace/flow/:handle/:slug (protected) - Flow detail (add/fork, ratings/reviews, disabled paid block, copy-a-prompt affordance)
 /artifacts (protected)             - User artifacts management

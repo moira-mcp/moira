@@ -1344,6 +1344,7 @@ Query parameters:
 
 - `search`: Search in name and description
 - `visibility`: Filter (public, private, all). Default: all
+- `ownedOnly`: When `true`, restrict to the caller's OWN workflows (both visibilities), excluding other users' public workflows and workflows shared with the caller. Default: false (own + public + shared). The `visibility` sub-filter still applies.
 - `validationStatus`: Filter by validation status (valid, invalid, unknown, all). Default: all
 - `sort`: Sort field (createdAt, name). Default: createdAt
 - `sortOrder`: Sort direction (asc, desc). Default: desc

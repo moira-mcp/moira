@@ -393,12 +393,13 @@ test.describe("Workflow Sharing - Shared Workflow Visibility", () => {
     console.log("Accept response:", JSON.stringify(acceptData, null, 2));
     expect(acceptResponse.status()).toBe(201);
 
-    // Navigate to workflows list as MCP_TOOLS_TEST user
-    await newPage.goto(`${BASE_URL}/workflows`);
+    // Navigate to the recipient's Workflows home → "Shared" origin tab (the unified home
+    // groups workflows by origin; shared-with-me flows live under ?origin=shared).
+    await newPage.goto(`${BASE_URL}/workflows?origin=shared`);
     await newPage.waitForLoadState("networkidle");
     await newPage.waitForTimeout(2000);
 
-    // Check that shared workflow appears in list (use first() in case of duplicates from previous test runs)
+    // Check that shared workflow appears in the Shared list (first() in case of dupes).
     const sharedWorkflow = newPage.getByText("Shared Visibility Test").first();
     await expect(sharedWorkflow).toBeVisible({ timeout: 10000 });
 

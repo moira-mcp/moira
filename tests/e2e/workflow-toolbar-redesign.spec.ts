@@ -16,6 +16,31 @@ const TEST_USER = {
 
 test.beforeAll(async () => {
   await createTestUser(TEST_USER.email, TEST_USER.password, TEST_USER.name, true);
+  // The Workflows home's "Mine" tab lists only the user's OWN workflows, so seed one so
+  // the explorer renders with data (filters + pagination indicator) instead of an empty state.
+  const login = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: TEST_USER.email, password: TEST_USER.password }),
+  });
+  const cookie = login.headers.get("set-cookie") || "";
+  await fetch(`${BASE_URL}/api/workflows`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({
+      workflow: {
+        metadata: {
+          name: `Toolbar Flow ${Date.now()}`,
+          version: "1.0.0",
+          description: "Toolbar test.",
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      },
+    }),
+  });
 });
 
 test.describe("Workflow Explorer Toolbar", () => {

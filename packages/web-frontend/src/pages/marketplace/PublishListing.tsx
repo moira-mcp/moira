@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient } from "../../services/api-client";
@@ -26,12 +26,14 @@ import {
 export function PublishListing() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const presetWorkflowId = searchParams.get("workflowId") ?? "";
   const { isEnabled } = useFeatures();
   const paidEnabled = isEnabled("paidWorkflows");
   const { loadWorkflows, workflows } = useWorkflowList();
 
   const [categories, setCategories] = useState<Array<{ id: string; label: string }>>([]);
-  const [workflowId, setWorkflowId] = useState("");
+  const [workflowId, setWorkflowId] = useState(presetWorkflowId);
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
   const [summary, setSummary] = useState("");
@@ -51,6 +53,17 @@ export function PublishListing() {
   // Only the user's OWN workflows can be published. The list endpoint always
   // populates accessType (owner|shared|public), so fail closed on "owner".
   const ownWorkflows = (workflows?.workflows ?? []).filter((w) => w.accessType === "owner");
+
+  // Publish-from-management: when arriving with ?workflowId=<id>, preselect it once the
+  // own-workflow list has loaded and the id is actually one of the user's own workflows.
+  useEffect(() => {
+    if (!presetWorkflowId) return;
+    if (workflowId === presetWorkflowId) return;
+    if (ownWorkflows.some((w) => w.id === presetWorkflowId)) {
+      setWorkflowId(presetWorkflowId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presetWorkflowId, ownWorkflows.length]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,9 +99,7 @@ export function PublishListing() {
         ← {t("pages.marketplace.back")}
       </Link>
       <h1 className="mt-3 text-2xl font-semibold">{t("pages.marketplace.publishForm.title")}</h1>
-      <p className="text-sm text-muted-foreground">
-        {t("pages.marketplace.publishForm.subtitle")}
-      </p>
+      <p className="text-sm text-muted-foreground">{t("pages.marketplace.publishForm.subtitle")}</p>
 
       <form className="mt-5 space-y-4" onSubmit={submit}>
         <div>

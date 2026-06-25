@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { MarketplaceListing } from "../../types/api-types";
 
 interface WorkflowExplorerProps {
   selectedWorkflowId?: string;
@@ -29,6 +30,14 @@ interface WorkflowExplorerProps {
   onDelete?: (workflowId: string, workflowName: string) => void;
   currentUserHandle?: string;
   isAdmin?: boolean;
+  /** Own workflowId → its active marketplace listing (for the publish/unpublish affordance). */
+  listingByWorkflowId?: Map<string, MarketplaceListing>;
+  /** Navigate to the publish flow pre-filled with this workflow. */
+  onPublish?: (workflowId: string) => void;
+  /** Unpublish (unlist) the workflow's listing, then refresh. */
+  onUnpublish?: (listingId: string) => void;
+  /** Restrict the list to the user's OWN workflows (the "Mine" origin). */
+  ownedOnly?: boolean;
 }
 
 export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
@@ -37,6 +46,10 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
   onDelete,
   currentUserHandle,
   isAdmin,
+  listingByWorkflowId,
+  onPublish,
+  onUnpublish,
+  ownedOnly = false,
 }) => {
   const { t } = useTranslation();
   const { pageSize, containerRef } = useDynamicPageSize(48);
@@ -82,12 +95,22 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
       search: debouncedSearch || undefined,
       visibility: visibilityFilter === "all" ? undefined : visibilityFilter,
       validationStatus: statusFilter === "all" ? undefined : statusFilter,
+      ownedOnly: ownedOnly || undefined,
       sort: sortBy,
       sortOrder,
       limit: pageSize,
       offset: (currentPage - 1) * pageSize,
     };
-  }, [debouncedSearch, visibilityFilter, statusFilter, sortBy, sortOrder, currentPage, pageSize]);
+  }, [
+    debouncedSearch,
+    visibilityFilter,
+    statusFilter,
+    ownedOnly,
+    sortBy,
+    sortOrder,
+    currentPage,
+    pageSize,
+  ]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -203,6 +226,9 @@ export const WorkflowExplorer: React.FC<WorkflowExplorerProps> = ({
             currentUserHandle={currentUserHandle}
             isAdmin={isAdmin}
             compact={viewMode === "grid"}
+            listing={listingByWorkflowId?.get(workflow.id)}
+            onPublish={onPublish}
+            onUnpublish={onUnpublish}
           />
         )}
         keyExtractor={(w) => w.id}

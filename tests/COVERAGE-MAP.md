@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **47 domains**, **318 files**, **3747 tests**
+- **47 domains**, **319 files**, **3750 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 20    | 181   | unit:9, integration:2, api:4, mcp-tools:1, e2e:4               |
+| marketplace         | 24    | 185   | unit:9, integration:2, api:4, mcp-tools:1, e2e:5               |
 | marketplace-render  | 2     | 25    | unit:2                                                         |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
@@ -57,7 +57,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | user-management     | 3     | 34    | api:1, e2e:2                                                   |
 | validation          | 4     | 90    | api:1, integration:1, unit:2                                   |
 | web-ui              | 7     | 61    | e2e:7                                                          |
-| workflow-engine     | 62    | 832   | api:4, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:26 |
+| workflow-engine     | 63    | 835   | api:5, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:26 |
 | workflow-scenarios  | 23    | 138   | workflow:23                                                    |
 
 ## Domain Details
@@ -531,7 +531,8 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/e2e/marketplace-i18n.spec.ts` — 1 test 🟢 (Playwright SPA localization: with ?lang=ru the gallery/detail/My-Listings render translated enum labels (category→"Разработка", status→"Опубликован") and correct Russian CLDR plural counts (install/step declensions, e.g. "2 шага") with no raw enum strings)
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the component detail page (backend, not SPA) with JSON-LD (SoftwareApplication across multiple LD blocks) + ships the hydration bootstrap (marketplace-hydrate.js script + `#mp-bootstrap` detail island); missing flow 404s instead of SPA fallthrough)
 - `tests/e2e/marketplace-public-page.spec.ts` — 6 tests 🟢 (Playwright session-aware polished public pages: anonymous /explore shows topbar/brand/theme-toggle/EN-RU switch/footer + `sign-in` (no account/sign-out); anonymous /w/:ref primary action is the gated `signin-cta`→/login + neither viewer pill; JS-free language toggle (anchor click → `?lang=ru`, RU "Войти"/"Каталог" chrome, `aria-current` on RU); hydrated theme toggle (set localStorage light → click → `<html>.dark` + localStorage `theme`="dark"); signed-in /explore shows `account-handle`=@handle + `sign-out` (no sign-in), sign-out (throwaway session) → reload back to anonymous header; owner's /w/:ref shows `own-pill` not `library-pill`/`signin-cta`)
-- `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); before/after screenshots captured)
+- `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); the old /marketplace/library redirects into the unified Workflows home where the added reference shows under the "Added" origin; before/after screenshots captured)
+- `tests/e2e/marketplace-unified-home.spec.ts` — 4 tests 🟢 (Playwright: the unified origin-tabbed Workflows home (Step 14). Publish-from-management — a Mine row's Publish action opens the publish form PRE-FILLED via `?workflowId` and publishing makes the row offer "View on marketplace" resolving to the public `/w/:handle/:slug` page; an owned flow shows in Mine with a Listed badge while a consumer's added-by-reference flow shows in Added with a ROOT `/w/...` source link (asserted equal to `/w/handle/slug` and 200-resolving); old `/marketplace/library` redirects to `?origin=added`; the top-of-home "Browse the public catalog" link is a ROOT `/explore` path — confirming app→catalog cross-links are root-mounted, not app-prefixed)
 
 ### marketplace-render
 
@@ -827,7 +828,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-engine
 
-**62 files, 832 tests**
+**63 files, 835 tests**
 
 **unit** (7 files)
 
@@ -890,6 +891,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/api/workflow-copy.test.ts` — 6 tests 🟢
 - `tests/api/workflow-list-performance.test.ts` — 5 tests 🟢
+- `tests/api/workflow-owned-scope.test.ts` — 3 tests 🟢 (GET /api/workflows `ownedOnly` scope: ownedOnly=true returns ONLY the caller's own workflows both visibilities + accessType=owner; default preserves browse-all incl. another user's public; ownedOnly honors the visibility sub-filter)
 - `tests/api/workflow-visibility-patch.test.ts` — 6 tests 🟢
 - `tests/api/workflows-privacy.test.ts` — 4 tests 🟢
 

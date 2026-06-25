@@ -214,6 +214,39 @@
         "yesterday": "Yesterday",
         "daysAgo": "{{count}} days ago"
       },
+      "home": {
+        "loadFailed": "Failed to load your library",
+        "browseCatalog": "Browse the public catalog",
+        "tab": {
+          "mine": "Mine",
+          "added": "Added",
+          "shared": "Shared",
+          "core": "Core"
+        },
+        "publish": "Publish to marketplace",
+        "unpublish": "Unpublish",
+        "unpublished": "Unpublished.",
+        "unpublishFailed": "Unpublish failed",
+        "listed": "Listed",
+        "viewOnMarketplace": "View on marketplace",
+        "viewSource": "View source",
+        "runHint": "Ask your agent:",
+        "runVerb": "run",
+        "empty": {
+          "added": {
+            "title": "Nothing added yet",
+            "desc": "Add a workflow from the public catalog to run it from your agent."
+          },
+          "shared": {
+            "title": "Nothing shared with you",
+            "desc": "Workflows other users share with you will appear here."
+          },
+          "core": {
+            "title": "No built-in workflows",
+            "desc": "Built-in workflows bundled with this instance will appear here."
+          }
+        }
+      },
       "confirmDelete": "Delete workflow \"{{name}}\"?"
     },
     "workflowDetail": {

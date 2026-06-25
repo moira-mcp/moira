@@ -56,6 +56,12 @@ export interface WorkflowFilter {
   userId: string;
   search?: string; // Search in name, description, and slug
   visibility?: "public" | "private" | "all";
+  /**
+   * Restrict to the user's OWN workflows only (the "Mine" origin). When false/omitted the
+   * list also includes other users' public workflows and workflows shared with the user
+   * (the legacy browse-all behavior). The `visibility` sub-filter still applies on top.
+   */
+  ownedOnly?: boolean;
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
   limit?: number;
@@ -454,6 +460,7 @@ export class WorkflowRepository {
       userId,
       search,
       visibility,
+      ownedOnly = false,
       sort = "createdAt",
       sortOrder = "desc",
       limit = 20,
@@ -480,8 +487,17 @@ export class WorkflowRepository {
       .from(workflowAccess)
       .where(eq(workflowAccess.userId, userId));
 
-    // Visibility filter
-    if (visibility === "public") {
+    // Scope + visibility filter
+    if (ownedOnly) {
+      // The "Mine" origin: only workflows the user owns, with the visibility sub-filter
+      // applied on top (All → own public+private; Public/Private → own of that visibility).
+      conditions.push(eq(workflow.userId, userId));
+      if (visibility === "public") {
+        conditions.push(eq(workflow.visibility, "public"));
+      } else if (visibility === "private") {
+        conditions.push(eq(workflow.visibility, "private"));
+      }
+    } else if (visibility === "public") {
       conditions.push(eq(workflow.visibility, "public"));
     } else if (visibility === "private") {
       conditions.push(and(eq(workflow.userId, userId), eq(workflow.visibility, "private")));

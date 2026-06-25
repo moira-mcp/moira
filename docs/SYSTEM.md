@@ -1191,6 +1191,7 @@ List workflows with filtering, sorting, and pagination.
 {
   search?: string;           // Search in name and description
   visibility?: 'public' | 'private' | 'all';  // Default: 'all'
+  ownedOnly?: boolean;       // Default: false. true → caller's OWN workflows only (excludes others' public + shared); visibility sub-filter still applies
   sort?: 'createdAt' | 'name';  // Default: 'createdAt'
   sortOrder?: 'asc' | 'desc';   // Default: 'desc'
   limit?: number;            // 1-100, default: 20

@@ -166,6 +166,8 @@ export interface WorkflowListRequest {
   validationStatus?: "valid" | "invalid" | "warning" | "all";
   search?: string;
   visibility?: "public" | "private" | "all";
+  /** "Mine" origin: restrict to the user's own workflows (exclude others' public + shared). */
+  ownedOnly?: boolean;
   sort?: "createdAt" | "name";
   sortOrder?: "asc" | "desc";
   limit?: number;

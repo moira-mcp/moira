@@ -151,10 +151,13 @@ test.describe("Marketplace SPA", () => {
     await expect(page.getByText("Solid starter flow.")).toBeVisible({ timeout: 10000 });
     await page.screenshot({ path: path.join(SHOT_DIR, "06-rated.png"), fullPage: true });
 
-    // The flow now appears in the consumer's library (the added reference plus the
-    // forked own-copy, so there can be more than one entry with this name).
+    // The library folded into the unified Workflows home: the old /marketplace/library
+    // route redirects to the home's "Added" origin, where the added reference appears.
     await page.goto(`${BASE_URL}/marketplace/library`);
-    await expect(page.getByText(FLOW_NAME).first()).toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/workflows\?origin=added$/);
+    const addedList = page.getByTestId("origin-list-added");
+    await expect(addedList).toBeVisible({ timeout: 10000 });
+    await expect(addedList.getByText(FLOW_NAME).first()).toBeVisible({ timeout: 10000 });
     await page.screenshot({ path: path.join(SHOT_DIR, "07-library.png"), fullPage: true });
   });
 });

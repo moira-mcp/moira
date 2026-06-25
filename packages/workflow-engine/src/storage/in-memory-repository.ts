@@ -71,6 +71,7 @@ export class InMemoryRepository implements IDataRepository {
       userId,
       search,
       visibility,
+      ownedOnly = false,
       sort = "createdAt",
       sortOrder = "desc",
       limit = 20,
@@ -81,8 +82,13 @@ export class InMemoryRepository implements IDataRepository {
     let workflows: WorkflowInfo[] = [];
 
     for (const [id, data] of this.workflows.entries()) {
-      // Visibility filter
-      if (visibility === "public") {
+      // Scope + visibility filter
+      if (ownedOnly) {
+        // "Mine" origin: own workflows only, with the visibility sub-filter on top.
+        if (data.userId !== userId) continue;
+        if (visibility === "public" && data.visibility !== "public") continue;
+        if (visibility === "private" && data.visibility !== "private") continue;
+      } else if (visibility === "public") {
         if (data.visibility !== "public") continue;
       } else if (visibility === "private") {
         if (data.userId !== userId || data.visibility !== "private") continue;

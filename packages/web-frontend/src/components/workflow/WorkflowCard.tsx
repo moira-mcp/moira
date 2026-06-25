@@ -17,6 +17,9 @@ import {
   Globe,
   Users,
   Trash2,
+  Upload,
+  Store,
+  ExternalLink,
 } from "lucide-react";
 import { WorkflowFileInfo } from "types";
 import { Card } from "@/components/ui/card";
@@ -24,6 +27,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { publicFlowPath } from "../../pages/marketplace/components";
+import type { MarketplaceListing } from "../../types/api-types";
 
 interface WorkflowCardProps {
   workflow: WorkflowFileInfo;
@@ -33,6 +38,12 @@ interface WorkflowCardProps {
   currentUserHandle?: string;
   isAdmin?: boolean;
   compact?: boolean;
+  /** The workflow's active marketplace listing, if it is published. */
+  listing?: MarketplaceListing;
+  /** Start the publish flow pre-filled with this workflow (own + unlisted). */
+  onPublish?: (workflowId: string) => void;
+  /** Unpublish the workflow's listing (own + listed). */
+  onUnpublish?: (listingId: string) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,6 +74,9 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   currentUserHandle,
   isAdmin = false,
   compact = false,
+  listing,
+  onPublish,
+  onUnpublish,
 }) => {
   const { t } = useTranslation();
   const validationConfig = getValidationStatusConfig(workflow.validation);
@@ -70,6 +84,73 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
   // Only show delete button if user owns the workflow or is admin
   const canDelete =
     onDelete && (isAdmin || (currentUserHandle && workflow.ownerHandle === currentUserHandle));
+
+  // Publish/unpublish affordance — only for the user's OWN workflows (publishing someone
+  // else's flow is not allowed). Listed flows offer Unpublish + a public "View on
+  // marketplace" link; unlisted ones offer Publish.
+  const isOwn = workflow.accessType === "owner";
+  const canManageListing = isOwn && (onPublish || onUnpublish);
+  const marketplaceActions = canManageListing ? (
+    <>
+      {listing ? (
+        <>
+          {/* Public "view on marketplace" link — only when the owner handle is present
+              (a null handle has no addressable public page). */}
+          {workflow.ownerHandle && (
+            <Button
+              variant="ghost"
+              size="icon"
+              asChild
+              className="h-6 w-6 text-primary hover:text-primary hover:bg-primary/10"
+              title={t("pages.workflows.home.viewOnMarketplace")}
+              aria-label={t("pages.workflows.home.viewOnMarketplace")}
+            >
+              <a
+                href={publicFlowPath(workflow.ownerHandle, workflow.slug)}
+                onClick={(e) => e.stopPropagation()}
+                data-testid="view-on-marketplace"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </Button>
+          )}
+          {onUnpublish && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUnpublish(listing.id);
+              }}
+              className="h-6 w-6 text-muted-foreground hover:text-foreground hover:bg-muted"
+              title={t("pages.workflows.home.unpublish")}
+              aria-label={t("pages.workflows.home.unpublish")}
+              data-testid="unpublish-workflow"
+            >
+              <Store className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </>
+      ) : (
+        onPublish && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPublish(workflow.id);
+            }}
+            className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary/10"
+            title={t("pages.workflows.home.publish")}
+            aria-label={t("pages.workflows.home.publish")}
+            data-testid="publish-workflow"
+          >
+            <Upload className="w-3.5 h-3.5" />
+          </Button>
+        )
+      )}
+    </>
+  ) : null;
 
   const cardContent = compact ? (
     // Grid view: vertical card with description
@@ -91,21 +172,35 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
               {workflow.metadata?.name || workflow.id}
             </span>
           </div>
-          {canDelete && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(workflow.id, workflow.metadata?.name || workflow.id);
-              }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
-              aria-label={t("components.workflowCard.deleteWorkflow")}
-              title={t("components.workflowCard.deleteWorkflow")}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </Button>
-          )}
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {/* Listed (published) badge — parity with the list view */}
+            {isOwn && listing && (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-primary/30 text-primary bg-primary/10"
+                data-testid="listed-badge"
+              >
+                <Store className="w-3 h-3" />
+                <span className="hidden md:inline">{t("pages.workflows.home.listed")}</span>
+              </Badge>
+            )}
+            {marketplaceActions}
+            {canDelete && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(workflow.id, workflow.metadata?.name || workflow.id);
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
+                aria-label={t("components.workflowCard.deleteWorkflow")}
+                title={t("components.workflowCard.deleteWorkflow")}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
 
         {workflow.metadata?.description && (
@@ -231,6 +326,21 @@ export const WorkflowCard: React.FC<WorkflowCardProps> = ({
               <span className="hidden md:inline">{t("components.workflowCard.sharedWithYou")}</span>
             </Badge>
           )}
+
+          {/* Listed (published) badge */}
+          {isOwn && listing && (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1 py-0 h-5 flex items-center gap-0.5 border-primary/30 text-primary bg-primary/10"
+              data-testid="listed-badge"
+            >
+              <Store className="w-3 h-3" />
+              <span className="hidden md:inline">{t("pages.workflows.home.listed")}</span>
+            </Badge>
+          )}
+
+          {/* Publish / unpublish / view-on-marketplace */}
+          {marketplaceActions}
 
           {/* Delete button - hidden until hover */}
           {canDelete && (

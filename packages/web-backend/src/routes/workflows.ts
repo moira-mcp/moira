@@ -79,6 +79,8 @@ router.get(
     // Parse query parameters
     const search = query.search as string | undefined;
     const visibility = query.visibility as "public" | "private" | "all" | undefined;
+    // "Mine" origin scope: only the user's own workflows (excludes others' public + shared).
+    const ownedOnly = query.ownedOnly === "true" || query.ownedOnly === true;
     const sort = (query.sort as "createdAt" | "name") || "createdAt";
     const sortOrder = (query.sortOrder as "asc" | "desc") || "desc";
     const limit = Math.min(Math.max(1, parseInt(query.limit as string) || 20), 100);
@@ -89,6 +91,7 @@ router.get(
       userId,
       search,
       visibility,
+      ownedOnly,
       sort,
       sortOrder,
       limit,
