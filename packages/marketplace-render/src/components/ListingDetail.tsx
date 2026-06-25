@@ -1,9 +1,14 @@
 /**
  * ListingDetail — the flow detail page body: a breadcrumb back to the gallery, the
  * title + metadata row (verified, localized category, rating, localized install count),
- * the summary, a localized step count + tags, and the start-command hint. Renders the
- * viewer pills ("In your library" / "Your listing") when authenticated. Wrapped in
- * `<article>` for crawlability. Pure + SSR-safe.
+ * the summary, a localized step count + tags, and a human "How to use it" panel.
+ *
+ * Moira is an MCP utility — the END USER does NOT execute MCP tools — so the page does
+ * NOT show a `start(...)` developer command. Instead it explains the real model: ADOPT
+ * the flow (add it to your agent's library in the cloud, or export/import on self-host)
+ * and RUN it by asking your agent in plain language. Renders the viewer pills
+ * ("In your library" / "Your listing") when authenticated. Wrapped in `<article>` for
+ * crawlability. Pure + SSR-safe.
  */
 
 import React from "react";
@@ -30,7 +35,6 @@ export function ListingDetail({
   appPrefix = "",
 }: ListingDetailProps): React.ReactElement {
   const isAuthenticated = viewer?.userId != null;
-  const startCommand = `start("${detail.reference}")`;
   const signInHref = withLang(`${appPrefix}/login`, labels.locale);
   return (
     <main className="mp-detail" data-mp="detail">
@@ -79,31 +83,59 @@ export function ListingDetail({
             </span>
           ) : null}
         </p>
-        <div className="mp-start" data-mp="start">
-          <p className="mp-start-label">{labels.chrome.startHint}</p>
-          <code data-mp="start-command">{startCommand}</code>
-        </div>
-        {/* Action area, context-appropriate: anonymous → gated sign-in CTA; a signed-in
-            viewer who neither owns nor already has the flow → an add affordance (the real
-            add action lands in Step 14); an owner or an in-library viewer → no action (the
-            "Your listing" / "In your library" pill above already conveys their state). */}
-        {!isAuthenticated ? (
-          <div className="mp-actions" data-mp="actions">
-            <a className="mp-btn mp-btn-primary" href={signInHref} data-mp="signin-cta">
-              {labels.chrome.signInToAdd}
-            </a>
-          </div>
-        ) : !detail.isOwn && !detail.inLibrary ? (
-          <div className="mp-actions" data-mp="actions">
-            <a
-              className="mp-btn mp-btn-primary"
-              href={withLang(`${baseUrl}/explore`, labels.locale)}
-              data-mp="add-cta"
-            >
-              {labels.chrome.addToLibrary}
-            </a>
-          </div>
-        ) : null}
+        {/* Human "how to use" model — NOT an MCP `start(...)` command. Step 1 adopts the
+            flow (context-aware: anonymous → gated sign-in CTA; signed-in non-owner not yet
+            in library → add affordance, the real action lands in Step 14; owner /
+            in-library → a confirming line, no button). Step 2 runs it by asking the agent
+            in plain language. */}
+        <section className="mp-howto" data-mp="howto">
+          <h2 className="mp-howto-title">{labels.chrome.howToUse}</h2>
+          <ol className="mp-steps">
+            <li className="mp-step">
+              <span className="mp-step-num" aria-hidden="true">
+                1
+              </span>
+              <div className="mp-step-body">
+                <h3 className="mp-step-title">{labels.chrome.adoptStep}</h3>
+                {isAuthenticated && detail.isOwn ? (
+                  <p className="mp-step-text">{labels.chrome.yourListing}</p>
+                ) : isAuthenticated && detail.inLibrary ? (
+                  <p className="mp-step-text">{labels.chrome.inLibrary}</p>
+                ) : (
+                  <>
+                    <p className="mp-step-text">{labels.chrome.adoptCloud}</p>
+                    {isAuthenticated ? (
+                      <a
+                        className="mp-btn mp-btn-primary"
+                        href={withLang(`${baseUrl}/explore`, labels.locale)}
+                        data-mp="add-cta"
+                      >
+                        {labels.chrome.addToLibrary}
+                      </a>
+                    ) : (
+                      <a className="mp-btn mp-btn-primary" href={signInHref} data-mp="signin-cta">
+                        {labels.chrome.signInToAdd}
+                      </a>
+                    )}
+                  </>
+                )}
+                <p className="mp-step-note">{labels.chrome.adoptSelfHost}</p>
+              </div>
+            </li>
+            <li className="mp-step">
+              <span className="mp-step-num" aria-hidden="true">
+                2
+              </span>
+              <div className="mp-step-body">
+                <h3 className="mp-step-title">{labels.chrome.runStep}</h3>
+                <p className="mp-step-text">{labels.chrome.runLead}:</p>
+                <p className="mp-say" data-mp="run-instruction">
+                  {`${labels.chrome.runVerb} “${detail.title}”`}
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
       </article>
     </main>
   );

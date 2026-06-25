@@ -28,9 +28,22 @@ interface ChromeStrings {
   inLibrary: string;
   yourListing: string;
   signInToAdd: string;
-  startHint: string;
   tagsLabel: string;
   notFoundTitle: string;
+  /**
+   * "How to use" section (replaces the old MCP `start(...)` code hint). Moira is an MCP
+   * utility — the END USER does not run MCP tools; they ADD the flow to their agent's
+   * library (or export/import on self-host) and then ASK THEIR AGENT to run it in plain
+   * language. These strings convey that human model, not a developer command.
+   */
+  howToUse: string;
+  adoptStep: string;
+  adoptCloud: string;
+  adoptSelfHost: string;
+  runStep: string;
+  runLead: string;
+  /** Imperative verb the user says to their agent (e.g. `run "<title>"`). */
+  runVerb: string;
   /** Page-chrome strings (header/footer controls). */
   signIn: string;
   signOut: string;
@@ -56,9 +69,15 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     inLibrary: "In your library",
     yourListing: "Your listing",
     signInToAdd: "Sign in to add",
-    startHint: "Run it in your MCP client",
     tagsLabel: "Tags",
     notFoundTitle: "Not found",
+    howToUse: "How to use it",
+    adoptStep: "Add it to your agent",
+    adoptCloud: "Add it to your library so your agent can run it on demand.",
+    adoptSelfHost: "Self-hosting? Export this workflow and import the file into your instance.",
+    runStep: "Run it",
+    runLead: "Then just ask your agent",
+    runVerb: "run",
     signIn: "Sign in",
     signOut: "Sign out",
     addToLibrary: "Add to library",
@@ -81,9 +100,16 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     inLibrary: "В вашей библиотеке",
     yourListing: "Ваша публикация",
     signInToAdd: "Войдите, чтобы добавить",
-    startHint: "Запустите в вашем MCP-клиенте",
     tagsLabel: "Теги",
     notFoundTitle: "Не найдено",
+    howToUse: "Как использовать",
+    adoptStep: "Добавьте для своего агента",
+    adoptCloud: "Добавьте флоу в свою библиотеку, чтобы агент мог запускать его по запросу.",
+    adoptSelfHost:
+      "Используете self-host? Экспортируйте этот воркфлоу и импортируйте файл в свой инстанс.",
+    runStep: "Запуск",
+    runLead: "Затем просто попросите своего агента",
+    runVerb: "запусти",
     signIn: "Войти",
     signOut: "Выйти",
     addToLibrary: "Добавить в библиотеку",

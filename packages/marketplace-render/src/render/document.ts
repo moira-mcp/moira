@@ -120,11 +120,14 @@ code {
 .mp-account-handle { font-size: 0.85rem; color: var(--muted-foreground); }
 
 /* ---- Content wrap ---- */
-.mp-wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 32px 20px 56px; flex: 1 0 auto; }
-.mp-header { margin-bottom: 24px; }
-.mp-header h1 { font-size: 1.7rem; margin: 0 0 6px; letter-spacing: -0.01em; }
-.mp-subtitle { color: var(--muted-foreground); margin: 0 0 8px; max-width: 60ch; }
-.mp-total { color: var(--muted-foreground); font-size: 0.85rem; margin: 0; font-weight: 600; }
+.mp-wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 44px 20px 64px; flex: 1 0 auto; }
+.mp-header { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.mp-header h1 { font-size: 2.2rem; line-height: 1.1; margin: 0 0 10px; letter-spacing: -0.025em; }
+.mp-subtitle { color: var(--muted-foreground); margin: 0 0 14px; max-width: 60ch; font-size: 1.05rem; line-height: 1.55; }
+.mp-total {
+  color: var(--muted-foreground); font-size: 0.78rem; margin: 0; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
 
 /* ---- Gallery grid ---- */
 .mp-card-list {
@@ -133,17 +136,18 @@ code {
 }
 .mp-card {
   background: var(--card); color: var(--card-foreground);
-  border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
-  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px;
+  display: flex; flex-direction: column; gap: 10px;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 .mp-card:hover {
   border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
-  box-shadow: 0 6px 22px -12px color-mix(in oklab, var(--primary) 40%, transparent);
-  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -16px color-mix(in oklab, var(--primary) 50%, transparent);
+  transform: translateY(-3px);
 }
-.mp-card-title { font-size: 1.08rem; margin: 0; line-height: 1.3; }
+.mp-card-title { font-size: 1.12rem; font-weight: 650; margin: 0; line-height: 1.3; letter-spacing: -0.01em; }
 .mp-card-title a { color: var(--foreground); }
+.mp-card-title a:hover { color: var(--primary); text-decoration: none; }
 .mp-card-summary {
   color: var(--muted-foreground); font-size: 0.9rem; margin: 0;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -170,18 +174,37 @@ code {
 
 /* ---- Detail ---- */
 .mp-detail { max-width: 760px; }
-.mp-breadcrumb { font-size: 0.85rem; margin-bottom: 16px; }
-.mp-detail-title { font-size: 1.9rem; margin: 0 0 10px; letter-spacing: -0.015em; }
-.mp-detail-summary { font-size: 1.02rem; margin: 16px 0; }
-.mp-detail-stats { color: var(--muted-foreground); font-size: 0.9rem; margin: 8px 0; }
+.mp-breadcrumb { font-size: 0.85rem; margin-bottom: 18px; }
+.mp-breadcrumb a { color: var(--muted-foreground); }
+.mp-breadcrumb a:hover { color: var(--primary); }
+.mp-detail-title { font-size: 2.1rem; line-height: 1.15; margin: 0 0 14px; letter-spacing: -0.02em; }
+.mp-detail .mp-detail-meta { margin-top: 0; margin-bottom: 18px; }
+.mp-detail-summary { font-size: 1.08rem; line-height: 1.6; margin: 18px 0; color: var(--foreground); }
+.mp-detail-stats { color: var(--muted-foreground); font-size: 0.9rem; margin: 10px 0 4px; }
 .mp-detail-tags { color: var(--muted-foreground); }
-.mp-start {
-  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-  padding: 16px 18px; margin: 22px 0;
+
+/* ---- How-to-use panel (human adopt + run model; no MCP code command) ---- */
+.mp-howto {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  padding: 24px 26px; margin: 28px 0 8px;
 }
-.mp-start-label { font-size: 0.8rem; color: var(--muted-foreground); margin: 0 0 8px; font-weight: 600; }
-.mp-start code { display: block; padding: 10px 12px; font-size: 0.9rem; white-space: pre-wrap; word-break: break-all; }
-.mp-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 20px 0 4px; }
+.mp-howto-title { font-size: 1.15rem; margin: 0 0 18px; letter-spacing: -0.01em; }
+.mp-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+.mp-step { display: grid; grid-template-columns: 32px 1fr; gap: 14px; align-items: start; }
+.mp-step-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 50%; font-size: 0.95rem; font-weight: 700;
+  background: color-mix(in oklab, var(--primary) 14%, transparent); color: var(--primary);
+}
+.mp-step-body { min-width: 0; }
+.mp-step-title { font-size: 1rem; margin: 4px 0 8px; }
+.mp-step-text { margin: 0 0 12px; color: var(--muted-foreground); }
+.mp-step-note { margin: 12px 0 0; font-size: 0.85rem; color: var(--muted-foreground); }
+.mp-say {
+  margin: 0; padding: 12px 16px; border-radius: 10px;
+  background: var(--secondary); color: var(--secondary-foreground);
+  border-left: 3px solid var(--primary); font-size: 1.02rem; font-weight: 500;
+}
 
 /* ---- Footer ---- */
 .mp-footer { border-top: 1px solid var(--border); flex-shrink: 0; }

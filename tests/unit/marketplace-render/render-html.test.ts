@@ -160,12 +160,17 @@ describe("renderExploreToHtml", () => {
 });
 
 describe("renderDetailToHtml", () => {
-  it("emits crawlable semantic detail HTML (article + start command)", () => {
+  it("emits crawlable semantic detail HTML (article + human run instruction, no MCP code)", () => {
     const { html } = renderDetailToHtml(detailView(), ANON, seo("en"));
     expect(html).toContain('data-mp="detail-article"');
     expect(html).toContain("<article");
     expect(html).toContain("Research Flow");
-    expect(html).toContain("start(&quot;alice/research-flow&quot;)");
+    // Human "how to use" model — a natural-language run instruction by title, NOT a
+    // developer `start(...)` MCP command (Moira's end user does not execute MCP tools).
+    expect(html).toContain('data-mp="run-instruction"');
+    expect(html).toContain("run “Research Flow”");
+    expect(html).not.toContain('start("alice/research-flow")');
+    expect(html).not.toContain("start(&quot;alice/research-flow&quot;)");
     expect(html).toContain(`<link rel="canonical" href="${BASE_URL}/w/alice/research-flow" />`);
     expect(html).toContain('<meta property="og:type" content="article" />');
   });

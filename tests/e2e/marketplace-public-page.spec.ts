@@ -189,11 +189,21 @@ test.describe("Public marketplace pages — anonymous chrome", () => {
     await page.screenshot({ path: path.join(SHOT_DIR, "01-explore-anon.png"), fullPage: true });
   });
 
-  test("/w/:ref detail: the primary action is the gated sign-in CTA → login", async ({ page }) => {
+  test("/w/:ref detail: human 'how to use' panel + gated sign-in CTA, no MCP code", async ({
+    page,
+  }) => {
     await page.goto(`${BASE_URL}/w/${startRef}`);
+    // The human adopt+run panel is shown (NOT a developer start(...) command).
+    await expect(page.locator('[data-mp="howto"]')).toBeVisible();
+    const runInstruction = page.locator('[data-mp="run-instruction"]');
+    await expect(runInstruction).toBeVisible();
+    await expect(runInstruction).toContainText(/run\s+“/); // natural-language "run "<title>""
+    // No MCP `start(...)` command anywhere in the page body.
+    await expect(page.locator("body")).not.toContainText("start(");
+
+    // Step 1 (adopt) gates anonymous to sign-in; the CTA links to the login route.
     const cta = page.locator('[data-mp="signin-cta"]');
     await expect(cta).toBeVisible();
-    // Gated: the CTA links to the login route.
     await expect(cta).toHaveAttribute("href", /\/login/);
     // Anonymous detail shows neither viewer pill.
     await expect(page.locator('[data-mp="own-pill"]')).toHaveCount(0);
