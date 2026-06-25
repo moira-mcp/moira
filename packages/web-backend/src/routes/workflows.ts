@@ -391,10 +391,11 @@ router.get(
  * GET /api/workflows/:id/export - Download a workflow as a JSON file.
  *
  * The source side of the offline transfer path: returns the accessible workflow's
- * graph as a downloadable attachment (no cloud call). Accepts UUID, slug, or
- * handle/slug. Registered before /:handle/:slug so the two-segment "/:id/export"
- * match wins. Not gated by the marketplace feature — exporting your own flow is
- * always available; importing (into a library) is the gated half.
+ * graph as a downloadable attachment (no cloud call). Accepts a workflow UUID or slug
+ * (the `:id` param rejects `/`, so a `handle/slug` reference does not reach here —
+ * use it via the public marketplace export instead). Registered before /:handle/:slug
+ * so the two-segment "/:id/export" match wins. Not gated by the marketplace feature —
+ * exporting your own flow is always available; importing (into a library) is gated.
  */
 router.get(
   "/:id/export",

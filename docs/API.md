@@ -1260,8 +1260,9 @@ Authentication: Required (owner only)
 ### GET /api/workflows/:id/export
 
 Download an accessible workflow's graph as a JSON file — the source side of the
-offline transfer path (no cloud call). Accepts UUID, slug, or `handle/slug`. Returns
-the graph as `application/json` with `Content-Disposition: attachment;
+offline transfer path (no cloud call). Accepts a workflow UUID or slug (a
+`handle/slug` reference does not reach this route — the `:id` param rejects `/`).
+Returns the graph as `application/json` with `Content-Disposition: attachment;
 filename="<slug>.moira.json"`. Not gated by the marketplace feature (exporting your
 own flow is always available; the import half, `POST /api/marketplace/import`, is the
 gated part). `404` if the workflow is not found / not accessible.

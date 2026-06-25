@@ -86,17 +86,24 @@ test.describe("Self-host file transfer", () => {
     const graph = JSON.parse(fileBuffer.toString("utf-8")) as { metadata: { name: string } };
     expect(graph.metadata.name).toBe(FLOW);
 
-    // Import the captured file via the gated "Import from file" control.
-    await page.getByTestId("import-workflow-input").setInputFiles({
-      name: "flow.moira.json",
-      mimeType: "application/json",
-      buffer: fileBuffer,
-    });
+    // Import the captured file via the gated "Import from file" control. Wait for the
+    // import request to complete so the assertions are deterministic (not racing the
+    // ephemeral toast).
+    const [importResponse] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/api/marketplace/import") && r.request().method() === "POST",
+      ),
+      page.getByTestId("import-workflow-input").setInputFiles({
+        name: "flow.moira.json",
+        mimeType: "application/json",
+        buffer: fileBuffer,
+      }),
+    ]);
+    expect(importResponse.status()).toBe(201);
 
-    // Success toast + the imported copy now appears alongside the source (same name).
-    await expect(page.getByText(`Imported "${FLOW}"`)).toBeVisible({ timeout: 10000 });
+    // The imported copy now appears alongside the source (same name) — the durable outcome.
     await expect(page.getByTestId("workflow-card").filter({ hasText: FLOW })).toHaveCount(2, {
-      timeout: 10000,
+      timeout: 15000,
     });
   });
 

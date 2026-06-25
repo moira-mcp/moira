@@ -630,6 +630,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/integration/cors-rate-limit-middleware.test.ts` — 5 tests 🟢 (CORS origin allowlist: allowlisted/localhost reflected, disallowed/no-origin; rate-limit IPv6 key fallback via ipKeyGenerator avoids ERR_ERL_KEY_GEN_IPV6)
 - `tests/integration/features-public-store.test.ts` — 3 tests 🟢 (REAL GET /api/features handler in-process via supertest, env-toggled (Step 15): publicStore.promotionEnabled true + default store URL for a non-store origin; true in BOTH MARKETPLACE_ENABLED states (orthogonal gate); false on the canonical store where own origin == store URL)
+- `tests/integration/marketplace-import-route.test.ts` — 1 test 🟢 (Step 16 server-side gate: mounts the real authed marketplace router + error middleware via supertest and posts a valid workflow file with MARKETPLACE_ENABLED=false → 404, proving the import endpoint enforces the local-feature flag at the HTTP layer)
 - `tests/integration/marketplace-import.test.ts` — 6 tests 🟢 (offline file import (Step 16) at the service level against a migrated DB: importFromFile saves an independent private workflow owned by the importer with a fresh id + intact graph; records a library copy entry (source=added, kind=copy, listingId null); surfaces in getLibrary deduped to origin=own; makes NO cloud call (no listing/event row); gated by the local marketplace feature (throws MarketplaceDisabledError when off); repeated import yields distinct ids/slugs)
 
 **unit** (1 files)

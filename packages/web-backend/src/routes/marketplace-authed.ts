@@ -29,9 +29,10 @@ import { WorkflowValidationService } from "../services/validation-service.js";
 
 const router = Router();
 
-// File import uploads (the offline adoption path) — in-memory, 10MB cap, matching
-// the token upload limit.
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// File import uploads (the offline adoption path) — in-memory, 5MB cap to match the
+// workflow repository's save limit so an oversize file fails at the upload boundary
+// instead of passing multer only to be rejected deeper.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function ok<T>(res: Response, data: T, status = 200): void {
   const body: ApiResponse<T> = { success: true, data, timestamp: new Date().toISOString() };
