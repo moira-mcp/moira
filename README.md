@@ -619,6 +619,12 @@ For contributors working on the codebase (implementation detail, not end-user do
 | Deployment             | Environment variables, restart procedures            | `docs/deployment/`                                                |
 | Legal                  | License/legal notes                                  | `docs/legal/`                                                     |
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the PR flow, DCO sign-off, and how
+releases are automated (Conventional Commits → semantic-release → versioned GHCR
+image). For upgrading a self-host instance, see [Updating / Upgrading](#updating--upgrading).
+
 ## License
 
 [Apache License 2.0](LICENSE)
