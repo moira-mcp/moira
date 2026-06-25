@@ -49,7 +49,19 @@ describe("POST /api/marketplace/import — server-side feature gate", () => {
         filename: "flow.moira.json",
         contentType: "application/json",
       });
-    // assertEnabled → MarketplaceDisabledError → HTTP 404 (feature hidden when off).
+    // The route checks the gate first → MarketplaceDisabledError → HTTP 404.
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses with 404 BEFORE validating the upload — an invalid file when disabled is still 404, not 400", async () => {
+    process.env.MARKETPLACE_ENABLED = "false";
+    const res = await request(makeApp())
+      .post("/api/marketplace/import")
+      .attach("workflow", Buffer.from("not json"), {
+        filename: "bad.json",
+        contentType: "application/json",
+      });
+    // Gate precedes parse/validation, so the disabled instance never reaches the 400 path.
     expect(res.status).toBe(404);
   });
 });

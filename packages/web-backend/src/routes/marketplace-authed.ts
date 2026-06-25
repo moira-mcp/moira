@@ -24,7 +24,11 @@ import { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { ApiResponse } from "../types/index.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
-import { getMarketplaceService } from "@mcp-moira/shared";
+import {
+  getMarketplaceService,
+  isMarketplaceEnabled,
+  MarketplaceDisabledError,
+} from "@mcp-moira/shared";
 import { WorkflowValidationService } from "../services/validation-service.js";
 
 const router = Router();
@@ -132,11 +136,16 @@ router.post(
 
 // POST /api/marketplace/import — import a workflow from an uploaded file into the
 // library (offline adoption, NO cloud call). Gated by the local marketplace feature
-// via the service's assertEnabled(); validates the graph before saving the copy.
+// (checked first → 404 when off, before parsing); validates the graph before saving.
 router.post(
   "/import",
   upload.single("workflow"),
   asyncHandler(async (req: Request, res: Response) => {
+    // Enforce the local-feature gate FIRST, before parsing/validating the upload, so a
+    // disabled instance refuses any import uniformly (404) rather than processing input.
+    if (!isMarketplaceEnabled()) {
+      throw new MarketplaceDisabledError();
+    }
     if (!req.file) {
       throw createApiError.validationFailed("No file uploaded");
     }

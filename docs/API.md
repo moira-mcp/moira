@@ -3331,10 +3331,11 @@ slug }`.
 
 Import a workflow from an uploaded file into the caller's library (the offline
 adoption path — NO cloud call). `multipart/form-data` with a `workflow` field (a
-`.moira.json` file, 10MB max). Parses + validates the graph, then saves it as an
+`.moira.json` file, 5MB max — matching the workflow save limit). Gated by the local
+marketplace feature, checked first (`MarketplaceDisabledError` → `404` when off, before
+any parsing). When enabled, parses + validates the graph, then saves it as an
 independent private workflow owned by the caller plus a library copy entry
-(`source='added'`, `kind='copy'`, no listing). Gated by the local marketplace
-feature (`MarketplaceDisabledError` when off). Invalid JSON / non-workflow files →
+(`source='added'`, `kind='copy'`, no listing). Invalid JSON / non-workflow files →
 `400`. → `201` + `{ workflowId, slug, name }`. The imported flow is runnable from the
 library like a forked one. The export half is `GET /api/workflows/:id/export`.
 
