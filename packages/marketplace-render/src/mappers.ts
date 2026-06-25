@@ -48,10 +48,7 @@ export function toGalleryCardView(item: AnnotatedGalleryItem): GalleryCardView {
 }
 
 /** Map an annotated gallery page to the gallery view model. */
-export function toGalleryView(page: {
-  items: AnnotatedGalleryItem[];
-  total: number;
-}): GalleryView {
+export function toGalleryView(page: { items: AnnotatedGalleryItem[]; total: number }): GalleryView {
   return {
     items: page.items.map(toGalleryCardView),
     total: page.total,

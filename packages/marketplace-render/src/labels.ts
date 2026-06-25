@@ -31,6 +31,17 @@ interface ChromeStrings {
   startHint: string;
   tagsLabel: string;
   notFoundTitle: string;
+  /** Page-chrome strings (header/footer controls). */
+  signIn: string;
+  signOut: string;
+  addToLibrary: string;
+  openInApp: string;
+  themeToggleLabel: string;
+  languageLabel: string;
+  accountLabel: string;
+  docsLabel: string;
+  homeLabel: string;
+  footerTagline: string;
 }
 
 const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
@@ -48,6 +59,16 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     startHint: "Run it in your MCP client",
     tagsLabel: "Tags",
     notFoundTitle: "Not found",
+    signIn: "Sign in",
+    signOut: "Sign out",
+    addToLibrary: "Add to library",
+    openInApp: "Open in app",
+    themeToggleLabel: "Toggle theme",
+    languageLabel: "Language",
+    accountLabel: "Account",
+    docsLabel: "Documentation",
+    homeLabel: "Explore",
+    footerTagline: "A catalog of agent-executable, validated workflows.",
   },
   ru: {
     exploreTitle: "Каталог воркфлоу",
@@ -63,6 +84,16 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     startHint: "Запустите в вашем MCP-клиенте",
     tagsLabel: "Теги",
     notFoundTitle: "Не найдено",
+    signIn: "Войти",
+    signOut: "Выйти",
+    addToLibrary: "Добавить в библиотеку",
+    openInApp: "Открыть в приложении",
+    themeToggleLabel: "Переключить тему",
+    languageLabel: "Язык",
+    accountLabel: "Аккаунт",
+    docsLabel: "Документация",
+    homeLabel: "Каталог",
+    footerTagline: "Каталог проверенных воркфлоу, исполняемых агентами.",
   },
 };
 

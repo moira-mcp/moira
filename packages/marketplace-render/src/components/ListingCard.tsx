@@ -12,6 +12,7 @@ import type { GalleryCardView, ViewerContext } from "../types.js";
 import type { Labels } from "../labels.js";
 import { VerifiedBadge } from "./VerifiedBadge.js";
 import { RatingStars } from "./RatingStars.js";
+import { withLang } from "../links.js";
 
 export interface ListingCardProps {
   item: GalleryCardView;
@@ -26,7 +27,7 @@ export function ListingCard({
   viewer,
   baseUrl,
 }: ListingCardProps): React.ReactElement {
-  const detailUrl = `${baseUrl}/w/${item.reference}`;
+  const detailUrl = withLang(`${baseUrl}/w/${item.reference}`, labels.locale);
   const isAuthenticated = viewer?.userId != null;
   return (
     <li className="mp-card" data-mp="listing-card">

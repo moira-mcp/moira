@@ -13,6 +13,7 @@ import { renderToString } from "react-dom/server";
 import { ListingDetail } from "../components/ListingDetail.js";
 import { makeLabels } from "../labels.js";
 import { buildDocument } from "./document.js";
+import { renderChrome } from "./chrome.js";
 import { buildSoftwareApplicationJsonLd, buildBreadcrumbJsonLd } from "../seo/jsonld.js";
 import type { DetailView, ViewerContext, SeoContext, RenderResult } from "../types.js";
 
@@ -26,8 +27,15 @@ export function renderDetailToHtml(
   const canonical = `${seo.baseUrl}/w/${detail.reference}`;
 
   const bodyHtml = renderToString(
-    React.createElement(ListingDetail, { detail, labels, viewer, baseUrl: seo.baseUrl }),
+    React.createElement(ListingDetail, {
+      detail,
+      labels,
+      viewer,
+      baseUrl: seo.baseUrl,
+      appPrefix: seo.appPrefix ?? "",
+    }),
   );
+  const chrome = renderChrome(labels, viewer, seo, seo.currentPath ?? `/w/${detail.reference}`);
 
   const jsonLd = [
     buildSoftwareApplicationJsonLd(detail, seo),
@@ -47,6 +55,7 @@ export function renderDetailToHtml(
       jsonLd,
     },
     bodyHtml,
+    chrome,
   );
 
   return { html };

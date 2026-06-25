@@ -77,11 +77,19 @@ marketplace(action: string, ...)                    // Agent marketplace: search
 POST /mcp     // JSON-RPC 2.0 requests
 GET  /health  // Server health status
 
-// Public server-rendered marketplace pages (web-backend, no auth; nginx routes these
-// root paths to the backend, NOT the SPA). Rendered fresh from the live DB per request
-// (no rebuild on publish) via the @mcp-moira/marketplace-render package (React
-// renderToString), with a client hydration bundle (marketplace-hydrate.js) that upgrades
-// the pages in the browser — pages are fully readable with JavaScript disabled.
+// Public server-rendered marketplace pages (web-backend; nginx routes these root paths
+// to the backend, NOT the SPA). Rendered fresh from the live DB per request (no rebuild
+// on publish) via the @mcp-moira/marketplace-render package (React renderToString), with
+// a client hydration bundle (marketplace-hydrate.js) that upgrades the pages in the
+// browser — pages are fully readable with JavaScript disabled.
+// Session-aware (optional-auth): the page reads the same-origin Better Auth session
+// cookie server-side. Anonymous requests render the read-only / sign-in variant on a
+// publicly cacheable fast path (Cache-Control: public, max-age=60; Vary: Accept-Language,
+// Cookie); a signed-in request is enriched with the viewer's library/ownership state and
+// account header and is non-cacheable (private, no-store; Vary: Cookie). An invalid or
+// expired session degrades to the anonymous variant. The chrome carries a theme toggle
+// (light/dark via a CSP-hash-allowed no-flash inline script), an EN/RU language switch
+// (server-honored ?lang, default en), and the sign-in / account+sign-out control.
 // Crawlable HTML + OpenGraph + JSON-LD (SoftwareApplication / ItemList / BreadcrumbList);
 // 404 HTML when disabled.
 GET  /explore             // gallery of listed flows

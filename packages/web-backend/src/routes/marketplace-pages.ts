@@ -1,12 +1,12 @@
 /**
  * Server-rendered PUBLIC marketplace pages (SEO) — mounted at the ROOT (not /api),
- * no auth, behind `apiLimiter`. Rendered server-side from the LIVE database per
- * request via the `@mcp-moira/marketplace-render` package: the SAME React components
- * are rendered to an HTML string here and hydrated in the browser by the
- * `marketplace-hydrate` bundle. A flow published a second ago is immediately listed
- * and crawlable with no image rebuild (the freshness requirement). The HTML is fully
- * readable with JavaScript off (progressive enhancement); hydration only upgrades
- * interactivity.
+ * behind `apiLimiter`, optional-auth (same-origin session-aware). Rendered server-side
+ * from the LIVE database per request via the `@mcp-moira/marketplace-render` package:
+ * the SAME React components are rendered to an HTML string here and the catalog body is
+ * hydrated in the browser by the `marketplace-hydrate` bundle. A flow published a second
+ * ago is immediately listed and crawlable with no image rebuild (the freshness
+ * requirement). The HTML is fully readable with JavaScript off (progressive
+ * enhancement); hydration only upgrades interactivity.
  *
  *   GET /explore              gallery of listed flows (component-rendered HTML + meta)
  *   GET /w/:handle/:slug      flow detail (HTML + OpenGraph + JSON-LD)
@@ -16,8 +16,11 @@
  * `layout()/flowCard()/renderGallery()/renderDetail()` helpers are gone — markup now
  * comes from the render package's components and SEO builders.
  *
- * Anonymous viewer only (this is Step 11): every page renders for `viewer = null`
- * (no library/ownership pills). Session-aware rendering is Step 12.
+ * Session-aware: each page reads the same-origin Better Auth session cookie. Anonymous
+ * (or invalid/expired) requests render the read-only / sign-in variant with all-false
+ * annotations on a publicly cacheable fast path; a signed-in request is enriched with
+ * the viewer's library/ownership pills and account header and is non-cacheable. See
+ * `resolveViewer` / `applyCacheHeaders`.
  *
  * nginx routes these paths to the web-backend instead of the SPA catch-all
  * (config/nginx-root.conf + config/nginx-app.conf); the hydration bundle is served as
@@ -46,13 +49,49 @@ import {
   type GalleryView,
   type DetailView,
   type SeoContext,
+  type ViewerContext,
 } from "@mcp-moira/marketplace-render";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
+import { auth } from "../auth.js";
+import { toHeaders } from "../utils/headers.js";
 
 const router = Router();
 
-// Render fresh per request, but let crawlers/CDNs cache the anonymous HTML briefly.
-const PAGE_CACHE_CONTROL = "public, max-age=60";
+// Anonymous HTML is identical for every signed-out visitor (theme is personalized
+// client-side by the no-flash script), so crawlers/CDNs may cache it briefly. Language
+// is part of the cache key via `Vary: Accept-Language` (and the `?lang` URL).
+const ANON_CACHE_CONTROL = "public, max-age=60";
+// Viewer-personalized HTML carries the signed-in header and the viewer's library/own
+// state — never cache it, and vary by the session cookie.
+const AUTH_CACHE_CONTROL = "private, no-store";
+
+/**
+ * Resolve the current viewer from the request's Better Auth session cookie (same-origin,
+ * optional-auth). Returns `null` for anonymous, expired, or invalid sessions — those
+ * render the public read-only variant on the cacheable fast path (graceful degrade,
+ * never an error). The `handle` drives the account chip in the header.
+ */
+async function resolveViewer(req: Request): Promise<ViewerContext | null> {
+  try {
+    const session = await auth.api.getSession({ headers: toHeaders(req.headers) });
+    if (!session?.user) return null;
+    const handle = (session.user as { handle?: string | null }).handle ?? null;
+    return { userId: session.user.id, handle };
+  } catch {
+    return null;
+  }
+}
+
+/** Apply the cache headers appropriate to the viewer (anonymous cacheable vs private). */
+function applyCacheHeaders(res: Response, viewer: ViewerContext | null): void {
+  if (viewer) {
+    res.setHeader("Cache-Control", AUTH_CACHE_CONTROL);
+    res.setHeader("Vary", "Cookie");
+  } else {
+    res.setHeader("Cache-Control", ANON_CACHE_CONTROL);
+    res.setHeader("Vary", "Accept-Language, Cookie");
+  }
+}
 
 /**
  * Stable hydration bundle URL. The frontend webpack `marketplace-hydrate` entry emits
@@ -77,7 +116,7 @@ interface HydrationIsland {
   page: "explore" | "detail";
   gallery?: GalleryView;
   detail?: DetailView;
-  viewer: null;
+  viewer: ViewerContext | null;
   seo: SeoContext;
 }
 
@@ -100,11 +139,27 @@ function withHydration(html: string, island: HydrationIsland): string {
   return html.replace("</body>", `${hydrationScripts(island)}\n</body>`);
 }
 
-/** Pick the render locale from Accept-Language (anonymous viewer has no cookie state). */
+/**
+ * Pick the render locale: an explicit `?lang=en|ru` query wins (the language switch
+ * links + a crawlable per-language URL), else the first `Accept-Language` preference.
+ * `toMarketplaceLocale` clamps anything unknown to the default (`en`).
+ */
 function pickLocale(req: Request): MarketplaceLocale {
+  const queryLang = typeof req.query.lang === "string" ? req.query.lang : "";
+  if (queryLang) return toMarketplaceLocale(queryLang);
   const accept = (req.headers["accept-language"] || "").toString();
   const first = accept.split(",")[0]?.trim() ?? "";
   return toMarketplaceLocale(first);
+}
+
+/** Build the SEO/page context: origin, locale, current path, and the SPA base path. */
+function buildSeo(req: Request, currentPath: string): SeoContext {
+  return {
+    baseUrl: getBaseUrl(),
+    locale: pickLocale(req),
+    currentPath,
+    appPrefix: getAppPrefix(),
+  };
 }
 
 /** A SEO-complete 404 page rendered via the package's document shell (not the SPA). */
@@ -129,19 +184,20 @@ function notFoundPage(seo: SeoContext, message: string): string {
 
 // GET /explore — gallery
 router.get("/explore", apiLimiter, async (req: Request, res: Response) => {
-  const seo: SeoContext = { baseUrl: getBaseUrl(), locale: pickLocale(req) };
+  const seo = buildSeo(req, "/explore");
   try {
-    // Anonymous viewer (null) → all-false annotations, crawler fast-path.
+    // Session-aware: a signed-in viewer gets their own library/ownership annotations and
+    // the signed-in header; anonymous (null) gets all-false annotations + crawler
+    // fast-path. An invalid/expired session degrades to anonymous.
+    const viewer = await resolveViewer(req);
     const page = await getMarketplaceService().getGalleryAnnotated(
       { sort: "recent", limit: 100 },
-      null,
+      viewer?.userId ?? null,
     );
     const gallery = toGalleryView(page);
-    const { html } = renderExploreToHtml(gallery, null, seo);
-    res.setHeader("Cache-Control", PAGE_CACHE_CONTROL);
-    res
-      .type("html")
-      .send(withHydration(html, { page: "explore", gallery, viewer: null, seo }));
+    const { html } = renderExploreToHtml(gallery, viewer, seo);
+    applyCacheHeaders(res, viewer);
+    res.type("html").send(withHydration(html, { page: "explore", gallery, viewer, seo }));
   } catch (error) {
     if (error instanceof MarketplaceDisabledError) {
       res
@@ -156,23 +212,25 @@ router.get("/explore", apiLimiter, async (req: Request, res: Response) => {
 
 // GET /w/:handle/:slug — flow detail
 router.get("/w/:handle/:slug", apiLimiter, async (req: Request, res: Response) => {
-  const seo: SeoContext = { baseUrl: getBaseUrl(), locale: pickLocale(req) };
   const reference = `${req.params.handle}/${req.params.slug}`;
+  const seo = buildSeo(req, `/w/${reference}`);
   try {
     const service = getMarketplaceService();
-    // Anonymous viewer (null) → resolves only listed+public flows, no library/own pills.
-    const annotated = await service.getDetailByReferenceAnnotated(reference, null);
-    void service.recordView(annotated.listing.id, null).catch(() => {});
+    // Session-aware: a signed-in viewer resolves with their own id (so an owner sees
+    // their flow) and gets library/own pills; anonymous resolves listed+public only.
+    const viewer = await resolveViewer(req);
+    const annotated = await service.getDetailByReferenceAnnotated(
+      reference,
+      viewer?.userId ?? null,
+    );
+    void service.recordView(annotated.listing.id, viewer?.userId ?? null).catch(() => {});
     const detail = toDetailView(annotated);
-    const { html } = renderDetailToHtml(detail, null, seo);
-    res.setHeader("Cache-Control", PAGE_CACHE_CONTROL);
-    res.type("html").send(withHydration(html, { page: "detail", detail, viewer: null, seo }));
+    const { html } = renderDetailToHtml(detail, viewer, seo);
+    applyCacheHeaders(res, viewer);
+    res.type("html").send(withHydration(html, { page: "detail", detail, viewer, seo }));
   } catch (error) {
     if (isDomainError(error)) {
-      res
-        .status(404)
-        .type("html")
-        .send(notFoundPage(seo, "This workflow is not available."));
+      res.status(404).type("html").send(notFoundPage(seo, "This workflow is not available."));
       return;
     }
     throw error;
@@ -193,7 +251,7 @@ router.get("/sitemap.xml", apiLimiter, async (_req: Request, res: Response) => {
         ),
     );
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${entries.join("\n")}\n</urlset>\n`;
-    res.setHeader("Cache-Control", PAGE_CACHE_CONTROL);
+    res.setHeader("Cache-Control", ANON_CACHE_CONTROL);
     res.setHeader("Content-Type", "application/xml; charset=utf-8");
     res.send(xml);
   } catch (error) {

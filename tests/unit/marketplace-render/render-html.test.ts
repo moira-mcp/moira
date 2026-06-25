@@ -121,7 +121,9 @@ describe("renderExploreToHtml", () => {
       name: "Research Flow",
     });
     // Breadcrumb present alongside.
-    expect(blocks.map((b) => JSON.parse(b)).some((d) => d["@type"] === "BreadcrumbList")).toBe(true);
+    expect(blocks.map((b) => JSON.parse(b)).some((d) => d["@type"] === "BreadcrumbList")).toBe(
+      true,
+    );
   });
 
   it("localizes the gallery total count (EN vs RU CLDR forms)", () => {
@@ -210,8 +212,11 @@ describe("renderDetailToHtml", () => {
     expect(ru).toContain("Данные и анализ"); // category enum localized
     expect(ru).toContain('<html lang="ru">');
 
-    const en = renderDetailToHtml(detailView({ stepCount: 1, installCount: 1 }), ANON, seo("en"))
-      .html;
+    const en = renderDetailToHtml(
+      detailView({ stepCount: 1, installCount: 1 }),
+      ANON,
+      seo("en"),
+    ).html;
     expect(en).toContain("1 step");
     expect(en).toContain("1 install");
   });
@@ -227,8 +232,8 @@ describe("renderDetailToHtml", () => {
 describe("JSON-LD XSS safety", () => {
   it("a malicious detail title cannot break out of the ld+json script block", () => {
     const malicious = detailView({
-      title: '</script><script>alert(1)</script>',
-      summary: 'evil </script><img src=x onerror=alert(2)>',
+      title: "</script><script>alert(1)</script>",
+      summary: "evil </script><img src=x onerror=alert(2)>",
     });
     const { html } = renderDetailToHtml(malicious, ANON, seo("en"));
 
@@ -262,5 +267,51 @@ describe("JSON-LD XSS safety", () => {
       expect(block).not.toContain("</script>");
     }
     expect(html).not.toContain("<script>alert(3)</script>");
+  });
+});
+
+describe("ListingDetail action area (session-aware)", () => {
+  const VIEWER: ViewerContext = { userId: "u-1", handle: "bob" };
+
+  it("anonymous → gated sign-in CTA, no add-to-library button", () => {
+    const { html } = renderDetailToHtml(
+      detailView({ isOwn: false, inLibrary: false }),
+      ANON,
+      seo("en"),
+    );
+    expect(html).toContain('data-mp="signin-cta"');
+    expect(html).not.toContain('data-mp="add-cta"');
+  });
+
+  it("signed-in, not own, not in library → add-to-library button, no sign-in CTA", () => {
+    const { html } = renderDetailToHtml(
+      detailView({ isOwn: false, inLibrary: false }),
+      VIEWER,
+      seo("en"),
+    );
+    expect(html).toContain('data-mp="add-cta"');
+    expect(html).not.toContain('data-mp="signin-cta"');
+  });
+
+  it("signed-in OWNER → own-pill and NO add button (and no sign-in CTA)", () => {
+    const { html } = renderDetailToHtml(
+      detailView({ isOwn: true, inLibrary: false }),
+      VIEWER,
+      seo("en"),
+    );
+    expect(html).toContain('data-mp="own-pill"');
+    expect(html).not.toContain('data-mp="add-cta"');
+    expect(html).not.toContain('data-mp="signin-cta"');
+  });
+
+  it("signed-in, already in library (not own) → library-pill and NO add button", () => {
+    const { html } = renderDetailToHtml(
+      detailView({ isOwn: false, inLibrary: true }),
+      VIEWER,
+      seo("en"),
+    );
+    expect(html).toContain('data-mp="library-pill"');
+    expect(html).not.toContain('data-mp="add-cta"');
+    expect(html).not.toContain('data-mp="signin-cta"');
   });
 });

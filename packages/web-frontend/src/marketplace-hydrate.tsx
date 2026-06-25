@@ -26,6 +26,7 @@ import {
   type ViewerContext,
   type SeoContext,
 } from "@mcp-moira/marketplace-render/hydrate";
+import { signOut } from "./auth/better-auth-client";
 
 /** The shape of the server-inlined initial-data island (`window.__MP__` equivalent). */
 interface HydrationIsland {
@@ -70,13 +71,56 @@ function buildTree(island: HydrationIsland): React.ReactElement | null {
         labels={labels}
         viewer={island.viewer}
         baseUrl={baseUrl}
+        appPrefix={island.seo.appPrefix ?? ""}
       />
     );
   }
   return null;
 }
 
+/** Theme values the SPA persists in localStorage `"theme"` (shared same-origin). */
+type ThemeChoice = "light" | "dark" | "system";
+const THEME_ORDER: ThemeChoice[] = ["light", "dark", "system"];
+
+/** Resolve whether a theme choice paints dark (mirrors the SPA `useTheme`). */
+function isDark(choice: ThemeChoice): boolean {
+  if (choice === "dark") return true;
+  if (choice === "light") return false;
+  return !!window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+/** Apply a theme choice to `<html>` (same class contract as the no-flash bootstrap). */
+function applyTheme(choice: ThemeChoice): void {
+  const el = document.documentElement;
+  el.classList.remove("light", "dark");
+  el.classList.add(isDark(choice) ? "dark" : "light");
+}
+
+/**
+ * Wire the static chrome controls the SSR rendered (the header lives outside `#root`, so
+ * it is enhanced imperatively rather than hydrated): the theme toggle cycles
+ * light→dark→system and persists to localStorage `"theme"` (same key the SPA reads); the
+ * sign-out button calls the Better Auth client then reloads so the server re-renders the
+ * anonymous header. The language switch needs no JS (plain `?lang` links).
+ */
+function wireChrome(): void {
+  const themeBtn = document.querySelector<HTMLButtonElement>('[data-mp="theme-toggle"]');
+  themeBtn?.addEventListener("click", () => {
+    const current = (localStorage.getItem("theme") as ThemeChoice | null) ?? "system";
+    const next = THEME_ORDER[(THEME_ORDER.indexOf(current) + 1) % THEME_ORDER.length] ?? "system";
+    localStorage.setItem("theme", next);
+    applyTheme(next);
+  });
+
+  const signOutBtn = document.querySelector<HTMLButtonElement>('[data-mp="sign-out"]');
+  signOutBtn?.addEventListener("click", () => {
+    signOutBtn.disabled = true;
+    void signOut().finally(() => window.location.reload());
+  });
+}
+
 function bootstrap(): void {
+  wireChrome();
   const root = document.getElementById("root");
   const island = readIsland();
   if (!root || !island) {

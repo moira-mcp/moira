@@ -11,12 +11,15 @@ import type { DetailView, ViewerContext } from "../types.js";
 import type { Labels } from "../labels.js";
 import { VerifiedBadge } from "./VerifiedBadge.js";
 import { RatingStars } from "./RatingStars.js";
+import { withLang } from "../links.js";
 
 export interface ListingDetailProps {
   detail: DetailView;
   labels: Labels;
   viewer: ViewerContext | null;
   baseUrl: string;
+  /** SPA base path (`""` or `/app`) for the anonymous sign-in CTA. Defaults to `""`. */
+  appPrefix?: string;
 }
 
 export function ListingDetail({
@@ -24,13 +27,15 @@ export function ListingDetail({
   labels,
   viewer,
   baseUrl,
+  appPrefix = "",
 }: ListingDetailProps): React.ReactElement {
   const isAuthenticated = viewer?.userId != null;
   const startCommand = `start("${detail.reference}")`;
+  const signInHref = withLang(`${appPrefix}/login`, labels.locale);
   return (
     <main className="mp-detail" data-mp="detail">
       <nav className="mp-breadcrumb" aria-label="Breadcrumb">
-        <a href={`${baseUrl}/explore`}>{labels.chrome.backToExplore}</a>
+        <a href={withLang(`${baseUrl}/explore`, labels.locale)}>{labels.chrome.backToExplore}</a>
       </nav>
       <article className="mp-detail-article" data-mp="detail-article">
         <h1 className="mp-detail-title">{detail.title}</h1>
@@ -74,9 +79,31 @@ export function ListingDetail({
             </span>
           ) : null}
         </p>
-        <p className="mp-start-hint">
-          {labels.chrome.startHint}: <code>{startCommand}</code>
-        </p>
+        <div className="mp-start" data-mp="start">
+          <p className="mp-start-label">{labels.chrome.startHint}</p>
+          <code data-mp="start-command">{startCommand}</code>
+        </div>
+        {/* Action area, context-appropriate: anonymous → gated sign-in CTA; a signed-in
+            viewer who neither owns nor already has the flow → an add affordance (the real
+            add action lands in Step 14); an owner or an in-library viewer → no action (the
+            "Your listing" / "In your library" pill above already conveys their state). */}
+        {!isAuthenticated ? (
+          <div className="mp-actions" data-mp="actions">
+            <a className="mp-btn mp-btn-primary" href={signInHref} data-mp="signin-cta">
+              {labels.chrome.signInToAdd}
+            </a>
+          </div>
+        ) : !detail.isOwn && !detail.inLibrary ? (
+          <div className="mp-actions" data-mp="actions">
+            <a
+              className="mp-btn mp-btn-primary"
+              href={withLang(`${baseUrl}/explore`, labels.locale)}
+              data-mp="add-cta"
+            >
+              {labels.chrome.addToLibrary}
+            </a>
+          </div>
+        ) : null}
       </article>
     </main>
   );

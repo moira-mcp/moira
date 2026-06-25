@@ -68,6 +68,8 @@ import { marketplacePublicRoutes } from "./routes/marketplace-public.js";
 import { marketplaceAuthedRoutes } from "./routes/marketplace-authed.js";
 import { marketplaceAdminRoutes } from "./routes/marketplace-admin.js";
 import { marketplacePagesRoutes } from "./routes/marketplace-pages.js";
+import { THEME_BOOTSTRAP } from "@mcp-moira/marketplace-render";
+import { createHash } from "node:crypto";
 import { workflowSharingRoutes } from "./routes/workflow-sharing.js";
 import { inviteAcceptRoutes } from "./routes/invite-accept.js";
 import { tokenRoutes } from "./routes/tokens.js";
@@ -139,7 +141,11 @@ class MoiraApiServer {
     // GeoIP logging for request origins
     this.app.use(geoipLogger({ logger: httpLogger }));
 
-    // Security headers
+    // Security headers. The public marketplace pages carry one tiny inline no-flash
+    // theme bootstrap; instead of weakening the policy with 'unsafe-inline', we allow
+    // exactly that script by its sha256 hash (derived from the same constant the render
+    // package inlines, so the two never drift).
+    const themeScriptHash = `'sha256-${createHash("sha256").update(THEME_BOOTSTRAP).digest("base64")}'`;
     this.app.use(
       helmet({
         contentSecurityPolicy: {
@@ -148,7 +154,7 @@ class MoiraApiServer {
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
             imgSrc: ["'self'", "data:", "https:"],
-            scriptSrc: ["'self'"],
+            scriptSrc: ["'self'", themeScriptHash],
           },
         },
       }),

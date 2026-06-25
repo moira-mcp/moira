@@ -76,6 +76,18 @@ export interface SeoContext {
   baseUrl: string;
   /** Locale the page is rendered in (drives counts, enum labels and `<html lang>`). */
   locale: MarketplaceLocale;
+  /**
+   * Path portion of the current page (e.g. `/explore`, `/w/handle/slug`). Used by the
+   * page chrome to build the language-switch links (same path, different `?lang`) and to
+   * mark the active language. Defaults to `/explore` when omitted.
+   */
+  currentPath?: string;
+  /**
+   * Base path the SPA is mounted under (`""` for self-host root, `/app` for the hosted
+   * deploy). Used to build same-origin SPA links from the chrome (e.g. sign-in `/login`).
+   * Defaults to `""`.
+   */
+  appPrefix?: string;
 }
 
 /** The result of a render call: a complete HTML document string. */

@@ -12,6 +12,7 @@ import { renderToString } from "react-dom/server";
 import { ExploreGallery } from "../components/ExploreGallery.js";
 import { makeLabels } from "../labels.js";
 import { buildDocument } from "./document.js";
+import { renderChrome } from "./chrome.js";
 import { buildItemListJsonLd, buildBreadcrumbJsonLd } from "../seo/jsonld.js";
 import type { GalleryView, ViewerContext, SeoContext, RenderResult } from "../types.js";
 
@@ -27,6 +28,7 @@ export function renderExploreToHtml(
   const bodyHtml = renderToString(
     React.createElement(ExploreGallery, { gallery, labels, viewer, baseUrl: seo.baseUrl }),
   );
+  const chrome = renderChrome(labels, viewer, seo, seo.currentPath ?? "/explore");
 
   const jsonLd = [
     buildItemListJsonLd(gallery, seo),
@@ -43,6 +45,7 @@ export function renderExploreToHtml(
       jsonLd,
     },
     bodyHtml,
+    chrome,
   );
 
   return { html };

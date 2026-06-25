@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **47 domains**, **316 files**, **3728 tests**
+- **47 domains**, **318 files**, **3747 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,8 +35,8 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 18    | 166   | unit:9, integration:2, api:3, mcp-tools:1, e2e:3               |
-| marketplace-render  | 2     | 21    | unit:2                                                         |
+| marketplace         | 20    | 181   | unit:9, integration:2, api:4, mcp-tools:1, e2e:4               |
+| marketplace-render  | 2     | 25    | unit:2                                                         |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -520,15 +520,17 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/api/marketplace-public-api.test.ts` — 7 tests 🟢 (HTTP: gallery public no-auth + page envelope; sort/limit/offset query params; categories payload; sitemap.xml content-type; unknown detail/export/reviews → 404)
 - `tests/api/marketplace-authed-api.test.ts` — 12 tests 🟢 (HTTP auth gating: me/listings + me/library + publish without session → 401; authed me/listings + me/library → 200 envelope; error mapping publish/delete/entitlement unknown id → 404; admin queue no-session → 401, non-admin → 403, admin → 200 envelope, verify unknown id → 404)
 - `tests/api/marketplace-pages.test.ts` — 7 tests 🟢 (SSR public pages COMPONENT-rendered via the render package: /explore crawlable HTML lists a just-published flow no-rebuild + carries `data-mp`/`#root` package markup + interim string-template markers gone; /explore readable with JS disabled + ships the hydration bootstrap (stable `marketplace-hydrate.js` ref + escaped `#mp-bootstrap` initial-data island carrying the anon view-model); /w/:handle/:slug detail + OpenGraph + JSON-LD SoftwareApplication; /w/ ships the hydration bootstrap (detail island, viewer=null); /sitemap.xml canonical /w/ URL fresh from DB; unknown /w/ → 404 HTML; malicious summary HTML-escaped + cannot break out of JSON-LD OR the bootstrap island (round-trips as data, never executed))
+- `tests/api/marketplace-pages-session.test.ts` — 9 tests 🟢 (SESSION-AWARE SSR public pages: anonymous /explore → cacheable fast path (`Cache-Control: public, max-age=60`, `Vary: Accept-Language`+`Cookie`), `data-mp="sign-in"` header, null `#mp-bootstrap` viewer; signed-in /explore → `private, no-store` (`Vary: Cookie`), `data-mp="sign-out"`+`account-handle`, island viewer.userId/handle set; owner sees `own-pill` on their detail; no cross-user leakage — USER_B who installed USER_A's listing gets `library-pill` not `own-pill`, owner gets `own-pill` not `library-pill`, anonymous gets neither + `signin-cta`, viewer island never carries the other user's handle; degraded session (bogus cookie) renders anonymous variant (200, sign-in, public cache) never an error; language honored server-side — `?lang=ru` + `Accept-Language: ru` → `<html lang="ru">`+RU "Каталог" chrome, default → `lang="en"`, RU detail threads `?lang=ru` into internal links)
 
 **mcp-tools** (1 file)
 
 - `tests/mcp-tools/marketplace-tool.test.ts` — 8 tests 🟢 (agent path over real MCP: publish produces handle/slug ref; search finds the published flow; info accessible detail; add → appears in list(source:added) as origin 'added'; start runs the added flow by ref; rate records a rating; author cannot rate own flow); list(source:core) returns bundled flows startable by moira/<slug> id
 
-**e2e** (3 files)
+**e2e** (4 files)
 
 - `tests/e2e/marketplace-i18n.spec.ts` — 1 test 🟢 (Playwright SPA localization: with ?lang=ru the gallery/detail/My-Listings render translated enum labels (category→"Разработка", status→"Опубликован") and correct Russian CLDR plural counts (install/step declensions, e.g. "2 шага") with no raw enum strings)
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the component detail page (backend, not SPA) with JSON-LD (SoftwareApplication across multiple LD blocks) + ships the hydration bootstrap (marketplace-hydrate.js script + `#mp-bootstrap` detail island); missing flow 404s instead of SPA fallthrough)
+- `tests/e2e/marketplace-public-page.spec.ts` — 6 tests 🟢 (Playwright session-aware polished public pages: anonymous /explore shows topbar/brand/theme-toggle/EN-RU switch/footer + `sign-in` (no account/sign-out); anonymous /w/:ref primary action is the gated `signin-cta`→/login + neither viewer pill; JS-free language toggle (anchor click → `?lang=ru`, RU "Войти"/"Каталог" chrome, `aria-current` on RU); hydrated theme toggle (set localStorage light → click → `<html>.dark` + localStorage `theme`="dark"); signed-in /explore shows `account-handle`=@handle + `sign-out` (no sign-in), sign-out (throwaway session) → reload back to anonymous header; owner's /w/:ref shows `own-pill` not `library-pill`/`signin-cta`)
 - `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); before/after screenshots captured)
 
 ### marketplace-render
@@ -537,7 +539,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 **unit** (2 files)
 
-- `tests/unit/marketplace-render/render-html.test.ts` — 13 tests 🟢 (@mcp-moira/marketplace-render server render: renderExploreToHtml crawlable semantic gallery HTML + real detail `<a href>` links + escaped SEO head (title/description/canonical/OG/Twitter) + well-formed ItemList+BreadcrumbList JSON-LD; renderDetailToHtml semantic `<article>` + start command + SoftwareApplication JSON-LD with/without aggregateRating + BreadcrumbList; localized counts EN vs RU CLDR forms (published/steps "2 шага"/installs "5 установок"/"1 install"); localized category enum (RU "Исследования"/"Данные и анализ", not raw) + "Unrated"/"Без оценок"; viewer pills only when authenticated+annotated; JSON-LD XSS-safety — malicious detail/gallery title+summary cannot break out of `<script type="application/ld+json">` (`<`-escaped, no raw `</script>`/`<script>alert`/`<img onerror`))
+- `tests/unit/marketplace-render/render-html.test.ts` — 17 tests 🟢 (@mcp-moira/marketplace-render server render: renderExploreToHtml crawlable semantic gallery HTML + real detail `<a href>` links + escaped SEO head (title/description/canonical/OG/Twitter) + well-formed ItemList+BreadcrumbList JSON-LD; renderDetailToHtml semantic `<article>` + start command + SoftwareApplication JSON-LD with/without aggregateRating + BreadcrumbList; localized counts EN vs RU CLDR forms (published/steps "2 шага"/installs "5 установок"/"1 install"); localized category enum (RU "Исследования"/"Данные и анализ", not raw) + "Unrated"/"Без оценок"; viewer pills only when authenticated+annotated; JSON-LD XSS-safety — malicious detail/gallery title+summary cannot break out of `<script type="application/ld+json">` (`<`-escaped, no raw `</script>`/`<script>alert`/`<img onerror`); session-aware detail action area — anonymous → sign-in CTA, signed-in addable viewer → add-to-library button, owner / in-library viewer → NO add button)
 - `tests/unit/marketplace-render/marketplace-viewer-annotation.test.ts` — 8 tests 🟢 (MarketplaceService viewer-annotation: getGalleryAnnotated/getDetailByReferenceAnnotated attach inLibrary/isOwn for owner (isOwn, not stored as library entry) / non-owner-who-added (inLibrary) / stranger (both false) / anonymous null viewer (both false, no library DB hit); gallery pagination metadata preserved; anonymous detail still resolves workflow + ownerHandle)
 
 ### node-handlers

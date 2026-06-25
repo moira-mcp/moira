@@ -15,7 +15,7 @@
 // Render functions (the primary server entry points)
 export { renderExploreToHtml } from "./render/renderExplore.js";
 export { renderDetailToHtml } from "./render/renderDetail.js";
-export { buildDocument } from "./render/document.js";
+export { buildDocument, THEME_BOOTSTRAP, type DocumentChrome } from "./render/document.js";
 
 // View-model types + viewer/SEO contexts
 export type {

@@ -1426,13 +1426,16 @@ server.start(); // Internal port 4201, accessed via nginx proxy
 
 // CORS origins configured dynamically via getBaseUrl() + EXTRA_TRUSTED_ORIGINS env var
 
-// Security headers
+// Security headers. scriptSrc is 'self' plus the sha256 hash of the public marketplace
+// pages' no-flash theme bootstrap (derived from the @mcp-moira/marketplace-render
+// THEME_BOOTSTRAP constant, so the header and the inlined script never drift) — this
+// allows that one inline script without weakening the policy with 'unsafe-inline'.
 helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
+      scriptSrc: ["'self'", "'sha256-<THEME_BOOTSTRAP hash>'"],
     },
   },
 });
