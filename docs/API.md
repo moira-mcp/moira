@@ -3200,8 +3200,13 @@ separately.
 
 Gallery of listed public flows.
 
-Query: `search` (title/summary), `category`, `tag`, `sort`
-(`recent` | `rating` | `installs` | `trending`; default `recent`), `limit`
+Query: `search` (title/summary), `category`, `tag`, two independent boolean filters
+(each enabled only by the literal `=true`):
+`official` — the canonical **Official** filter: listings owned by a system/official
+account (mirrors the library's owner-based `official` notion); and
+`verified` — the verified **trust badge** (may include admin-verified community
+listings, so it is a superset of `official`).
+`sort` (`recent` | `rating` | `installs` | `trending`; default `recent`), `limit`
 (1–100, default 24), `offset` (0–10000, default 0). `trending` ranks recent
 install/start activity over a 7-day window.
 

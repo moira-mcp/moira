@@ -50,10 +50,18 @@ router.get(
     const sort = SORTS.includes(q.sort as GallerySortOption)
       ? (q.sort as GallerySortOption)
       : "recent";
+    // Two independent boolean filters (each enabled only by the literal "true"):
+    //   ?official=true → the canonical "Official" set (listings owned by a system
+    //                    account; mirrors the library's owner-based Official notion).
+    //   ?verified=true → the verified trust badge (may include verified community flows).
+    const official = q.official === "true" ? true : undefined;
+    const verified = q.verified === "true" ? true : undefined;
     const page = await getMarketplaceService().getGallery({
       search: typeof q.search === "string" ? q.search : undefined,
       category: typeof q.category === "string" ? q.category : undefined,
       tag: typeof q.tag === "string" ? q.tag : undefined,
+      official,
+      verified,
       sort,
       limit: q.limit !== undefined ? parseIntOr(q.limit, 24) : undefined,
       offset: q.offset !== undefined ? parseIntOr(q.offset, 0) : undefined,

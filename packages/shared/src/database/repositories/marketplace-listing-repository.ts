@@ -12,6 +12,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { marketplaceListing, workflow, user } from "../schema.js";
 import type * as schema from "../schema.js";
 import { v4 as uuidv4 } from "uuid";
+import { OFFICIAL_OWNER_IDS } from "../../marketplace/official.js";
 
 /** A marketplace listing row as stored. */
 export type MarketplaceListingRecord = typeof marketplaceListing.$inferSelect;
@@ -39,6 +40,15 @@ export interface GalleryFilter {
   category?: string;
   /** Match a single free-form tag. */
   tag?: string;
+  /** Restrict to verified listings (the trust badge — may include verified community flows). */
+  verified?: boolean;
+  /**
+   * Restrict to the OFFICIAL set: listings owned by a system/official account
+   * ({@link OFFICIAL_OWNER_IDS}). This is the canonical "Official" gallery filter and
+   * mirrors the library's owner-based `official` notion, independent of the `verified`
+   * trust badge.
+   */
+  official?: boolean;
   /** Sort order (default: recent). Note: "trending" is computed in the service. */
   sort?: GallerySort;
   limit?: number;
@@ -335,6 +345,12 @@ function galleryConditions(filter: GalleryFilter = {}) {
     eq(workflow.visibility, "public"),
     or(eq(workflow.deleted, false), isNull(workflow.deleted)),
   ];
+  if (filter.verified === true) {
+    conditions.push(eq(marketplaceListing.verified, true));
+  }
+  if (filter.official === true) {
+    conditions.push(inArray(marketplaceListing.publishedBy, [...OFFICIAL_OWNER_IDS]));
+  }
   if (filter.category) {
     conditions.push(eq(marketplaceListing.category, filter.category));
   }

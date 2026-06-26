@@ -28,7 +28,11 @@ import type {
   PublicListingRef,
 } from "../database/repositories/marketplace-listing-repository.js";
 import { MARKETPLACE_CATEGORIES, normalizeMarketplaceCategory } from "../marketplace/constants.js";
-import { OFFICIAL_BASE_FLOW_SLUGS, isOfficialOwner } from "../marketplace/official.js";
+import {
+  OFFICIAL_BASE_FLOW_SLUGS,
+  isOfficialOwner,
+  officialFlowCategory,
+} from "../marketplace/official.js";
 import type {
   LibraryEntryRepository,
   LibraryEntryRecord,
@@ -120,9 +124,27 @@ export interface GalleryQuery {
   search?: string;
   category?: string;
   tag?: string;
+  /** Restrict to verified listings — the trust badge (may include verified community flows). */
+  verified?: boolean;
+  /**
+   * Restrict to the OFFICIAL set — listings owned by a system/official account. This is
+   * the canonical "Official" filter and mirrors the library's owner-based `official`
+   * notion, independent of the `verified` trust badge.
+   */
+  official?: boolean;
   sort?: GallerySortOption;
   limit?: number;
   offset?: number;
+}
+
+/** Outcome of the idempotent official-flow publish routine. */
+export interface PublishOfficialFlowsResult {
+  /** Listings newly created or re-listed in this run. */
+  published: number;
+  /** Listings newly granted the verified badge in this run. */
+  verified: number;
+  /** Total official (`system-moira`) flows considered. */
+  total: number;
 }
 
 /** A page of gallery results with pagination metadata. */
@@ -360,6 +382,53 @@ export class MarketplaceService {
     await this.workflowRepo.updateVisibility(listing.workflowId, userId, "private");
   }
 
+  /**
+   * Publish + verify the complete set of official bundled flows (owned by
+   * `system-moira`) as listed, verified marketplace listings owned by the official
+   * account. Idempotent and safe to run on every deploy (after the catalog install):
+   *
+   * For each owned `system-moira` flow:
+   *   - no listing (or an unlisted/removed one) → {@link publish} it (create/re-list),
+   *     assigning the {@link officialFlowCategory} for its slug and its metadata
+   *     title/summary;
+   *   - already `listed` → keep as-is;
+   *   - then, if the listing is not yet verified → {@link verifyListing} it.
+   *
+   * A second run publishes 0 new and verifies 0 (everything already listed+verified),
+   * leaving exactly one listing per workflow. `adminId` is recorded as the verifier.
+   */
+  async publishOfficialFlows(adminId: string): Promise<PublishOfficialFlowsResult> {
+    this.assertEnabled();
+
+    // Only the official account's OWN flows (list() also surfaces other owners' public
+    // flows for discovery, which we must not publish on its behalf).
+    const flows = (await this.workflowRepo.list(SYSTEM_PUBLIC_OWNER)).filter(
+      (w) => w.accessType === "owner",
+    );
+
+    let published = 0;
+    let verified = 0;
+    for (const flow of flows) {
+      let listing = await this.listingRepo.getByWorkflowId(flow.id);
+      if (!listing || listing.status !== "listed") {
+        // publish() creates a new listing or re-lists an unlisted/removed one; it
+        // throws only when a `listed` row already exists (excluded by the guard above).
+        listing = await this.publish(SYSTEM_PUBLIC_OWNER, flow.id, {
+          category: officialFlowCategory(flow.slug),
+          title: flow.metadata.name,
+          summary: flow.metadata.description ?? null,
+        });
+        published++;
+      }
+      if (!listing.verified) {
+        await this.verifyListing(adminId, listing.id);
+        verified++;
+      }
+    }
+
+    return { published, verified, total: flows.length };
+  }
+
   /** Reject paid publish fields while the `paidWorkflows` feature is disabled. */
   private assertNoPaidFields(options: PublishOptions): void {
     const wantsPaid = options.isPaid === true || options.price != null || options.tier != null;
@@ -380,7 +449,13 @@ export class MarketplaceService {
     // Clamp offset so an unauthenticated caller cannot force deep-paging scans.
     const offset = clamp(query.offset ?? 0, 0, MAX_GALLERY_OFFSET);
     const category = query.category ? normalizeMarketplaceCategory(query.category) : undefined;
-    const filter: GalleryFilter = { search: query.search, category, tag: query.tag };
+    const filter: GalleryFilter = {
+      search: query.search,
+      category,
+      tag: query.tag,
+      verified: query.verified,
+      official: query.official,
+    };
     const sort: GallerySortOption = query.sort ?? "recent";
 
     if (sort === "trending") {
@@ -1197,6 +1272,8 @@ function clamp(n: number, min: number, max: number): number {
 
 /** In-memory gallery filter (used for the trending path, post-ranking). */
 function matchesGalleryFilter(item: GalleryItem, filter: GalleryFilter): boolean {
+  if (filter.verified === true && !item.verified) return false;
+  if (filter.official === true && !isOfficialOwner(item.publishedBy)) return false;
   if (filter.category && item.category !== filter.category) return false;
   if (filter.search) {
     const q = filter.search.toLowerCase();

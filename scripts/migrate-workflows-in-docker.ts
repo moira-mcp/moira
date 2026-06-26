@@ -37,6 +37,7 @@ import {
   getWorkflowsDirs,
   installCatalogEntries,
   isOfficialOwner,
+  isMarketplaceEnabled,
   CatalogContentMismatchError,
 } from "@mcp-moira/shared";
 
@@ -119,6 +120,27 @@ async function migrate(): Promise<void> {
   console.log(
     `✅ Default library backfill complete: ${backfilledEntries} entries across ${backfilledUsers} user(s) (${userIds.length} scanned)`,
   );
+
+  // Official gallery: list + verify the complete set of official bundled flows so the
+  // marketplace gallery's "Official" filter returns them. Runs after the catalog is
+  // installed; idempotent (publishes 0 new on a steady-state deploy). Guarded on the
+  // marketplace feature so a marketplace-off self-host never attempts to publish.
+  if (isMarketplaceEnabled()) {
+    console.log("\n🏷️  Publishing official flows to the marketplace gallery...");
+    try {
+      // Verify as system-moira (the always-seeded account that OWNS these flows) rather
+      // than system-admin (only seeded when ADMIN_PASSWORD is set) — avoids a hidden
+      // cross-seed dependency + a verifiedBy FK-violation failure mode.
+      const official = await marketplaceService.publishOfficialFlows("system-moira");
+      console.log(
+        `✅ Official flows published: ${official.published} new/relisted, ${official.verified} newly verified (${official.total} official flows)`,
+      );
+    } catch (error) {
+      console.error("⚠️  Official flow publish failed:", error);
+    }
+  } else {
+    console.log("\n⏭️  Marketplace disabled — skipping official flow publish");
+  }
 
   if (result.invalid > 0) {
     console.error("\n❌ Migration completed with invalid flows");

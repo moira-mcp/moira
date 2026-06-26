@@ -40,3 +40,64 @@ export const OFFICIAL_BASE_FLOW_SLUGS: readonly string[] = [
   "user-onboarding",
   "software-development-flow",
 ] as const;
+
+/**
+ * Marketplace category for each known official (`system-moira`) catalog slug.
+ *
+ * The on-disk catalog flows carry no category, so the official-publish routine assigns
+ * one at publish time. Each value MUST be one of the closed
+ * {@link MARKETPLACE_CATEGORIES} ids (development/research/content/data/design/testing/
+ * marketing/productivity/other). A slug not listed here resolves to `other` via
+ * {@link officialFlowCategory}. Keep this in sync with `workflows/production/flows/*`.
+ */
+export const OFFICIAL_FLOW_CATEGORIES: Readonly<Record<string, string>> = {
+  // development — build/ship/manage work
+  "quick-task": "development",
+  "robust-task": "development",
+  "software-development-flow": "development",
+  "software-development-flow-lite": "development",
+  "workflow-management-flow": "development",
+  "task-breakdown-flow": "development",
+  // research
+  "verified-research": "research",
+  "iterative-research": "research",
+  "universal-research-workflow": "research",
+  research: "research",
+  // content
+  "content-creation": "content",
+  // data & analysis
+  "data-analysis": "data",
+  // design & UX
+  "ux-design": "design",
+  "architecture-design-flow": "design",
+  // testing & QA
+  "test-generation": "testing",
+  "test-planning": "testing",
+  "test-suite-audit": "testing",
+  "bug-hunting-workflow": "testing",
+  // marketing
+  "marketing-campaign": "marketing",
+  // productivity — assistants, planning, task management, onboarding
+  "user-onboarding": "productivity",
+  "todo-list": "productivity",
+  "prd-creation": "productivity",
+  "smart-purchase-assistant": "productivity",
+  "startup-idea-validation": "productivity",
+  "infinite-task-loop": "productivity",
+  "simple-plan-execution": "productivity",
+  // other — demos, generators, setup utilities
+  "artifacts-demo-dashboard-builder": "other",
+  "artifacts-demo-report-publisher": "other",
+  "notes-demo-metrics-collector": "other",
+  "notes-demo-metrics-reporter": "other",
+  "workflow-presentation-generator": "other",
+  "telegram-setup": "other",
+};
+
+/**
+ * The marketplace category for an official catalog slug. Returns the mapped category
+ * from {@link OFFICIAL_FLOW_CATEGORIES}, or `"other"` for an unmapped slug.
+ */
+export function officialFlowCategory(slug: string): string {
+  return OFFICIAL_FLOW_CATEGORIES[slug] ?? "other";
+}

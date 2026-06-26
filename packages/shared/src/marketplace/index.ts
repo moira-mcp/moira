@@ -19,5 +19,7 @@ export {
   type OfficialOwnerId,
   OFFICIAL_OWNER_IDS,
   OFFICIAL_BASE_FLOW_SLUGS,
+  OFFICIAL_FLOW_CATEGORIES,
   isOfficialOwner,
+  officialFlowCategory,
 } from "./official.js";
