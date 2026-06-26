@@ -206,13 +206,14 @@ test.describe("Theme Integration", () => {
       await betaDismiss.click();
     }
 
-    // Search for test workflow (required because there are 800+ workflows)
-    const searchInput = page.locator('input[placeholder*="Search"]');
-    await searchInput.fill("react-flow-theme-test");
-    await page.waitForTimeout(500);
-
-    // Click on test workflow
-    await page.click("text=React Flow Theme Test");
+    // The Workflows home is now a single "Your library" surface: filter it by NAME, then
+    // open the admin-owned flow via its card's edit action (the card name is not a link).
+    const searchInput = page.getByTestId("library-search");
+    await searchInput.fill("React Flow Theme Test");
+    const themeCard = page.getByTestId("flow-card").filter({ hasText: "React Flow Theme Test" });
+    await expect(themeCard.first()).toBeVisible({ timeout: 10000 });
+    await themeCard.first().getByTestId("edit-workflow").click();
+    await page.waitForURL(/\/workflows\/.+/, { timeout: 10000 });
 
     // Wait for React Flow to load
     const reactFlowDiv = page.locator(".react-flow").first();

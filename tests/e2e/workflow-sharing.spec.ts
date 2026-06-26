@@ -393,9 +393,9 @@ test.describe("Workflow Sharing - Shared Workflow Visibility", () => {
     console.log("Accept response:", JSON.stringify(acceptData, null, 2));
     expect(acceptResponse.status()).toBe(201);
 
-    // Navigate to the recipient's Workflows home → "Shared" origin tab (the unified home
-    // groups workflows by origin; shared-with-me flows live under ?origin=shared).
-    await newPage.goto(`${BASE_URL}/workflows?origin=shared`);
+    // Navigate to the recipient's Workflows home → "Shared" filter (the unified library
+    // filters by source; shared-with-me flows live under ?filter=shared).
+    await newPage.goto(`${BASE_URL}/workflows?filter=shared`);
     await newPage.waitForLoadState("networkidle");
     await newPage.waitForTimeout(2000);
 

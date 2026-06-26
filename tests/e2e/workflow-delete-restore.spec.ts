@@ -17,15 +17,13 @@ test.describe("Workflow Delete and Restore Flow", () => {
     await page.goto(`${BASE_URL}/workflows`);
     await page.waitForLoadState("domcontentloaded");
 
-    // Search for test workflow (required because there are 800+ workflows)
-    const searchInput = page.locator('input[placeholder*="Search"]');
-    await searchInput.fill("react-flow-theme-test");
-    await page.waitForTimeout(500);
-
-    // Click on workflow name to navigate (workflows list shows clickable items)
-    const workflowItem = page.locator("text=React Flow Theme Test").first();
-    await expect(workflowItem).toBeVisible({ timeout: 10000 });
-    await workflowItem.click();
+    // The Workflows home is now a single "Your library" surface: filter it by NAME, then
+    // open the admin-owned flow via its card's edit action (the card name is not a link).
+    const searchInput = page.getByTestId("library-search");
+    await searchInput.fill("React Flow Theme Test");
+    const card = page.getByTestId("flow-card").filter({ hasText: "React Flow Theme Test" });
+    await expect(card.first()).toBeVisible({ timeout: 10000 });
+    await card.first().getByTestId("edit-workflow").click();
     await page.waitForURL(/\/workflows\/.+/, { timeout: 10000 });
     await expect(page.locator('button:has-text("Delete Workflow")')).toBeVisible();
   });

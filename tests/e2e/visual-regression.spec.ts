@@ -12,7 +12,7 @@ const BASE_URL = getTestBaseUrl();
 
 const PAGES = [
   { name: "dashboard", path: "/", waitFor: '[data-testid="stat-card"]' },
-  { name: "workflows", path: "/workflows", waitFor: '[data-testid="workflow-card"]' },
+  { name: "workflows", path: "/workflows", waitFor: '[data-testid="flow-card"]' },
   { name: "executions", path: "/executions", waitFor: "table" },
   { name: "notes", path: "/notes", waitFor: "main" },
   { name: "artifacts", path: "/artifacts", waitFor: "main" },

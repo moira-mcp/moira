@@ -152,12 +152,14 @@ test.describe("Marketplace SPA", () => {
     await page.screenshot({ path: path.join(SHOT_DIR, "06-rated.png"), fullPage: true });
 
     // The library folded into the unified Workflows home: the old /marketplace/library
-    // route redirects to the home's "Added" origin, where the added reference appears.
+    // route redirects to the home with the "Added" filter active, where the added
+    // reference appears.
     await page.goto(`${BASE_URL}/marketplace/library`);
-    await expect(page).toHaveURL(/\/workflows\?origin=added$/);
-    const addedList = page.getByTestId("origin-list-added");
-    await expect(addedList).toBeVisible({ timeout: 10000 });
-    await expect(addedList.getByText(FLOW_NAME).first()).toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/workflows\?filter=added$/);
+    await expect(page.getByTestId("library-chip-added")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("flow-card").filter({ hasText: FLOW_NAME }).first()).toBeVisible({
+      timeout: 10000,
+    });
     await page.screenshot({ path: path.join(SHOT_DIR, "07-library.png"), fullPage: true });
   });
 });

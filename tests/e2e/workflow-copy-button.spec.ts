@@ -63,40 +63,49 @@ test.describe("Workflow Copy Button", () => {
     // Login as admin
     await loginAsAdmin(page);
 
-    // Navigate to dashboard to find a private workflow
-    await page.goto(`${BASE_URL}/workflows`);
+    // Create a PRIVATE workflow. "Use as Template" is gated on visibility === "public",
+    // so it must be ABSENT on a private flow's detail. (The old home's Private-badge card
+    // is gone, so navigate to the detail directly instead of searching the home.)
+    const createResponse = await page.request.post(`${BASE_URL}/api/workflows`, {
+      headers: { "Content-Type": "application/json" },
+      data: {
+        visibility: "private",
+        workflow: {
+          metadata: {
+            name: "Copy Test Private Workflow",
+            version: "1.0.0",
+            description: "Private workflow for testing copy-button gating",
+          },
+          nodes: [
+            { type: "start", id: "start", connections: { default: "end" } },
+            { type: "end", id: "end" },
+          ],
+        },
+      },
+    });
+    expect(createResponse.status()).toBe(200);
+    const responseData = await createResponse.json();
+    const workflowId = responseData.data?.workflowId;
+    const workflowSlug = responseData.data?.slug;
+    expect(workflowId).toBeTruthy();
+
+    // Navigate to the private workflow's detail (handle/slug).
+    await page.goto(`${BASE_URL}/workflows/${ADMIN_HANDLE}/${workflowSlug}`);
     await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(1000);
 
-    // Look for a private workflow (has lock icon) or just check visibility logic
-    // Navigate to a known private workflow if exists, or verify button logic
-    // The button condition is: visibility === "public" && session?.user
-    // For private workflows, button should NOT be visible
+    // Positive guard: confirm the workflow DETAIL actually rendered (the react-flow canvas)
+    // before asserting the button's absence — otherwise a failed navigation would make the
+    // toHaveCount(0) check pass vacuously.
+    await expect(page.locator(".react-flow").first()).toBeVisible({ timeout: 10000 });
 
-    // Check dashboard - find a workflow with "Private" badge
-    const privateWorkflowCard = page
-      .locator(
-        '[data-testid="workflow-card"]:has-text("Private"), [class*="workflow"]:has-text("Приватный")',
-      )
-      .first();
-    const hasPrivateWorkflow = await privateWorkflowCard.isVisible().catch(() => false);
+    // "Use as Template" must NOT be present for a private workflow.
+    const templateButton = page.locator(
+      "button:has-text('Use as Template'), button:has-text('Использовать как шаблон')",
+    );
+    await expect(templateButton).toHaveCount(0);
 
-    if (hasPrivateWorkflow) {
-      // Click on the private workflow to navigate to detail
-      await privateWorkflowCard.click();
-      await page.waitForLoadState("domcontentloaded");
-      await page.waitForTimeout(1000);
-
-      // "Use as Template" button should NOT be visible for private workflows
-      const templateButton = page.locator(
-        "button:has-text('Use as Template'), button:has-text('Использовать как шаблон')",
-      );
-      await expect(templateButton).not.toBeVisible();
-    } else {
-      // No private workflows available - skip this assertion
-      // The main test "should show button for public workflow" covers the positive case
-      console.log("No private workflows found to test - skipping assertion");
-    }
+    // Cleanup
+    await page.request.delete(`${BASE_URL}/api/workflows/${workflowId}`);
   });
 
   test("should create copy and navigate when clicking 'Use as Template'", async ({ page }) => {

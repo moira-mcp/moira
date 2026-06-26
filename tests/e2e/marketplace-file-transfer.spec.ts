@@ -73,7 +73,7 @@ test.describe("Self-host file transfer", () => {
     await login(page, USER.email, USER.password);
     await page.goto(`${BASE_URL}/workflows`);
 
-    const sourceCard = page.getByTestId("workflow-card").filter({ hasText: FLOW });
+    const sourceCard = page.getByTestId("flow-card").filter({ hasText: FLOW });
     await expect(sourceCard).toHaveCount(1, { timeout: 10000 });
 
     // Export → capture the downloaded file.
@@ -102,7 +102,7 @@ test.describe("Self-host file transfer", () => {
     expect(importResponse.status()).toBe(201);
 
     // The imported copy now appears alongside the source (same name) — the durable outcome.
-    await expect(page.getByTestId("workflow-card").filter({ hasText: FLOW })).toHaveCount(2, {
+    await expect(page.getByTestId("flow-card").filter({ hasText: FLOW })).toHaveCount(2, {
       timeout: 15000,
     });
   });
@@ -128,7 +128,7 @@ test.describe("Self-host file transfer", () => {
     });
     await page.goto(`${BASE_URL}/workflows`);
 
-    const sourceCard = page.getByTestId("workflow-card").filter({ hasText: FLOW });
+    const sourceCard = page.getByTestId("flow-card").filter({ hasText: FLOW });
     await expect(sourceCard.first()).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("import-workflow-button")).toHaveCount(0);
     // Export is not gated — it stays on the owned card.

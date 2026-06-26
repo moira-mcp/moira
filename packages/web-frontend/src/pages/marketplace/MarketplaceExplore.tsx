@@ -62,7 +62,7 @@ export function MarketplaceExplore() {
         </div>
         <div className="flex gap-2">
           <Button asChild variant="outline">
-            <Link to={`${ROUTES.WORKFLOWS}?origin=added`}>{t("pages.marketplace.navLibrary")}</Link>
+            <Link to={`${ROUTES.WORKFLOWS}?filter=added`}>{t("pages.marketplace.navLibrary")}</Link>
           </Button>
           <Button asChild variant="outline">
             <Link to={`${ROUTES.MARKETPLACE}/my-listings`}>

@@ -11,6 +11,12 @@ import { Card, CardContent } from "../../components/ui/card";
 import { ROUTES } from "../../constants/routes";
 import type { MarketplaceGalleryItem } from "../../types/api-types";
 
+// VerifiedBadge moved to the shared flow-badges module (so it sits beside OfficialBadge
+// and is reusable by the SSR storefront). Imported here for local use (ListingCard) and
+// re-exported for the existing import sites (MyListings / MarketplaceDetail).
+import { VerifiedBadge } from "../../components/flow/FlowBadges";
+export { VerifiedBadge };
+
 /** Compact star rating with the count (read-only). */
 export function RatingStars({ avg, count }: { avg: number; count: number }) {
   const { t } = useTranslation();
@@ -25,15 +31,6 @@ export function RatingStars({ avg, count }: { avg: number; count: number }) {
         {avg.toFixed(1)} ({count})
       </span>
     </span>
-  );
-}
-
-export function VerifiedBadge() {
-  const { t } = useTranslation();
-  return (
-    <Badge variant="secondary" className="gap-1">
-      ✓ {t("pages.marketplace.verified")}
-    </Badge>
   );
 }
 

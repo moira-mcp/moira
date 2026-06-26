@@ -188,28 +188,8 @@
       }
     },
     "workflows": {
-      "title": "Workflows",
-      "subtitle": "Browse and manage your workflows",
-      "explorer": {
-        "title": "Workflow Explorer",
-        "workflows": "Workflows",
-        "loading": "Loading...",
-        "failedToLoad": "Failed to load workflows",
-        "retry": "Retry",
-        "noWorkflows": "No workflows found",
-        "noMatch": "No workflows match current filters",
-        "statistics": "Statistics",
-        "valid": "valid",
-        "invalid": "invalid",
-        "of": "of",
-        "resultsCount": "{{count}} workflows found",
-        "sortBy": "Sort by",
-        "sortByDate": "Date",
-        "sortByName": "Name",
-        "newest": "Newest",
-        "oldest": "Oldest",
-        "page": "Page"
-      },
+      "title": "Your library",
+      "subtitle": "Run, manage, and adopt workflows for your agent",
       "time": {
         "today": "Today",
         "yesterday": "Yesterday",
@@ -223,11 +203,15 @@
         "importError": "Import failed",
         "export": "Export to file",
         "exportError": "Export failed",
-        "tab": {
-          "mine": "Mine",
+        "edit": "Edit",
+        "official": "Official",
+        "searchPlaceholder": "Search your library",
+        "filter": {
+          "all": "All",
+          "official": "Official",
           "added": "Added",
-          "shared": "Shared",
-          "core": "Core"
+          "mine": "Mine",
+          "shared": "Shared"
         },
         "publish": "Publish to marketplace",
         "unpublish": "Unpublish",
@@ -239,6 +223,18 @@
         "runHint": "Ask your agent:",
         "runVerb": "run",
         "empty": {
+          "all": {
+            "title": "Your library is empty",
+            "desc": "Adopt a workflow from the public catalog or import one from a file to get started."
+          },
+          "official": {
+            "title": "No official workflows",
+            "desc": "Workflows published by the Moira team will appear here."
+          },
+          "mine": {
+            "title": "You haven't created any workflows yet",
+            "desc": "Your agent authors workflows for you over MCP. You can also import one from a file or adopt one from the public catalog."
+          },
           "added": {
             "title": "Nothing added yet",
             "desc": "Add a workflow from the public catalog to run it from your agent."
@@ -247,12 +243,13 @@
             "title": "Nothing shared with you",
             "desc": "Workflows other users share with you will appear here."
           },
-          "core": {
-            "title": "No built-in workflows",
-            "desc": "Built-in workflows bundled with this instance will appear here."
+          "search": {
+            "title": "No matches",
+            "desc": "No workflows match \"{{query}}\"."
           }
         }
       },
+      "confirmDeleteTitle": "Delete workflow",
       "confirmDelete": "Delete workflow \"{{name}}\"?"
     },
     "workflowDetail": {
@@ -905,18 +902,6 @@
         "pickFirst": "Pick a workflow to publish",
         "published": "Published to the marketplace.",
         "failed": "Publish failed"
-      },
-      "library": {
-        "title": "My Library",
-        "subtitle": "Workflows you can run from your agent. Use the start command shown on each flow.",
-        "unavailable": "Library unavailable",
-        "loadFailed": "Failed to load library",
-        "emptyTitle": "Your library is empty",
-        "emptyDesc": "Add workflows from the marketplace to run them from your agent.",
-        "originCore": "built-in",
-        "originOwn": "yours",
-        "originAdded": "added",
-        "originShared": "shared"
       },
       "listings": {
         "title": "My Listings",

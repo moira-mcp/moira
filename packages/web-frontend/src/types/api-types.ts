@@ -74,12 +74,28 @@ export interface MarketplaceReview {
   updatedAt: string;
 }
 
+/** Origin of a library item (mirrors the backend `LibraryOrigin`). */
+export type LibraryOrigin = "own" | "added" | "shared";
+
+/**
+ * Filterable library source (the single "Your library" surface's chip set, mirrors the
+ * backend `LibrarySourceFilter`):
+ *   - all      — every item.
+ *   - official — items owned by an official system account (`official === true`).
+ *   - added    — origin "added" (marketplace flows + seeded official base flows).
+ *   - mine     — origin "own" (the user's own workflows).
+ *   - shared   — origin "shared" (flows shared with the user).
+ */
+export type LibrarySourceFilter = "all" | "official" | "added" | "mine" | "shared";
+
 export interface MarketplaceLibraryItem {
-  origin: "core" | "own" | "added" | "shared";
+  origin: LibraryOrigin;
   workflowId: string | null;
   slug: string;
   name: string;
   ownerHandle: string | null;
+  /** True when the flow is owned by an official system account (drives the Official badge). */
+  official: boolean;
   kind?: "reference" | "copy";
   listingId?: string | null;
 }

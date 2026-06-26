@@ -478,7 +478,6 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **e2e** (2 files)
 
 - `tests/e2e/mcp-prompts.spec.ts` — 11 tests 🟢
-- `tests/e2e/workflow-toolbar-redesign.spec.ts` — 5 tests 🟢
 
 ### mcp-clients
 
@@ -539,7 +538,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the component detail page (backend, not SPA) with JSON-LD (SoftwareApplication across multiple LD blocks) + ships the hydration bootstrap (marketplace-hydrate.js script + `#mp-bootstrap` detail island); missing flow 404s instead of SPA fallthrough)
 - `tests/e2e/marketplace-public-page.spec.ts` — 6 tests 🟢 (Playwright session-aware polished public pages: anonymous /explore shows topbar/brand/theme-toggle/EN-RU switch/footer + `sign-in` (no account/sign-out); anonymous /w/:ref primary action is the gated `signin-cta`→/login + neither viewer pill; JS-free language toggle (anchor click → `?lang=ru`, RU "Войти"/"Каталог" chrome, `aria-current` on RU); hydrated theme toggle (set localStorage light → click → `<html>.dark` + localStorage `theme`="dark"); signed-in /explore shows `account-handle`=@handle + `sign-out` (no sign-in), sign-out (throwaway session) → reload back to anonymous header; owner's /w/:ref shows `own-pill` not `library-pill`/`signin-cta`)
 - `tests/e2e/marketplace-ui.spec.ts` — 1 test 🟢 (Playwright SPA: publisher publishes a workflow via the publish form (paid pricing present-but-disabled "coming soon"), it appears in the gallery + My Listings; a different consumer adds it to their library and rates it (self-rating forbidden, so rater ≠ owner); the old /marketplace/library redirects into the unified Workflows home where the added reference shows under the "Added" origin; before/after screenshots captured)
-- `tests/e2e/marketplace-unified-home.spec.ts` — 4 tests 🟢 (Playwright: the unified origin-tabbed Workflows home (Step 14). Publish-from-management — a Mine row's Publish action opens the publish form PRE-FILLED via `?workflowId` and publishing makes the row offer "View on marketplace" resolving to the public `/w/:handle/:slug` page; an owned flow shows in Mine with a Listed badge while a consumer's added-by-reference flow shows in Added with a ROOT `/w/...` source link (asserted equal to `/w/handle/slug` and 200-resolving); old `/marketplace/library` redirects to `?origin=added`; the top-of-home "Browse the public catalog" link resolves to the promoted public-store URL reported by `/api/features` (external) — see public-store-promotion for the local-fallback case)
+- `tests/e2e/marketplace-unified-home.spec.ts` — 7 tests 🟢 (Playwright: the unified "Your library" Workflows home (Step 20). One filterable surface with a `library-filter-chips` row (All/Official/Added/Mine/Shared, `?filter=...`) replacing the old origin tabs — chips scope the single client-side list of `flow-card`s; the seeded official base flows carry an `official-badge` and appear under the Official filter; the MCP-first `run-hint` shows no `start(`/`mcp__` code; the Mine filter empty state offers the import + browse-catalog adoption affordances. Publish-from-card — an own card's Publish action opens the publish form PRE-FILLED via `?workflowId` and publishing makes the card offer "View on marketplace" resolving to the public `/w/:handle/:slug` page; an owned flow shows under Mine with a Listed badge while a consumer's added-by-reference flow shows under Added with a ROOT `/w/...` source link (asserted equal to `/w/handle/slug` and 200-resolving); old `/marketplace/library` redirects to `?filter=added`; the home "Browse the public catalog" link resolves to the promoted public-store URL reported by `/api/features` (external) — see public-store-promotion for the local-fallback case)
 - `tests/e2e/marketplace-public-store-promotion.spec.ts` — 4 tests 🟢 (Playwright: public-store promotion gate (Step 15), orthogonal to the local marketplace feature. The live `/api/features` reports `publicStore.promotionEnabled` true with a store URL on this non-store instance; the "Public store" sidebar link renders pointing at that URL (external). Via mocked `/api/features` + reload: with the local `marketplace` feature OFF the promotion link + home catalog link still target the store while the Marketplace nav item is gone (local catalog gracefully absent); on the canonical store (`promotionEnabled` false) the promotion link is suppressed and the home catalog link falls back to the local `/explore` path)
 - `tests/e2e/marketplace-file-transfer.spec.ts` — 2 tests 🟢 (Playwright, self-host file transfer (Step 16): from the Mine tab, a flow's export action downloads a `.moira.json` file (captured + parsed) which is then set on the "Import from file" control → a success toast and the imported copy appears alongside the source (count 2); the import control is gated by the local `marketplace` feature (absent when mocked off) while the per-card export action stays available)
 
@@ -918,12 +917,9 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **e2e** (7 files)
 
 - `tests/e2e/workflow-canvas-controls.spec.ts` — 4 tests 🟢
-- `tests/e2e/workflow-card-compact.spec.ts` — 7 tests 🟢
 - `tests/e2e/workflow-copy-button.spec.ts` — 5 tests 🟢
-- `tests/e2e/workflow-delete-restore.spec.ts` — 2 tests 🟢
-- `tests/e2e/workflow-list-performance.spec.ts` — 4 tests 🟢
-- `tests/e2e/workflow-visibility-toggle.spec.ts` — 4 tests 🟢
-- `tests/e2e/workflow-visibility.spec.ts` — 4 tests 🟢
+- `tests/e2e/workflow-delete-restore.spec.ts` — 2 tests 🟢 (Step 20: reaches the workflow detail by filtering the unified library home by name + the card's edit action, not the removed all-workflows search/list)
+- `tests/e2e/workflow-visibility-toggle.spec.ts` — 4 tests 🟢 (public/private visibility on the workflow detail page — the surviving home for the visibility concept after Step 20)
 
 ### workflow-scenarios
 

@@ -122,15 +122,17 @@ test.describe("Workflow Visibility Toggle UI", () => {
     // Login as the regular user
     await login(page, email, password);
 
-    // Navigate to a system workflow (owned by system-admin)
-    await page.goto(`${BASE_URL}/workflows`);
+    // Navigate DIRECTLY to a public system workflow's detail (owned by system-moira). The
+    // Workflows home is now a library of the user's own/added/shared flows with
+    // non-clickable cards, so reach the system flow by its public handle/slug instead. A
+    // non-owner can view this public flow but must not see the owner-only visibility toggle.
+    await page.goto(`${BASE_URL}/workflows/moira/quick-task`);
     await page.waitForLoadState("domcontentloaded");
 
-    // Click on first public workflow (system-owned)
-    const workflowCard = page.locator("[class*='cursor-pointer']").first();
-    await workflowCard.click();
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(1000);
+    // Positive guard: confirm the workflow DETAIL actually rendered (the react-flow canvas)
+    // before asserting the toggle's absence — otherwise a failed navigation would make the
+    // toHaveCount(0) checks pass vacuously.
+    await expect(page.locator(".react-flow").first()).toBeVisible({ timeout: 10000 });
 
     // Regular user should NOT see visibility toggle for system workflow
     // The toggle button shows "Private" or "Public" text - should NOT be visible for non-owners

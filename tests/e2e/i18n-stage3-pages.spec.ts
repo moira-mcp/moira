@@ -26,11 +26,10 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
       await page.goto(`${BASE_URL}/workflows`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Check workflows explorer content
-      await expect(page.locator("text=Workflows").first()).toBeVisible({ timeout: 5000 });
-      // Check FilterBar filter dropdowns (migrated from labeled dropdowns to inline Selects)
-      await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
-      await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
+      // The unified "Your library" surface (Step 20): localized title + filter chips.
+      await expect(page.locator("text=Your library").first()).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId("library-filter-chips")).toBeVisible();
+      await expect(page.getByTestId("library-chip-all")).toHaveText(/All/);
     });
 
     test("Executions page shows English content", async ({ page }) => {
@@ -81,11 +80,10 @@ test.describe("i18n Stage 3 - Core Application Pages Translations", () => {
       await page.goto(`${BASE_URL}/workflows`);
       await page.waitForLoadState("domcontentloaded");
 
-      // Check workflows explorer content in Russian
-      await expect(page.locator("text=Воркфлоу").first()).toBeVisible({ timeout: 5000 });
-      // Check FilterBar filter dropdowns (migrated from labeled dropdowns to inline Selects)
-      await expect(page.locator('[data-testid="status-filter"]')).toBeVisible();
-      await expect(page.locator('[data-testid="visibility-filter"]')).toBeVisible();
+      // The unified "Your library" surface (Step 20): localized title + filter chips.
+      await expect(page.locator("text=Ваша библиотека").first()).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId("library-filter-chips")).toBeVisible();
+      await expect(page.getByTestId("library-chip-all")).toHaveText(/Все/);
     });
 
     test("Executions page shows Russian content", async ({ page }) => {

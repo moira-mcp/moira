@@ -164,7 +164,7 @@ const App: React.FC = () => {
                   {/* The old "My Library" view folded into the unified Workflows home. */}
                   <Route
                     path="marketplace/library"
-                    element={<Navigate to={`${ROUTES.WORKFLOWS}?origin=added`} replace />}
+                    element={<Navigate to={`${ROUTES.WORKFLOWS}?filter=added`} replace />}
                   />
                   <Route path="marketplace/my-listings" element={<MyListings />} />
                   <Route path="marketplace/flow/:handle/:slug" element={<MarketplaceDetail />} />

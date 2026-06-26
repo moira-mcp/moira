@@ -45,10 +45,13 @@ frontend/src/
 │   ├── execution/              # Execution display components
 │   │   ├── ExecutionInspector.tsx    # Unified inspector with DI (fetchExecution prop, editable flag)
 │   │   └── ExecutionErrorHistory.tsx # Error log with collapsible entries, error badges
+│   ├── flow/                    # Shared library/marketplace presentation (also reusable concepts for the storefront)
+│   │   ├── FlowCard.tsx         # Shared presentational flow card (name + Official badge + MCP-first run hint + badges/actions slots)
+│   │   ├── FlowBadges.tsx       # OfficialBadge (owner-based) + VerifiedBadge (trust)
+│   │   └── LibraryFilterChips.tsx # All/Official/Added/Mine/Shared filter chips
 │   └── workflow/                # Workflow management
-│       ├── WorkflowExplorer.tsx # Workflow list with FilterBar + DataListView + useDebounce
 │       ├── WorkflowGraph.tsx    # React Flow visualization with layout controls
-│       ├── WorkflowCard.tsx     # Compact single-row workflow card (icon + name left, owner center, badges right)
+│       ├── WorkflowCard.tsx     # Compact single-row workflow card (admin/deleted views: icon + name left, owner center, badges right)
 │       ├── WorkflowSidebar.tsx  # Persistent sidebar (workflow info / node details)
 │       ├── NodeDetailSheet.tsx  # Node detail panel (legacy, used in execution views)
 │       ├── WorkflowHeader.tsx   # Workflow metadata display
@@ -204,11 +207,11 @@ Application routes:
 
 ```
 / (protected)                      - Dashboard (home page)
-/workflows (protected)             - Unified Workflows home, organized by origin tabs (?origin=mine|added|shared|core, default mine). Mine = the user's OWN workflows with full management (filters/sort/pagination, edit/delete/visibility) + per-row publish/unpublish/view-on-marketplace, a Listed badge, and a per-row Export action (downloads the flow as a `.moira.json` file — ungated). Added/Shared/Core = the agent-library origins (run by asking your agent in natural language); Added rows link to their source listing on the public catalog. The header offers an "Import from file" control (gated by the `marketplace` feature) that imports a `.moira.json` into the library, and a catalog link. Cross-links to the public catalog use a single root-mounted helper.
+/workflows (protected)             - Unified "Your library" home: ONE filterable surface over the caller's library, with filter chips (?filter=all|official|added|mine|shared, default all). Each flow is a shared `FlowCard` showing its name, an "Official" badge when it is owned by an official system account, and an MCP-first run hint ("Ask your agent: run \"X\"" — never start() code). Own flows (the `mine` filter) carry full management (export `.moira.json` — ungated, publish/unpublish + a Listed badge + view-on-marketplace, edit, delete); `added` flows link to their source listing on the public catalog; `shared` flows show the run hint. The seeded official base flows surface under `all`/`official`/`added`. The header offers an "Import from file" control (gated by the `marketplace` feature) and a catalog link; the `mine` filter's first-run empty state offers Import + Browse-the-catalog. Legacy `?origin=mine|added|shared|core` links redirect to the `?filter=` equivalent (core → all). Cross-links to the public catalog use a single root-mounted helper.
 /executions (protected)            - Execution history
 /marketplace (protected)           - Marketplace gallery (search + sort recent/rating/installs/trending); nav entry hidden when the `marketplace` feature is off
 /marketplace/publish (protected)   - Publish form (owner-only workflow picker; reads ?workflowId= to preselect when launched from a workflow row; paid pricing section disabled while `paidWorkflows` is off)
-/marketplace/library (protected)   - Redirects to /workflows?origin=added (My Library folded into the unified Workflows home)
+/marketplace/library (protected)   - Redirects to /workflows?filter=added (My Library folded into the unified Workflows home)
 /marketplace/my-listings (protected) - My Listings (publisher view + unpublish)
 /marketplace/flow/:handle/:slug (protected) - Flow detail (add/fork, ratings/reviews, disabled paid block, copy-a-prompt affordance)
 /artifacts (protected)             - User artifacts management
@@ -921,32 +924,34 @@ interface AppHeaderProps {
 }
 ````
 
-### Workflow Management
+### Workflows home ("Your library")
 
-```typescript
-// Workflow explorer component (uses FilterBar + DataListView + PageShell)
-interface WorkflowExplorerProps {
-  selectedWorkflowId?: string;
-  onWorkflowSelect: (workflow: WorkflowFileInfo) => void;
-}
-```
-
-### Workflow Explorer Toolbar
-
-WorkflowExplorer uses `FilterBar` with inline Select controls:
+`pages/Workflows.tsx` is ONE filterable surface over the caller's library (`getMyLibrary()` +
+`getMyListings()`), driven by filter chips, NOT origin tabs:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ [🔍 Search workflows...    ] Status[▼] Visibility[▼]       │
-│                               Sort[▼]  Direction[▼]        │
-│ 42 workflows                                     [⊞] [≡]   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ Your library                              [Import from file] [Browse…] │
+│ [All N] [Official n] [Added n] [Mine n] [Shared n]   [Search library ] │
+├──────────────────────────────────────────────────────────────────────┤
+│ FlowCard:  Name  [Official ✓]   Ask your agent: run "Name"   <actions> │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Filter changes reset pagination to page 1
-- Sort options: Date/Name, Newest/Oldest
-- i18n support for all labels (en/ru)
-- Same layout pattern as Executions page
+- **Components:** `flow/LibraryFilterChips` (All/Official/Added/Mine/Shared, `aria-pressed`,
+  per-chip counts), `flow/FlowCard` (shared presentational card: name + `flow/FlowBadges`
+  `OfficialBadge` + MCP-first run hint + `badges`/`actions` slots).
+- **Filtering:** `?filter=` (default `all`) drives a client-side `applyFilter` that mirrors the
+  backend `filterLibrary` (all / official=`item.official` / added / mine=`own` / shared); a
+  debounced client search filters by name. Legacy `?origin=` links redirect to `?filter=`.
+- **Per-origin actions:** own → export (`.moira.json`, ungated) + publish/unpublish (+ Listed badge
+  - view-on-marketplace) + edit + delete; added → source-listing link (root `/w/:handle/:slug`);
+    shared → run hint only. Official badge on any official-owned item.
+- **States:** PageLoader / InlineError / EmptyState; the library is never blank for a new user (seeded
+  official base flows), and the `mine` filter has a first-run empty state offering Import +
+  Browse-the-catalog. i18n EN + RU.
+- `WorkflowCard` (compact management card) is retained for the Admin/Deleted-workflows pages, not the
+  home.
 
 ### Beta Agreement System
 
@@ -1483,7 +1488,7 @@ const App: React.FC = () => {
     <Layout
       header={<AppHeader backendConnected={backendConnected} />}
       footer={<AppFooter />}
-      sidebar={<WorkflowExplorer onWorkflowSelect={handleWorkflowSelect} />}
+      sidebar={/* sidebar content */}
       sidebarOpen={sidebarOpen}
     >
       <WorkflowViewerPlaceholder
@@ -1753,7 +1758,8 @@ frontend/
 │   │   ├── ui/                  # shadcn/ui components (Button, Card, Badge, etc.)
 │   │   ├── auth/                # Authentication components (Login, Register, ProtectedRoute)
 │   │   ├── layout/              # Layout components (AppHeader, AppFooter, WorkflowViewerPlaceholder)
-│   │   ├── workflow/            # Workflow components (WorkflowExplorer, WorkflowCard)
+│   │   ├── flow/                # Shared library presentation (FlowCard, FlowBadges, LibraryFilterChips)
+│   │   ├── workflow/            # Workflow components (WorkflowCard, WorkflowGraph)
 │   │   └── nodes/               # ReactFlow node components (CompactNode - unified for all types)
 │   ├── contexts/                # ThemeProvider for dark mode
 │   ├── hooks/                   # useWorkflowData, useLayoutState, use-mobile
