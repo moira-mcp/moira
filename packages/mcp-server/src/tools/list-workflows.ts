@@ -27,9 +27,9 @@ const logger = createLogger({ component: "ListWorkflows" });
 
 export const listWorkflowsSchema = z.object({
   source: z
-    .enum(["core", "own", "added", "shared", "all"])
+    .enum(["all", "official", "added", "mine", "shared"])
     .optional()
-    .describe("Restrict to one library origin: core | own | added | shared (default all)"),
+    .describe("Filter the library: all | official | added | mine | shared (default all)"),
   search: z.string().optional().describe("Filter the library by workflow name (substring)"),
   limit: z
     .number()
@@ -48,8 +48,8 @@ export async function listWorkflows(
     const { userId } = getUserContext();
     const engine = MCPEngine.getInstance();
 
-    // list() returns the user's LIBRARY (core ∪ own ∪ added ∪ shared), not the whole
-    // public catalog — see the marketplace MCP tool for browsing the store.
+    // list() returns the user's LIBRARY (own ∪ added ∪ shared), not the whole public
+    // catalog — see the marketplace MCP tool for browsing the store.
     const library = await getMarketplaceService().getLibrary(userId, params.source ?? "all");
 
     const search = params.search?.toLowerCase();
@@ -65,7 +65,7 @@ export async function listWorkflows(
         ? filtered.slice(offset, offset + params.limit)
         : filtered.slice(offset);
     const items: LibraryListItem[] = page.map((i) => ({
-      id: i.ownerHandle ? `${i.ownerHandle}/${i.slug}` : (i.workflowId ?? i.slug),
+      id: `${i.ownerHandle}/${i.slug}`,
       workflowId: i.workflowId,
       slug: i.slug,
       name: i.name,

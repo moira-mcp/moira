@@ -98,7 +98,6 @@ describe("Marketplace authed + admin API (service integration)", () => {
       {
         isMarketplaceEnabled: () => true,
         isPaidEnabled: () => paidEnabled,
-        coreProvider: () => [],
       },
     );
 
@@ -223,11 +222,11 @@ describe("Marketplace authed + admin API (service integration)", () => {
   });
 
   describe("library source filter", () => {
-    it("getLibrary(source) restricts to a single origin and works when the store is enabled", async () => {
+    it("getLibrary('mine') restricts to the user's own flows and works when the store is enabled", async () => {
       const flow = await publishFlow("Mine For Filter");
-      const ownOnly = await service.getLibrary(AUTHOR, "own");
-      expect(ownOnly.every((i) => i.origin === "own")).toBe(true);
-      expect(ownOnly.some((i) => i.workflowId === flow.workflowId)).toBe(true);
+      const mineOnly = await service.getLibrary(AUTHOR, "mine");
+      expect(mineOnly.every((i) => i.origin === "own")).toBe(true);
+      expect(mineOnly.some((i) => i.workflowId === flow.workflowId)).toBe(true);
     });
   });
 

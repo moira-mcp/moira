@@ -187,7 +187,12 @@ test.describe("Unified Workflows home", () => {
       addedList.getByTestId("library-item-name").filter({ hasText: PUBLISHED_FLOW }),
     ).toBeVisible();
 
-    const sourceLink = addedList.getByTestId("added-source-link").first();
+    // The Added tab also contains the official base flows seeded on signup (Step 17), so
+    // scope the source link to THIS published flow by its href instead of taking the first.
+    const sourceLink = addedList.locator(
+      `[data-testid="added-source-link"][href="/w/${publishedRef}"]`,
+    );
+    await expect(sourceLink).toHaveCount(1);
     const sourceHref = await sourceLink.getAttribute("href");
     expect(sourceHref).toBe(`/w/${publishedRef}`);
     expect(sourceHref).toBe(`/w/${publisherHandle}/${publishedRef.split("/")[1]}`);

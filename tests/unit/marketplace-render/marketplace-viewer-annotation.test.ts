@@ -56,7 +56,10 @@ describe("MarketplaceService viewer annotation", () => {
       .run();
   }
 
-  async function createWorkflow(userId: string, name: string): Promise<{ id: string; slug: string }> {
+  async function createWorkflow(
+    userId: string,
+    name: string,
+  ): Promise<{ id: string; slug: string }> {
     return workflowRepo.save({
       graph: { metadata: { name, version: "1.0.0", description: `${name} desc` }, nodes: [] },
       userId,
@@ -94,7 +97,6 @@ describe("MarketplaceService viewer annotation", () => {
       {
         isMarketplaceEnabled: () => true,
         isPaidEnabled: () => false,
-        coreProvider: () => [],
       },
     );
   });

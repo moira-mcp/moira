@@ -1,16 +1,19 @@
 /**
  * Marketplace Service — publish/unpublish, the public gallery, detail resolution,
- * the library resolver (core ∪ own ∪ added ∪ shared), add/remove/fork, and the
- * `canAccess` seam (free accessible; paid gated to a "coming soon" decision while
- * selling is off).
+ * the library resolver (own ∪ added ∪ shared), add/remove/fork, and the `canAccess`
+ * seam (free accessible; paid gated to a "coming soon" decision while selling is off).
  *
  * Library composition (what the agent ultimately sees as its list()):
- *   - core   — bundled system flows (resolved from the on-disk catalog), available to everyone.
  *   - own    — workflows the user owns (`workflow.userId = me`).
  *   - added  — marketplace flows the user added: kind=reference (live pointer to the
  *              author's workflow, auto-updates) or kind=copy (an independent fork).
+ *              The curated official base flows seeded on signup live here too (they are
+ *              `libraryEntry` source="added" rows owned by `system-moira`, so they carry
+ *              `official:true`).
  *   - shared — flows shared with the user via the existing invite/access mechanism.
- * Core/own are resolved implicitly and are never stored in `libraryEntry`.
+ * `own` is resolved implicitly and is never stored in `libraryEntry`. The bundled
+ * catalog is no longer surfaced as a library origin — non-base bundled flows are
+ * discoverable only through the marketplace gallery.
  */
 
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
@@ -39,7 +42,6 @@ import type {
   MarketplaceEventType,
 } from "../database/repositories/marketplace-event-repository.js";
 import { isMarketplaceEnabled as defaultIsMarketplaceEnabled } from "../config/env.js";
-import { readWorkflowCatalog } from "./workflow-catalog.js";
 import { parseWorkflowReference } from "../validation/slug-handle.js";
 import {
   MarketplaceDisabledError,
@@ -67,17 +69,17 @@ export const MARKETPLACE_LISTING_STATUSES = [
 export type MarketplaceListingStatus = (typeof MARKETPLACE_LISTING_STATUSES)[number];
 
 /** Where a library item came from. */
-export type LibraryOrigin = "core" | "own" | "added" | "shared";
+export type LibraryOrigin = "own" | "added" | "shared";
 
 /** A resolved library item (what the library resolver returns per flow). */
 export interface LibraryItem {
   origin: LibraryOrigin;
-  /** Workflow id; null for a bundled core flow that has no per-user DB row. */
-  workflowId: string | null;
+  /** Workflow id (every library item resolves to a real per-user/author DB row). */
+  workflowId: string;
   slug: string;
   name: string;
-  /** Owner handle (for building a `handle/slug` start reference); null for core flows. */
-  ownerHandle: string | null;
+  /** Owner handle (for building a `handle/slug` start reference). */
+  ownerHandle: string;
   /** True when the flow is owned by an official system account (system-moira/system-admin). */
   official: boolean;
   /** For `added` items: reference (live) vs copy (frozen). */
@@ -87,8 +89,15 @@ export interface LibraryItem {
   workflow: WorkflowGraph;
 }
 
-/** Library source filter (for `getLibrary`): a single origin, or every origin. */
-export type LibrarySourceFilter = LibraryOrigin | "all";
+/**
+ * Library source filter (for `getLibrary`): the design's single filterable set.
+ *   - all      — every item.
+ *   - official — items owned by an official system account (`official === true`).
+ *   - added    — origin "added" (marketplace flows + seeded official base flows).
+ *   - mine     — origin "own" (the user's own workflows).
+ *   - shared   — origin "shared" (flows shared with the user).
+ */
+export type LibrarySourceFilter = "all" | "official" | "added" | "mine" | "shared";
 
 /** Result of a `canAccess` check. Reason vocabulary matches the design API contract. */
 export interface AccessDecision {
@@ -237,28 +246,15 @@ export interface ShareResult {
   expiresAt?: number;
 }
 
-/** Injectable feature predicates + core provider (defaults wire to the real ones). */
+/** Injectable feature predicates (defaults wire to the real ones). */
 export interface MarketplaceServiceOptions {
   isMarketplaceEnabled?: () => boolean;
   isPaidEnabled?: () => boolean;
-  /** Provides the bundled "core" flows. Default reads the on-disk system catalog. */
-  coreProvider?: () => CoreFlow[];
-}
-
-/** A bundled core flow as exposed to the library resolver. */
-export interface CoreFlow {
-  workflowId: string | null;
-  slug: string;
-  name: string;
-  /** Owner handle for the start reference (`moira` for the public system owner). */
-  ownerHandle?: string | null;
-  workflow: WorkflowGraph;
 }
 
 export class MarketplaceService {
   private readonly isMarketplaceEnabled: () => boolean;
   private readonly isPaidEnabled: () => boolean;
-  private readonly coreProvider: () => CoreFlow[];
 
   constructor(
     private listingRepo: MarketplaceListingRepository,
@@ -272,7 +268,6 @@ export class MarketplaceService {
   ) {
     this.isMarketplaceEnabled = options.isMarketplaceEnabled ?? defaultIsMarketplaceEnabled;
     this.isPaidEnabled = options.isPaidEnabled ?? (() => false);
-    this.coreProvider = options.coreProvider ?? defaultCoreProvider;
   }
 
   // ===== Publish / Unpublish =====
@@ -820,52 +815,27 @@ export class MarketplaceService {
   // ===== Library resolver =====
 
   /**
-   * Compose the user's library: core ∪ own ∪ added ∪ shared. Deduplicated by
-   * workflowId (own wins over added wins over shared). Arbitrary public flows the
-   * user has not added/owned/shared are NOT included.
+   * Compose the user's library: own ∪ added ∪ shared. Deduplicated by workflowId
+   * (own wins over added wins over shared). Arbitrary public flows the user has not
+   * added/owned/shared are NOT included. The curated official base flows surface here
+   * through the `added` branch (they are seeded `libraryEntry` source="added" rows).
    *
    * The library is a LOCAL concept and does NOT require the marketplace store to be
-   * enabled (self-host still returns core + own + shared). `assertEnabled` gates only
+   * enabled (self-host still returns own + added + shared). `assertEnabled` gates only
    * the store actions (search/info/add/publish/rate/share), not library resolution.
    *
-   * `source` optionally restricts the result to a single origin (or "all").
+   * All items are composed first, then `source` filters the result (see
+   * {@link LibrarySourceFilter}).
    */
   async getLibrary(userId: string, source: LibrarySourceFilter = "all"): Promise<LibraryItem[]> {
-    const include = (origin: LibraryOrigin): boolean => source === "all" || source === origin;
     const items: LibraryItem[] = [];
     const seenWorkflowIds = new Set<string>();
-
-    // core — bundled flows, available to everyone (resolved by slug, not stored per
-    // user). Each core flow is resolved to its real (installed) workflow id and that id
-    // is claimed in `seenWorkflowIds` BEFORE added/shared are processed — so a base flow
-    // that was ALSO seeded as an `added` library entry is listed once (as core), never
-    // twice. Core flows are bundled system-moira flows, hence always official. Ids are
-    // claimed even when core is filtered out (mirrors the own-origin dedup precedence).
-    const cores = this.coreProvider();
-    const coreSlugIds = cores.some((c) => c.workflowId == null)
-      ? await this.workflowRepo.getOwnerSlugIds(SYSTEM_PUBLIC_OWNER)
-      : new Map<string, string>();
-    for (const core of cores) {
-      const workflowId = core.workflowId ?? coreSlugIds.get(core.slug) ?? null;
-      if (workflowId) seenWorkflowIds.add(workflowId);
-      if (!include("core")) continue;
-      items.push({
-        origin: "core",
-        workflowId,
-        slug: core.slug,
-        name: core.name,
-        ownerHandle: core.ownerHandle ?? null,
-        official: true,
-        workflow: core.workflow,
-      });
-    }
 
     // own — workflows the user owns. list() also surfaces public/shared flows for
     // discovery, so restrict to genuinely owned ones (accessType === "owner").
     const own = await this.workflowRepo.list(userId);
     for (const w of own.filter((w) => w.accessType === "owner")) {
       seenWorkflowIds.add(w.id);
-      if (!include("own")) continue;
       items.push({
         origin: "own",
         workflowId: w.id,
@@ -878,14 +848,14 @@ export class MarketplaceService {
     }
 
     // added — marketplace flows in the library (reference resolves the author's
-    // LATEST version; copy is the user's own frozen workflow row).
+    // LATEST version; copy is the user's own frozen workflow row). The seeded official
+    // base flows live here too — owned by system-moira, so they carry official:true.
     const entries = await this.libraryRepo.listByUser(userId);
     for (const entry of entries.filter((e) => e.source === "added")) {
       if (seenWorkflowIds.has(entry.workflowId)) continue;
       const info = await this.workflowRepo.getFullInfo(entry.workflowId, userId);
       if (!info) continue; // author deleted/unpublished — skip silently
       seenWorkflowIds.add(entry.workflowId);
-      if (!include("added")) continue;
       items.push({
         origin: "added",
         workflowId: entry.workflowId,
@@ -906,7 +876,6 @@ export class MarketplaceService {
       const info = await this.workflowRepo.getFullInfo(sharedId, userId);
       if (!info) continue;
       seenWorkflowIds.add(sharedId);
-      if (!include("shared")) continue;
       items.push({
         origin: "shared",
         workflowId: sharedId,
@@ -918,7 +887,7 @@ export class MarketplaceService {
       });
     }
 
-    return items;
+    return filterLibrary(items, source);
   }
 
   /**
@@ -1246,27 +1215,21 @@ function matchesGalleryFilter(item: GalleryItem, filter: GalleryFilter): boolean
   return true;
 }
 
-/** Handle of the public system owner — core flows are referenced as `moira/<slug>`. */
+/** Owner id of the public system account that owns the seeded official base flows. */
 const SYSTEM_PUBLIC_OWNER = "system-moira";
-const SYSTEM_PUBLIC_HANDLE = "moira";
 
-/**
- * Default core provider: the bundled PUBLIC system flows from the on-disk catalog.
- * Only `system-moira` (public) flows are core for everyone — `system-admin` flows are
- * private. The catalog's on-disk graph id is NOT the installed DB id, so cores carry no
- * `workflowId`; they are started by their `moira/<slug>` reference instead.
- */
-function defaultCoreProvider(): CoreFlow[] {
-  return readWorkflowCatalog()
-    .filter((entry) => entry.owner === SYSTEM_PUBLIC_OWNER)
-    .map((entry) => {
-      const graph = entry.graph as unknown as WorkflowGraph;
-      return {
-        workflowId: null,
-        slug: entry.slug,
-        name: graph.metadata?.name ?? entry.slug,
-        ownerHandle: SYSTEM_PUBLIC_HANDLE,
-        workflow: graph,
-      };
-    });
+/** Apply a {@link LibrarySourceFilter} to the fully composed library item set. */
+function filterLibrary(items: LibraryItem[], source: LibrarySourceFilter): LibraryItem[] {
+  switch (source) {
+    case "all":
+      return items;
+    case "official":
+      return items.filter((item) => item.official);
+    case "added":
+      return items.filter((item) => item.origin === "added");
+    case "mine":
+      return items.filter((item) => item.origin === "own");
+    case "shared":
+      return items.filter((item) => item.origin === "shared");
+  }
 }

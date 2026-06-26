@@ -94,7 +94,6 @@ describe("MarketplaceService", () => {
       {
         isMarketplaceEnabled: overrides.isMarketplaceEnabled ?? (() => true),
         isPaidEnabled: overrides.isPaidEnabled ?? (() => false),
-        coreProvider: () => [], // deterministic: no bundled flows in unit tests
       },
     );
   }

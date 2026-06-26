@@ -9,7 +9,7 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 
 ### Workflow Management
 
-- `list` - List your workflow library (core + own + added + shared)
+- `list` - List your workflow library (own + added + shared)
 - `manage` - Create, edit, or get workflow details
 - `start` - Start new workflow execution
 - `step` - Advance workflow with agent input
@@ -40,15 +40,18 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 
 ## list
 
-Returns **your library** — not the whole public catalog. The library is:
+Returns **your library** — not the whole public catalog. Items come from three origins:
 
-- **core** — official bundled flows (quick-task, robust-task, …), available to everyone
 - **own** — workflows you created
-- **added** — marketplace flows you adopted (via `marketplace add`)
+- **added** — marketplace flows you adopted (via `marketplace add`), plus the curated
+  official base flows (quick-task, robust-task, …) seeded into every account
 - **shared** — private flows shared with you by link
 
-The marketplace's public flows are **not** in `list()` until you add them — browse the
-store with the [`marketplace`](#marketplace) tool. This keeps the agent's working set
+Flows owned by the official system account are flagged **official** regardless of origin;
+the seeded base flows are official `added` entries. Filter to them with `source: "official"`.
+
+The marketplace's other public flows are **not** in `list()` until you add them — browse
+the store with the [`marketplace`](#marketplace) tool. This keeps the agent's working set
 small and intentional as the catalog grows.
 
 :::note[Breaking change]
@@ -59,13 +62,13 @@ up the new behavior and the new `marketplace` tool.
 
 **Parameters:**
 
-- `source` (string, optional) - Restrict to one origin: `core` | `own` | `added` | `shared` (default: all)
+- `source` (string, optional) - Filter the library: `all` | `official` | `added` | `mine` | `shared` (default: `all`)
 - `search` (string, optional) - Filter by workflow name (substring)
 - `limit` / `offset` (number, optional) - Pagination (default: the whole library)
 
 **Returns:**
 
-- `workflows` - array of `{ id, workflowId, slug, name, version, description, origin, kind? }`. Pass a result's `id` ("handle/slug" when known, else the workflow id) to `start()`.
+- `workflows` - array of `{ id, workflowId, slug, name, version, description, origin, kind? }`. Pass a result's `id` (a "handle/slug" reference) to `start()`.
 - `total` - the number of library entries matched
 
 **Example:**

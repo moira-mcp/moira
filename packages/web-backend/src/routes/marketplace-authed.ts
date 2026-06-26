@@ -9,7 +9,7 @@
  *   PATCH  /listings/:id                       owner metadata edit → listing
  *   DELETE /listings/:id                       unpublish (status=unlisted) → 204
  *   GET    /me/listings                        the caller's listings (any status)
- *   GET    /me/library                         the caller's library (core/own/added/shared)
+ *   GET    /me/library?filter=…                 the caller's library (all|official|added|mine|shared)
  *   POST   /listings/:id/install               adopt as reference → { startRef }
  *   POST   /listings/:id/fork                  fork an editable copy → { workflowId, slug }
  *   DELETE /library/:workflowId                remove a flow from the library → 204
@@ -28,6 +28,7 @@ import {
   getMarketplaceService,
   isMarketplaceEnabled,
   MarketplaceDisabledError,
+  type LibrarySourceFilter,
 } from "@mcp-moira/shared";
 import { WorkflowValidationService } from "../services/validation-service.js";
 
@@ -55,6 +56,21 @@ function optionalTags(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((t) => typeof t === "string")
     ? (value as string[])
     : undefined;
+}
+
+const LIBRARY_FILTERS: readonly LibrarySourceFilter[] = [
+  "all",
+  "official",
+  "added",
+  "mine",
+  "shared",
+];
+
+/** Map the `?filter=` query value to a LibrarySourceFilter (default "all"). */
+function parseLibraryFilter(value: unknown): LibrarySourceFilter {
+  return LIBRARY_FILTERS.includes(value as LibrarySourceFilter)
+    ? (value as LibrarySourceFilter)
+    : "all";
 }
 
 // POST /api/marketplace/listings — publish a workflow
@@ -108,11 +124,12 @@ router.get(
   }),
 );
 
-// GET /api/marketplace/me/library — the caller's library
+// GET /api/marketplace/me/library — the caller's library (optional ?filter=)
 router.get(
   "/me/library",
   asyncHandler(async (req: Request, res: Response) => {
-    ok(res, { items: await getMarketplaceService().getLibrary(userId(req)) });
+    const filter = parseLibraryFilter(req.query.filter);
+    ok(res, { items: await getMarketplaceService().getLibrary(userId(req), filter) });
   }),
 );
 

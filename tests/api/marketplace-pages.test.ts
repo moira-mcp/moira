@@ -111,9 +111,7 @@ describe("Public marketplace pages (SSR)", () => {
     expect(html).toMatch(/<script src="\/(app\/)?marketplace-hydrate\.js" defer><\/script>/);
     expect(html).toContain('<script id="mp-bootstrap" type="application/json">');
     // The island carries the exact view-model the server rendered (anonymous viewer).
-    const island = html.match(
-      /<script id="mp-bootstrap"[^>]*>([\s\S]*?)<\/script>/,
-    )?.[1];
+    const island = html.match(/<script id="mp-bootstrap"[^>]*>([\s\S]*?)<\/script>/)?.[1];
     expect(island).toBeTruthy();
     const data = JSON.parse(island as string) as {
       page: string;
@@ -190,9 +188,7 @@ describe("Public marketplace pages (SSR)", () => {
     expect(html).toContain("\\u003c/script>");
     // The bootstrap island is present, carries the malicious summary only in <-escaped
     // form, and still parses as JSON (the payload cannot break out of the <script>).
-    const island = html.match(
-      /<script id="mp-bootstrap"[^>]*>([\s\S]*?)<\/script>/,
-    )?.[1];
+    const island = html.match(/<script id="mp-bootstrap"[^>]*>([\s\S]*?)<\/script>/)?.[1];
     expect(island).toBeTruthy();
     expect(island).toContain("\\u003c/script>"); // </script> in the summary is neutralized
     const parsed = JSON.parse(island as string) as { page: string; detail?: { summary: string } };
@@ -207,9 +203,7 @@ describe("Public marketplace pages (SSR)", () => {
     expect(html).not.toContain('<div class="detail">'); // interim marker gone
     // Hydration bootstrap present on the detail page too.
     expect(html).toMatch(/<script src="\/(app\/)?marketplace-hydrate\.js" defer><\/script>/);
-    const island = html.match(
-      /<script id="mp-bootstrap"[^>]*>([\s\S]*?)<\/script>/,
-    )?.[1];
+    const island = html.match(/<script id="mp-bootstrap"[^>]*>([\s\S]*?)<\/script>/)?.[1];
     const data = JSON.parse(island as string) as {
       page: string;
       viewer: unknown;

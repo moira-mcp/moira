@@ -90,7 +90,6 @@ describe("Marketplace file import (service integration)", () => {
       {
         isMarketplaceEnabled: () => marketplaceEnabled,
         isPaidEnabled: () => false,
-        coreProvider: () => [],
       },
     );
 

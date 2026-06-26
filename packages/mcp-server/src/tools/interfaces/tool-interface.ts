@@ -29,10 +29,10 @@ export interface WorkflowSummary {
   createdAt: string;
 }
 
-// Parameters for list (the user's library): core ∪ own ∪ added ∪ shared
+// Parameters for list (the user's library): own ∪ added ∪ shared
 export interface ListWorkflowsParams {
-  /** Restrict to one library origin (default: all). */
-  source?: "core" | "own" | "added" | "shared" | "all";
+  /** Filter the library (default: all). */
+  source?: "all" | "official" | "added" | "mine" | "shared";
   /** Filter by workflow name (case-insensitive substring). */
   search?: string;
   limit?: number;
@@ -41,14 +41,14 @@ export interface ListWorkflowsParams {
 
 // One library entry as returned by list()
 export interface LibraryListItem {
-  /** Startable reference ("handle/slug" when known, else the workflow id) — pass to start(). */
+  /** Startable "handle/slug" reference — pass to start(). */
   id: string;
-  workflowId: string | null;
+  workflowId: string;
   slug: string;
   name: string;
   version: string;
   description: string;
-  origin: "core" | "own" | "added" | "shared";
+  origin: "own" | "added" | "shared";
   /** For `added` items: reference (live) vs copy (frozen). */
   kind?: "reference" | "copy";
 }

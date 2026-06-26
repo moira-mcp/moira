@@ -144,16 +144,17 @@ describe("MCP Marketplace Tool E2E", () => {
     expect(text.toLowerCase()).toMatch(/own|self|cannot|forbidden|denied/);
   });
 
-  test("list(source:core) returns bundled flows startable by their id", async () => {
-    const core = await callMCPTool<{ workflows: Array<{ id: string; origin: string }> }>(
+  test("list(source:official) returns the seeded official base flows startable by their id", async () => {
+    const official = await callMCPTool<{ workflows: Array<{ id: string; origin: string }> }>(
       consumer,
       "list",
-      { source: "core" },
+      { source: "official" },
     );
-    expect(core.workflows.length).toBeGreaterThan(0);
-    expect(core.workflows.every((w) => w.origin === "core")).toBe(true);
-    // Core flows carry a "moira/<slug>" id (no per-user DB row) — it must be startable.
-    const first = core.workflows[0];
+    expect(official.workflows.length).toBeGreaterThan(0);
+    // The official base flows are seeded library entries (origin "added") owned by system-moira.
+    expect(official.workflows.every((w) => w.origin === "added")).toBe(true);
+    // They carry a "moira/<slug>" id — it must be startable.
+    const first = official.workflows[0];
     expect(first.id).toMatch(/^moira\//);
     const started = await callMCPTool<string>(consumer, "start", {
       workflowId: first.id,

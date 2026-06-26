@@ -22,7 +22,8 @@ if (typeof realFetch === "function" && !globalThis.__FETCH_RETRY_WRAPPED__) {
     if (!err) return false;
     const message = String(err.message || err);
     const causeCode = err.cause && err.cause.code ? String(err.cause.code) : "";
-    const transientPattern = /ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EAI_AGAIN|socket hang up|network socket disconnected|other side closed/i;
+    const transientPattern =
+      /ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|EAI_AGAIN|socket hang up|network socket disconnected|other side closed/i;
     return (
       (err instanceof TypeError && /fetch failed/i.test(message)) ||
       transientPattern.test(message) ||

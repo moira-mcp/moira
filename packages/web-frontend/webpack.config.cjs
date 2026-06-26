@@ -45,9 +45,7 @@ const config = {
     path: path.resolve(__dirname, "dist"),
     // Per-entry filename: stable for the hydration bundle, content-hashed otherwise.
     filename: (pathData) =>
-      pathData.chunk.name === "marketplace-hydrate"
-        ? "[name].js"
-        : "[name].[contenthash].js",
+      pathData.chunk.name === "marketplace-hydrate" ? "[name].js" : "[name].[contenthash].js",
     clean: true,
     publicPath: getPublicPath(),
   },

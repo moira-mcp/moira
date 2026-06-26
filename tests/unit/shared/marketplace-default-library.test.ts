@@ -4,8 +4,7 @@
  * into a user's library as live references — independent of the marketplace feature
  * flag, idempotent, and tolerant of base slugs not installed on the instance. The
  * getLibrary resolver marks official-owned flows `official:true` and lists a seeded
- * base flow exactly once (core claims the workflow id, so the seeded `added` entry is
- * not double-listed).
+ * base flow exactly once, under origin "added" (the seeded `libraryEntry` row).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
@@ -25,7 +24,6 @@ import {
   WorkflowSharingRepository,
   UserRepository,
   OFFICIAL_BASE_FLOW_SLUGS,
-  type CoreFlow,
 } from "@mcp-moira/shared";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
@@ -86,21 +84,9 @@ describe("MarketplaceService.seedDefaultLibrary (Step 17)", () => {
     return saved.id;
   }
 
-  /** A coreProvider returning the installed base flows as core (workflowId resolved by slug). */
-  function coreProviderForInstalled(): CoreFlow[] {
-    return INSTALLED_SLUGS.map((slug) => ({
-      workflowId: null,
-      slug,
-      name: `Flow ${slug}`,
-      ownerHandle: "moira",
-      workflow: makeGraph(slug),
-    }));
-  }
-
   function makeService(
     overrides: {
       isMarketplaceEnabled?: () => boolean;
-      coreProvider?: () => CoreFlow[];
     } = {},
   ): MarketplaceService {
     return new MarketplaceService(
@@ -114,8 +100,6 @@ describe("MarketplaceService.seedDefaultLibrary (Step 17)", () => {
       {
         isMarketplaceEnabled: overrides.isMarketplaceEnabled ?? (() => true),
         isPaidEnabled: () => false,
-        // No bundled flows by default — seeding must not depend on the core provider.
-        coreProvider: overrides.coreProvider ?? (() => []),
       },
     );
   }
@@ -211,7 +195,7 @@ describe("MarketplaceService.seedDefaultLibrary (Step 17)", () => {
   });
 
   it("getLibrary marks the seeded base flows official:true", async () => {
-    const service = makeService({ coreProvider: coreProviderForInstalled });
+    const service = makeService();
     await service.seedDefaultLibrary(USER);
 
     const library = await service.getLibrary(USER);
@@ -222,17 +206,17 @@ describe("MarketplaceService.seedDefaultLibrary (Step 17)", () => {
     }
   });
 
-  it("lists a seeded base flow exactly once (no core + added duplication)", async () => {
-    const service = makeService({ coreProvider: coreProviderForInstalled });
+  it("lists a seeded base flow exactly once, under origin 'added'", async () => {
+    const service = makeService();
     await service.seedDefaultLibrary(USER);
 
     const library = await service.getLibrary(USER);
     for (const slug of INSTALLED_SLUGS) {
       const workflowId = await workflowRepo.resolveSlug(slug, SYSTEM_MOIRA);
       const matches = library.filter((i) => i.workflowId === workflowId);
-      // Core claims the workflow id, so the seeded `added` entry is deduped away.
+      // The seeded base flow surfaces through the `added` branch (no core origin).
       expect(matches).toHaveLength(1);
-      expect(matches[0].origin).toBe("core");
+      expect(matches[0].origin).toBe("added");
     }
   });
 

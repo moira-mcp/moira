@@ -88,7 +88,7 @@ describe("Marketplace public read API (service integration)", () => {
       workflowRepo,
       sharingRepo,
       userRepo,
-      { isMarketplaceEnabled: () => true, isPaidEnabled: () => false, coreProvider: () => [] },
+      { isMarketplaceEnabled: () => true, isPaidEnabled: () => false },
     );
 
     seedUser(AUTHOR, "author");
