@@ -33,4 +33,5 @@ export {
   PortableFileParseError,
   buildPortableFile,
   parsePortableFile,
+  importKeyFromSource,
 } from "./portable-file.js";

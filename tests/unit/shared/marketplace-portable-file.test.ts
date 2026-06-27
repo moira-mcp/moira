@@ -10,6 +10,7 @@ import { describe, it, expect } from "@jest/globals";
 import {
   buildPortableFile,
   parsePortableFile,
+  importKeyFromSource,
   PortableFileParseError,
   PORTABLE_FILE_FORMAT_VERSION,
   PORTABLE_FILE_KIND,
@@ -92,5 +93,38 @@ describe("portable flow-file: parsePortableFile", () => {
   it("rejects an object that is neither an envelope nor a graph", () => {
     expect(() => parsePortableFile({ hello: "world" })).toThrow(PortableFileParseError);
     expect(() => parsePortableFile({ metadata: {} })).toThrow(/Not a workflow file/);
+  });
+});
+
+describe("portable flow-file: importKeyFromSource", () => {
+  it("keys a store pull on instance + listingId", () => {
+    expect(importKeyFromSource({ instance: "https://x", listingId: "L1" })).toBe(
+      "https://x|listing|L1",
+    );
+  });
+
+  it("keys a same-instance export on instance + workflowId", () => {
+    expect(importKeyFromSource({ instance: "https://x", workflowId: "W1" })).toBe(
+      "https://x|workflow|W1",
+    );
+  });
+
+  it("prefers listingId over workflowId when both are present", () => {
+    expect(importKeyFromSource({ instance: "https://x", listingId: "L1", workflowId: "W1" })).toBe(
+      "https://x|listing|L1",
+    );
+  });
+
+  it("returns null without a usable identity (no instance, empty, or non-string)", () => {
+    expect(importKeyFromSource(undefined)).toBeNull();
+    expect(importKeyFromSource(null)).toBeNull();
+    expect(importKeyFromSource({})).toBeNull();
+    expect(importKeyFromSource({ listingId: "L1" })).toBeNull(); // no instance
+    expect(importKeyFromSource({ instance: "https://x" })).toBeNull(); // no id
+    expect(importKeyFromSource({ instance: "https://x", listingId: "  " })).toBeNull();
+    // untrusted non-string fields are ignored (no wrong match)
+    expect(
+      importKeyFromSource({ instance: "https://x", listingId: 42 as unknown as string }),
+    ).toBeNull();
   });
 });

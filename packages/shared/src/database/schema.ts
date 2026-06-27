@@ -594,6 +594,11 @@ export const libraryEntry = sqliteTable(
     listingId: text("listingId").references(() => marketplaceListing.id, {
       onDelete: "set null",
     }),
+    // File-import provenance key: identifies the source a flow was IMPORTED from so a
+    // re-import of an updated file updates this entry's workflow in place instead of
+    // duplicating. Format: `<originInstance>|listing|<listingId>` (store pull) or
+    // `<originInstance>|workflow|<workflowId>` (same-instance). Null for non-imported entries.
+    importKey: text("importKey"),
     addedAt: integer("addedAt", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => ({
@@ -603,6 +608,7 @@ export const libraryEntry = sqliteTable(
     ),
     userIdx: index("library_entry_user_idx").on(table.userId),
     listingIdx: index("library_entry_listing_idx").on(table.listingId),
+    importKeyIdx: index("library_entry_import_key_idx").on(table.userId, table.importKey),
   }),
 );
 

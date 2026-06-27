@@ -188,7 +188,9 @@ describe("Workflow export + import (self-host file transfer)", () => {
     const libRes = await fetch(`${BASE_URL}/api/marketplace/me/library?filter=mine`, {
       headers: { Cookie: cookie },
     });
-    const lib = (await libRes.json()) as { data: { items: { workflowId: string; slug: string }[] } };
+    const lib = (await libRes.json()) as {
+      data: { items: { workflowId: string; slug: string }[] };
+    };
     const slug = lib.data.items.find((i) => i.workflowId === workflowId)!.slug;
     const ref = `${pub.data.ownerHandle}/${slug}`;
 
@@ -211,7 +213,11 @@ describe("Workflow export + import (self-host file transfer)", () => {
     // Importing those exact downloaded bytes must succeed (this was rejected 400 before
     // the unified format) and land the flow in the caller's library.
     const form = new FormData();
-    form.append("workflow", new Blob([fileText], { type: "application/json" }), `${slug}.moira.json`);
+    form.append(
+      "workflow",
+      new Blob([fileText], { type: "application/json" }),
+      `${slug}.moira.json`,
+    );
     const imported = await fetch(`${BASE_URL}/api/marketplace/import`, {
       method: "POST",
       headers: { Cookie: cookie },
@@ -221,8 +227,90 @@ describe("Workflow export + import (self-host file transfer)", () => {
     const result = (await imported.json()) as { data: { workflowId: string; name: string } };
     expect(result.data.name).toBe(name);
 
-    const after = await fetch(`${BASE_URL}/api/marketplace/me/library`, { headers: { Cookie: cookie } });
-    const items = ((await after.json()) as { data: { items: { workflowId: string }[] } }).data.items;
+    const after = await fetch(`${BASE_URL}/api/marketplace/me/library`, {
+      headers: { Cookie: cookie },
+    });
+    const items = ((await after.json()) as { data: { items: { workflowId: string }[] } }).data
+      .items;
     expect(items.some((i) => i.workflowId === result.data.workflowId)).toBe(true);
+  });
+
+  test("re-import of an updated storefront flow updates in place — no duplicate (D-B)", async () => {
+    // Publish v1, download + import it.
+    const name = `Reimport Xfer ${stamp}`;
+    const workflowId = await createWorkflow(name);
+    const pubRes = await fetch(`${BASE_URL}/api/marketplace/listings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workflowId, title: name, category: "productivity" }),
+    });
+    const pub = (await pubRes.json()) as { data: { ownerHandle: string } };
+    const lib1 = (await (
+      await fetch(`${BASE_URL}/api/marketplace/me/library?filter=mine`, {
+        headers: { Cookie: cookie },
+      })
+    ).json()) as { data: { items: { workflowId: string; slug: string }[] } };
+    const slug = lib1.data.items.find((i) => i.workflowId === workflowId)!.slug;
+    const ref = `${pub.data.ownerHandle}/${slug}`;
+
+    const v1 = await (
+      await fetch(`${BASE_URL}/api/public/marketplace/listings/${ref}/export`)
+    ).text();
+    const form1 = new FormData();
+    form1.append("workflow", new Blob([v1], { type: "application/json" }), `${slug}.moira.json`);
+    const imp1 = await fetch(`${BASE_URL}/api/marketplace/import`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: form1,
+    });
+    const r1 = (await imp1.json()) as { data: { workflowId: string; updated: boolean } };
+    expect(r1.data.updated).toBe(false);
+
+    const countNamed = async (): Promise<number> => {
+      const r = await fetch(`${BASE_URL}/api/marketplace/me/library`, {
+        headers: { Cookie: cookie },
+      });
+      const its = ((await r.json()) as { data: { items: { name: string; workflowId: string }[] } })
+        .data.items;
+      return its.filter((i) => i.name === name && i.workflowId !== workflowId).length;
+    };
+    expect(await countNamed()).toBe(1); // the imported copy (excludes the author's own source)
+
+    // Bump the source flow to v2 (kept public so the listing stays live), re-download, re-import.
+    await fetch(`${BASE_URL}/api/workflows/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        id: workflowId,
+        overwrite: true,
+        visibility: "public",
+        workflow: {
+          metadata: { name, version: "2.0.0", description: "transfer test flow" },
+          nodes: [
+            { id: "start", type: "start", connections: { default: "end" } },
+            { id: "end", type: "end" },
+          ],
+        },
+      }),
+    });
+    const v2 = await (
+      await fetch(`${BASE_URL}/api/public/marketplace/listings/${ref}/export`)
+    ).text();
+    const form2 = new FormData();
+    form2.append("workflow", new Blob([v2], { type: "application/json" }), `${slug}.moira.json`);
+    const imp2 = await fetch(`${BASE_URL}/api/marketplace/import`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: form2,
+    });
+    const r2 = (await imp2.json()) as {
+      data: { workflowId: string; updated: boolean; version: string };
+    };
+
+    // Updated in place: same imported workflowId, marked updated, still ONE copy (no duplicate).
+    expect(r2.data.updated).toBe(true);
+    expect(r2.data.workflowId).toBe(r1.data.workflowId);
+    expect(r2.data.version).toBe("2.0.0");
+    expect(await countNamed()).toBe(1);
   });
 });

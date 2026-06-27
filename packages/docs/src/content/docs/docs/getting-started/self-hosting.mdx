@@ -150,6 +150,10 @@ Flows transfer by file — no account on the hosted store and no outbound call r
    **Workflows** page, click **Import from file** and choose the `.moira.json` file. The
    flow is saved as a private copy in your library and is immediately runnable — tell
    your agent to run it by name, just like any other library flow.
+3. **Update** (re-import): when the source flow is updated, download it again and import
+   the new file. Because the portable file records where it came from, the import updates
+   your existing copy in place (graph and version refreshed) instead of creating a
+   duplicate.
 
 Export is ungated (you can always download your own flows); importing into the library
 is part of the local marketplace feature and so follows `MARKETPLACE_ENABLED`.

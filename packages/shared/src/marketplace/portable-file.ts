@@ -131,3 +131,21 @@ export function parsePortableFile(raw: unknown): ParsedPortableFile {
 
   throw new PortableFileParseError(NOT_A_WORKFLOW);
 }
+
+/**
+ * Build the import-dedupe key from a file's provenance, or null when there is no usable
+ * identity. The key lets a re-import update the existing imported flow in place instead
+ * of duplicating: store pulls dedupe on `(instance, listingId)`, same-instance exports
+ * on `(instance, workflowId)`. Only string fields are honoured (untrusted file input),
+ * so a malformed `source` simply yields null (→ a fresh import, never a wrong match).
+ */
+export function importKeyFromSource(source: PortableFlowSource | undefined | null): string | null {
+  if (!source || typeof source !== "object") return null;
+  const instance = typeof source.instance === "string" ? source.instance.trim() : "";
+  if (!instance) return null;
+  const listingId = typeof source.listingId === "string" ? source.listingId.trim() : "";
+  if (listingId) return `${instance}|listing|${listingId}`;
+  const workflowId = typeof source.workflowId === "string" ? source.workflowId.trim() : "";
+  if (workflowId) return `${instance}|workflow|${workflowId}`;
+  return null;
+}

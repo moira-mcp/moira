@@ -177,10 +177,13 @@ router.post(
     }
 
     // Accept the portable-file envelope (from either export path) OR a bare workflow
-    // graph. parsePortableFile normalises both and throws for anything else.
+    // graph. parsePortableFile normalises both and throws for anything else. The
+    // envelope's `source` provenance lets the import update an existing copy in place
+    // (no duplicate on re-import).
     let graph: WorkflowGraph;
+    let source: ReturnType<typeof parsePortableFile>["source"];
     try {
-      ({ workflow: graph } = parsePortableFile(raw));
+      ({ workflow: graph, source } = parsePortableFile(raw));
     } catch (err) {
       throw createApiError.validationFailed(
         err instanceof PortableFileParseError
@@ -198,7 +201,7 @@ router.post(
       throw createApiError.validationFailed("Workflow validation failed", { validation });
     }
 
-    const result = await getMarketplaceService().importFromFile(userId(req), graph);
+    const result = await getMarketplaceService().importFromFile(userId(req), graph, source);
     ok(res, result, 201);
   }),
 );

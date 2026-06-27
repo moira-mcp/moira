@@ -29,6 +29,8 @@ export interface AddLibraryEntryInput {
   source: LibrarySource;
   kind: LibraryKind;
   listingId?: string | null;
+  /** File-import provenance key (see schema) — enables re-import-updates-in-place. */
+  importKey?: string | null;
 }
 
 export class LibraryEntryRepository {
@@ -43,6 +45,7 @@ export class LibraryEntryRepository {
       source: input.source,
       kind: input.kind,
       listingId: input.listingId ?? null,
+      importKey: input.importKey ?? null,
       addedAt: new Date(),
     };
     await this.db.insert(libraryEntry).values(row);
@@ -62,6 +65,19 @@ export class LibraryEntryRepository {
       .select()
       .from(libraryEntry)
       .where(and(eq(libraryEntry.userId, userId), eq(libraryEntry.workflowId, workflowId)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Get a user's library entry for an import-provenance key, if any. */
+  async getByUserAndImportKey(
+    userId: string,
+    importKey: string,
+  ): Promise<LibraryEntryRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(libraryEntry)
+      .where(and(eq(libraryEntry.userId, userId), eq(libraryEntry.importKey, importKey)))
       .limit(1);
     return row ?? null;
   }

@@ -157,4 +157,96 @@ describe("Marketplace file import (service integration)", () => {
     expect(a.workflowId).not.toBe(b.workflowId);
     expect(a.slug).not.toBe(b.slug);
   });
+
+  it("re-import of a STORE-pull source updates the existing flow in place (no duplicate)", async () => {
+    const source = { instance: "https://moira-mcp.com", listingId: "L1", version: "1.0.0" };
+    const first = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, source);
+    expect(first.updated).toBe(false);
+
+    const v2: WorkflowGraph = {
+      ...SAMPLE_GRAPH,
+      metadata: { ...SAMPLE_GRAPH.metadata, version: "2.0.0" },
+    } as WorkflowGraph;
+    const second = await service.importFromFile(IMPORTER, v2, {
+      ...source,
+      version: "2.0.0",
+    });
+
+    // Same flow updated in place — id+slug kept, version bumped, marked updated.
+    expect(second.updated).toBe(true);
+    expect(second.workflowId).toBe(first.workflowId);
+    expect(second.slug).toBe(first.slug);
+    expect(second.previousVersion).toBe("1.0.0");
+    expect(second.version).toBe("2.0.0");
+
+    // Exactly ONE library entry for this source; the stored workflow is at v2.
+    const entries = await libraryRepo.listByUser(IMPORTER);
+    expect(entries.filter((e) => e.importKey === "https://moira-mcp.com|listing|L1")).toHaveLength(
+      1,
+    );
+    const info = await workflowRepo.getFullInfo(first.workflowId, IMPORTER);
+    expect(info?.workflow?.metadata.version).toBe("2.0.0");
+  });
+
+  it("re-import of a SAME-INSTANCE source updates in place; distinct sources stay separate", async () => {
+    const sameInstance = { instance: "https://self.example", workflowId: "WSRC" };
+    const a1 = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, sameInstance);
+    const a2 = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, sameInstance);
+    expect(a2.updated).toBe(true);
+    expect(a2.workflowId).toBe(a1.workflowId);
+
+    // A different source identity → a separate import, not a match.
+    const other = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, {
+      instance: "https://self.example",
+      workflowId: "WOTHER",
+    });
+    expect(other.updated).toBe(false);
+    expect(other.workflowId).not.toBe(a1.workflowId);
+  });
+
+  it("re-import after the imported flow was deleted creates a clean copy (no orphan, no duplicate)", async () => {
+    const source = { instance: "https://moira-mcp.com", listingId: "L9", version: "1.0.0" };
+    const first = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, source);
+    expect(first.updated).toBe(false);
+
+    // User deletes the imported workflow (soft delete on the Workflows page).
+    expect(await workflowRepo.softDelete(first.workflowId, IMPORTER)).toBe(true);
+
+    // Re-import of the same source must NOT update the dead workflow in place.
+    const second = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, source);
+    expect(second.updated).toBe(false);
+    expect(second.workflowId).not.toBe(first.workflowId);
+
+    // The new workflow is live; the dead one stays gone (no resurrection).
+    expect(await workflowRepo.getFullInfo(second.workflowId, IMPORTER)).not.toBeNull();
+    expect(await workflowRepo.getFullInfo(first.workflowId, IMPORTER)).toBeNull();
+
+    // Exactly ONE library entry for this source — the stale one was dropped, not
+    // left pointing at the dead workflow.
+    const entries = await libraryRepo.listByUser(IMPORTER);
+    const forSource = entries.filter((e) => e.importKey === "https://moira-mcp.com|listing|L9");
+    expect(forSource).toHaveLength(1);
+    expect(forSource[0]!.workflowId).toBe(second.workflowId);
+  });
+
+  it("re-import of a published imported copy preserves its visibility (no silent unpublish)", async () => {
+    const source = { instance: "https://moira-mcp.com", listingId: "L7", version: "1.0.0" };
+    const first = await service.importFromFile(IMPORTER, SAMPLE_GRAPH, source);
+
+    // The user publishes their imported copy.
+    expect(await workflowRepo.updateVisibility(first.workflowId, IMPORTER, "public")).toBe(true);
+
+    // Re-importing an updated file updates in place WITHOUT unpublishing it.
+    const v2: WorkflowGraph = {
+      ...SAMPLE_GRAPH,
+      metadata: { ...SAMPLE_GRAPH.metadata, version: "2.0.0" },
+    } as WorkflowGraph;
+    const second = await service.importFromFile(IMPORTER, v2, { ...source, version: "2.0.0" });
+    expect(second.updated).toBe(true);
+    expect(second.workflowId).toBe(first.workflowId);
+
+    const info = await workflowRepo.getFullInfo(first.workflowId, IMPORTER);
+    expect(info!.visibility).toBe("public");
+    expect(info!.workflow.metadata.version).toBe("2.0.0");
+  });
 });

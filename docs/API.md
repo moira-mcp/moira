@@ -3358,11 +3358,22 @@ adoption path — NO cloud call). `multipart/form-data` with a `workflow` field 
 marketplace feature, checked first (`MarketplaceDisabledError` → `404` when off, before
 any parsing). When enabled, accepts the portable flow-file envelope (from either export
 path) OR a bare workflow graph (hand-authored input tolerance), validates the graph,
-then saves it as an independent private workflow owned by the caller plus a library copy
-entry (`source='added'`, `kind='copy'`, no listing). Invalid JSON / non-workflow files
-(incl. the legacy `{ listing, workflow }` wrapper, which is no longer accepted) → `400`.
-→ `201` + `{ workflowId, slug, name }`. The imported flow is runnable from the library
-like a forked one. The export half is `GET /api/workflows/:id/export`.
+then either UPDATES an existing import in place or creates a new one:
+
+- If the file carries `source` provenance matching a flow the caller already imported
+  from the same origin (store `(instance, listingId)` or same-instance
+  `(instance, workflowId)`), the existing imported workflow is updated in place — graph/
+  name/version replaced, local id + slug kept — so re-pulling an updated flow does not
+  duplicate.
+- Otherwise it is saved as a new independent private workflow owned by the caller plus a
+  library copy entry (`source='added'`, `kind='copy'`, no listing), stamped with the
+  provenance key for future re-imports.
+
+Invalid JSON / non-workflow files (incl. the legacy `{ listing, workflow }` wrapper,
+which is no longer accepted) → `400`. → `201` +
+`{ workflowId, slug, name, updated, previousVersion?, version? }` (`updated=true` when an
+existing import was replaced). The imported flow is runnable from the library like a
+forked one. The export half is `GET /api/workflows/:id/export`.
 
 ### DELETE /api/marketplace/library/:workflowId
 

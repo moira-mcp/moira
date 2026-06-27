@@ -33,6 +33,7 @@ import {
   isOfficialOwner,
   officialFlowCategory,
 } from "../marketplace/official.js";
+import { importKeyFromSource, type PortableFlowSource } from "../marketplace/portable-file.js";
 import type {
   LibraryEntryRepository,
   LibraryEntryRecord,
@@ -1083,23 +1084,70 @@ export class MarketplaceService {
 
   /**
    * Import a workflow from a file (the offline adoption path — NO cloud call).
-   * Saves the supplied graph as an independent private workflow owned by the user
-   * (a frozen copy, id dropped so a fresh one is assigned) and records it in the
-   * library as kind=copy with no listing provenance. Gated by the local marketplace
-   * feature, like {@link fork}/{@link install}; the imported flow is runnable from
-   * the user's library exactly like a forked one. The caller is responsible for
-   * validating the graph before calling this.
+   *
+   * When the file carries provenance (`source`) that matches a flow the user already
+   * imported from the same origin (store listing or same-instance workflow), the
+   * existing imported flow is UPDATED IN PLACE — its graph/name/version replaced, its
+   * local id + slug kept — so re-pulling an updated flow does not accumulate duplicates.
+   * Otherwise the graph is saved as a new independent private workflow (id dropped so a
+   * fresh one is assigned) recorded in the library as kind=copy, stamped with the
+   * provenance key for future re-imports. Gated by the local marketplace feature, like
+   * {@link fork}/{@link install}. The caller validates the graph before calling this.
    */
   async importFromFile(
     userId: string,
     graph: WorkflowGraph,
-  ): Promise<{ workflowId: string; slug: string; name: string }> {
+    source?: PortableFlowSource | null,
+  ): Promise<{
+    workflowId: string;
+    slug: string;
+    name: string;
+    updated: boolean;
+    previousVersion?: string;
+    version?: string;
+  }> {
     this.assertEnabled();
 
     // Deep clone, drop the id so save() assigns a fresh one (independent row).
     const clone = JSON.parse(JSON.stringify(graph)) as WorkflowGraph;
     delete clone.id;
     const name = clone.metadata?.name ?? "imported-workflow";
+    const version = clone.metadata?.version;
+    const importKey = importKeyFromSource(source);
+
+    // Re-import of a known source → update the existing imported flow in place.
+    // Only when the target workflow still exists: a soft-deleted workflow reads as
+    // gone (getFullInfo === null), so saving against its id would INSERT a new row
+    // while the stale library entry kept re-matching the importKey — reopening the
+    // duplicate-accumulation D-B closes. When the target is gone, drop the stale
+    // entry and fall through to a clean create (honest updated:false, one entry).
+    if (importKey) {
+      const existing = await this.libraryRepo.getByUserAndImportKey(userId, importKey);
+      if (existing) {
+        const info = await this.workflowRepo.getFullInfo(existing.workflowId, userId);
+        if (info) {
+          const previousVersion = info.workflow?.metadata?.version;
+          const saved = await this.workflowRepo.save({
+            graph: { ...clone, id: existing.workflowId } as WorkflowGraph,
+            userId,
+            // Preserve the copy's current visibility — re-importing an update must
+            // not silently unpublish a copy the user has published.
+            visibility: info.visibility,
+          });
+          return {
+            workflowId: saved.id,
+            slug: saved.slug,
+            name,
+            updated: true,
+            previousVersion,
+            version,
+          };
+        }
+        // Target workflow is gone (soft-deleted) — the library entry is stale.
+        await this.libraryRepo.remove(userId, existing.workflowId);
+      }
+    }
+
     const slug = await this.workflowRepo.generateUniqueSlug(userId, name);
     const saved = await this.workflowRepo.save({
       graph: clone,
@@ -1114,8 +1162,9 @@ export class MarketplaceService {
       source: "added",
       kind: "copy",
       listingId: null,
+      importKey,
     });
-    return { workflowId: saved.id, slug: saved.slug, name };
+    return { workflowId: saved.id, slug: saved.slug, name, updated: false, version };
   }
 
   // ===== Ratings / reviews =====
