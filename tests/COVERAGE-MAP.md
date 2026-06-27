@@ -35,7 +35,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 26    | 198   | unit:10, integration:2, api:4, mcp-tools:1, e2e:6              |
+| marketplace         | 27    | 208   | unit:11, integration:2, api:4, mcp-tools:1, e2e:6              |
 | marketplace-render  | 2     | 31    | unit:2                                                         |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
@@ -239,7 +239,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **api** (2 files)
 
 - `tests/api/auth/self-host-auth.test.ts` — 2 tests 🟢 (HTTP self-host auth branch: open registration closed (REGISTRATION_DISABLED) vs saas consent-enforced; admin token issuance on requireVerifiedAuth route; mode auto-detected from sign-up behavior)
-- `tests/api/marketplace-file-transfer.test.ts` — 4 tests 🟢 (self-host export/import endpoints (Step 16) over HTTP: GET /api/workflows/:id/export downloads a `.moira.json` attachment with the source graph; export→import round-trips into an independent library copy (fresh id, appears in me/library); non-JSON / non-workflow files → 400; import requires auth → 401)
+- `tests/api/marketplace-file-transfer.test.ts` — 5 tests 🟢 (self-host export/import endpoints over HTTP: GET /api/workflows/:id/export downloads a `.moira.json` portable envelope (moiraFile/formatVersion/source.workflowId + workflow graph); export→import round-trips into an independent library copy (fresh id, appears in me/library); non-JSON / non-workflow files → 400; import requires auth → 401; **storefront download → import round-trip (D-A): GET /api/public/marketplace/listings/:h/:s/export returns the envelope with source.listingId and that exact file imports → 201 and lands in the library**)
 - `tests/api/features-api.test.ts` — 5 tests 🟢 (public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host; public-store promotion gate shape — boolean promotionEnabled + absolute store URL, true on the non-store test container)
 
 **e2e** (1 file)
@@ -502,6 +502,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **unit** (9 files)
 
 - `tests/unit/shared/i18n-plural.test.ts` — 12 tests 🟢 (pluralization/declension primitive: EN one/other + RU one/few/many CLDR categories incl. boundaries 1/2/5/11/21/0; selectForm other-fallback; formatCount; toMarketplaceLocale normalization; formatMarketplaceCount RU declensions 1 шаг/2 шага/5 шагов; marketplaceEnumLabel category/status/kind EN+RU + unknown-value fallback; countable-noun + enum-label parity)
+- `tests/unit/shared/marketplace-portable-file.test.ts` — 9 tests 🟢 (portable `.moira.json` envelope: buildPortableFile wraps a graph with the `moiraFile`/`formatVersion` discriminator + compacted `source` provenance (drops undefined, omits empty); parsePortableFile round-trips an envelope (graph + source) detected strictly by the `moiraFile` discriminator, accepts a bare graph (input tolerance, no source), and rejects the legacy `{listing,workflow}` shape (no back-compat shim) / non-objects / envelopes whose workflow is not a graph / non-workflow objects with "Not a workflow file")
 - `tests/unit/shared/marketplace-schema.test.ts` — 13 tests 🟢 (marketplace migration 0014: five tables + listing indexes created; listing column defaults; UNIQUE constraints — one listing/workflow, one review/(listing,user), one library entry/(user,workflow), one entitlement/(user,listing); review stars DB CHECK 1..5 boundary+reject; nullable event userId)
 - `tests/unit/shared/marketplace-categories.test.ts` — 7 tests 🟢 (fixed category set: non-empty unique ids, 'other' catch-all last, MARKETPLACE_CATEGORY_IDS derivation, isValidMarketplaceCategory, normalizeMarketplaceCategory fallback)
 - `tests/unit/shared/marketplace-feature-flags.test.ts` — 6 tests 🟢 (paidWorkflows off in both modes; isMarketplaceEnabled config toggle: mode defaults + MARKETPLACE_ENABLED opt-in/opt-out override)

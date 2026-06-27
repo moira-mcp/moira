@@ -23,3 +23,14 @@ export {
   isOfficialOwner,
   officialFlowCategory,
 } from "./official.js";
+
+export {
+  type PortableFlowSource,
+  type PortableFlowFile,
+  type ParsedPortableFile,
+  PORTABLE_FILE_FORMAT_VERSION,
+  PORTABLE_FILE_KIND,
+  PortableFileParseError,
+  buildPortableFile,
+  parsePortableFile,
+} from "./portable-file.js";

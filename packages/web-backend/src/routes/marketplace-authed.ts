@@ -28,6 +28,8 @@ import {
   getMarketplaceService,
   isMarketplaceEnabled,
   MarketplaceDisabledError,
+  parsePortableFile,
+  PortableFileParseError,
   type LibrarySourceFilter,
 } from "@mcp-moira/shared";
 import { WorkflowValidationService } from "../services/validation-service.js";
@@ -167,15 +169,23 @@ router.post(
       throw createApiError.validationFailed("No file uploaded");
     }
 
-    let graph: WorkflowGraph;
+    let raw: unknown;
     try {
-      graph = JSON.parse(req.file.buffer.toString("utf-8")) as WorkflowGraph;
+      raw = JSON.parse(req.file.buffer.toString("utf-8"));
     } catch {
       throw createApiError.validationFailed("Invalid JSON format");
     }
-    if (!graph || typeof graph !== "object" || !Array.isArray(graph.nodes) || !graph.metadata) {
+
+    // Accept the portable-file envelope (from either export path) OR a bare workflow
+    // graph. parsePortableFile normalises both and throws for anything else.
+    let graph: WorkflowGraph;
+    try {
+      ({ workflow: graph } = parsePortableFile(raw));
+    } catch (err) {
       throw createApiError.validationFailed(
-        "Not a workflow file: expected an object with metadata and a nodes array",
+        err instanceof PortableFileParseError
+          ? err.message
+          : "Not a workflow file: expected an object with metadata and a nodes array",
       );
     }
 

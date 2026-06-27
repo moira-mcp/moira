@@ -83,8 +83,15 @@ test.describe("Self-host file transfer", () => {
     ]);
     expect(download.suggestedFilename()).toMatch(/\.moira\.json$/);
     const fileBuffer = await readFile(await download.path());
-    const graph = JSON.parse(fileBuffer.toString("utf-8")) as { metadata: { name: string } };
-    expect(graph.metadata.name).toBe(FLOW);
+    // The download is the portable-file envelope: a discriminator + provenance + the graph.
+    const file = JSON.parse(fileBuffer.toString("utf-8")) as {
+      moiraFile: string;
+      formatVersion: number;
+      workflow: { metadata: { name: string } };
+    };
+    expect(file.moiraFile).toBe("workflow");
+    expect(file.formatVersion).toBe(2);
+    expect(file.workflow.metadata.name).toBe(FLOW);
 
     // Import the captured file via the gated "Import from file" control. Wait for the
     // import request to complete so the assertions are deterministic (not racing the

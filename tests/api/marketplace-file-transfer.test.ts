@@ -88,9 +88,18 @@ describe("Workflow export + import (self-host file transfer)", () => {
       /attachment; filename=".+\.moira\.json"/,
     );
 
-    const graph = (await res.json()) as { metadata: { name: string }; nodes: unknown[] };
-    expect(graph.metadata.name).toBe(name);
-    expect(graph.nodes).toHaveLength(2);
+    // The export is the portable-file envelope: a discriminator + provenance + the graph.
+    const file = (await res.json()) as {
+      moiraFile: string;
+      formatVersion: number;
+      source?: { workflowId?: string };
+      workflow: { metadata: { name: string }; nodes: unknown[] };
+    };
+    expect(file.moiraFile).toBe("workflow");
+    expect(file.formatVersion).toBe(2);
+    expect(file.source?.workflowId).toBe(workflowId);
+    expect(file.workflow.metadata.name).toBe(name);
+    expect(file.workflow.nodes).toHaveLength(2);
   });
 
   test("export → import round-trips into an independent library copy", async () => {
@@ -161,5 +170,59 @@ describe("Workflow export + import (self-host file transfer)", () => {
     );
     const res = await fetch(`${BASE_URL}/api/marketplace/import`, { method: "POST", body: form });
     expect(res.status).toBe(401);
+  });
+
+  test("storefront download → import round-trips (D-A: the public export file is importable)", async () => {
+    // Publish a flow so it has a public listing reference (handle/slug).
+    const name = `Storefront Xfer ${stamp}`;
+    const workflowId = await createWorkflow(name);
+    const pubRes = await fetch(`${BASE_URL}/api/marketplace/listings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ workflowId, title: name, category: "productivity" }),
+    });
+    expect(pubRes.status).toBe(201);
+    const pub = (await pubRes.json()) as {
+      data: { ownerHandle: string; listing: { id: string } };
+    };
+    const libRes = await fetch(`${BASE_URL}/api/marketplace/me/library?filter=mine`, {
+      headers: { Cookie: cookie },
+    });
+    const lib = (await libRes.json()) as { data: { items: { workflowId: string; slug: string }[] } };
+    const slug = lib.data.items.find((i) => i.workflowId === workflowId)!.slug;
+    const ref = `${pub.data.ownerHandle}/${slug}`;
+
+    // Download from the PUBLIC storefront export-by-reference — the only download a
+    // self-host user can obtain. It must be the portable envelope with store provenance.
+    const exported = await fetch(`${BASE_URL}/api/public/marketplace/listings/${ref}/export`);
+    expect(exported.status).toBe(200);
+    const fileText = await exported.text();
+    const file = JSON.parse(fileText) as {
+      moiraFile: string;
+      formatVersion: number;
+      source?: { listingId?: string };
+      workflow: { nodes: unknown[] };
+    };
+    expect(file.moiraFile).toBe("workflow");
+    expect(file.formatVersion).toBe(2);
+    expect(file.source?.listingId).toBe(pub.data.listing.id);
+    expect(Array.isArray(file.workflow.nodes)).toBe(true);
+
+    // Importing those exact downloaded bytes must succeed (this was rejected 400 before
+    // the unified format) and land the flow in the caller's library.
+    const form = new FormData();
+    form.append("workflow", new Blob([fileText], { type: "application/json" }), `${slug}.moira.json`);
+    const imported = await fetch(`${BASE_URL}/api/marketplace/import`, {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: form,
+    });
+    expect(imported.status).toBe(201);
+    const result = (await imported.json()) as { data: { workflowId: string; name: string } };
+    expect(result.data.name).toBe(name);
+
+    const after = await fetch(`${BASE_URL}/api/marketplace/me/library`, { headers: { Cookie: cookie } });
+    const items = ((await after.json()) as { data: { items: { workflowId: string }[] } }).data.items;
+    expect(items.some((i) => i.workflowId === result.data.workflowId)).toBe(true);
   });
 });

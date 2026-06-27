@@ -27,7 +27,7 @@ import {
 } from "../middleware/error-middleware.js";
 import { WorkflowValidationService } from "../services/validation-service.js";
 import { DatabaseRepository, WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
-import { getWorkflowService, validateSlug } from "@mcp-moira/shared";
+import { getWorkflowService, validateSlug, getBaseUrl, buildPortableFile } from "@mcp-moira/shared";
 
 const router = Router();
 
@@ -414,9 +414,16 @@ router.get(
     }
 
     const filename = `${info.slug || workflowId}.moira.json`;
+    // Emit the portable-file envelope with same-instance provenance (instance + workflow
+    // id + version) so a re-import updates this flow in place instead of duplicating.
+    const file = buildPortableFile(info.workflow, {
+      instance: getBaseUrl(),
+      workflowId,
+      version: info.workflow.metadata?.version,
+    });
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.send(JSON.stringify(info.workflow, null, 2));
+    res.send(JSON.stringify(file, null, 2));
   }),
 );
 

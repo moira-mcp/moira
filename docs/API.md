@@ -1259,11 +1259,13 @@ Authentication: Required (owner only)
 
 ### GET /api/workflows/:id/export
 
-Download an accessible workflow's graph as a JSON file — the source side of the
-offline transfer path (no cloud call). Accepts a workflow UUID or slug (a
+Download an accessible workflow as a portable `.moira.json` file — the source side of
+the offline transfer path (no cloud call). Accepts a workflow UUID or slug (a
 `handle/slug` reference does not reach this route — the `:id` param rejects `/`).
-Returns the graph as `application/json` with `Content-Disposition: attachment;
-filename="<slug>.moira.json"`. Not gated by the marketplace feature (exporting your
+Returns the portable flow-file envelope
+`{ moiraFile: "workflow", formatVersion, source: { instance, workflowId, version }, workflow }`
+as `application/json` with `Content-Disposition: attachment; filename="<slug>.moira.json"`
+(the same envelope the storefront export emits). Not gated by the marketplace feature (exporting your
 own flow is always available; the import half, `POST /api/marketplace/import`, is the
 gated part). `404` if the workflow is not found / not accessible.
 
@@ -3280,10 +3282,13 @@ Authentication: Not required.
 
 ### GET /api/public/marketplace/listings/:handle/:slug/export
 
-Purchase-gated workflow-definition download (`Content-Disposition: attachment`).
-Free flows export; paid flows are denied while selling is off.
+Purchase-gated workflow-definition download (`Content-Disposition: attachment`,
+`<slug>.moira.json`). Free flows export; paid flows are denied while selling is off.
 
-- 200: `{ listing: { id, title }, workflow }` JSON attachment (accessible flow)
+- 200: the portable flow-file envelope
+  `{ moiraFile: "workflow", formatVersion, source: { instance, listingRef, listingId, version }, workflow }`
+  (same envelope `GET /api/workflows/:id/export` emits; `source` provenance lets import dedupe/update on
+  re-import). Importable as-is via `POST /api/marketplace/import`.
 - 403: Listing not accessible (paid / coming-soon)
 - 404: No listed public flow matches
 
@@ -3351,11 +3356,13 @@ Import a workflow from an uploaded file into the caller's library (the offline
 adoption path — NO cloud call). `multipart/form-data` with a `workflow` field (a
 `.moira.json` file, 5MB max — matching the workflow save limit). Gated by the local
 marketplace feature, checked first (`MarketplaceDisabledError` → `404` when off, before
-any parsing). When enabled, parses + validates the graph, then saves it as an
-independent private workflow owned by the caller plus a library copy entry
-(`source='added'`, `kind='copy'`, no listing). Invalid JSON / non-workflow files →
-`400`. → `201` + `{ workflowId, slug, name }`. The imported flow is runnable from the
-library like a forked one. The export half is `GET /api/workflows/:id/export`.
+any parsing). When enabled, accepts the portable flow-file envelope (from either export
+path) OR a bare workflow graph (hand-authored input tolerance), validates the graph,
+then saves it as an independent private workflow owned by the caller plus a library copy
+entry (`source='added'`, `kind='copy'`, no listing). Invalid JSON / non-workflow files
+(incl. the legacy `{ listing, workflow }` wrapper, which is no longer accepted) → `400`.
+→ `201` + `{ workflowId, slug, name }`. The imported flow is runnable from the library
+like a forked one. The export half is `GET /api/workflows/:id/export`.
 
 ### DELETE /api/marketplace/library/:workflowId
 

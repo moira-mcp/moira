@@ -19,6 +19,7 @@ import {
   getBaseUrl,
   createLogger,
   Service,
+  buildPortableFile,
   type GallerySortOption,
 } from "@mcp-moira/shared";
 
@@ -136,12 +137,20 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const reference = `${req.params.handle}/${req.params.slug}`;
     const { listing, workflow } = await getMarketplaceService().exportListing(reference, ANONYMOUS);
-    const filename = `${req.params.slug}.json`;
+    const filename = `${req.params.slug}.moira.json`;
+    // Emit the portable-file envelope with store provenance (origin instance + listing
+    // identity + version) so a self-host import can adopt it and re-imports update in
+    // place. This replaces the old wrapped `{ listing, workflow }` shape that the import
+    // endpoint rejected.
+    const file = buildPortableFile(workflow, {
+      instance: getBaseUrl(),
+      listingRef: reference,
+      listingId: listing.id,
+      version: workflow.metadata?.version,
+    });
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.send(
-      JSON.stringify({ listing: { id: listing.id, title: listing.title }, workflow }, null, 2),
-    );
+    res.send(JSON.stringify(file, null, 2));
   }),
 );
 

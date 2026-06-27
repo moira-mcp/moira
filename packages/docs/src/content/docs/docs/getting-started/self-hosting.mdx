@@ -141,8 +141,11 @@ Two independent things, both off-by-default-friendly for self-host:
 
 Flows transfer by file — no account on the hosted store and no outbound call required:
 
-1. **Export** (always available): on the **Workflows** page, open the **Mine** tab and
-   use a flow's export action to download it as a `.moira.json` file.
+1. **Export** (always available): download a flow as a `.moira.json` file — either from
+   the **Workflows** page (open the **Mine** tab and use a flow's export action) or from
+   any listing on the public storefront via its **Download** control. Both produce the
+   same portable file (a self-describing envelope carrying the flow graph plus its origin
+   and version).
 2. **Import** (requires `MARKETPLACE_ENABLED=true` on the destination): on the
    **Workflows** page, click **Import from file** and choose the `.moira.json` file. The
    flow is saved as a private copy in your library and is immediately runnable — tell
