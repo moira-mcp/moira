@@ -25,6 +25,7 @@ export type {
   DetailView,
   ViewerContext,
   SeoContext,
+  ExploreFilter,
   RenderResult,
 } from "./types.js";
 

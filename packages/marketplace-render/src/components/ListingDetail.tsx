@@ -16,7 +16,8 @@ import type { DetailView, ViewerContext } from "../types.js";
 import type { Labels } from "../labels.js";
 import { VerifiedBadge } from "./VerifiedBadge.js";
 import { RatingStars } from "./RatingStars.js";
-import { withLang } from "../links.js";
+import { AdoptButton } from "./AdoptButton.js";
+import { withLang, exportHref } from "../links.js";
 
 export interface ListingDetailProps {
   detail: DetailView;
@@ -25,6 +26,8 @@ export interface ListingDetailProps {
   baseUrl: string;
   /** SPA base path (`""` or `/app`) for the anonymous sign-in CTA. Defaults to `""`. */
   appPrefix?: string;
+  /** Adopt side-effect (install + reload), wired by the browser hydration only. */
+  onAdopt?: (listingId: string) => void | Promise<void>;
 }
 
 export function ListingDetail({
@@ -33,9 +36,11 @@ export function ListingDetail({
   viewer,
   baseUrl,
   appPrefix = "",
+  onAdopt,
 }: ListingDetailProps): React.ReactElement {
   const isAuthenticated = viewer?.userId != null;
   const signInHref = withLang(`${appPrefix}/login`, labels.locale);
+  const downloadHref = exportHref(baseUrl, detail.reference);
   return (
     <main className="mp-detail" data-mp="detail">
       <nav className="mp-breadcrumb" aria-label="Breadcrumb">
@@ -104,22 +109,32 @@ export function ListingDetail({
                 ) : (
                   <>
                     <p className="mp-step-text">{labels.chrome.adoptCloud}</p>
-                    {isAuthenticated ? (
-                      <a
-                        className="mp-btn mp-btn-primary"
-                        href={withLang(`${baseUrl}/explore`, labels.locale)}
-                        data-mp="add-cta"
-                      >
-                        {labels.chrome.addToLibrary}
-                      </a>
-                    ) : (
-                      <a className="mp-btn mp-btn-primary" href={signInHref} data-mp="signin-cta">
-                        {labels.chrome.signInToAdd}
-                      </a>
-                    )}
+                    <div className="mp-detail-actions" data-mp="detail-actions">
+                      {isAuthenticated ? (
+                        <AdoptButton
+                          listingId={detail.listingId}
+                          labels={labels}
+                          onAdopt={onAdopt}
+                        />
+                      ) : (
+                        <a className="mp-btn mp-btn-primary" href={signInHref} data-mp="signin-cta">
+                          {labels.chrome.signInToAdd}
+                        </a>
+                      )}
+                    </div>
                   </>
                 )}
                 <p className="mp-step-note">{labels.chrome.adoptSelfHost}</p>
+                {/* Download is public (anyone, JS-free) and is the self-host export source
+                    referenced by the note above; the endpoint enforces access server-side. */}
+                <a
+                  className="mp-btn mp-btn-ghost mp-btn-sm"
+                  href={downloadHref}
+                  download
+                  data-mp="download-link"
+                >
+                  {labels.chrome.download}
+                </a>
               </div>
             </li>
             <li className="mp-step">

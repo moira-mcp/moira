@@ -23,5 +23,6 @@ export type {
   DetailView,
   ViewerContext,
   SeoContext,
+  ExploreFilter,
   ViewerAnnotation,
 } from "./types.js";

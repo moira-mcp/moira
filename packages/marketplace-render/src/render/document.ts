@@ -110,6 +110,9 @@ code {
 .mp-btn-primary:hover { filter: brightness(1.06); }
 .mp-btn-ghost { background: transparent; color: var(--foreground); border-color: var(--border); }
 .mp-btn-ghost:hover { background: var(--accent); }
+.mp-btn-sm { font-size: 0.8rem; padding: 5px 11px; }
+.mp-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
+.mp-import-input { display: none; }
 .mp-account { display: inline-flex; align-items: center; gap: 8px; }
 .mp-avatar {
   display: inline-flex; align-items: center; justify-content: center;
@@ -128,6 +131,19 @@ code {
   color: var(--muted-foreground); font-size: 0.78rem; margin: 0; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.06em;
 }
+
+/* ---- Filter chips ---- */
+.mp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.mp-chip {
+  display: inline-flex; align-items: center; font-size: 0.82rem; font-weight: 600;
+  padding: 5px 14px; border-radius: 999px; cursor: pointer;
+  background: var(--card); color: var(--muted-foreground); border: 1px solid var(--border);
+}
+.mp-chip:hover { text-decoration: none; color: var(--foreground); border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); }
+.mp-chip-active {
+  background: var(--primary); color: var(--primary-foreground); border-color: transparent;
+}
+.mp-chip-active:hover { color: var(--primary-foreground); filter: brightness(1.06); }
 
 /* ---- Gallery grid ---- */
 .mp-card-list {
@@ -171,6 +187,14 @@ code {
 }
 .mp-pill-library { background: color-mix(in oklab, var(--primary) 16%, transparent); color: var(--primary); }
 .mp-pill-own { background: color-mix(in oklab, var(--success) 18%, transparent); color: var(--success); }
+
+/* ---- Adopt / download action rows (card + detail) ---- */
+.mp-card-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border);
+}
+.mp-detail-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 8px; }
+.mp-adopt-error { font-size: 0.82rem; color: oklch(0.6 0.2 25); }
 
 /* ---- Detail ---- */
 .mp-detail { max-width: 760px; }

@@ -28,6 +28,7 @@ function seo(locale: "en" | "ru"): SeoContext {
 
 function galleryCard(overrides: Partial<GalleryView["items"][number]> = {}) {
   return {
+    listingId: "listing-1",
     reference: "alice/research-flow",
     title: "Research Flow",
     summary: "A verified-research workflow.",
@@ -45,6 +46,7 @@ function galleryCard(overrides: Partial<GalleryView["items"][number]> = {}) {
 
 function detailView(overrides: Partial<DetailView> = {}): DetailView {
   return {
+    listingId: "listing-1",
     reference: "alice/research-flow",
     title: "Research Flow",
     summary: "A verified-research workflow.",
@@ -285,7 +287,7 @@ describe("ListingDetail action area (session-aware)", () => {
       seo("en"),
     );
     expect(html).toContain('data-mp="signin-cta"');
-    expect(html).not.toContain('data-mp="add-cta"');
+    expect(html).not.toContain('data-mp="adopt-btn"');
   });
 
   it("signed-in, not own, not in library → add-to-library button, no sign-in CTA", () => {
@@ -294,7 +296,8 @@ describe("ListingDetail action area (session-aware)", () => {
       VIEWER,
       seo("en"),
     );
-    expect(html).toContain('data-mp="add-cta"');
+    expect(html).toContain('data-mp="adopt-btn"');
+    expect(html).toContain("Add to library");
     expect(html).not.toContain('data-mp="signin-cta"');
   });
 
@@ -305,7 +308,7 @@ describe("ListingDetail action area (session-aware)", () => {
       seo("en"),
     );
     expect(html).toContain('data-mp="own-pill"');
-    expect(html).not.toContain('data-mp="add-cta"');
+    expect(html).not.toContain('data-mp="adopt-btn"');
     expect(html).not.toContain('data-mp="signin-cta"');
   });
 
@@ -316,7 +319,80 @@ describe("ListingDetail action area (session-aware)", () => {
       seo("en"),
     );
     expect(html).toContain('data-mp="library-pill"');
-    expect(html).not.toContain('data-mp="add-cta"');
+    expect(html).not.toContain('data-mp="adopt-btn"');
     expect(html).not.toContain('data-mp="signin-cta"');
+  });
+
+  it("renders a JS-free Download link to the public export endpoint (any viewer)", () => {
+    const anon = renderDetailToHtml(detailView(), ANON, seo("en")).html;
+    expect(anon).toContain('data-mp="download-link"');
+    expect(anon).toContain(
+      `href="${BASE_URL}/api/public/marketplace/listings/alice/research-flow/export"`,
+    );
+    expect(anon).toContain("Download");
+    // The download link is present for an owner too (export is the self-host source).
+    const owner = renderDetailToHtml(detailView({ isOwn: true }), VIEWER, seo("en")).html;
+    expect(owner).toContain('data-mp="download-link"');
+  });
+});
+
+describe("ExploreGallery Official filter chips", () => {
+  it("renders All + Official chips as crawlable links with the active state from the filter", () => {
+    const gallery: GalleryView = { items: [galleryCard()], total: 1 };
+
+    // Default (no filter) → All active.
+    const all = renderExploreToHtml(gallery, ANON, seo("en")).html;
+    expect(all).toContain('data-mp="filter-chips"');
+    expect(all).toContain('data-mp="chip-all"');
+    expect(all).toContain('data-mp="chip-official"');
+    expect(all).toContain(`href="${BASE_URL}/explore?official=true"`);
+    // All chip active, Official chip not.
+    expect(all).toMatch(/data-mp="chip-all"[^>]*aria-pressed="true"/);
+    expect(all).toMatch(/data-mp="chip-official"[^>]*aria-pressed="false"/);
+
+    // Official filter active → Official chip pressed.
+    const official = renderExploreToHtml(gallery, ANON, seo("en"), { official: true }).html;
+    expect(official).toMatch(/data-mp="chip-official"[^>]*aria-pressed="true"/);
+    expect(official).toMatch(/data-mp="chip-all"[^>]*aria-pressed="false"/);
+  });
+
+  it("localizes the chip labels and carries ?lang in the chip hrefs (RU)", () => {
+    const gallery: GalleryView = { items: [galleryCard()], total: 1 };
+    const ru = renderExploreToHtml(gallery, ANON, seo("ru"), { official: false }).html;
+    expect(ru).toContain("Все");
+    expect(ru).toContain("Официальные");
+    // Official chip carries BOTH filter + language (React escapes `&` → `&amp;` in attrs).
+    expect(ru).toContain(`href="${BASE_URL}/explore?official=true&amp;lang=ru"`);
+  });
+});
+
+describe("ListingCard adopt + download affordances", () => {
+  const VIEWER: ViewerContext = { userId: "u-1", handle: "bob" };
+
+  it("a signed-in addable card shows the adopt button + a public download link", () => {
+    const gallery: GalleryView = {
+      items: [galleryCard({ isOwn: false, inLibrary: false })],
+      total: 1,
+    };
+    const html = renderExploreToHtml(gallery, VIEWER, seo("en")).html;
+    expect(html).toContain('data-mp="adopt-btn"');
+    expect(html).toContain('data-mp="download-link"');
+  });
+
+  it("an in-library card shows the download link but NO adopt button", () => {
+    const gallery: GalleryView = {
+      items: [galleryCard({ isOwn: false, inLibrary: true })],
+      total: 1,
+    };
+    const html = renderExploreToHtml(gallery, VIEWER, seo("en")).html;
+    expect(html).not.toContain('data-mp="adopt-btn"');
+    expect(html).toContain('data-mp="download-link"');
+  });
+
+  it("an anonymous card shows the download link but NO adopt button", () => {
+    const gallery: GalleryView = { items: [galleryCard()], total: 1 };
+    const html = renderExploreToHtml(gallery, ANON, seo("en")).html;
+    expect(html).not.toContain('data-mp="adopt-btn"');
+    expect(html).toContain('data-mp="download-link"');
   });
 });

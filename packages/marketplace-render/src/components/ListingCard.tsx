@@ -12,13 +12,16 @@ import type { GalleryCardView, ViewerContext } from "../types.js";
 import type { Labels } from "../labels.js";
 import { VerifiedBadge } from "./VerifiedBadge.js";
 import { RatingStars } from "./RatingStars.js";
-import { withLang } from "../links.js";
+import { AdoptButton } from "./AdoptButton.js";
+import { withLang, exportHref } from "../links.js";
 
 export interface ListingCardProps {
   item: GalleryCardView;
   labels: Labels;
   viewer: ViewerContext | null;
   baseUrl: string;
+  /** Adopt side-effect (install + reload), wired by the browser hydration only. */
+  onAdopt?: (listingId: string) => void | Promise<void>;
 }
 
 export function ListingCard({
@@ -26,9 +29,13 @@ export function ListingCard({
   labels,
   viewer,
   baseUrl,
+  onAdopt,
 }: ListingCardProps): React.ReactElement {
   const detailUrl = withLang(`${baseUrl}/w/${item.reference}`, labels.locale);
   const isAuthenticated = viewer?.userId != null;
+  // The adopt affordance occupies the same slot as the pills: a signed-in viewer who
+  // neither owns the flow nor already has it can add it. Download is public (anyone).
+  const canAdopt = isAuthenticated && !item.isOwn && !item.inLibrary;
   return (
     <li className="mp-card" data-mp="listing-card">
       <h2 className="mp-card-title">
@@ -65,6 +72,19 @@ export function ListingCard({
           {labels.chrome.inLibrary}
         </span>
       ) : null}
+      <div className="mp-card-actions" data-mp="card-actions">
+        {canAdopt ? (
+          <AdoptButton listingId={item.listingId} labels={labels} onAdopt={onAdopt} />
+        ) : null}
+        <a
+          className="mp-btn mp-btn-ghost mp-btn-sm"
+          href={exportHref(baseUrl, item.reference)}
+          download
+          data-mp="download-link"
+        >
+          {labels.chrome.download}
+        </a>
+      </div>
     </li>
   );
 }

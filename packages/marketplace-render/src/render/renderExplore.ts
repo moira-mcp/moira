@@ -14,19 +14,26 @@ import { makeLabels } from "../labels.js";
 import { buildDocument } from "./document.js";
 import { renderChrome } from "./chrome.js";
 import { buildItemListJsonLd, buildBreadcrumbJsonLd } from "../seo/jsonld.js";
-import type { GalleryView, ViewerContext, SeoContext, RenderResult } from "../types.js";
+import type {
+  GalleryView,
+  ViewerContext,
+  SeoContext,
+  RenderResult,
+  ExploreFilter,
+} from "../types.js";
 
 /** Render the gallery page to a full HTML document. */
 export function renderExploreToHtml(
   gallery: GalleryView,
   viewer: ViewerContext | null,
   seo: SeoContext,
+  filter?: ExploreFilter,
 ): RenderResult {
   const labels = makeLabels(seo.locale);
   const canonical = `${seo.baseUrl}/explore`;
 
   const bodyHtml = renderToString(
-    React.createElement(ExploreGallery, { gallery, labels, viewer, baseUrl: seo.baseUrl }),
+    React.createElement(ExploreGallery, { gallery, labels, viewer, baseUrl: seo.baseUrl, filter }),
   );
   const chrome = renderChrome(labels, viewer, seo, seo.currentPath ?? "/explore");
 

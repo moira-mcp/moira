@@ -88,12 +88,19 @@ GET  /health  // Server health status
 // Cookie); a signed-in request is enriched with the viewer's library/ownership state and
 // account header and is non-cacheable (private, no-store; Vary: Cookie). An invalid or
 // expired session degrades to the anonymous variant. The chrome carries a theme toggle
-// (light/dark via a CSP-hash-allowed no-flash inline script), an EN/RU language switch
-// (server-honored ?lang, default en), and the sign-in / account+sign-out control.
-// Crawlable HTML + OpenGraph + JSON-LD (SoftwareApplication / ItemList / BreadcrumbList);
-// 404 HTML when disabled.
-GET  /explore             // gallery of listed flows
-GET  /w/:handle/:slug     // flow detail (JSON-LD SoftwareApplication)
+// (light/dark via a CSP-hash-allowed no-flash inline script — shared localStorage "theme"
+// with the SPA), an EN/RU language switch (server-honored ?lang, default en), a signed-in
+// "Back to library" cross-app link (carries ?lang into the SPA) + an "Import from file"
+// control, and the sign-in / account+sign-out control. The storefront mirrors the SPA's
+// affordances reusing the existing backend (no duplication): a hydration-wired "Add to
+// library" (adopt → install) on cards + the detail's MCP-first "How to use it" panel, a
+// JS-free "Download" link (public export-by-reference), and the header import. /explore
+// accepts an "Official" filter (?official=true → owner-based official set) shown as
+// crawlable filter chips. Crawlable HTML + OpenGraph + JSON-LD (SoftwareApplication /
+// ItemList / BreadcrumbList); 404 HTML when the marketplace feature is disabled (so the
+// adopt/import affordances never render in that mode).
+GET  /explore             // gallery of listed flows (?official=true filter; ?search, ?sort)
+GET  /w/:handle/:slug     // flow detail (JSON-LD SoftwareApplication; adopt/download/run)
 GET  /sitemap.xml         // dynamic sitemap (/explore + every /w/{handle}/{slug})
 
 // Version Check

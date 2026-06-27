@@ -21,6 +21,9 @@ interface ChromeStrings {
   exploreTitle: string;
   exploreSubtitle: string;
   exploreEmpty: string;
+  /** Gallery filter chips: the unfiltered set vs the Official-only set. */
+  filterAll: string;
+  filterOfficial: string;
   backToExplore: string;
   unrated: string;
   verified: string;
@@ -48,7 +51,17 @@ interface ChromeStrings {
   signIn: string;
   signOut: string;
   addToLibrary: string;
-  openInApp: string;
+  /** Adopt button transient + failure states (storefront has no toast lib). */
+  adding: string;
+  adoptError: string;
+  /** Export a flow as a `.json` file (works with JS off; gated server-side). */
+  download: string;
+  /** Import a workflow file into the library (self-host adoption path). */
+  importFromFile: string;
+  /** Inline failure message for the import-from-file control. */
+  importError: string;
+  /** Cross-app link back into the SPA for a signed-in viewer. */
+  backToLibrary: string;
   themeToggleLabel: string;
   languageLabel: string;
   accountLabel: string;
@@ -62,6 +75,8 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     exploreTitle: "Explore workflows",
     exploreSubtitle: "Ready-to-run agent processes you can adopt and run in your MCP client.",
     exploreEmpty: "No published workflows yet.",
+    filterAll: "All",
+    filterOfficial: "Official",
     backToExplore: "Explore",
     unrated: "Unrated",
     verified: "Verified",
@@ -81,7 +96,12 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     signIn: "Sign in",
     signOut: "Sign out",
     addToLibrary: "Add to library",
-    openInApp: "Open in app",
+    adding: "Adding…",
+    adoptError: "Couldn't add it. Try again.",
+    download: "Download",
+    importFromFile: "Import from file",
+    importError: "Couldn't import that file.",
+    backToLibrary: "Back to library",
     themeToggleLabel: "Toggle theme",
     languageLabel: "Language",
     accountLabel: "Account",
@@ -93,6 +113,8 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     exploreTitle: "Каталог воркфлоу",
     exploreSubtitle: "Готовые агентные процессы, которые можно добавить и запустить в MCP-клиенте.",
     exploreEmpty: "Пока нет опубликованных воркфлоу.",
+    filterAll: "Все",
+    filterOfficial: "Официальные",
     backToExplore: "Каталог",
     unrated: "Без оценок",
     verified: "Проверено",
@@ -113,7 +135,12 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     signIn: "Войти",
     signOut: "Выйти",
     addToLibrary: "Добавить в библиотеку",
-    openInApp: "Открыть в приложении",
+    adding: "Добавление…",
+    adoptError: "Не удалось добавить. Попробуйте ещё раз.",
+    download: "Скачать",
+    importFromFile: "Импорт из файла",
+    importError: "Не удалось импортировать файл.",
+    backToLibrary: "Назад в библиотеку",
     themeToggleLabel: "Переключить тему",
     languageLabel: "Язык",
     accountLabel: "Аккаунт",

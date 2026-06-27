@@ -98,6 +98,35 @@ export function PageHeader({
 
           {isAuthenticated ? (
             <div className="mp-account" data-mp="account">
+              {/* Cross-app link back into the SPA; carries the storefront language so the
+                  app lands in the same locale (session + theme are shared same-origin). */}
+              <a
+                className="mp-btn mp-btn-ghost"
+                href={langSwitchHref(`${appPrefix}/workflows`, locale)}
+                data-mp="open-app"
+              >
+                {labels.chrome.backToLibrary}
+              </a>
+              {/* Import-from-file (self-host adoption): a hidden file input + a button the
+                  browser hydration wires (PageHeader is enhanced imperatively, not
+                  hydrated). On success the handler redirects into the SPA library. */}
+              <input
+                type="file"
+                className="mp-import-input"
+                data-mp="import-input"
+                accept="application/json,.json"
+                aria-hidden="true"
+                tabIndex={-1}
+                hidden
+              />
+              <button
+                type="button"
+                className="mp-btn mp-btn-ghost"
+                data-mp="import-btn"
+                title={labels.chrome.importFromFile}
+              >
+                {labels.chrome.importFromFile}
+              </button>
               <span className="mp-avatar" aria-hidden="true">
                 {initialsOf(viewer?.handle ?? null)}
               </span>

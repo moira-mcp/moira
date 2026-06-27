@@ -23,3 +23,25 @@ export function withLang(path: string, locale: MarketplaceLocale): string {
 export function langSwitchHref(currentPath: string, target: MarketplaceLocale): string {
   return `${currentPath}?lang=${target}`;
 }
+
+/**
+ * The `/explore` gallery href for a given filter + locale. Combines the `?official=true`
+ * filter (omitted for the "All" view) with the language query (omitted for the default
+ * `en`) so each chip is a crawlable, SSR-navigable URL that preserves the active language.
+ */
+export function exploreHref(baseUrl: string, locale: MarketplaceLocale, official: boolean): string {
+  const params: string[] = [];
+  if (official) params.push("official=true");
+  if (locale !== "en") params.push(`lang=${locale}`);
+  const query = params.length > 0 ? `?${params.join("&")}` : "";
+  return `${baseUrl}/explore${query}`;
+}
+
+/**
+ * The public export (download) href for a `handle/slug` reference. A plain link to the
+ * purchase-gated public export endpoint — works with JS off (progressive enhancement)
+ * and is available to anyone (the endpoint enforces access server-side).
+ */
+export function exportHref(baseUrl: string, reference: string): string {
+  return `${baseUrl}/api/public/marketplace/listings/${reference}/export`;
+}

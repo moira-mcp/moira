@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **47 domains**, **319 files**, **3750 tests**
+- **47 domains**, **320 files**, **3761 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -35,8 +35,8 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | infrastructure      | 4     | 87    | unit:4                                                         |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
-| marketplace         | 25    | 193   | unit:10, integration:2, api:4, mcp-tools:1, e2e:5              |
-| marketplace-render  | 2     | 25    | unit:2                                                         |
+| marketplace         | 26    | 198   | unit:10, integration:2, api:4, mcp-tools:1, e2e:6              |
+| marketplace-render  | 2     | 31    | unit:2                                                         |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
 | mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
@@ -497,7 +497,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace
 
-**18 files, 164 tests**
+**19 files, 169 tests**
 
 **unit** (9 files)
 
@@ -532,8 +532,9 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/mcp-tools/marketplace-tool.test.ts` — 8 tests 🟢 (agent path over real MCP: publish produces handle/slug ref; search finds the published flow; info accessible detail; add → appears in list(source:added) as origin 'added'; start runs the added flow by ref; rate records a rating; author cannot rate own flow); list(source:official) returns the seeded official base flows (origin 'added') startable by moira/<slug> id
 
-**e2e** (4 files)
+**e2e** (8 files)
 
+- `tests/e2e/marketplace-storefront-affordances.spec.ts` — 6 tests 🟢 (Playwright, Step 21 storefront↔app unification: a signed-in viewer on `/w/:handle/:slug` clicks the hydrated `adopt-btn` → the listing installs and after reload the `library-pill` replaces the button + `/api/marketplace/me/library` confirms it; the JS-free `download-link` targets `/api/public/marketplace/listings/:handle/:slug/export` and returns 200 JSON; the storefront Official chip scopes `/explore` — a community flow present under `chip-all` drops out under `?official=true` (`chip-official` aria-pressed) while the seeded official listings remain; the header `open-app` "Back to library" link carries `?lang=ru` and lands in the SPA `/workflows` with the SPA i18n resolving to RU (`i18nextLng`); an anonymous visitor sees `download-link` + `signin-cta` but no `adopt-btn`; a signed-in viewer uses the header import control (`import-input`) → `importWorkflowFile` → redirect to `/workflows?filter=mine` with the imported flow in the library)
 - `tests/e2e/marketplace-i18n.spec.ts` — 1 test 🟢 (Playwright SPA localization: with ?lang=ru the gallery/detail/My-Listings render translated enum labels (category→"Разработка", status→"Опубликован") and correct Russian CLDR plural counts (install/step declensions, e.g. "2 шага") with no raw enum strings)
 - `tests/e2e/marketplace-pages.spec.ts` — 3 tests 🟢 (Playwright: /explore lists a just-published flow + links to its detail; /w/:handle/:slug renders the component detail page (backend, not SPA) with JSON-LD (SoftwareApplication across multiple LD blocks) + ships the hydration bootstrap (marketplace-hydrate.js script + `#mp-bootstrap` detail island); missing flow 404s instead of SPA fallthrough)
 - `tests/e2e/marketplace-public-page.spec.ts` — 6 tests 🟢 (Playwright session-aware polished public pages: anonymous /explore shows topbar/brand/theme-toggle/EN-RU switch/footer + `sign-in` (no account/sign-out); anonymous /w/:ref primary action is the gated `signin-cta`→/login + neither viewer pill; JS-free language toggle (anchor click → `?lang=ru`, RU "Войти"/"Каталог" chrome, `aria-current` on RU); hydrated theme toggle (set localStorage light → click → `<html>.dark` + localStorage `theme`="dark"); signed-in /explore shows `account-handle`=@handle + `sign-out` (no sign-in), sign-out (throwaway session) → reload back to anonymous header; owner's /w/:ref shows `own-pill` not `library-pill`/`signin-cta`)
@@ -544,11 +545,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### marketplace-render
 
-**2 files, 21 tests**
+**2 files, 31 tests**
 
 **unit** (2 files)
 
-- `tests/unit/marketplace-render/render-html.test.ts` — 17 tests 🟢 (@mcp-moira/marketplace-render server render: renderExploreToHtml crawlable semantic gallery HTML + real detail `<a href>` links + escaped SEO head (title/description/canonical/OG/Twitter) + well-formed ItemList+BreadcrumbList JSON-LD; renderDetailToHtml semantic `<article>` + start command + SoftwareApplication JSON-LD with/without aggregateRating + BreadcrumbList; localized counts EN vs RU CLDR forms (published/steps "2 шага"/installs "5 установок"/"1 install"); localized category enum (RU "Исследования"/"Данные и анализ", not raw) + "Unrated"/"Без оценок"; viewer pills only when authenticated+annotated; JSON-LD XSS-safety — malicious detail/gallery title+summary cannot break out of `<script type="application/ld+json">` (`<`-escaped, no raw `</script>`/`<script>alert`/`<img onerror`); session-aware detail action area — anonymous → sign-in CTA, signed-in addable viewer → add-to-library button, owner / in-library viewer → NO add button)
+- `tests/unit/marketplace-render/render-html.test.ts` — 23 tests 🟢 (@mcp-moira/marketplace-render server render: renderExploreToHtml crawlable semantic gallery HTML + real detail `<a href>` links + escaped SEO head (title/description/canonical/OG/Twitter) + well-formed ItemList+BreadcrumbList JSON-LD; renderDetailToHtml semantic `<article>` + start command + SoftwareApplication JSON-LD with/without aggregateRating + BreadcrumbList; localized counts EN vs RU CLDR forms (published/steps "2 шага"/installs "5 установок"/"1 install"); localized category enum (RU "Исследования"/"Данные и анализ", not raw) + "Unrated"/"Без оценок"; viewer pills only when authenticated+annotated; JSON-LD XSS-safety — malicious detail/gallery title+summary cannot break out of `<script type="application/ld+json">` (`<`-escaped, no raw `</script>`/`<script>alert`/`<img onerror`); session-aware detail action area (Step 21) — anonymous → sign-in CTA + public Download link + NO adopt-btn, signed-in addable viewer → `adopt-btn` "Add to library", owner / in-library viewer → NO adopt-btn but Download still present; ExploreGallery Official filter chips — All/Official crawlable LINK chips carry `?official`/`?lang` with the active `aria-pressed` driven by the threaded filter, localized chip labels (Все/Официальные) + `&`-escaped combined query; ListingCard adopt+download — addable card shows adopt-btn + download-link, in-library/anonymous cards show download-link only)
 - `tests/unit/marketplace-render/marketplace-viewer-annotation.test.ts` — 8 tests 🟢 (MarketplaceService viewer-annotation: getGalleryAnnotated/getDetailByReferenceAnnotated attach inLibrary/isOwn for owner (isOwn, not stored as library entry) / non-owner-who-added (inLibrary) / stranger (both false) / anonymous null viewer (both false, no library DB hit); gallery pagination metadata preserved; anonymous detail still resolves workflow + ownerHandle)
 
 ### node-handlers

@@ -33,6 +33,7 @@ function parseTags(tags: string): string[] {
 /** Map one annotated gallery item to a card view model. */
 export function toGalleryCardView(item: AnnotatedGalleryItem): GalleryCardView {
   return {
+    listingId: item.id,
     reference: referenceOf(item.ownerHandle, item.slug),
     title: item.title,
     summary: item.summary,
@@ -60,6 +61,7 @@ export function toDetailView(detail: AnnotatedListingDetail): DetailView {
   const listing = detail.listing;
   const stepCount = Array.isArray(detail.workflow.nodes) ? detail.workflow.nodes.length : 0;
   return {
+    listingId: listing.id,
     reference: detail.startRef,
     title: listing.title,
     summary: listing.summary,

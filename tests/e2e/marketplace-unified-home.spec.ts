@@ -274,16 +274,14 @@ test.describe("Unified Workflows home (Your library)", () => {
     // clearCookies() also drops the beta-accepted cookie from beforeEach, so re-add it
     // before the consumer navigates (otherwise the beta modal can race the next assertion).
     await page.context().clearCookies();
-    await page
-      .context()
-      .addCookies([
-        {
-          name: "moira-beta-accepted",
-          value: "true",
-          domain: new URL(BASE_URL).hostname,
-          path: "/",
-        },
-      ]);
+    await page.context().addCookies([
+      {
+        name: "moira-beta-accepted",
+        value: "true",
+        domain: new URL(BASE_URL).hostname,
+        path: "/",
+      },
+    ]);
     await login(page, CONSUMER.email, CONSUMER.password);
     await page.goto(`${BASE_URL}/workflows?filter=added`);
 

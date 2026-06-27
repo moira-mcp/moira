@@ -36,6 +36,7 @@ import {
   MarketplaceDisabledError,
   toMarketplaceLocale,
   type MarketplaceLocale,
+  type GallerySortOption,
 } from "@mcp-moira/shared";
 import {
   renderExploreToHtml,
@@ -50,6 +51,7 @@ import {
   type DetailView,
   type SeoContext,
   type ViewerContext,
+  type ExploreFilter,
 } from "@mcp-moira/marketplace-render";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
 import { auth } from "../auth.js";
@@ -118,6 +120,8 @@ interface HydrationIsland {
   detail?: DetailView;
   viewer: ViewerContext | null;
   seo: SeoContext;
+  /** The active gallery filter (explore only) so the chips hydrate with the same state. */
+  filter?: ExploreFilter;
 }
 
 /** Build the inline bootstrap `<script>`s (escaped island + deferred hydration bundle). */
@@ -182,6 +186,29 @@ function notFoundPage(seo: SeoContext, message: string): string {
   );
 }
 
+const GALLERY_SORTS: GallerySortOption[] = ["recent", "rating", "installs", "trending"];
+
+/**
+ * Parse the supported `/explore` query filters (minimal, mirroring marketplace-public):
+ * `?official=true` (the canonical Official set), `?search=` and `?sort=`. The active
+ * `official` flag is also returned as an {@link ExploreFilter} for the chips' state.
+ */
+function parseExploreQuery(req: Request): {
+  query: { official?: boolean; search?: string; sort: GallerySortOption; limit: number };
+  filter: ExploreFilter;
+} {
+  const q = req.query;
+  const official = q.official === "true";
+  const search = typeof q.search === "string" ? q.search : undefined;
+  const sort = GALLERY_SORTS.includes(q.sort as GallerySortOption)
+    ? (q.sort as GallerySortOption)
+    : "recent";
+  return {
+    query: { official: official ? true : undefined, search, sort, limit: 100 },
+    filter: { official },
+  };
+}
+
 // GET /explore — gallery
 router.get("/explore", apiLimiter, async (req: Request, res: Response) => {
   const seo = buildSeo(req, "/explore");
@@ -190,14 +217,12 @@ router.get("/explore", apiLimiter, async (req: Request, res: Response) => {
     // the signed-in header; anonymous (null) gets all-false annotations + crawler
     // fast-path. An invalid/expired session degrades to anonymous.
     const viewer = await resolveViewer(req);
-    const page = await getMarketplaceService().getGalleryAnnotated(
-      { sort: "recent", limit: 100 },
-      viewer?.userId ?? null,
-    );
+    const { query, filter } = parseExploreQuery(req);
+    const page = await getMarketplaceService().getGalleryAnnotated(query, viewer?.userId ?? null);
     const gallery = toGalleryView(page);
-    const { html } = renderExploreToHtml(gallery, viewer, seo);
+    const { html } = renderExploreToHtml(gallery, viewer, seo, filter);
     applyCacheHeaders(res, viewer);
-    res.type("html").send(withHydration(html, { page: "explore", gallery, viewer, seo }));
+    res.type("html").send(withHydration(html, { page: "explore", gallery, viewer, seo, filter }));
   } catch (error) {
     if (error instanceof MarketplaceDisabledError) {
       res

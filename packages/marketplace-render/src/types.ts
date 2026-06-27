@@ -23,6 +23,8 @@ export interface ViewerAnnotation {
 
 /** A single gallery card view model (one published listing + viewer annotations). */
 export interface GalleryCardView extends ViewerAnnotation {
+  /** Marketplace listing id — the target of the adopt (install) action. */
+  listingId: string;
   /** `handle/slug` reference used to build the crawlable detail URL. */
   reference: string;
   title: string;
@@ -45,6 +47,8 @@ export interface GalleryView {
 
 /** The flow-detail view model (one listing + viewer annotations). */
 export interface DetailView extends ViewerAnnotation {
+  /** Marketplace listing id — the target of the adopt (install) action. */
+  listingId: string;
   /** `handle/slug` reference (canonical URL + start command). */
   reference: string;
   title: string;
@@ -88,6 +92,15 @@ export interface SeoContext {
    * Defaults to `""`.
    */
   appPrefix?: string;
+}
+
+/**
+ * The active gallery filter, threaded SSR → hydration so the storefront's filter chips
+ * render their active state identically on both sides. Currently the single "Official"
+ * toggle (owned by a system/official account); `official:false` is the "All" view.
+ */
+export interface ExploreFilter {
+  official: boolean;
 }
 
 /** The result of a render call: a complete HTML document string. */
