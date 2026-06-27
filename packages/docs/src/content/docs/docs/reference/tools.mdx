@@ -245,6 +245,10 @@ Edits existing workflow with partial updates.
 - Change summary
 - Validation results
 
+Editing keeps the flow's current visibility: editing a published (public, listed) flow
+does **not** unpublish it — the listing keeps serving the updated version. To take a flow
+private, unpublish it explicitly (`marketplace` `unpublish`) or use `set-visibility`.
+
 **Example:**
 
 ```json
@@ -601,6 +605,10 @@ Changes workflow visibility (public/private).
 **Returns:**
 
 - Previous and new visibility
+
+Setting `private` on a flow that has an active marketplace listing is rejected (the flow
+stays public and listed). Unpublish it first via `marketplace` `unpublish`, which makes it
+private and unlists it in one step.
 
 **Example:**
 

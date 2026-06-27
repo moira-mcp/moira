@@ -241,6 +241,11 @@ manage({
 - Сводка изменений
 - Результаты валидации
 
+Редактирование сохраняет текущую видимость потока: редактирование опубликованного
+(публичного, листингованного) потока **не** снимает его с публикации — листинг
+продолжает отдавать обновлённую версию. Чтобы сделать поток приватным, снимите его с
+публикации явно (`marketplace` `unpublish`) или используйте `set-visibility`.
+
 **Пример:**
 
 ```json
@@ -487,6 +492,31 @@ manage({ action: "delete-variable", workflowId: "my-workflow", variableName: "un
 ```json
 manage({ action: "diff", workflowId: "workflow-v1", compareWorkflowId: "workflow-v2" })
 → { metadataDiff: { version: { old: "1.0.0", new: "2.0.0" } }, addedNodes: ["new-step"], removedNodes: [], modifiedNodes: [...] }
+```
+
+### Action: set-visibility
+
+Меняет видимость workflow (public/private).
+
+**Параметры:**
+
+- `action`: `"set-visibility"` (обязательный)
+- `workflowId` (string, обязательный) - ID workflow
+- `visibility` (string, обязательный) - "public" или "private"
+
+**Возвращает:**
+
+- Предыдущую и новую видимость
+
+Установка `private` для потока с активным листингом в маркетплейсе отклоняется (поток
+остаётся публичным и листингованным). Сначала снимите его с публикации через `marketplace`
+`unpublish` — это делает поток приватным и снимает листинг за один шаг.
+
+**Пример:**
+
+```json
+manage({ action: "set-visibility", workflowId: "my-workflow", visibility: "public" })
+→ { previousVisibility: "private", newVisibility: "public" }
 ```
 
 ---

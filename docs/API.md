@@ -1224,6 +1224,11 @@ Workflow listing and management endpoints.
 
 Update workflow visibility (owner only).
 
+Setting `private` on a workflow that has an active (`status='listed'`) marketplace listing
+is rejected with 409 — it would orphan the listing. Unpublish first
+(`DELETE /api/marketplace/listings/:id`), which makes the workflow private and unlists it
+together.
+
 Parameters:
 
 - `id`: Workflow ID
@@ -1254,8 +1259,14 @@ Errors:
 - 400: Invalid visibility value
 - 403: Not workflow owner
 - 404: Workflow not found
+- 409: Workflow has an active marketplace listing (unpublish first)
 
 Authentication: Required (owner only)
+
+Note: the workflow create/update endpoint (`POST /api/workflows`) treats an omitted
+`visibility` field as "inherit current" on update (a new workflow defaults to private), so
+editing a published workflow's content without a visibility field keeps it public and
+listed. Use this endpoint (or unpublish) to change visibility explicitly.
 
 ### GET /api/workflows/:id/export
 

@@ -470,6 +470,22 @@ export class WorkflowAlreadyListedError extends DomainError {
 }
 
 /**
+ * A flow cannot be made private while it has an active (listed) marketplace
+ * listing — doing so silently would orphan the listing. The caller must
+ * unpublish first (which makes the flow private and unlists it atomically).
+ */
+export class WorkflowListedCannotGoPrivateError extends DomainError {
+  readonly code = "WORKFLOW_LISTED_CANNOT_GO_PRIVATE";
+  readonly httpStatus = 409;
+
+  constructor(public readonly workflowId: string) {
+    super(
+      `Workflow '${workflowId}' has an active marketplace listing and cannot be made private directly. Unpublish it first.`,
+    );
+  }
+}
+
+/**
  * Caller is not allowed to manage this listing (not the publisher/owner).
  */
 export class ListingAccessDeniedError extends DomainError {

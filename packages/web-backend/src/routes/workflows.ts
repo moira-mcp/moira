@@ -730,8 +730,17 @@ router.post(
       }
     }
 
+    // Validate visibility if provided (omitting it inherits the current value)
+    if (visibility !== undefined && !["public", "private"].includes(visibility)) {
+      throw createApiError.badRequest("Invalid visibility value. Must be 'public' or 'private'");
+    }
+
     const workflowId = id || workflow.id || `workflow-${Date.now()}`;
-    const workflowVisibility = visibility || "private";
+    // Pass visibility through as-is: an omitted field inherits the flow's current
+    // visibility on update (only an explicit value changes it), so editing a
+    // published flow's content without a visibility field does not unpublish it
+    // (defect D-C). New flows default to private inside the service.
+    const workflowVisibility = visibility;
 
     // Check if exists
     const existing = await workflowService.get(workflowId, userId, true);

@@ -338,6 +338,15 @@ export function getWorkflowService(): WorkflowService {
     // Wire mutation service for validation caching (Issue #463)
     const mutationService = getWorkflowMutationService();
     workflowServiceInstance.setMutationService(mutationService);
+
+    // Wire the active-listing checker so a public→private transition cannot
+    // silently orphan a live marketplace listing (defect D-C). Resilient when
+    // marketplace is unused: no listed row → returns false.
+    const listingRepo = new MarketplaceListingRepository(db);
+    workflowServiceInstance.setActiveListingChecker(async (workflowId) => {
+      const listing = await listingRepo.getByWorkflowId(workflowId);
+      return !!listing && listing.status === "listed";
+    });
   }
   return workflowServiceInstance;
 }

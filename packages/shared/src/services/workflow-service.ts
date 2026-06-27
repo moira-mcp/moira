@@ -29,7 +29,16 @@ import {
   UserNotFoundError,
   SlugConflictError,
   InvalidSlugError,
+  WorkflowListedCannotGoPrivateError,
 } from "../errors/domain-errors.js";
+
+/**
+ * Predicate that reports whether a workflow currently has an ACTIVE (listed)
+ * marketplace listing. Injected from the service layer where the listing repo
+ * is available, so WorkflowService can reject a public→private transition that
+ * would orphan a live listing without depending on MarketplaceService directly.
+ */
+export type ActiveListingChecker = (workflowId: string) => Promise<boolean>;
 import { validateSlug, normalizeSlug, parseWorkflowReference } from "../validation/slug-handle.js";
 
 /**
@@ -62,6 +71,7 @@ export interface SaveWorkflowResult {
 export class WorkflowService {
   private logger = createLogger({ component: Component.Workflow });
   private mutationService?: WorkflowMutationService;
+  private activeListingChecker?: ActiveListingChecker;
 
   constructor(
     private workflowRepo: WorkflowRepository,
@@ -76,6 +86,33 @@ export class WorkflowService {
    */
   setMutationService(mutationService: WorkflowMutationService): void {
     this.mutationService = mutationService;
+  }
+
+  /**
+   * Set the active-listing checker (wired by the service factory). When unset
+   * (e.g. marketplace not wired), the listing guard is skipped — there are no
+   * listings to orphan.
+   */
+  setActiveListingChecker(checker: ActiveListingChecker): void {
+    this.activeListingChecker = checker;
+  }
+
+  /**
+   * Throw if making `workflowId` private would orphan an active marketplace
+   * listing. Only enforced on a genuine public→private transition; already-private
+   * flows and flows without a live listing are unaffected.
+   */
+  private async assertNotOrphaningListing(
+    workflowId: string | undefined,
+    oldVisibility: "public" | "private" | null,
+    newVisibility: "public" | "private",
+  ): Promise<void> {
+    if (!workflowId) return;
+    if (newVisibility !== "private" || oldVisibility !== "public") return;
+    if (!this.activeListingChecker) return;
+    if (await this.activeListingChecker(workflowId)) {
+      throw new WorkflowListedCannotGoPrivateError(workflowId);
+    }
   }
 
   /**
@@ -173,7 +210,7 @@ export class WorkflowService {
    * while preserving detailed audit logging with change detection
    */
   async save(options: SaveWorkflowOptions): Promise<SaveWorkflowResult> {
-    const { graph, userId, slug, visibility = "private", isUpdate, adminBypass } = options;
+    const { graph, userId, slug, visibility, isUpdate, adminBypass } = options;
 
     // Get existing workflow for change detection (needed for audit)
     const existing =
@@ -183,6 +220,17 @@ export class WorkflowService {
           : null
         : await this.workflowRepo.get(graph.id, userId, true);
     const isCreate = isUpdate !== undefined ? !isUpdate : !existing;
+
+    // Resolve effective visibility: an omitted field INHERITS the flow's current
+    // visibility on update (only an explicit value changes it); a new flow defaults
+    // to private. This stops a content edit that omits visibility from silently
+    // unpublishing a public flow (defect D-C).
+    const ownership = await this.workflowRepo.getOwnership(graph.id);
+    const currentVisibility = ownership.exists ? ownership.visibility : null;
+    const effectiveVisibility: "public" | "private" = visibility ?? currentVisibility ?? "private";
+
+    // Guard: an explicit public→private transition must not orphan a live listing.
+    await this.assertNotOrphaningListing(graph.id, currentVisibility, effectiveVisibility);
 
     // Validate slug if provided
     if (slug) {
@@ -207,7 +255,7 @@ export class WorkflowService {
         graph,
         userId,
         slug,
-        visibility,
+        visibility: effectiveVisibility,
         adminBypass,
         skipAudit: true, // We handle audit here with change detection
       });
@@ -218,7 +266,7 @@ export class WorkflowService {
         userId,
         mutationResult.id,
         mutationResult.slug,
-        visibility,
+        effectiveVisibility,
         isCreate,
         existing,
       );
@@ -236,12 +284,20 @@ export class WorkflowService {
       graph,
       userId,
       slug,
-      visibility,
+      visibility: effectiveVisibility,
       adminBypass,
     });
 
     // Perform detailed audit logging
-    await this.auditSave(graph, userId, result.id, result.slug, visibility, isCreate, existing);
+    await this.auditSave(
+      graph,
+      userId,
+      result.id,
+      result.slug,
+      effectiveVisibility,
+      isCreate,
+      existing,
+    );
 
     return result;
   }
@@ -493,6 +549,9 @@ export class WorkflowService {
     // Get current visibility for change detection
     const ownership = await this.workflowRepo.getOwnership(workflowId);
     const oldVisibility = ownership.visibility;
+
+    // Guard: an explicit public→private toggle must not orphan a live listing.
+    await this.assertNotOrphaningListing(workflowId, oldVisibility, visibility);
 
     // Update visibility
     const success = await this.workflowRepo.updateVisibility(workflowId, userId, visibility);
