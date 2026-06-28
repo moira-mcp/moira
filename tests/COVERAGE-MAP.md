@@ -273,7 +273,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### error-handling
 
-**11 files, 127 tests**
+**12 files, 135 tests**
 
 **unit** (5 files)
 
@@ -283,10 +283,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/unit/shared/errors/app-error.test.ts` — 32 tests 🟢
 - `tests/unit/web-backend/error-sanitizer.test.ts` — 17 tests 🟢
 
-**integration** (2 files)
+**integration** (3 files)
 
 - `tests/integration/error-logging-flow.test.ts` — 6 tests 🟢
 - `tests/integration/subgraph-error-scenarios.test.ts` — 2 tests 🟢
+- `tests/integration/error-code-taxonomy.test.ts` — 8 tests 🟢 (HTTP error boundary surfaces specific domain codes, not generic INTERNAL_ERROR, with correct status (D-N3): already-listed→409 WORKFLOW_ALREADY_LISTED, listing/workflow not-owner→403 LISTING_ACCESS_DENIED/WORKFLOW_ACCESS_DENIED, self-rate→403 SELF_RATING_FORBIDDEN, marketplace-disabled→MARKETPLACE_DISABLED, invalid-rating→INVALID_RATING, listed-cannot-go-private→409; none collapse to INTERNAL_ERROR)
 
 **api** (1 files)
 

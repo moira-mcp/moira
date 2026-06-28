@@ -84,9 +84,19 @@ export function setupErrorMiddleware() {
       },
     );
 
+    // Prefer the specific domain error code (set in context by normalizeError) over the
+    // generic AppError→ApiErrorCode mapping, so clients/agents can branch on the reason
+    // (e.g. WORKFLOW_ALREADY_LISTED, LISTING_ACCESS_DENIED, SELF_RATING_FORBIDDEN,
+    // MARKETPLACE_DISABLED) instead of a blanket INTERNAL_ERROR. Operational only — never
+    // expose internal/programmer-error context. HTTP status is unchanged (set below).
+    const domainCode =
+      appError.isOperational && typeof appError.context?.code === "string"
+        ? appError.context.code
+        : undefined;
+
     // Build response
     const apiError: ApiError = {
-      code: mapErrorCodeToApiCode(appError),
+      code: domainCode ?? mapErrorCodeToApiCode(appError),
       message: appError.isOperational
         ? appError.message
         : sanitizeErrorMessage(appError.message, ApiErrorCode.INTERNAL_ERROR),

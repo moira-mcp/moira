@@ -39,6 +39,19 @@ HTTP 429 Too Many Requests
 }
 ```
 
+## Error Responses
+
+Errors use the envelope `{ success: false, error: { code, message, details }, timestamp }`.
+For operational domain errors the `error.code` is the SPECIFIC machine-readable domain code
+(not a generic `INTERNAL_ERROR`), so clients/agents can branch on the reason, while the HTTP
+status reflects the error class. Examples: `WORKFLOW_ALREADY_LISTED` (409),
+`LISTING_ACCESS_DENIED` / `WORKFLOW_ACCESS_DENIED` (403), `SELF_RATING_FORBIDDEN` (403),
+`MARKETPLACE_DISABLED` (404), `INVALID_RATING` (400),
+`WORKFLOW_LISTED_CANNOT_GO_PRIVATE` / `WORKFLOW_NOT_LISTABLE` (409). Unexpected
+(non-operational) errors return `INTERNAL_ERROR` (500) with no internal detail. The saas
+signup consent errors (`TERMS_NOT_ACCEPTED` / `RESIDENCY_NOT_CONFIRMED`) name the required
+body field via `field` + `requiredFields`.
+
 ## Size Limits
 
 ### Workflow Size

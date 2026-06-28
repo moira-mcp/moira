@@ -491,17 +491,30 @@ const baseConfig = {
       if (ctx.path === "/sign-up/email" && getFeatureResolver().isEnabled("legalConsents")) {
         const { acceptedTermsAt, acceptedNotRussianResidentAt } = body;
 
+        // Name the required body field(s) in the error so a programmatic caller knows
+        // exactly what to send (defect D-DX1: the generic message hid the field names).
+        // Both consent fields are required on saas sign-up; surface the full set.
+        const requiredConsentFields = ["acceptedTermsAt", "acceptedNotRussianResidentAt"];
+
         if (!acceptedTermsAt) {
           throw new APIError("BAD_REQUEST", {
-            message: "You must accept the Terms of Service and Privacy Policy to register.",
+            message:
+              "You must accept the Terms of Service and Privacy Policy to register. " +
+              "Send an ISO timestamp in the `acceptedTermsAt` field.",
             code: "TERMS_NOT_ACCEPTED",
+            field: "acceptedTermsAt",
+            requiredFields: requiredConsentFields,
           });
         }
 
         if (!acceptedNotRussianResidentAt) {
           throw new APIError("BAD_REQUEST", {
-            message: "You must confirm that you are not a resident of the Russian Federation.",
+            message:
+              "You must confirm that you are not a resident of the Russian Federation. " +
+              "Send an ISO timestamp in the `acceptedNotRussianResidentAt` field.",
             code: "RESIDENCY_NOT_CONFIRMED",
+            field: "acceptedNotRussianResidentAt",
+            requiredFields: requiredConsentFields,
           });
         }
       }

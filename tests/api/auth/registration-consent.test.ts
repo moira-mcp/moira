@@ -29,9 +29,19 @@ describe("Registration Consent Validation", () => {
 
     expect(res.status).toBe(400);
 
-    const json = (await res.json()) as { code?: string; message?: string };
+    const json = (await res.json()) as {
+      code?: string;
+      message?: string;
+      field?: string;
+      requiredFields?: string[];
+    };
     expect(json.code).toBe("TERMS_NOT_ACCEPTED");
     expect(json.message).toContain("Terms of Service");
+    // D-DX1: the error names the required body field(s) so a programmatic caller knows
+    // exactly what to send (not just a generic "you must accept" message).
+    expect(json.message).toContain("acceptedTermsAt");
+    expect(json.field).toBe("acceptedTermsAt");
+    expect(json.requiredFields).toEqual(["acceptedTermsAt", "acceptedNotRussianResidentAt"]);
   });
 
   test("should reject registration without acceptedNotRussianResidentAt with RESIDENCY_NOT_CONFIRMED error", async () => {
@@ -49,9 +59,12 @@ describe("Registration Consent Validation", () => {
 
     expect(res.status).toBe(400);
 
-    const json = (await res.json()) as { code?: string; message?: string };
+    const json = (await res.json()) as { code?: string; message?: string; field?: string };
     expect(json.code).toBe("RESIDENCY_NOT_CONFIRMED");
     expect(json.message).toContain("Russian Federation");
+    // D-DX1: names the required body field.
+    expect(json.message).toContain("acceptedNotRussianResidentAt");
+    expect(json.field).toBe("acceptedNotRussianResidentAt");
   });
 
   test("should accept registration with both consent fields", async () => {
