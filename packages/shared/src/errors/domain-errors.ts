@@ -557,6 +557,19 @@ export class SelfRatingError extends DomainError {
 }
 
 /**
+ * An author cannot install/adopt their own listing into their library — they already
+ * own the workflow, and a self-install would inflate the install/trending counters.
+ */
+export class SelfInstallError extends DomainError {
+  readonly code = "SELF_INSTALL_FORBIDDEN";
+  readonly httpStatus = 403;
+
+  constructor() {
+    super("You cannot install your own listing");
+  }
+}
+
+/**
  * Star rating is outside the allowed 1-5 range.
  */
 export class InvalidRatingError extends DomainError {

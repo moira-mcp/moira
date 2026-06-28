@@ -354,7 +354,13 @@ export class WorkflowRepository {
   async slugExists(slug: string, userId: string, excludeWorkflowId?: string): Promise<boolean> {
     const normalizedSlug = normalizeSlug(slug);
 
-    const conditions = [eq(workflow.slug, normalizedSlug), eq(workflow.userId, userId)];
+    // Slugs are unique among LIVE workflows only: a soft-deleted row no longer reserves
+    // its slug (its slug is freed on delete, see softDelete), so deleted rows are excluded.
+    const conditions = [
+      eq(workflow.slug, normalizedSlug),
+      eq(workflow.userId, userId),
+      or(eq(workflow.deleted, false), isNull(workflow.deleted)),
+    ];
 
     if (excludeWorkflowId) {
       conditions.push(sql`${workflow.id} != ${excludeWorkflowId}`);
@@ -968,7 +974,12 @@ export class WorkflowRepository {
   }
 
   async softDelete(workflowId: string, userId: string): Promise<boolean> {
-    // Soft delete - mark as deleted
+    // Soft delete - mark as deleted.
+    // Free the slug so it can be reused (D-N4): the `(userId, slug)` unique index would
+    // otherwise keep the deleted row's slug permanently reserved, so re-creating a flow
+    // with the same slug after deletion would conflict. We move the slug to a
+    // collision-proof dead value (`deleted-<workflowId>`; the id is globally unique).
+    // `restore()` assigns a fresh valid slug, so nothing depends on this dead value.
     const now = new Date();
 
     const result = await this.db
@@ -977,6 +988,7 @@ export class WorkflowRepository {
         deleted: true,
         deletedAt: now,
         deletedBy: userId,
+        slug: `deleted-${workflowId}`,
         updatedAt: now,
       })
       .where(
@@ -991,8 +1003,29 @@ export class WorkflowRepository {
   }
 
   async restore(workflowId: string, userId: string): Promise<boolean> {
-    // Restore soft-deleted workflow
+    // Restore soft-deleted workflow. The original slug was freed on delete (see
+    // softDelete), so assign a fresh unique slug derived from the workflow name — the
+    // original slug may have been taken by a flow created after the deletion.
     const now = new Date();
+
+    const [row] = await this.db
+      .select({ graph: workflow.graph })
+      .from(workflow)
+      .where(
+        and(eq(workflow.id, workflowId), eq(workflow.userId, userId), eq(workflow.deleted, true)),
+      )
+      .limit(1);
+    if (!row) {
+      return false;
+    }
+
+    let name: string | undefined;
+    try {
+      name = (JSON.parse(row.graph) as WorkflowGraph)?.metadata?.name;
+    } catch {
+      // Unparseable graph → generateUniqueSlug falls back to a random default slug.
+    }
+    const restoredSlug = await this.generateUniqueSlug(userId, name);
 
     const result = await this.db
       .update(workflow)
@@ -1000,6 +1033,7 @@ export class WorkflowRepository {
         deleted: false,
         deletedAt: null,
         deletedBy: null,
+        slug: restoredSlug,
         updatedAt: now,
       })
       .where(
@@ -1007,6 +1041,25 @@ export class WorkflowRepository {
       );
 
     return result.changes > 0;
+  }
+
+  /**
+   * Repair the freed-slug invariant on pre-existing data: a soft-deleted workflow must NOT
+   * keep its original slug reserved (the `(userId, slug)` unique index would otherwise block
+   * re-creating a flow with the same slug — see {@link softDelete}). Converges any legacy
+   * deleted rows (soft-deleted before this enforcement shipped) to the same `deleted-<id>`
+   * freed shape that {@link slugExists} / {@link restore} already assume. Idempotent: only
+   * touches deleted rows whose slug has not already been freed. Returns the rows repaired.
+   *
+   * Canonical typed equivalent of the raw startup repair in scripts/run-migrations.ts — both
+   * MUST keep the same predicate (deleted AND slug NOT LIKE 'deleted-%').
+   */
+  async repairFreedSlugs(): Promise<number> {
+    const result = await this.db
+      .update(workflow)
+      .set({ slug: sql`'deleted-' || ${workflow.id}`, updatedAt: new Date() })
+      .where(and(eq(workflow.deleted, true), sql`${workflow.slug} NOT LIKE 'deleted-%'`));
+    return result.changes;
   }
 
   async listDeleted(userId: string): Promise<WorkflowInfo[]> {

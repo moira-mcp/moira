@@ -58,6 +58,7 @@ import {
   ListingNotAccessibleError,
   LibraryEntryNotFoundError,
   SelfRatingError,
+  SelfInstallError,
   InvalidRatingError,
   PaidListingsDisabledError,
   InvalidListingStatusError,
@@ -1035,6 +1036,13 @@ export class MarketplaceService {
     const listing = await this.requireListedListing(listingId);
     this.assertAccessible(listing);
 
+    // Self-install guard (mirrors the self-rating guard): the author already owns the
+    // workflow, and adopting their own listing would inflate install/trending counters.
+    // Thrown before any mutation so the counters are never touched.
+    if (listing.publishedBy === userId) {
+      throw new SelfInstallError();
+    }
+
     const existing = await this.libraryRepo.getByUserAndWorkflow(userId, listing.workflowId);
     if (existing) {
       return existing; // idempotent
@@ -1139,8 +1147,13 @@ export class MarketplaceService {
       kind: "copy",
       listingId,
     });
-    await this.listingRepo.incrementInstallCount(listingId);
-    await this.eventRepo.record({ listingId, userId, type: "install" });
+    // Exclude author self-actions from the install/trending counters (D-N5): forking
+    // your own listing is allowed (an independent private copy), but must not inflate
+    // the listing's popularity signals.
+    if (listing.publishedBy !== userId) {
+      await this.listingRepo.incrementInstallCount(listingId);
+      await this.eventRepo.record({ listingId, userId, type: "install" });
+    }
     return { workflowId: saved.id, slug: saved.slug };
   }
 

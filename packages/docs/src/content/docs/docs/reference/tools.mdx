@@ -99,7 +99,7 @@ marketplace to be enabled on the instance; where it is off they return a clear
 | ----------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `search`    | `q`, `category`, `tags`, `sort` (recent\|rating\|installs\|trending), `page` | store cards, each with a `ref` ("handle/slug")                                                          |
 | `info`      | `ref`                                                                        | full detail (description, ratings, author, node count, entitlement); records a view                     |
-| `add`       | `ref`, `fork` (true = editable copy; default = live reference)               | adopts the flow into your library; it then appears in `list()`                                          |
+| `add`       | `ref`, `fork` (true = editable copy; default = live reference)               | adopts the flow into your library; it then appears in `list()` (you cannot adopt your own listing)      |
 | `remove`    | `ref`                                                                        | origin-aware: un-adopts an added reference (original untouched), but DELETES a flow you own             |
 | `publish`   | `workflowId`, `category`, `tags`, `summary`                                  | makes your workflow public (listed). Paid fields are rejected while selling is off                      |
 | `unpublish` | `workflowId`                                                                 | makes your listed workflow private again                                                                |

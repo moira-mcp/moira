@@ -463,6 +463,33 @@ if (listingTable) {
   }
 }
 
+// Repair freed-slug invariant: a soft-deleted workflow must NOT keep its original slug
+// reserved (the `(userId, slug)` unique index would otherwise block re-creating a flow with
+// the same slug — see WorkflowRepository.softDelete, which moves the slug to `deleted-<id>`).
+// Converge any pre-existing soft-deleted rows (deleted before this enforcement shipped) to the
+// same freed shape so slug reuse never trips the unique index. Safe + idempotent: only touches
+// deleted rows whose slug has not already been freed.
+// Canonical, tested equivalent: WorkflowRepository.repairFreedSlugs() — this raw SQL must keep
+// the SAME predicate (deleted AND slug NOT LIKE 'deleted-%'); raw here to match this script's
+// style and avoid wiring the typed repo at boot.
+const workflowTable = sqlite
+  .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='workflow'")
+  .get();
+if (workflowTable) {
+  const freed = sqlite
+    .prepare(
+      `UPDATE workflow
+       SET slug = 'deleted-' || id, updatedAt = ?
+       WHERE deleted = 1 AND slug NOT LIKE 'deleted-%'`,
+    )
+    .run(Date.now());
+  if (freed.changes > 0) {
+    console.log(`  ✅ Freed slug on ${freed.changes} legacy soft-deleted workflow(s)`);
+  } else {
+    console.log("  ⏭️  No legacy deleted-workflow slugs to free");
+  }
+}
+
 // Seed setting definitions
 console.log("📝 Seeding setting definitions...");
 const { seedSettingDefinitions } = await import("./seed-settings-definitions.js");
