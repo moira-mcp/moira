@@ -80,7 +80,14 @@ export interface PublicListingRef {
 export class MarketplaceListingRepository {
   constructor(private db: BetterSQLite3Database<typeof schema>) {}
 
-  /** Create a listing (status defaults to "listed"). Returns the stored row. */
+  /**
+   * Create a listing (status defaults to "listed"). Returns the stored row.
+   *
+   * Low-level primitive: it does NOT set `workflow.visibility` and so does NOT enforce
+   * the publication invariant (`listed ⟹ public & !deleted`). Production publish goes
+   * through {@link publishCoupled}, which writes visibility + status atomically. Use this
+   * directly only in tests/admin tooling where the coupling is handled separately.
+   */
   async create(input: CreateListingInput): Promise<MarketplaceListingRecord> {
     const now = new Date();
     const row = {
@@ -287,21 +294,20 @@ export class MarketplaceListingRepository {
     return this.getById(listingId);
   }
 
-  /** Set the listing status (e.g. listed → unlisted on unpublish; moderation transitions). */
+  /**
+   * Set the listing status (low-level primitive; e.g. moderation transitions).
+   *
+   * NOTE: this writes only `status` and does NOT touch `workflow.visibility`. It does
+   * NOT enforce the publication invariant (`listed ⟹ public & !deleted`). Setting a
+   * listing back to `listed` MUST go through {@link publishCoupled} (or be gated by the
+   * service, as `setListingStatus` does) so visibility and status stay consistent.
+   */
   async setStatus(listingId: string, status: string): Promise<MarketplaceListingRecord | null> {
     await this.db
       .update(marketplaceListing)
       .set({ status, updatedAt: new Date() })
       .where(eq(marketplaceListing.id, listingId));
     return this.getById(listingId);
-  }
-
-  /** Re-list a previously unlisted/removed listing, refreshing its metadata. */
-  async relist(
-    listingId: string,
-    patch: UpdateListingMetadata,
-  ): Promise<MarketplaceListingRecord | null> {
-    return this.updateMetadata(listingId, patch).then(() => this.setStatus(listingId, "listed"));
   }
 
   /** Grant or revoke the verified badge (admin). Sets verifiedAt/By when granting. */
@@ -332,6 +338,142 @@ export class MarketplaceListingRepository {
       .set({ featured, updatedAt: new Date() })
       .where(eq(marketplaceListing.id, listingId));
     return this.getById(listingId);
+  }
+
+  // ===== Publication coupling (the single owning path for the invariant) =====
+  //
+  // Invariant: a `status='listed'` listing ALWAYS references a public, non-deleted
+  // workflow. `workflow.visibility` and `marketplaceListing.status` are two columns in
+  // two tables, so they can only stay consistent if every transition that touches the
+  // pairing writes BOTH atomically. These methods are that single path; callers must use
+  // them (not raw updateVisibility + setStatus) to publish/unpublish so the pairing can
+  // never split. (The legal `public + no/unlisted listing` state is unaffected — only
+  // the listed↔visibility coupling is enforced.)
+
+  /**
+   * Publish atomically: set the workflow public AND create (or re-list) its listing in a
+   * single transaction. `existingListingId` re-lists a kept (unlisted/removed) row;
+   * omit it to create a fresh listing. Returns the resulting listing row.
+   */
+  async publishCoupled(input: {
+    workflowId: string;
+    publishedBy: string;
+    title: string;
+    summary?: string | null;
+    category: string;
+    tags?: string[];
+    existingListingId?: string | null;
+  }): Promise<MarketplaceListingRecord> {
+    const now = new Date();
+    const id = input.existingListingId ?? uuidv4();
+    this.db.transaction((tx) => {
+      tx.update(workflow)
+        .set({ visibility: "public", updatedAt: now })
+        .where(eq(workflow.id, input.workflowId))
+        .run();
+      if (input.existingListingId) {
+        tx.update(marketplaceListing)
+          .set({
+            status: "listed",
+            title: input.title,
+            summary: input.summary ?? null,
+            category: input.category,
+            tags: JSON.stringify(input.tags ?? []),
+            updatedAt: now,
+          })
+          .where(eq(marketplaceListing.id, input.existingListingId))
+          .run();
+      } else {
+        tx.insert(marketplaceListing)
+          .values({
+            id,
+            workflowId: input.workflowId,
+            publishedBy: input.publishedBy,
+            status: "listed",
+            title: input.title,
+            summary: input.summary ?? null,
+            category: input.category,
+            tags: JSON.stringify(input.tags ?? []),
+            isPaid: false,
+            price: null,
+            currency: null,
+            publishedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .run();
+      }
+    });
+    const saved = await this.getById(id);
+    if (!saved) {
+      throw new Error(`Failed to publish listing for workflow ${input.workflowId}`);
+    }
+    return saved;
+  }
+
+  /**
+   * Unpublish atomically: set the listing `unlisted` AND the workflow private in a single
+   * transaction (the listing row is kept for history/reviews). Returns the updated row.
+   */
+  async unpublishCoupled(input: {
+    listingId: string;
+    workflowId: string;
+  }): Promise<MarketplaceListingRecord | null> {
+    const now = new Date();
+    this.db.transaction((tx) => {
+      tx.update(marketplaceListing)
+        .set({ status: "unlisted", updatedAt: now })
+        .where(eq(marketplaceListing.id, input.listingId))
+        .run();
+      tx.update(workflow)
+        .set({ visibility: "private", updatedAt: now })
+        .where(eq(workflow.id, input.workflowId))
+        .run();
+    });
+    return this.getById(input.listingId);
+  }
+
+  /**
+   * Unlist any `listed` listing for a workflow without touching its visibility — used
+   * when the workflow is deleted (a deleted workflow must not keep a listed listing).
+   * Returns true if a row was unlisted. Idempotent.
+   */
+  async unlistForWorkflow(workflowId: string): Promise<boolean> {
+    const result = await this.db
+      .update(marketplaceListing)
+      .set({ status: "unlisted", updatedAt: new Date() })
+      .where(
+        and(eq(marketplaceListing.workflowId, workflowId), eq(marketplaceListing.status, "listed")),
+      );
+    return result.changes > 0;
+  }
+
+  /**
+   * Startup repair: unlist every `listed` listing whose workflow is private or
+   * soft-deleted, converging any pre-existing rows that violate the invariant. Returns
+   * the number of listings repaired.
+   *
+   * NOTE: `scripts/run-migrations.ts` runs an equivalent raw-SQL repair at boot — keep the
+   * two predicates (`status='listed'` AND workflow private/deleted) in sync if either changes.
+   */
+  async repairInconsistentListings(): Promise<number> {
+    const offenders = await this.db
+      .select({ id: marketplaceListing.id })
+      .from(marketplaceListing)
+      .innerJoin(workflow, eq(marketplaceListing.workflowId, workflow.id))
+      .where(
+        and(
+          eq(marketplaceListing.status, "listed"),
+          or(eq(workflow.visibility, "private"), eq(workflow.deleted, true)),
+        ),
+      );
+    if (offenders.length === 0) return 0;
+    const ids = offenders.map((o) => o.id);
+    await this.db
+      .update(marketplaceListing)
+      .set({ status: "unlisted", updatedAt: new Date() })
+      .where(inArray(marketplaceListing.id, ids));
+    return ids.length;
   }
 }
 

@@ -486,6 +486,23 @@ export class WorkflowListedCannotGoPrivateError extends DomainError {
 }
 
 /**
+ * A listing cannot be set `listed` because its workflow is not public (private or
+ * deleted) — doing so would orphan the listing (the publication invariant: a listed
+ * listing always references a public, non-deleted workflow). Make the workflow public
+ * (publish) first.
+ */
+export class WorkflowNotListableError extends DomainError {
+  readonly code = "WORKFLOW_NOT_LISTABLE";
+  readonly httpStatus = 409;
+
+  constructor(public readonly workflowId: string) {
+    super(
+      `Workflow '${workflowId}' cannot be listed because it is private or deleted. Make it public first.`,
+    );
+  }
+}
+
+/**
  * Caller is not allowed to manage this listing (not the publisher/owner).
  */
 export class ListingAccessDeniedError extends DomainError {

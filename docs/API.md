@@ -3434,6 +3434,10 @@ Transition a listing's status. Body: `{ status, reason? }`. `status` must be one
 `listed`, `unlisted`, `pending`, `rejected`, `removed` (else `400
 INVALID_LISTING_STATUS`). → listing.
 
+Setting `status='listed'` is rejected with `409 WORKFLOW_NOT_LISTABLE` when the listing's
+workflow is private or deleted — the publication invariant requires a listed listing to
+reference a public, non-deleted workflow (publish the workflow first).
+
 Authentication: Required (admin role) for all of the above.
 
 ## Middleware

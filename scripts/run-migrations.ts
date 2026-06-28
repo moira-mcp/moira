@@ -436,6 +436,33 @@ if (!existingMoiraUser) {
   console.log("  ⏭️  Moira system user already exists");
 }
 
+// Repair publication invariant: a `listed` listing must reference a public, non-deleted
+// workflow. Converge any pre-existing rows that violate it (e.g. created before the
+// publication-coupling enforcement) by unlisting them. Safe + idempotent.
+// Canonical, unit-tested equivalent: MarketplaceListingRepository.repairInconsistentListings()
+// — this raw SQL must keep the SAME predicate (status='listed' AND workflow private/deleted).
+// It is raw SQL here to match this script's style and avoid wiring the typed repo at boot.
+const listingTable = sqlite
+  .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='marketplaceListing'")
+  .get();
+if (listingTable) {
+  const repair = sqlite
+    .prepare(
+      `UPDATE marketplaceListing
+       SET status = 'unlisted', updatedAt = ?
+       WHERE status = 'listed'
+         AND workflowId IN (
+           SELECT id FROM workflow WHERE visibility = 'private' OR deleted = 1
+         )`,
+    )
+    .run(Date.now());
+  if (repair.changes > 0) {
+    console.log(`  ✅ Unlisted ${repair.changes} orphaned listing(s) (private/deleted workflow)`);
+  } else {
+    console.log("  ⏭️  No orphaned listings to repair");
+  }
+}
+
 // Seed setting definitions
 console.log("📝 Seeding setting definitions...");
 const { seedSettingDefinitions } = await import("./seed-settings-definitions.js");

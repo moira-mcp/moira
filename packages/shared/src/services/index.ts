@@ -347,6 +347,11 @@ export function getWorkflowService(): WorkflowService {
       const listing = await listingRepo.getByWorkflowId(workflowId);
       return !!listing && listing.status === "listed";
     });
+    // Soft-delete cascade: unlist any active listing so a deleted workflow never keeps a
+    // `listed` listing (publication invariant).
+    workflowServiceInstance.setListingUnlister((workflowId) =>
+      listingRepo.unlistForWorkflow(workflowId),
+    );
   }
   return workflowServiceInstance;
 }

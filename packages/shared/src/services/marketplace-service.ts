@@ -61,6 +61,7 @@ import {
   InvalidRatingError,
   PaidListingsDisabledError,
   InvalidListingStatusError,
+  WorkflowNotListableError,
 } from "../errors/domain-errors.js";
 
 /** Legal moderation statuses for a listing (admin status transitions are validated against this). */
@@ -322,34 +323,22 @@ export class MarketplaceService {
       throw new WorkflowAlreadyListedError(workflowId);
     }
 
-    await this.workflowRepo.updateVisibility(workflowId, userId, "public");
-
     const info = await this.workflowRepo.getFullInfo(workflowId, userId);
     const title = options.title ?? info?.metadata.name ?? ownership.name ?? "Untitled workflow";
     const summary = options.summary ?? info?.metadata.description ?? null;
     const category = normalizeMarketplaceCategory(options.category);
     const tags = options.tags ?? info?.metadata.tags ?? [];
 
-    if (existing) {
-      const relisted = await this.listingRepo.relist(existing.id, {
-        title,
-        summary,
-        category,
-        tags,
-      });
-      if (!relisted) {
-        throw new ListingNotFoundError(existing.id);
-      }
-      return relisted;
-    }
-
-    return this.listingRepo.create({
+    // Single atomic path: set the workflow public AND create/relist the listing together,
+    // so visibility and listing status can never split (publication invariant).
+    return this.listingRepo.publishCoupled({
       workflowId,
       publishedBy: userId,
       title,
       summary,
       category,
       tags,
+      existingListingId: existing ? existing.id : null,
     });
   }
 
@@ -368,8 +357,7 @@ export class MarketplaceService {
       throw new ListingAccessDeniedError(workflowId, "unpublish");
     }
 
-    await this.listingRepo.setStatus(listing.id, "unlisted");
-    await this.workflowRepo.updateVisibility(workflowId, userId, "private");
+    await this.listingRepo.unpublishCoupled({ listingId: listing.id, workflowId });
   }
 
   /** Unpublish by listing id (authed HTTP path). Owner only; idempotent. */
@@ -379,8 +367,10 @@ export class MarketplaceService {
     if (listing.publishedBy !== userId) {
       throw new ListingAccessDeniedError(listingId, "unpublish");
     }
-    await this.listingRepo.setStatus(listing.id, "unlisted");
-    await this.workflowRepo.updateVisibility(listing.workflowId, userId, "private");
+    await this.listingRepo.unpublishCoupled({
+      listingId: listing.id,
+      workflowId: listing.workflowId,
+    });
   }
 
   /**
@@ -799,7 +789,15 @@ export class MarketplaceService {
     if (!(MARKETPLACE_LISTING_STATUSES as readonly string[]).includes(status)) {
       throw new InvalidListingStatusError(status, MARKETPLACE_LISTING_STATUSES);
     }
-    await this.requireExistingListing(listingId);
+    const listing = await this.requireExistingListing(listingId);
+    // Publication invariant: a `listed` listing must reference a public, non-deleted
+    // workflow. Re-listing one whose workflow is private/deleted would orphan it.
+    if (status === "listed") {
+      const ownership = await this.workflowRepo.getOwnership(listing.workflowId);
+      if (!ownership.exists || ownership.visibility !== "public") {
+        throw new WorkflowNotListableError(listing.workflowId);
+      }
+    }
     const updated = await this.listingRepo.setStatus(listingId, status);
     if (!updated) {
       throw new ListingNotFoundError(listingId);
@@ -1115,6 +1113,12 @@ export class MarketplaceService {
     const version = clone.metadata?.version;
     const importKey = importKeyFromSource(source);
 
+    // Publication-invariant note: this path writes visibility via workflowRepo.save
+    // directly (not WorkflowService), so it does NOT run assertNotOrphaningListing. That
+    // is safe because import never produces the illegal `listed + private` state — a new
+    // import is created private (no listing), and an in-place update PRESERVES the copy's
+    // current visibility (below). Keep it that way: any future change here that could set
+    // a listed flow private must route through the guarded service path instead.
     // Re-import of a known source → update the existing imported flow in place.
     // Only when the target workflow still exists: a soft-deleted workflow reads as
     // gone (getFullInfo === null), so saving against its id would INSERT a new row

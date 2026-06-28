@@ -72,6 +72,7 @@ export class WorkflowService {
   private logger = createLogger({ component: Component.Workflow });
   private mutationService?: WorkflowMutationService;
   private activeListingChecker?: ActiveListingChecker;
+  private listingUnlister?: (workflowId: string) => Promise<boolean>;
 
   constructor(
     private workflowRepo: WorkflowRepository,
@@ -98,9 +99,23 @@ export class WorkflowService {
   }
 
   /**
+   * Set the listing-unlister (wired by the service factory). On soft-delete it unlists
+   * any active listing for the workflow so a deleted workflow never keeps a `listed`
+   * listing (publication invariant). When unset, the cascade is skipped.
+   */
+  setListingUnlister(unlister: (workflowId: string) => Promise<boolean>): void {
+    this.listingUnlister = unlister;
+  }
+
+  /**
    * Throw if making `workflowId` private would orphan an active marketplace
    * listing. Only enforced on a genuine public→private transition; already-private
    * flows and flows without a live listing are unaffected.
+   *
+   * NOTE: this guard applies even under `adminBypass` (it is invoked from save()/
+   * updateVisibility before the bypass-gated write) — the publication invariant is not an
+   * ownership rule, so admins also must unpublish (or use setListingStatus) rather than
+   * flip a listed flow private. Intentional; see Step 6 admin work.
    */
   private async assertNotOrphaningListing(
     workflowId: string | undefined,
@@ -464,6 +479,10 @@ export class WorkflowService {
     const success = await this.workflowRepo.softDelete(workflowId, userId);
 
     if (success) {
+      // Publication invariant: a deleted workflow must not keep a `listed` listing.
+      if (this.listingUnlister) {
+        await this.listingUnlister(workflowId);
+      }
       await this.auditRepo.log({
         userId,
         action: AuditAction.WORKFLOW_DELETE,
