@@ -1,10 +1,15 @@
 /**
  * Official ownership + the curated base-flow seed set.
  *
- * "Official" is a derived signal, not a schema column: a flow is official iff its
- * owner is one of the system accounts ({@link OFFICIAL_OWNER_IDS}). Bundled flows are
- * installed under `system-moira` (public) / `system-admin` (private), so they carry no
- * separate "verified"/"core" marker — the owner is the source of truth.
+ * "Official" is a PROVENANCE signal: a flow is official iff it comes from the official
+ * Moira catalog — i.e. it is owned by the official catalog account `system-moira` (handle
+ * `moira`), which owns the bundled official flows and is never a login account. The
+ * source of truth is this provenance, NOT "owned by any local system account".
+ *
+ * `system-admin` (handle `admin`) is deliberately NOT official: on self-host the operator
+ * logs in AS `system-admin` (via ADMIN_EMAIL), so every flow they create or import is
+ * `system-admin`-owned. Treating that as "Official" mislabels the operator's own flows as
+ * trusted (defect D-N6). Only genuine `system-moira` catalog provenance earns the badge.
  *
  * {@link OFFICIAL_BASE_FLOW_SLUGS} is the curated everyday set seeded into every user's
  * library on signup (and back-filled for existing users). It is intentionally small —
@@ -13,11 +18,11 @@
  */
 
 /**
- * The system/official account ids. A flow owned by one of these is "official".
- * `system-moira` (handle `moira`) owns the bundled PUBLIC flows; `system-admin`
- * (handle `admin`) owns the bundled PRIVATE flows.
+ * The official catalog account id(s). A flow owned by one of these is "official" — it
+ * carries genuine official-catalog provenance. `system-admin` is intentionally excluded
+ * (it is the local operator's login account, not an official-trust signal — see D-N6).
  */
-export const OFFICIAL_OWNER_IDS = ["system-moira", "system-admin"] as const;
+export const OFFICIAL_OWNER_IDS = ["system-moira"] as const;
 export type OfficialOwnerId = (typeof OFFICIAL_OWNER_IDS)[number];
 
 const OFFICIAL_OWNER_ID_SET: ReadonlySet<string> = new Set(OFFICIAL_OWNER_IDS);

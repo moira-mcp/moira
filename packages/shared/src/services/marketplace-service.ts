@@ -84,9 +84,13 @@ export interface LibraryItem {
   workflowId: string;
   slug: string;
   name: string;
+  /** Top-level flow version (from the graph metadata) — lets the UI show "which version do I hold". */
+  version: string;
+  /** Last-modified time of the underlying workflow row (ms epoch) — for an "updated" meta line. */
+  updatedAt: number;
   /** Owner handle (for building a `handle/slug` start reference). */
   ownerHandle: string;
-  /** True when the flow is owned by an official system account (system-moira/system-admin). */
+  /** True when the flow carries official-catalog provenance (owned by system-moira). */
   official: boolean;
   /** For `added` items: reference (live) vs copy (frozen). */
   kind?: "reference" | "copy";
@@ -926,6 +930,8 @@ export class MarketplaceService {
         workflowId: w.id,
         slug: w.slug,
         name: w.metadata.name,
+        version: w.metadata.version,
+        updatedAt: w.updatedAt,
         ownerHandle: w.ownerHandle,
         official: isOfficialOwner(w.userId),
         workflow: w.workflow,
@@ -946,6 +952,8 @@ export class MarketplaceService {
         workflowId: entry.workflowId,
         slug: info.slug,
         name: info.metadata.name,
+        version: info.metadata.version,
+        updatedAt: info.updatedAt,
         ownerHandle: info.ownerHandle,
         official: isOfficialOwner(info.userId),
         kind: entry.kind as "reference" | "copy",
@@ -966,6 +974,8 @@ export class MarketplaceService {
         workflowId: sharedId,
         slug: info.slug,
         name: info.metadata.name,
+        version: info.metadata.version,
+        updatedAt: info.updatedAt,
         ownerHandle: info.ownerHandle,
         official: isOfficialOwner(info.userId),
         workflow: info.workflow,

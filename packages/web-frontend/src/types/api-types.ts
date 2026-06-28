@@ -93,8 +93,12 @@ export interface MarketplaceLibraryItem {
   workflowId: string | null;
   slug: string;
   name: string;
+  /** Top-level flow version (from graph metadata). */
+  version: string;
+  /** Last-modified time of the workflow row (ms epoch) — for the card's "updated" meta. */
+  updatedAt: number;
   ownerHandle: string | null;
-  /** True when the flow is owned by an official system account (drives the Official badge). */
+  /** True when the flow carries official-catalog provenance (drives the Official badge). */
   official: boolean;
   kind?: "reference" | "copy";
   listingId?: string | null;

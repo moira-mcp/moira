@@ -349,6 +349,9 @@ export const Workflows: React.FC = () => {
           key={key}
           name={item.name}
           official={item.official}
+          ownerHandle={item.ownerHandle}
+          version={item.version}
+          updatedAt={item.updatedAt}
           badges={badges}
           actions={actions}
         />
@@ -372,6 +375,8 @@ export const Workflows: React.FC = () => {
           name={item.name}
           official={item.official}
           ownerHandle={item.ownerHandle}
+          version={item.version}
+          updatedAt={item.updatedAt}
           actions={actions}
         />
       );
@@ -384,6 +389,8 @@ export const Workflows: React.FC = () => {
         name={item.name}
         official={item.official}
         ownerHandle={item.ownerHandle}
+        version={item.version}
+        updatedAt={item.updatedAt}
       />
     );
   };

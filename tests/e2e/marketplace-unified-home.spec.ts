@@ -269,6 +269,12 @@ test.describe("Unified Workflows home (Your library)", () => {
     const ownCard = page.getByTestId("flow-card").filter({ hasText: PUBLISHED_FLOW }).first();
     await expect(ownCard).toBeVisible({ timeout: 10000 });
     await expect(ownCard.getByTestId("listed-badge")).toBeVisible();
+    // The publisher is a regular user, so their OWN flow is NOT official (provenance-based
+    // badge, D-N6) — no Official badge on an own card.
+    await expect(ownCard.getByTestId("official-badge")).toHaveCount(0);
+    // The card shows a version/updated identity meta line (with the actual version) so
+    // duplicates are distinguishable (D-N1/D-N7).
+    await expect(ownCard.getByTestId("flow-card-meta")).toContainText("v1.0.0");
 
     // Consumer sees the SAME flow under Added, with a link to its public source listing.
     // clearCookies() also drops the beta-accepted cookie from beforeEach, so re-add it

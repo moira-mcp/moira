@@ -47,8 +47,11 @@ Returns **your library** — not the whole public catalog. Items come from three
   official base flows (quick-task, robust-task, …) seeded into every account
 - **shared** — private flows shared with you by link
 
-Flows owned by the official system account are flagged **official** regardless of origin;
-the seeded base flows are official `added` entries. Filter to them with `source: "official"`.
+The **official** flag is provenance-based: a flow is official only when it comes from the
+official Moira catalog account (`moira`), regardless of origin — the seeded base flows are
+official `added` entries. Your own flows (and, on a self-host instance, the operator's
+flows) are **not** official. Filter to the official set with `source: "official"`. Each
+library item also carries a `version` so you can tell otherwise-identical copies apart.
 
 The marketplace's other public flows are **not** in `list()` until you add them — browse
 the store with the [`marketplace`](#marketplace) tool. This keeps the agent's working set

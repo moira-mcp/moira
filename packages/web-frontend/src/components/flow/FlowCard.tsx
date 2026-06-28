@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "../ui/card";
 import { OfficialBadge } from "./FlowBadges";
+import { formatRelativeTime } from "../cards/format-utils";
 
 interface FlowCardProps {
   /** Flow display name (also the run-hint subject). */
@@ -26,6 +27,10 @@ interface FlowCardProps {
   official?: boolean;
   /** Owner handle, shown as muted meta (omitted when absent). */
   ownerHandle?: string | null;
+  /** Flow version, shown in the identity meta line (omitted when absent). */
+  version?: string | null;
+  /** Last-modified time (ms epoch), shown as a relative "updated" in the meta line. */
+  updatedAt?: number | null;
   /** Extra badges rendered next to the name (e.g. a Listed badge). */
   badges?: ReactNode;
   /** Right-aligned, origin-specific action controls. */
@@ -34,8 +39,23 @@ interface FlowCardProps {
   onClick?: () => void;
 }
 
-export function FlowCard({ name, official, ownerHandle, badges, actions, onClick }: FlowCardProps) {
+export function FlowCard({
+  name,
+  official,
+  ownerHandle,
+  version,
+  updatedAt,
+  badges,
+  actions,
+  onClick,
+}: FlowCardProps) {
   const { t } = useTranslation();
+  // Identity meta — version + last-updated — so otherwise-identical rows (same name,
+  // duplicate copies) are distinguishable (defects D-N7/D-N1).
+  const metaParts: string[] = [];
+  if (version) metaParts.push(`v${version}`);
+  if (updatedAt)
+    metaParts.push(t("pages.workflows.home.updated", { time: formatRelativeTime(updatedAt) }));
   return (
     <Card
       className={onClick ? "cursor-pointer transition-colors hover:border-primary/50" : undefined}
@@ -60,6 +80,14 @@ export function FlowCard({ name, official, ownerHandle, badges, actions, onClick
           {ownerHandle && (
             <div className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
               {t("pages.marketplace.by", { handle: ownerHandle })}
+            </div>
+          )}
+          {metaParts.length > 0 && (
+            <div
+              className="text-[11px] text-muted-foreground mt-0.5 truncate"
+              data-testid="flow-card-meta"
+            >
+              {metaParts.join(" · ")}
             </div>
           )}
         </div>
