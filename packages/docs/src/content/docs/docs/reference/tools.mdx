@@ -97,11 +97,16 @@ marketplace to be enabled on the instance; where it is off they return a clear
 | `search`    | `q`, `category`, `tags`, `sort` (recent\|rating\|installs\|trending), `page` | store cards, each with a `ref` ("handle/slug")                                                          |
 | `info`      | `ref`                                                                        | full detail (description, ratings, author, node count, entitlement); records a view                     |
 | `add`       | `ref`, `fork` (true = editable copy; default = live reference)               | adopts the flow into your library; it then appears in `list()`                                          |
-| `remove`    | `ref`                                                                        | un-adopts the flow (does not delete the original)                                                       |
+| `remove`    | `ref`                                                                        | origin-aware: un-adopts an added reference (original untouched), but DELETES a flow you own             |
 | `publish`   | `workflowId`, `category`, `tags`, `summary`                                  | makes your workflow public (listed). Paid fields are rejected while selling is off                      |
 | `unpublish` | `workflowId`                                                                 | makes your listed workflow private again                                                                |
 | `rate`      | `ref`, `stars` (1-5), `review`                                               | upserts your rating/review (you cannot rate your own flow)                                              |
 | `share`     | `workflowId`, `userHandle?`                                                  | privately shares your workflow — grant a user directly, or omit `userHandle` to generate an invite link |
+
+Library removal is **origin-aware** and reports what it did: removing an _added_ reference
+un-adopts it (the original is untouched); removing a flow you _own_ (including imported or
+forked copies) deletes it (and unlists it if it was published); removing a flow _shared_ with
+you revokes your access. Removal never reports success without actually removing anything.
 
 **Typical agent flow:**
 

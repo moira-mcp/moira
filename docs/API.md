@@ -3388,7 +3388,18 @@ forked one. The export half is `GET /api/workflows/:id/export`.
 
 ### DELETE /api/marketplace/library/:workflowId
 
-Remove a flow from the caller's library (does not delete the original). `204`.
+Remove a flow from the caller's library, ORIGIN-AWARE, returning what happened so the
+response is never a no-op "success" → `{ workflowId, origin, action }`:
+
+- `origin: "own"`, `action: "deleted"` — the caller owns the workflow (including imported/
+  forked copies): it is soft-deleted (and its listing unlisted, per the publication
+  invariant).
+- `origin: "added"`, `action: "unlinked"` — a reference to another user's flow: the library
+  entry is unlinked (the original is untouched).
+- `origin: "shared"`, `action: "revoked"` — a flow shared with the caller: the caller's own
+  access is revoked.
+
+`404 LIBRARY_ENTRY_NOT_FOUND` when the flow is in none of these.
 
 ### POST /api/marketplace/listings/:id/reviews
 

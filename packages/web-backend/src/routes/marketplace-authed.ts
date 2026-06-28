@@ -12,7 +12,7 @@
  *   GET    /me/library?filter=…                 the caller's library (all|official|added|mine|shared)
  *   POST   /listings/:id/install               adopt as reference → { startRef }
  *   POST   /listings/:id/fork                  fork an editable copy → { workflowId, slug }
- *   DELETE /library/:workflowId                remove a flow from the library → 204
+ *   DELETE /library/:workflowId                remove a flow from the library (origin-aware) → { origin, action }
  *   POST   /listings/:id/reviews               rate/review → { review, ratingAvg, ratingCount }
  *   DELETE /listings/:id/reviews/me            remove own review → 204
  *   GET    /listings/:id/entitlement           { hasAccess, reason }
@@ -206,12 +206,14 @@ router.post(
   }),
 );
 
-// DELETE /api/marketplace/library/:workflowId — remove from library
+// DELETE /api/marketplace/library/:workflowId — remove from library (origin-aware)
 router.delete(
   "/library/:workflowId",
   asyncHandler(async (req: Request, res: Response) => {
-    await getMarketplaceService().remove(userId(req), req.params.workflowId);
-    res.status(204).end();
+    const result = await getMarketplaceService().remove(userId(req), req.params.workflowId);
+    // Report what actually happened (own→deleted, added→unlinked, shared→revoked) so the
+    // response is honest rather than a blanket 204 that may have removed nothing (D-D).
+    ok(res, { workflowId: req.params.workflowId, ...result });
   }),
 );
 

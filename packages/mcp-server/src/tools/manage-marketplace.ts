@@ -6,7 +6,8 @@
  * - search:    find public flows (q/category/tags/sort/page) → store cards
  * - info:      full detail for one flow by `ref` ("handle/slug") (records a view)
  * - add:       adopt a flow into the library (reference, or `fork:true` editable copy)
- * - remove:    un-adopt a flow from the library (does not delete the original)
+ * - remove:    origin-aware removal — un-adopt an added reference (original untouched),
+ *              but DELETE a flow you own (e.g. your own published listing)
  * - publish:   make one of your own workflows public (listed)
  * - unpublish: make your listed workflow private again
  * - rate:      rate/review a flow (1-5 stars; not your own)
@@ -177,8 +178,11 @@ export async function manageMarketplace(
       case "remove": {
         if (!params.ref) return { success: false, error: ERRORS.missing_required_field("ref") };
         const detail = await service.getDetailByReference(params.ref, userId);
-        await service.remove(userId, detail.workflowId);
-        return { success: true, data: { removed: true, ref: detail.startRef } };
+        const removal = await service.remove(userId, detail.workflowId);
+        return {
+          success: true,
+          data: { removed: true, ref: detail.startRef, ...removal },
+        };
       }
 
       case "publish": {

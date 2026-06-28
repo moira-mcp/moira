@@ -279,6 +279,7 @@ export interface MarketplaceServiceOptions {
 export class MarketplaceService {
   private readonly isMarketplaceEnabled: () => boolean;
   private readonly isPaidEnabled: () => boolean;
+  private ownedWorkflowRemover?: (workflowId: string, userId: string) => Promise<boolean>;
 
   constructor(
     private listingRepo: MarketplaceListingRepository,
@@ -292,6 +293,16 @@ export class MarketplaceService {
   ) {
     this.isMarketplaceEnabled = options.isMarketplaceEnabled ?? defaultIsMarketplaceEnabled;
     this.isPaidEnabled = options.isPaidEnabled ?? (() => false);
+  }
+
+  /**
+   * Set the remover used to delete an OWNED workflow when it is removed from the library
+   * (wired to WorkflowService.softDelete so the deletion is audited and cascades the
+   * listing-unlist per the publication invariant). When unset, {@link remove} falls back
+   * to the repository soft-delete + an explicit listing-unlist.
+   */
+  setOwnedWorkflowRemover(remover: (workflowId: string, userId: string) => Promise<boolean>): void {
+    this.ownedWorkflowRemover = remover;
   }
 
   // ===== Publish / Unpublish =====
@@ -1031,13 +1042,56 @@ export class MarketplaceService {
     return entry;
   }
 
-  /** Remove a flow from the user's library. */
-  async remove(userId: string, workflowId: string): Promise<void> {
+  /**
+   * Remove a flow from the user's library, ORIGIN-AWARE so the response never lies
+   * (defect D-D — previously this only unlinked the library entry, a no-op for owned/
+   * imported/forked flows because `getLibrary` re-surfaces owned rows):
+   *
+   * - **own** (the user owns the workflow row — includes imported/forked copies):
+   *   soft-delete the workflow (audited + cascades the listing-unlist) and drop any
+   *   library entry. The flow is actually gone from the library.
+   * - **added** (a reference to someone else's flow): unlink the library entry.
+   * - **shared** (granted via invite/access): revoke the user's own access.
+   *
+   * Returns what happened so the caller can report it honestly. Throws
+   * {@link LibraryEntryNotFoundError} when the flow is in none of these.
+   */
+  async remove(
+    userId: string,
+    workflowId: string,
+  ): Promise<{ origin: "own" | "added" | "shared"; action: "deleted" | "unlinked" | "revoked" }> {
     this.assertEnabled();
-    const removed = await this.libraryRepo.remove(userId, workflowId);
-    if (!removed) {
-      throw new LibraryEntryNotFoundError(workflowId);
+
+    // Owned (incl. imported/forked copies) → delete it for real.
+    const ownership = await this.workflowRepo.getOwnership(workflowId);
+    if (ownership.exists && ownership.ownerId === userId) {
+      const deleted = this.ownedWorkflowRemover
+        ? await this.ownedWorkflowRemover(workflowId, userId)
+        : await this.workflowRepo.softDelete(workflowId, userId);
+      if (!deleted) {
+        throw new LibraryEntryNotFoundError(workflowId);
+      }
+      // Keep the publication invariant even if the remover did not cascade (idempotent),
+      // and drop any library entry that pointed at the owned copy.
+      await this.listingRepo.unlistForWorkflow(workflowId);
+      await this.libraryRepo.remove(userId, workflowId);
+      return { origin: "own", action: "deleted" };
     }
+
+    // Added reference → unlink the library entry.
+    const entry = await this.libraryRepo.getByUserAndWorkflow(userId, workflowId);
+    if (entry) {
+      await this.libraryRepo.remove(userId, workflowId);
+      return { origin: "added", action: "unlinked" };
+    }
+
+    // Shared with the user → revoke the user's own access.
+    if (await this.sharingRepo.hasAccess(workflowId, userId)) {
+      await this.sharingRepo.revokeAccess(workflowId, userId);
+      return { origin: "shared", action: "revoked" };
+    }
+
+    throw new LibraryEntryNotFoundError(workflowId);
   }
 
   /**

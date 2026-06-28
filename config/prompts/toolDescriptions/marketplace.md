@@ -7,7 +7,7 @@ Actions (pass `action`):
 - search — find public flows. Params: `q` (text), `category`, `tags` (one tag), `sort` (recent|rating|installs|trending), `page`. Returns store cards with a `ref` ("handle/slug").
 - info — full detail for one flow. Params: `ref`. Returns description, ratings, author, node count, entitlement.
 - add — adopt a flow into your library. Params: `ref`, `fork` (true = editable owned copy; default = live reference that auto-updates). After add, the flow appears in `list()` and you can `start(ref)`.
-- remove — un-adopt a flow from your library (does not delete the original). Params: `ref`.
+- remove — remove a flow from your library. ORIGIN-AWARE: an _added_ reference is un-adopted (the original is untouched), but a flow you _own_ (e.g. your own published listing) is DELETED (and unlisted if it was published). Use with care on your own flows. Params: `ref`.
 - publish — make one of your own workflows public (listed in the marketplace). Params: `workflowId`, `category`, `tags` (comma-separated), `summary`.
 - unpublish — make your listed workflow private again. Params: `workflowId`.
 - rate — rate/review a flow (you cannot rate your own). Params: `ref`, `stars` (1-5), `review`.

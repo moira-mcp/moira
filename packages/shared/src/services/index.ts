@@ -568,6 +568,11 @@ export function getMarketplaceService(): MarketplaceService {
       userRepo,
       { isPaidEnabled: () => getFeatureResolver().isEnabled("paidWorkflows") },
     );
+    // Removing an OWNED flow from the library deletes it via WorkflowService.softDelete
+    // (audited + cascades the listing-unlist per the publication invariant).
+    marketplaceServiceInstance.setOwnedWorkflowRemover((workflowId, uid) =>
+      getWorkflowService().softDelete(workflowId, uid),
+    );
   }
   return marketplaceServiceInstance;
 }
