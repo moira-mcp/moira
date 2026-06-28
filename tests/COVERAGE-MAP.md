@@ -539,6 +539,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **mcp-tools** (1 file)
 
 - `tests/mcp-tools/marketplace-tool.test.ts` — 8 tests 🟢 (agent path over real MCP: publish produces handle/slug ref; search finds the published flow; info accessible detail; add → appears in list(source:added) as origin 'added'; start runs the added flow by ref; rate records a rating; author cannot rate own flow); list(source:official) returns the seeded official base flows (origin 'added') startable by moira/<slug> id
+- `tests/mcp-tools/marketplace-token-transport.test.ts` — 4 tests 🟢 (Step 10, D-O3 — the marketplace surface over the headless persistent-token transport: a `moira_…` API token is created via REST and used as the `/mcp` Bearer (no OAuth); `tools/list` exposes the full 12-tool set incl. `marketplace` (deployment-lag guard O2); `marketplace` search+info, `add`, and the `list` source filter (added/official/mine) work over the token transport with asserted responses; the author installing their own listing over MCP is rejected — D-N5 self-install guard end-to-end)
 
 **e2e** (8 files)
 

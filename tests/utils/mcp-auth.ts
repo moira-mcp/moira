@@ -617,6 +617,50 @@ export async function createAuthenticatedMCPClient(
 }
 
 /**
+ * Create a persistent API token (`moira_…`) for a user via the REST API — the headless
+ * dev/test token path to `/mcp` (no interactive OAuth). Signs the user in to obtain the
+ * session cookie the token-create endpoint requires.
+ */
+export async function createApiToken(
+  baseUrl: string,
+  email: string,
+  password: string,
+  name = "mcp-test-token",
+  expiresIn = "90d",
+): Promise<{ token: string; id: string }> {
+  const sessionCookie = await signInUser(baseUrl, email, password);
+  const res = await fetch(`${baseUrl}/api/tokens`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: formatSessionCookie(baseUrl, sessionCookie),
+    },
+    body: JSON.stringify({ name, expiresIn }),
+  });
+  if (!res.ok) {
+    throw new Error(`Create API token failed: ${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as { data: { token: string; id: string } };
+  return data.data;
+}
+
+/**
+ * Connect an MCP client to `/mcp` using a persistent API token as the Bearer credential
+ * (the headless token transport — no OAuth dance). Returns the client + a cleanup.
+ */
+export async function createPersistentTokenMCPClient(
+  token: string,
+): Promise<{ client: Client; transport: StreamableHTTPClientTransport; cleanup: () => Promise<void> }> {
+  const fetchUrl = getTestFetchUrl();
+  const client = new Client({ name: "pat-test-client", version: "1.0.0" }, { capabilities: {} });
+  const transport = new StreamableHTTPClientTransport(new URL(`${fetchUrl}/mcp`), {
+    requestInit: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  await client.connect(transport);
+  return { client, transport, cleanup: async () => client.close() };
+}
+
+/**
  * Helper to call MCP tool and parse JSON result
  *
  * @param client - Authenticated MCP client
