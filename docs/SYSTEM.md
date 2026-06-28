@@ -95,11 +95,13 @@ GET  /health  // Server health status
 // affordances reusing the existing backend (no duplication): a hydration-wired "Add to
 // library" (adopt → install) on cards + the detail's MCP-first "How to use it" panel, a
 // JS-free "Download" link (public export-by-reference), and the header import. /explore
-// accepts an "Official" filter (?official=true → owner-based official set) shown as
-// crawlable filter chips. Crawlable HTML + OpenGraph + JSON-LD (SoftwareApplication /
-// ItemList / BreadcrumbList); 404 HTML when the marketplace feature is disabled (so the
-// adopt/import affordances never render in that mode).
-GET  /explore             // gallery of listed flows (?official=true filter; ?search, ?sort)
+// shows partition-aware filter chips — All / Official / Community (?official=true →
+// owner-based official set; ?community=true → its complement; official ⊎ community = all)
+// — each with a count from getGalleryFacets, and a no-results search shows search-specific
+// copy + a clear-filters link (vs the catalog-empty copy). Crawlable HTML + OpenGraph +
+// JSON-LD (SoftwareApplication / ItemList / BreadcrumbList); 404 HTML when the marketplace
+// feature is disabled (so the adopt/import affordances never render in that mode).
+GET  /explore             // gallery of listed flows (?official=true | ?community=true; ?search, ?sort)
 GET  /w/:handle/:slug     // flow detail (JSON-LD SoftwareApplication; adopt/download/run)
 GET  /sitemap.xml         // dynamic sitemap (/explore + every /w/{handle}/{slug})
 

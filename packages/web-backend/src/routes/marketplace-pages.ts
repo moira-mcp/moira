@@ -52,6 +52,7 @@ import {
   type SeoContext,
   type ViewerContext,
   type ExploreFilter,
+  type GalleryFacets,
 } from "@mcp-moira/marketplace-render";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
 import { auth } from "../auth.js";
@@ -122,6 +123,8 @@ interface HydrationIsland {
   seo: SeoContext;
   /** The active gallery filter (explore only) so the chips hydrate with the same state. */
   filter?: ExploreFilter;
+  /** Per-partition chip counts (explore only) so the chips hydrate identically. */
+  facets?: GalleryFacets;
 }
 
 /** Build the inline bootstrap `<script>`s (escaped island + deferred hydration bundle). */
@@ -190,22 +193,37 @@ const GALLERY_SORTS: GallerySortOption[] = ["recent", "rating", "installs", "tre
 
 /**
  * Parse the supported `/explore` query filters (minimal, mirroring marketplace-public):
- * `?official=true` (the canonical Official set), `?search=` and `?sort=`. The active
- * `official` flag is also returned as an {@link ExploreFilter} for the chips' state.
+ * the `?official=true` / `?community=true` partition (mutually exclusive; official wins if
+ * both are set), `?search=` and `?sort=`. The active partition + search are also returned
+ * as an {@link ExploreFilter} for the chips' state and the no-results copy.
  */
 function parseExploreQuery(req: Request): {
-  query: { official?: boolean; search?: string; sort: GallerySortOption; limit: number };
+  query: {
+    official?: boolean;
+    community?: boolean;
+    search?: string;
+    sort: GallerySortOption;
+    limit: number;
+  };
   filter: ExploreFilter;
 } {
   const q = req.query;
   const official = q.official === "true";
-  const search = typeof q.search === "string" ? q.search : undefined;
+  // official takes precedence so the two partitions never combine into an empty set.
+  const community = !official && q.community === "true";
+  const search = typeof q.search === "string" && q.search.trim() !== "" ? q.search : undefined;
   const sort = GALLERY_SORTS.includes(q.sort as GallerySortOption)
     ? (q.sort as GallerySortOption)
     : "recent";
   return {
-    query: { official: official ? true : undefined, search, sort, limit: 100 },
-    filter: { official },
+    query: {
+      official: official ? true : undefined,
+      community: community ? true : undefined,
+      search,
+      sort,
+      limit: 100,
+    },
+    filter: { official, community, search },
   };
 }
 
@@ -218,11 +236,15 @@ router.get("/explore", apiLimiter, async (req: Request, res: Response) => {
     // fast-path. An invalid/expired session degrades to anonymous.
     const viewer = await resolveViewer(req);
     const { query, filter } = parseExploreQuery(req);
-    const page = await getMarketplaceService().getGalleryAnnotated(query, viewer?.userId ?? null);
+    const service = getMarketplaceService();
+    const page = await service.getGalleryAnnotated(query, viewer?.userId ?? null);
+    const facets = await service.getGalleryFacets(query);
     const gallery = toGalleryView(page);
-    const { html } = renderExploreToHtml(gallery, viewer, seo, filter);
+    const { html } = renderExploreToHtml(gallery, viewer, seo, filter, facets);
     applyCacheHeaders(res, viewer);
-    res.type("html").send(withHydration(html, { page: "explore", gallery, viewer, seo, filter }));
+    res
+      .type("html")
+      .send(withHydration(html, { page: "explore", gallery, viewer, seo, filter, facets }));
   } catch (error) {
     if (error instanceof MarketplaceDisabledError) {
       res

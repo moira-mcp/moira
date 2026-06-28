@@ -17,7 +17,13 @@ export function toMarketplaceLocale(locale: string | null | undefined): Marketpl
 }
 
 /** Countable nouns rendered with a leading count in the marketplace UI. */
-export type MarketplaceCountNoun = "installs" | "steps" | "ratings" | "reviews" | "published";
+export type MarketplaceCountNoun =
+  | "installs"
+  | "steps"
+  | "ratings"
+  | "reviews"
+  | "published"
+  | "results";
 
 /** Correct plural word forms per locale for each countable noun. */
 export const MARKETPLACE_COUNTABLE_NOUNS: Record<
@@ -43,6 +49,10 @@ export const MARKETPLACE_COUNTABLE_NOUNS: Record<
   published: {
     en: { one: "published", other: "published" },
     ru: { one: "опубликован", few: "опубликовано", many: "опубликовано", other: "опубликовано" },
+  },
+  results: {
+    en: { one: "result", other: "results" },
+    ru: { one: "результат", few: "результата", many: "результатов", other: "результата" },
   },
 };
 

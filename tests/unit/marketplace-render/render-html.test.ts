@@ -396,3 +396,94 @@ describe("ListingCard adopt + download affordances", () => {
     expect(html).toContain('data-mp="download-link"');
   });
 });
+
+describe("ExploreGallery empty-state (Step 9, D-N11)", () => {
+  it("a truly empty catalog shows the catalog-empty copy, not the search copy", () => {
+    const empty: GalleryView = { items: [], total: 0 };
+    const html = renderExploreToHtml(empty, ANON, seo("en")).html;
+    expect(html).toContain('data-mp="empty"');
+    expect(html).toContain("No published workflows yet.");
+    expect(html).not.toContain('data-mp="empty-search"');
+    expect(html).not.toContain('data-mp="clear-search"');
+    // No active filter → the count uses the "published" wording, not "results".
+    expect(html).toMatch(/data-mp="total"[^>]*>0 published</);
+  });
+
+  it("a no-results SEARCH shows search-specific copy + a clear link, not 'no published'", () => {
+    const empty: GalleryView = { items: [], total: 0 };
+    const html = renderExploreToHtml(empty, ANON, seo("en"), {
+      official: false,
+      search: "zzzznomatch",
+    }).html;
+    expect(html).toContain('data-mp="empty-search"');
+    expect(html).toContain("No workflows match your filters.");
+    expect(html).not.toContain("No published workflows yet.");
+    // The clear link drops the search back to the unfiltered catalog.
+    expect(html).toContain('data-mp="clear-search"');
+    expect(html).toContain(`href="${BASE_URL}/explore"`);
+    // Filtered → the count uses the "results" wording (0 results, not "0 published").
+    expect(html).toMatch(/data-mp="total"[^>]*>0 results</);
+  });
+
+  it("a no-results OFFICIAL filter (no search) also shows the no-match state + clear link", () => {
+    const empty: GalleryView = { items: [], total: 0 };
+    const html = renderExploreToHtml(empty, ANON, seo("en"), { official: true }).html;
+    expect(html).toContain('data-mp="empty-search"');
+    expect(html).toContain('data-mp="clear-search"');
+    expect(html).toMatch(/data-mp="total"[^>]*>0 results</);
+  });
+
+  it("RU: filtered count uses the 'результат' declensions", () => {
+    const five: GalleryView = { items: [], total: 0 };
+    const ru = renderExploreToHtml(five, ANON, seo("ru"), { official: true }).html;
+    expect(ru).toMatch(/data-mp="total"[^>]*>0 результат/);
+    expect(ru).toContain("Нет воркфлоу по вашему запросу.");
+  });
+});
+
+describe("ExploreGallery partition-aware chips (Step 9, D-N8)", () => {
+  const gallery: GalleryView = { items: [galleryCard()], total: 1 };
+
+  it("renders three partition chips (All / Official / Community) with their facet counts", () => {
+    const html = renderExploreToHtml(gallery, ANON, seo("en"), { official: false }, {
+      all: 12,
+      official: 9,
+      community: 3,
+    }).html;
+    expect(html).toContain('data-mp="chip-all"');
+    expect(html).toContain('data-mp="chip-official"');
+    expect(html).toContain('data-mp="chip-community"');
+    // Each chip carries its count (All=12, Official=9, Community=3 → partition sums).
+    expect(html).toMatch(/data-mp="chip-all"[\s\S]*?data-mp="chip-count">12</);
+    expect(html).toMatch(/data-mp="chip-official"[\s\S]*?data-mp="chip-count">9</);
+    expect(html).toMatch(/data-mp="chip-community"[\s\S]*?data-mp="chip-count">3</);
+    // Community chip is a crawlable link to the community partition.
+    expect(html).toContain(`href="${BASE_URL}/explore?community=true"`);
+  });
+
+  it("marks the Community chip active when the community filter is set", () => {
+    const html = renderExploreToHtml(gallery, ANON, seo("en"), { official: false, community: true })
+      .html;
+    expect(html).toMatch(/data-mp="chip-community"[^>]*aria-pressed="true"/);
+    expect(html).toMatch(/data-mp="chip-all"[^>]*aria-pressed="false"/);
+    expect(html).toMatch(/data-mp="chip-official"[^>]*aria-pressed="false"/);
+  });
+
+  it("chip links preserve the active search term across partitions", () => {
+    const html = renderExploreToHtml(gallery, ANON, seo("en"), {
+      official: false,
+      search: "research",
+    }).html;
+    // Switching to Official/Community keeps ?search; React escapes & → &amp; in attrs.
+    expect(html).toContain(`href="${BASE_URL}/explore?official=true&amp;search=research"`);
+    expect(html).toContain(`href="${BASE_URL}/explore?community=true&amp;search=research"`);
+    // The All chip keeps the search too.
+    expect(html).toContain(`href="${BASE_URL}/explore?search=research"`);
+  });
+
+  it("omits chip counts when no facets are provided (counts are optional)", () => {
+    const html = renderExploreToHtml(gallery, ANON, seo("en"), { official: false }).html;
+    expect(html).toContain('data-mp="chip-all"');
+    expect(html).not.toContain('data-mp="chip-count"');
+  });
+});

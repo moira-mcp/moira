@@ -29,6 +29,7 @@ import {
   type ViewerContext,
   type SeoContext,
   type ExploreFilter,
+  type GalleryFacets,
 } from "@mcp-moira/marketplace-render/hydrate";
 import { signOut } from "./auth/better-auth-client";
 import { apiClient } from "./services/api-client";
@@ -42,6 +43,8 @@ interface HydrationIsland {
   seo: SeoContext;
   /** The active gallery filter (explore page) so chips hydrate with the same state. */
   filter?: ExploreFilter;
+  /** Per-partition chip counts (explore page) so chips hydrate identically. */
+  facets?: GalleryFacets;
 }
 
 /**
@@ -79,6 +82,7 @@ function buildTree(island: HydrationIsland): React.ReactElement | null {
         viewer={island.viewer}
         baseUrl={baseUrl}
         filter={island.filter}
+        facets={island.facets}
         onAdopt={adoptListing}
       />
     );

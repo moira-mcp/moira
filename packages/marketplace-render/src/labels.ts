@@ -21,9 +21,14 @@ interface ChromeStrings {
   exploreTitle: string;
   exploreSubtitle: string;
   exploreEmpty: string;
-  /** Gallery filter chips: the unfiltered set vs the Official-only set. */
+  /** No-results copy when a search/filter is active (distinct from an empty catalog). */
+  exploreNoMatch: string;
+  /** Link that clears the active search/filters back to the full catalog. */
+  clearSearch: string;
+  /** Gallery filter chips: the unfiltered set, the Official set, the Community set. */
   filterAll: string;
   filterOfficial: string;
+  filterCommunity: string;
   backToExplore: string;
   unrated: string;
   verified: string;
@@ -75,8 +80,11 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     exploreTitle: "Explore workflows",
     exploreSubtitle: "Ready-to-run agent processes you can adopt and run in your MCP client.",
     exploreEmpty: "No published workflows yet.",
+    exploreNoMatch: "No workflows match your filters.",
+    clearSearch: "Clear filters",
     filterAll: "All",
     filterOfficial: "Official",
+    filterCommunity: "Community",
     backToExplore: "Explore",
     unrated: "Unrated",
     verified: "Verified",
@@ -113,8 +121,11 @@ const CHROME: Record<MarketplaceLocale, ChromeStrings> = {
     exploreTitle: "Каталог воркфлоу",
     exploreSubtitle: "Готовые агентные процессы, которые можно добавить и запустить в MCP-клиенте.",
     exploreEmpty: "Пока нет опубликованных воркфлоу.",
+    exploreNoMatch: "Нет воркфлоу по вашему запросу.",
+    clearSearch: "Сбросить фильтры",
     filterAll: "Все",
     filterOfficial: "Официальные",
+    filterCommunity: "Сообщество",
     backToExplore: "Каталог",
     unrated: "Без оценок",
     verified: "Проверено",
@@ -167,6 +178,8 @@ export interface Labels {
   ratings(count: number): string;
   /** `"<n> published"` correctly pluralized for the locale (gallery total). */
   published(count: number): string;
+  /** `"<n> results"` correctly pluralized for the locale (filtered/search count). */
+  results(count: number): string;
 }
 
 /** Build the locale-bound label bundle for a marketplace locale. */
@@ -180,5 +193,6 @@ export function makeLabels(locale: MarketplaceLocale): Labels {
     steps: (count) => formatMarketplaceCount(locale, "steps", count),
     ratings: (count) => formatMarketplaceCount(locale, "ratings", count),
     published: (count) => formatMarketplaceCount(locale, "published", count),
+    results: (count) => formatMarketplaceCount(locale, "results", count),
   };
 }

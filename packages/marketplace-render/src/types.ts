@@ -101,6 +101,22 @@ export interface SeoContext {
  */
 export interface ExploreFilter {
   official: boolean;
+  /** The COMMUNITY partition (non-official). Mutually exclusive with `official`. */
+  community?: boolean;
+  /** The active free-text search, threaded so the no-results state and chip links know it. */
+  search?: string;
+}
+
+/**
+ * Per-partition gallery counts for the storefront filter chips, respecting the active
+ * search but NOT the official/community selection. `official` + `community` = `all`, so
+ * the chips show a meaningful, non-redundant partition (and the correct total/filtered
+ * count). Anonymous and signed-in viewers see the same facets (public data).
+ */
+export interface GalleryFacets {
+  all: number;
+  official: number;
+  community: number;
 }
 
 /** The result of a render call: a complete HTML document string. */

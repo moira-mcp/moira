@@ -144,6 +144,25 @@ code {
   background: var(--primary); color: var(--primary-foreground); border-color: transparent;
 }
 .mp-chip-active:hover { color: var(--primary-foreground); filter: brightness(1.06); }
+.mp-chip-count {
+  margin-left: 7px; font-size: 0.72rem; font-weight: 700; line-height: 1;
+  padding: 2px 6px; border-radius: 999px;
+  background: color-mix(in oklab, var(--muted-foreground) 16%, transparent); color: inherit;
+}
+.mp-chip-active .mp-chip-count { background: color-mix(in oklab, var(--primary-foreground) 24%, transparent); }
+
+/* ---- Empty / no-results state ---- */
+.mp-empty {
+  color: var(--muted-foreground); font-size: 0.95rem;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+}
+.mp-empty-text { margin: 0; }
+.mp-empty-clear {
+  display: inline-flex; align-items: center; font-size: 0.85rem; font-weight: 600;
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card); color: var(--foreground);
+}
+.mp-empty-clear:hover { text-decoration: none; border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); color: var(--primary); }
 
 /* ---- Gallery grid ---- */
 .mp-card-list {
@@ -161,7 +180,7 @@ code {
   box-shadow: 0 10px 30px -16px color-mix(in oklab, var(--primary) 50%, transparent);
   transform: translateY(-3px);
 }
-.mp-card-title { font-size: 1.12rem; font-weight: 650; margin: 0; line-height: 1.3; letter-spacing: -0.01em; }
+.mp-card-title { font-size: 1.12rem; font-weight: 650; margin: 0; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .mp-card-title a { color: var(--foreground); }
 .mp-card-title a:hover { color: var(--primary); text-decoration: none; }
 .mp-card-summary {
@@ -248,6 +267,10 @@ code {
   .mp-account-handle { display: none; }
   .mp-header h1 { font-size: 1.45rem; }
   .mp-detail-title { font-size: 1.55rem; }
+  /* Single column with no 320px floor so cards never force horizontal scroll on a
+     narrow phone, and the in-card actions stay reachable (D-N10). */
+  .mp-card-list { grid-template-columns: 1fr; }
+  .mp-card { padding: 18px 16px; }
 }
 `;
 

@@ -7,7 +7,7 @@
  * workflow was unpublished or deleted must not surface.
  */
 
-import { eq, and, or, isNull, desc, sql, like, inArray, count } from "drizzle-orm";
+import { eq, and, or, isNull, desc, sql, like, inArray, notInArray, count } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { marketplaceListing, workflow, user } from "../schema.js";
 import type * as schema from "../schema.js";
@@ -49,6 +49,12 @@ export interface GalleryFilter {
    * trust badge.
    */
   official?: boolean;
+  /**
+   * Restrict to the COMMUNITY set: listings NOT owned by an official account — the
+   * complement of {@link official}. `official` and `community` partition the gallery
+   * (official ⊎ community = all), powering the storefront's partition-aware chips.
+   */
+  community?: boolean;
   /** Sort order (default: recent). Note: "trending" is computed in the service. */
   sort?: GallerySort;
   limit?: number;
@@ -492,6 +498,9 @@ function galleryConditions(filter: GalleryFilter = {}) {
   }
   if (filter.official === true) {
     conditions.push(inArray(marketplaceListing.publishedBy, [...OFFICIAL_OWNER_IDS]));
+  }
+  if (filter.community === true) {
+    conditions.push(notInArray(marketplaceListing.publishedBy, [...OFFICIAL_OWNER_IDS]));
   }
   if (filter.category) {
     conditions.push(eq(marketplaceListing.category, filter.category));

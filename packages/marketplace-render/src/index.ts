@@ -26,6 +26,7 @@ export type {
   ViewerContext,
   SeoContext,
   ExploreFilter,
+  GalleryFacets,
   RenderResult,
 } from "./types.js";
 

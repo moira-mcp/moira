@@ -20,6 +20,7 @@ import type {
   SeoContext,
   RenderResult,
   ExploreFilter,
+  GalleryFacets,
 } from "../types.js";
 
 /** Render the gallery page to a full HTML document. */
@@ -28,12 +29,20 @@ export function renderExploreToHtml(
   viewer: ViewerContext | null,
   seo: SeoContext,
   filter?: ExploreFilter,
+  facets?: GalleryFacets,
 ): RenderResult {
   const labels = makeLabels(seo.locale);
   const canonical = `${seo.baseUrl}/explore`;
 
   const bodyHtml = renderToString(
-    React.createElement(ExploreGallery, { gallery, labels, viewer, baseUrl: seo.baseUrl, filter }),
+    React.createElement(ExploreGallery, {
+      gallery,
+      labels,
+      viewer,
+      baseUrl: seo.baseUrl,
+      filter,
+      facets,
+    }),
   );
   const chrome = renderChrome(labels, viewer, seo, seo.currentPath ?? "/explore");
 

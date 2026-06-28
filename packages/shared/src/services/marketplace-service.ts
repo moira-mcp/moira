@@ -139,9 +139,25 @@ export interface GalleryQuery {
    * notion, independent of the `verified` trust badge.
    */
   official?: boolean;
+  /**
+   * Restrict to the COMMUNITY set — listings NOT owned by an official account (the
+   * complement of {@link official}). Together they partition the gallery.
+   */
+  community?: boolean;
   sort?: GallerySortOption;
   limit?: number;
   offset?: number;
+}
+
+/**
+ * Per-partition gallery counts for the storefront's filter chips, respecting the active
+ * search/category/tag (but NOT the official/community selection itself): `all` is every
+ * matching listing, `official`/`community` are its disjoint, covering partitions.
+ */
+export interface GalleryFacets {
+  all: number;
+  official: number;
+  community: number;
 }
 
 /** Outcome of the idempotent official-flow publish routine. */
@@ -462,6 +478,7 @@ export class MarketplaceService {
       tag: query.tag,
       verified: query.verified,
       official: query.official,
+      community: query.community,
     };
     const sort: GallerySortOption = query.sort ?? "recent";
 
@@ -490,6 +507,26 @@ export class MarketplaceService {
     const items = await this.listingRepo.listGallery({ ...filter, sort, limit, offset });
     const total = await this.listingRepo.countGallery(filter);
     return { items, total, limit, offset, sort };
+  }
+
+  /**
+   * Partition counts for the storefront filter chips. Counts respect the active
+   * search/category/tag/verified filters but NOT the official/community selection, so the
+   * chips can show how the matching set splits into official vs community (a meaningful,
+   * non-redundant partition). `community = all - official` (official ⊎ community = all).
+   */
+  async getGalleryFacets(query: GalleryQuery = {}): Promise<GalleryFacets> {
+    this.assertEnabled();
+    const category = query.category ? normalizeMarketplaceCategory(query.category) : undefined;
+    const base: GalleryFilter = {
+      search: query.search,
+      category,
+      tag: query.tag,
+      verified: query.verified,
+    };
+    const all = await this.listingRepo.countGallery(base);
+    const official = await this.listingRepo.countGallery({ ...base, official: true });
+    return { all, official, community: all - official };
   }
 
   /** The fixed category set (id + label), for the public categories endpoint. */
@@ -1404,6 +1441,7 @@ function clamp(n: number, min: number, max: number): number {
 function matchesGalleryFilter(item: GalleryItem, filter: GalleryFilter): boolean {
   if (filter.verified === true && !item.verified) return false;
   if (filter.official === true && !isOfficialOwner(item.publishedBy)) return false;
+  if (filter.community === true && isOfficialOwner(item.publishedBy)) return false;
   if (filter.category && item.category !== filter.category) return false;
   if (filter.search) {
     const q = filter.search.toLowerCase();

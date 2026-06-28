@@ -24,16 +24,31 @@ export function langSwitchHref(currentPath: string, target: MarketplaceLocale): 
   return `${currentPath}?lang=${target}`;
 }
 
+/** The active gallery partition/search for building an `/explore` href. */
+export interface ExploreHrefParams {
+  official?: boolean;
+  community?: boolean;
+  /** Preserve the active search term across chip navigation. */
+  search?: string;
+}
+
 /**
- * The `/explore` gallery href for a given filter + locale. Combines the `?official=true`
- * filter (omitted for the "All" view) with the language query (omitted for the default
- * `en`) so each chip is a crawlable, SSR-navigable URL that preserves the active language.
+ * The `/explore` gallery href for a given partition/search + locale. Combines the
+ * `?official=true` / `?community=true` partition (omitted for the "All" view) and the
+ * active `?search=` with the language query (omitted for the default `en`) so each chip is
+ * a crawlable, SSR-navigable URL that preserves both the search and the active language.
  */
-export function exploreHref(baseUrl: string, locale: MarketplaceLocale, official: boolean): string {
-  const params: string[] = [];
-  if (official) params.push("official=true");
-  if (locale !== "en") params.push(`lang=${locale}`);
-  const query = params.length > 0 ? `?${params.join("&")}` : "";
+export function exploreHref(
+  baseUrl: string,
+  locale: MarketplaceLocale,
+  params: ExploreHrefParams = {},
+): string {
+  const parts: string[] = [];
+  if (params.official) parts.push("official=true");
+  if (params.community) parts.push("community=true");
+  if (params.search) parts.push(`search=${encodeURIComponent(params.search)}`);
+  if (locale !== "en") parts.push(`lang=${locale}`);
+  const query = parts.length > 0 ? `?${parts.join("&")}` : "";
   return `${baseUrl}/explore${query}`;
 }
 
