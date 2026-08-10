@@ -2,7 +2,7 @@
   "slug": "simple-linear-test",
   "metadata": {
     "name": "simple-linear-test",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Simple linear flow test - no conditionals"
   },
   "nodes": [
@@ -77,8 +77,8 @@
       "type": "end",
       "id": "end",
       "finalOutput": [
-        "name",
-        "greeting"
+        "step1.name",
+        "step2.greeting"
       ]
     }
   ]

@@ -45,9 +45,8 @@ describe("PathResolver", () => {
       ]);
     });
 
-    test("should handle empty property names gracefully", () => {
-      expect(() => PathResolver.parseVariablePath("")).not.toThrow();
-      expect(PathResolver.parseVariablePath("")).toEqual([]);
+    test("should reject an empty path", () => {
+      expect(() => PathResolver.parseVariablePath("")).toThrow("Path cannot be empty");
     });
 
     test("should throw error for unclosed array index", () => {
@@ -59,6 +58,20 @@ describe("PathResolver", () => {
         'Invalid array index "abc"',
       );
       expect(() => PathResolver.parseVariablePath("items[-1]")).toThrow('Invalid array index "-1"');
+    });
+
+    test.each([
+      ".user",
+      "user.",
+      "user..name",
+      "items.[0]",
+      "items[0]name",
+      "items[01]",
+      "__proto__.polluted",
+      "safe.constructor.value",
+      "safe.prototype.value",
+    ])("should reject unsafe or ambiguous path %s", (path) => {
+      expect(() => PathResolver.parseVariablePath(path)).toThrow();
     });
   });
 
@@ -183,6 +196,13 @@ describe("PathResolver", () => {
       expect(() => PathResolver.setVariablePath(context, "items[5].value", "value")).toThrow(
         "Array index 5 out of bounds",
       );
+    });
+
+    test("should not mutate object prototypes", () => {
+      expect(() => PathResolver.setVariablePath(context, "__proto__.polluted", true)).toThrow(
+        "Forbidden property segment",
+      );
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     });
   });
 

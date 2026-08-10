@@ -222,7 +222,7 @@ describe("GraphValidator Error Messages", () => {
             graphId: "some-workflow-id",
             inputMapping: {},
             outputMapping: {},
-            connections: { success: "end" },
+            connections: { success: "end", error: "end" },
           },
           { id: "end", type: "end" },
         ],

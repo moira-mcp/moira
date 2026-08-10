@@ -5,7 +5,7 @@
   "id": "64773545-f970-409c-8779-f976f6188f0c",
   "metadata": {
     "name": "Architecture Design Flow",
-    "version": "1.4.1",
+    "version": "1.4.3",
     "description": "Structured architecture design and documentation process supporting two scenarios: new project design (requirements → domain → C4 diagrams) and existing project analysis (scan → reverse-engineer → gap analysis → improvements). Both converge into shared stages: ADRs, quality attributes, crosscutting concerns, documentation assembly with subagent reviews and fix cycles. Produces complete docs/architecture/ package with C4 diagrams, bounded context maps, ADRs, and quality attribute scenarios."
   },
   "nodes": [
@@ -921,8 +921,7 @@
     },
     "scenario_type": {
       "type": "string",
-      "description": "Set to \"new\" or \"existing\" during gather-context. Controls flow branching",
-      "default": "",
+      "description": "Set to new or existing during gather-context. Controls flow branching",
       "enum": [
         "new",
         "existing"

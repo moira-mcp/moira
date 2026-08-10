@@ -53,7 +53,7 @@ tests/
 ├── fixtures/
 │   ├── mcp-workflows.ts         # Workflow test fixtures
 │   └── mcp-test-data.ts         # Test data constants
-├── e2e/mcp-tools/
+├── mcp-tools/
 │   ├── README.md                # This file
 │   ├── user-settings.test.ts    # Settings CRUD (5 tests)
 │   ├── workflow-tokens.test.ts  # Token creation (6 tests)
@@ -404,13 +404,13 @@ expect(workflow).toHaveProperty("nodes");
 npm run test:mcp-tools
 
 # Specific test file
-npm run test:mcp-tools -- tests/e2e/mcp-tools/user-settings.test.ts
+npm run test:mcp-tools -- --file tests/mcp-tools/user-settings.test.ts
 
 # Specific test name
-npm run test:mcp-tools -- --testNamePattern="list_setting_definitions"
+npm run test:mcp-tools -- --grep "list_setting_definitions"
 
 # Watch mode (not recommended - use focused runs)
-npm run test:mcp-tools -- --watch
+npm run test:mcp-tools -- -- --watch
 
 # Full test suite (all tests)
 npm test
@@ -432,7 +432,7 @@ Tests include OAuth flow logging by default:
 ### Isolate Single Test
 
 ```bash
-npm run test:mcp-tools -- --testNamePattern="exact test name"
+npm run test:mcp-tools -- --grep "exact test name"
 ```
 
 ### Check Server Logs
@@ -543,7 +543,7 @@ docker exec mcp-moira-dev2 tail -100 /var/log/supervisor/mcp-server.log
 
 ## Adding New MCP Tool Tests
 
-1. **Create test file:** `tests/e2e/mcp-tools/my-new-tool.test.ts`
+1. **Create test file:** `tests/mcp-tools/my-new-tool.test.ts`
 
 2. **Add fixture if needed:**
    - Workflow: add to `mcp-workflows.ts`
@@ -565,7 +565,7 @@ docker exec mcp-moira-dev2 tail -100 /var/log/supervisor/mcp-server.log
 5. **Run tests:**
 
    ```bash
-   npm run test:mcp-tools -- tests/e2e/mcp-tools/my-new-tool.test.ts
+   npm run test:mcp-tools -- --file tests/mcp-tools/my-new-tool.test.ts
    ```
 
 6. **Verify pass:**
@@ -588,7 +588,7 @@ docker exec mcp-moira-dev2 tail -100 /var/log/supervisor/mcp-server.log
 export default {
   preset: "ts-jest/presets/default-esm",
   testEnvironment: "node",
-  testMatch: ["<rootDir>/tests/e2e/mcp-tools/**/*.test.ts"],
+  testMatch: ["<rootDir>/tests/mcp-tools/**/*.test.ts"],
   maxWorkers: 1, // Sequential execution
 };
 ```

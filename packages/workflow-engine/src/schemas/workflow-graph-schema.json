@@ -118,7 +118,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["string", "number", "boolean", "object", "array", "null"],
+            "enum": ["string", "number", "integer", "boolean", "object", "array", "null"],
             "description": "JSON Schema primitive type of the variable's value"
           },
           "description": {

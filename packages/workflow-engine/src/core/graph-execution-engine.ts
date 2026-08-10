@@ -188,6 +188,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
           this.repository,
           this,
           nodeInput,
+          graph.variableRegistry,
         );
       } catch (handlerError) {
         // Handler threw exception - this is the boundary for handler errors

@@ -5,7 +5,7 @@
   "id": "41246c35-cada-43ae-917c-57b1ea90c1bd",
   "metadata": {
     "name": "Test Suite Audit",
-    "version": "3.2.0",
+    "version": "3.2.4",
     "description": "Feature-centric test suite audit using LLM semantic analysis. Builds Feature Taxonomy from production code, maps tests to features, detects cross-level redundancy and coverage gaps."
   },
   "nodes": [
@@ -147,7 +147,7 @@
         "taxonomy_fix_attempts = taxonomy_fix_attempts + 1"
       ],
       "connections": {
-        "default": "fix-taxonomy"
+        "default": "check-taxonomy-fix-attempts"
       }
     },
     {
@@ -155,7 +155,6 @@
       "id": "fix-taxonomy",
       "directive": "Fix taxonomy issues found in {{workspace_path}}/taxonomy-issues.json\n\nRead the issues file and fix each one:\n- Missing code references: find the actual production file/function\n- Duplicate behaviors: merge or differentiate\n- Missing coverage: add missing features/behaviors\n\nUpdate {{workspace_path}}/feature-taxonomy.json with fixes.",
       "completionCondition": "Taxonomy issues fixed. Updated taxonomy saved.",
-      "maxRetries": 3,
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -167,8 +166,7 @@
         ]
       },
       "connections": {
-        "success": "verify-taxonomy",
-        "maxRetriesExceeded": "approve-taxonomy"
+        "success": "verify-taxonomy"
       }
     },
     {
@@ -303,7 +301,7 @@
         "batch_fix_attempts = batch_fix_attempts + 1"
       ],
       "connections": {
-        "default": "fix-batch"
+        "default": "check-batch-fix-attempts"
       }
     },
     {
@@ -311,7 +309,6 @@
       "id": "fix-batch",
       "directive": "Fix batch mapping issues from {{workspace_path}}/batch-issues.json\n\nRe-read the actual test files and correct mappings:\n- Wrong behavior_id: re-analyze what test actually tests\n- Wrong aspect: check if happy_path vs error_handling etc.\n- Missing assertions: re-read test and list actual expect() calls\n\nUpdate {{workspace_path}}/test-mappings.json with corrections.\nReset batch_fix_attempts counter if issues resolved.",
       "completionCondition": "Batch issues fixed. Mappings updated.",
-      "maxRetries": 3,
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -323,8 +320,7 @@
         ]
       },
       "connections": {
-        "success": "verify-batch",
-        "maxRetriesExceeded": "ask-user-batch-skip"
+        "success": "verify-batch"
       }
     },
     {
@@ -484,7 +480,7 @@
         "verify_rounds = verify_rounds + 1"
       ],
       "connections": {
-        "default": "cleanup-false-positives"
+        "default": "check-verification-rounds"
       }
     },
     {
@@ -492,7 +488,6 @@
       "id": "cleanup-false-positives",
       "directive": "Cross-verification disagreement rate is too high (≥20%).\n\nRead {{workspace_path}}/verification-results.json.\n\nAnalyze patterns in DISAGREE findings:\n1. Which redundancy types have most disagreements?\n2. What systematic errors are occurring?\n3. Are the detection rules too aggressive?\n\nRemove confirmed false positives from {{workspace_path}}/redundancy-findings.json.\nAdjust detection criteria if a pattern of errors is found.\n\nRe-run with cleaned findings (loop back to sample-for-verification).",
       "completionCondition": "False positives removed. Findings cleaned up.",
-      "maxRetries": 3,
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -505,8 +500,7 @@
         ]
       },
       "connections": {
-        "success": "sample-for-verification",
-        "maxRetriesExceeded": "approve-decisions"
+        "success": "sample-for-verification"
       }
     },
     {
@@ -629,7 +623,7 @@
         "test_fix_attempts = test_fix_attempts + 1"
       ],
       "connections": {
-        "default": "fix-test-failures"
+        "default": "check-test-fix-attempts"
       }
     },
     {
@@ -637,7 +631,6 @@
       "id": "fix-test-failures",
       "directive": "Fix test failures caused by audit changes.\n\nRead {{workspace_path}}/test-failures.json.\n\nFor each failure:\n1. Identify which change caused it\n2. Fix the issue — either adjust the change or revert it\n3. Record the fix\n\nDo NOT revert changes unless the test failure reveals the change was wrong.\nUpdate changelog with fixes.",
       "completionCondition": "Test failures addressed. Fixes applied.",
-      "maxRetries": 3,
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -650,8 +643,7 @@
         ]
       },
       "connections": {
-        "success": "verify-tests-pass",
-        "maxRetriesExceeded": "ask-user-test-failures"
+        "success": "verify-tests-pass"
       }
     },
     {
@@ -784,7 +776,7 @@
       },
       "connections": {
         "true": "increment-batch",
-        "false": "end"
+        "false": "end-aborted"
       }
     },
     {
@@ -817,9 +809,74 @@
         "right": "abort"
       },
       "connections": {
-        "true": "end",
+        "true": "end-aborted",
         "false": "generate-report"
       }
+    },
+    {
+      "type": "condition",
+      "id": "check-taxonomy-fix-attempts",
+      "condition": {
+        "operator": "lte",
+        "left": {
+          "contextPath": "taxonomy_fix_attempts"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "fix-taxonomy",
+        "false": "approve-taxonomy"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-batch-fix-attempts",
+      "condition": {
+        "operator": "lte",
+        "left": {
+          "contextPath": "batch_fix_attempts"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "fix-batch",
+        "false": "ask-user-batch-skip"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-verification-rounds",
+      "condition": {
+        "operator": "lte",
+        "left": {
+          "contextPath": "verify_rounds"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "cleanup-false-positives",
+        "false": "approve-decisions"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-test-fix-attempts",
+      "condition": {
+        "operator": "lte",
+        "left": {
+          "contextPath": "test_fix_attempts"
+        },
+        "right": 3
+      },
+      "connections": {
+        "true": "fix-test-failures",
+        "false": "ask-user-test-failures"
+      }
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": []
     }
   ],
   "variableRegistry": {

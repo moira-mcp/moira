@@ -55,7 +55,7 @@ export function getTestBaseUrl(): string {
 ```bash
 # Default: Docker local (reads DOCKER_PORT from .env.local)
 npm test
-npm run test:e2e:docker
+npm run test:e2e
 
 # Custom Docker port
 TEST_BASE_URL=http://localhost:3031 npm test
@@ -219,7 +219,7 @@ Default `autoAcceptBeta=true` handles beta agreement modal automatically.
 
 **Components:**
 
-- `tests/helpers/scenario-runner.ts` - Runs scenarios via GraphExecutionEngine (supports `maxRetries`/`maxRetriesExceeded` node redirects, excludes Go/Docker format strings like `{{.Names}}` from template validation, accepts `engineSetup` callback for handler customization)
+- `tests/helpers/scenario-runner.ts` - Runs scenarios via GraphExecutionEngine, excludes Go/Docker format strings like `{{.Names}}` from template validation, and accepts an `engineSetup` callback for handler customization
 - `tests/helpers/coverage-calculator.ts` - Calculates node/branch coverage
 - `GraphValidator` from `@mcp-moira/workflow-engine` - Validates workflow structure
 
@@ -383,7 +383,7 @@ const BASE_URL = getTestBaseUrl();
 - [ ] Replace all URLs with `${BASE_URL}/path`
 - [ ] NO hardcoded localhost:port ANYWHERE
 - [ ] Add header comment about Docker default and TEST_BASE_URL override
-- [ ] Verify test runs on Docker: `npm run test:e2e:docker` or `npm run test:integration`
+- [ ] Verify test runs on Docker: `npm run test:e2e` or `npm run test:integration`
 
 ### Example New Test
 
@@ -450,7 +450,7 @@ TEST_BASE_URL=http://custom:8080 npm test
   run: npm run docker:restart
 
 - name: Run E2E tests on Docker
-  run: npm run test:e2e:docker
+  run: npm run test:e2e
   # Uses DOCKER_PORT from .env.local automatically
 
 - name: Run integration tests
@@ -494,7 +494,7 @@ docker compose -f docker-compose.inspector.yml --env-file .env.inspector up -d
 npm run docker:restart
 
 # Run Inspector tests
-npm run test:e2e -- tests/e2e/inspector-*.spec.ts
+npm run test:e2e -- --file tests/e2e/inspector-mcp-tools.spec.ts
 ```
 
 ### Test Files

@@ -237,7 +237,8 @@ Run tests: {{test_command}}
 
 - Check inputSchema matches what agent provides
 - Verify condition logic with actual values
-- Add maxRetries to prevent infinite loops
+- Correct the rejected input before calling `step()` again. Schema rejection keeps execution at the
+  same node; it is not a workflow-authored retry loop.
 
 ### Validation Fails
 
@@ -412,10 +413,15 @@ Node task-1: unclosed template bracket '{{' at position 15
     },
     "required": ["field"]
   },
-  "maxRetries": 3,
   "connections": { "success": "next-node" }
 }
 ```
+
+Invalid input is logged and the workflow pauses again at the same node with schema-derived
+feedback. The rejected payload is not echoed. Legacy `maxRetries`, `retryMessage`, and
+`connections.maxRetriesExceeded` fields may still parse in stored definitions, but the runtime
+does not use them. Model a bounded business retry policy explicitly in the graph after a valid
+submission.
 
 ### Condition Node
 
@@ -454,11 +460,16 @@ Node task-1: unclosed template bracket '{{' at position 15
 - Basic arithmetic: `+`, `-`, `*`, `/`
 - Parentheses: `(a + b) * c`
 - Assignment: `result = a + b`
-- Context paths: `step.index`, `plan.current_step`
+- Context paths: `step.index`, `plan.items[0].value`, `tasks[current_index].action`
 
-**Security:** Custom sandboxed parser, NOT JavaScript eval.
+**Security:** Custom sandboxed parser, NOT JavaScript eval. Member reads use own properties only.
+Array indexes must resolve to in-bounds non-negative integers; `__proto__`, `prototype`, and
+`constructor` are rejected. Assignment targets are safe bare variable names, not object or array
+members. With a variable registry, every assignment must name a declared global and satisfy its
+JSON Schema.
 
-**Error handling:** Division by zero and undefined variables route to `error` connection if defined.
+**Error handling:** Invalid arithmetic, paths, indexes, targets, or registry values route to the
+`error` connection without publishing earlier assignments from the same node.
 
 ### Telegram Notification Node
 
@@ -497,11 +508,15 @@ Node task-1: unclosed template bracket '{{' at position 15
     "childResult": "parentResult"
   },
   "connections": {
-    "success": "next-node",
-    "error": "error-node"
+    "success": "next-node"
   }
 }
 ```
+
+Only `connections.success` is required. Although the definition schema accepts an optional
+`connections.error`, the current subgraph handler does not route thrown child-execution or mapping
+failures through it. The execution engine logs such a failure and pauses at the subgraph for
+correction and retry.
 
 ### Teleport Node
 
@@ -978,9 +993,6 @@ When `inputSchema` is not defined, the node only accepts empty input (`null` or 
 EXPECTED INPUT FORMAT:
 null or {} (no inputSchema defined - node accepts empty input only)
 
-YOUR INPUT:
-{ "garbage": 123 }
-
 ERRORS:
 • No inputSchema defined. Input must be null or {}.
 
@@ -1028,7 +1040,7 @@ Workflow authors do not need to add `additionalProperties: false` manually — i
 - Strict additional properties enforcement (automatic)
 - Field-level error messages
 - Type coercion where safe
-- Retry mechanism on validation failure
+- Sanitized corrective feedback followed by a pause at the same node on validation failure
 
 ## Workflow Patterns
 
@@ -1442,15 +1454,15 @@ Variables persist in execution context. Each node can access all previously set 
 ### Validation Errors
 
 **Error**: Agent input rejected
-**Format**: Comprehensive error with 5 sections:
+**Format**: Comprehensive error with 4 sections:
 
 - Header with error indicator
 - EXPECTED INPUT FORMAT (schema as readable JSON)
-- YOUR INPUT (what agent sent, truncated at 500 chars)
 - ERRORS (bullet list of specific issues)
 - ACTION REQUIRED (instructions to retry)
 
-**Fix**: Check input matches inputSchema requirements. The error message shows expected format and specific validation failures.
+**Fix**: Check input matches inputSchema requirements. The error message shows the expected format
+and specific validation failures but deliberately does not echo the rejected payload.
 
 ### Condition Errors
 

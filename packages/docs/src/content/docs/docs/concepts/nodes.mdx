@@ -110,18 +110,14 @@ The primary node type for agent tasks. Contains a directive (what to do) and com
 }
 ```
 
-| Property                         | Required | Description                                          |
-| -------------------------------- | -------- | ---------------------------------------------------- |
-| `directive`                      | Yes      | What the agent should do                             |
-| `completionCondition`            | Yes      | When the step is complete                            |
-| `inputSchema`                    | No       | JSON Schema for response validation                  |
-| `inputSchema.globalInputs`       | No       | Names of `variableRegistry` globals this node writes |
-| `inputSchema.properties`         | No       | Node-local outputs (referenced as `node-id.name`)    |
-| `maxRetries`                     | No       | Max validation retries (default: 3)                  |
-| `retryMessage`                   | No       | Custom retry message                                 |
-| `connections.success`            | Yes      | Next node on success                                 |
-| `connections.error`              | No       | Next node on error                                   |
-| `connections.maxRetriesExceeded` | No       | Next node when retries exhausted                     |
+| Property                   | Required | Description                                          |
+| -------------------------- | -------- | ---------------------------------------------------- |
+| `directive`                | Yes      | What the agent should do                             |
+| `completionCondition`      | Yes      | When the step is complete                            |
+| `inputSchema`              | No       | JSON Schema for response validation                  |
+| `inputSchema.globalInputs` | No       | Names of `variableRegistry` globals this node writes |
+| `inputSchema.properties`   | No       | Node-local outputs (referenced as `node-id.name`)    |
+| `connections.success`      | Yes      | Next node after valid input                          |
 
 In the example, `analysis_done` is a declared global (it must exist in `variableRegistry`) written by this node and readable elsewhere as `{{analysis_done}}`; `features` is a node-local output readable as `{{analyze-requirements.features}}`. A returned key that is neither a declared global nor a described local output is rejected.
 
@@ -130,6 +126,12 @@ In the example, `analysis_done` is a declared global (it must exist in `variable
   writes; `properties` describes its node-local outputs. The engine validates and routes the
   response automatically.
 </Aside>
+
+If a submission does not match `inputSchema`, the engine logs the rejection and pauses again at
+the same node. The corrective message describes the expected schema and errors without echoing the
+rejected payload. Per-node retry fields found in older definitions are compatibility-only and do
+not bound or redirect this validation cycle; model business retry and escalation explicitly in the
+workflow graph.
 
 ## Condition Node
 
@@ -216,7 +218,7 @@ Expressions support basic arithmetic operations:
 - **Arithmetic:** `+`, `-`, `*`, `/`
 - **Parentheses:** `(a + b) * c`
 - **Assignment:** `result = a + b`
-- **Context paths:** `step.index`, `plan.items[0].value`
+- **Context paths:** `step.index`, `plan.items[0].value`, `tasks[current_index].action`
 
 ```json
 {
@@ -225,8 +227,10 @@ Expressions support basic arithmetic operations:
 ```
 
 <Aside type="caution">
-  Expression evaluation uses a custom sandboxed parser, NOT JavaScript eval. Only arithmetic
-  operations are supported.
+  Expression evaluation uses a custom sandboxed parser, NOT JavaScript eval. Member reads use own
+  properties only; fixed or variable array indexes must resolve to in-bounds non-negative integers.
+  Assignment targets are safe bare variable names. With a variable registry, assignments must name
+  declared globals and satisfy their JSON Schemas; the node publishes nothing on error.
 </Aside>
 
 ### Error Handling
@@ -234,7 +238,8 @@ Expressions support basic arithmetic operations:
 Expression nodes can fail in two cases:
 
 - Division by zero
-- Reference to undefined variable
+- Invalid, unsafe, unresolved, or out-of-bounds member read
+- Undeclared assignment target or value outside its registry schema
 
 When an error occurs, execution routes to the `error` connection if defined, otherwise the workflow fails.
 
@@ -265,11 +270,14 @@ Delegate execution to another workflow:
 | `inputMapping`        | Yes      | Parent context -> subgraph context |
 | `outputMapping`       | Yes      | Subgraph context -> parent context |
 | `connections.success` | Yes      | Next node on success               |
-| `connections.error`   | No       | Next node on failure               |
 
 <Aside type="tip">
   Subgraphs enable workflow composition and reuse. The agent sees it as a continuous workflow.
 </Aside>
+
+`connections.error` is optional and is not the route for thrown child-execution or mapping
+failures in the current runtime. Those failures are logged and execution pauses at the subgraph so
+the agent can correct the cause and retry.
 
 ## Telegram Notification Node
 
@@ -493,7 +501,7 @@ Find-or-create operation:
 3. **Clear Directives** - Be specific about what the agent should do
 4. **Verifiable Conditions** - Completion conditions should be objectively measurable
 5. **Schema Validation** - Use `inputSchema` for structured responses
-6. **Error Paths** - Define error connections for graceful failure handling
+6. **Error Paths** - Use an error connection only where that node type's documented runtime behavior routes it
 
 ## Related
 

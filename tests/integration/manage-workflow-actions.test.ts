@@ -22,7 +22,13 @@ const testWorkflow: WorkflowGraph = {
   },
   // Declare the variable the condition references (Step-6 blocking validation requires
   // every referenced variable to be a declared global or a node-id.name local).
-  variableRegistry: { result: { type: "string", description: "Step result for condition check" } },
+  variableRegistry: {
+    result: {
+      type: "string",
+      description: "Step result for condition check",
+      default: "pending",
+    },
+  },
   nodes: [
     {
       id: "start",

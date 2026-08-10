@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **259 files**, **3222 tests**
+- **40 domains**, **262 files**, **3335 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -23,7 +23,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | email               | 1     | 22    | unit:1                                                         |
 | self-host-limits    | 2     | 12    | unit:2                                                         |
 | pin-hash            | 1     | 7     | unit:1                                                         |
-| error-handling      | 11    | 127   | api:1, e2e:2, integration:2, mcp-tools:1, unit:5               |
+| error-handling      | 11    | 133   | api:1, e2e:2, integration:2, mcp-tools:1, unit:5               |
 | execution           | 13    | 108   | api:1, e2e:3, integration:5, mcp-tools:3, unit:1               |
 | execution-lock      | 9     | 79    | unit:2, workflow:1, mcp-tools:2, api:2, e2e:1                  |
 | expressions         | 4     | 16    | api:1, e2e:1, mcp-tools:2                                      |
@@ -36,7 +36,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
 | inspector           | 1     | 1     | e2e:1                                                          |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
-| mcp-tools           | 14    | 128   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
+| mcp-tools           | 14    | 135   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
 | metrics             | 1     | 20    | unit:1                                                         |
 | node-handlers       | 1     | 6     | unit:1                                                         |
 | notes               | 7     | 166   | api:1, e2e:2, integration:1, mcp-tools:1, unit:2               |
@@ -45,8 +45,8 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | security            | 2     | 49    | unit:2                                                         |
 | settings            | 11    | 142   | api:3, e2e:2, integration:3, mcp-tools:1, unit:2               |
 | sharing             | 5     | 125   | api:1, e2e:1, integration:1, mcp-tools:1, unit:1               |
-| slug-handle         | 4     | 52    | api:2, integration:2                                           |
-| storage             | 1     | 34    | unit:1                                                         |
+| slug-handle         | 4     | 56    | api:2, integration:2                                           |
+| storage             | 1     | 42    | unit:1                                                         |
 | telegram            | 2     | 18    | integration:1, unit:1                                          |
 | template-engine     | 2     | 6     | integration:2                                                  |
 | tokens              | 2     | 21    | integration:1, mcp-tools:1                                     |
@@ -55,8 +55,8 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | user-management     | 3     | 34    | api:1, e2e:2                                                   |
 | validation          | 4     | 90    | api:1, integration:1, unit:2                                   |
 | web-ui              | 7     | 61    | e2e:7                                                          |
-| workflow-engine     | 62    | 832   | api:4, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:26 |
-| workflow-scenarios  | 23    | 138   | workflow:23                                                    |
+| workflow-engine     | 63    | 883   | api:4, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:27 |
+| workflow-scenarios  | 25    | 167   | workflow:25                                                    |
 
 ## Domain Details
 
@@ -270,7 +270,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### error-handling
 
-**11 files, 127 tests**
+**11 files, 133 tests**
 
 **unit** (5 files)
 
@@ -283,7 +283,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **integration** (2 files)
 
 - `tests/integration/error-logging-flow.test.ts` — 6 tests 🟢
-- `tests/integration/subgraph-error-scenarios.test.ts` — 2 tests 🟢
+- `tests/integration/subgraph-error-scenarios.test.ts` — 8 tests 🟢 (root/child/grandchild error provenance, durable root ownership, authored recovery edges, and persisted root/one/nested retry exhaustion without mutation replay)
 
 **api** (1 files)
 
@@ -304,7 +304,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 **unit** (1 files)
 
-- `tests/unit/shared/execution-repository-errors.test.ts` — 21 tests 🟢
+- `tests/unit/shared/execution-repository-errors.test.ts` — 27 tests 🟢 (including terminal-result persistence, owner-identity validation, legacy null rows, and fail-closed empty/falsy payload handling)
 
 **integration** (5 files)
 
@@ -449,7 +449,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 **unit** (2 files)
 
-- `tests/unit/scripts/workflow-tool-variables.test.ts` — 15 tests 🟢 (incl. registry-backed get/set/delete-variable)
+- `tests/unit/scripts/workflow-tool-variables.test.ts` — 22 tests 🟢 (incl. registry-backed globals, metadata, replace/sync, End projection/path qualification, and inert-retry migration)
 - `tests/unit/services/mcp-text-service.test.ts` — 37 tests 🟢
 
 **integration** (5 files)
@@ -643,12 +643,12 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### slug-handle
 
-**4 files, 52 tests**
+**4 files, 56 tests**
 
 **integration** (2 files)
 
 - `tests/integration/database/upload-pipeline-slug.test.ts` — 10 tests 🟢
-- `tests/integration/mcp-slug-operations.test.ts` — 15 tests 🟢
+- `tests/integration/mcp-slug-operations.test.ts` — MCP completion-marker/session equality for Todo's empty terminal result, parent linkage, and optional-output omission 🟢
 
 **api** (2 files)
 
@@ -657,11 +657,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### storage
 
-**1 files, 34 tests**
+**1 files, 42 tests**
 
 **unit** (1 files)
 
-- `tests/unit/scripts/prompt-migration.test.ts` — 34 tests 🟢
+- `tests/unit/scripts/prompt-migration.test.ts` — 42 tests 🟢 (including safe cleanup of removed managed agent overrides and preservation of manually edited values as conflicts)
 
 ### telegram
 
@@ -777,7 +777,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-engine
 
-**62 files, 832 tests**
+**63 files, 883 tests**
 
 **unit** (7 files)
 
@@ -788,6 +788,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/unit/workflow-engine/variable-resolver.test.ts` — 9 tests 🟢
 - `tests/unit/workflow-engine/registry-converter.test.ts` — 13 tests 🟢
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — 14 tests 🟢 (incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection)
+- `tests/unit/workflow-engine/in-memory-terminal-result.test.ts` — 7 tests 🟢 (strict terminal-envelope preservation, owner-identity validation, and fail-closed malformed/falsy-result rejection)
 
 **integration** (13 files)
 
@@ -798,25 +799,25 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/integration/manage-workflow-new-actions.test.ts` — 29 tests 🟢
 - `tests/integration/step-on-completed-workflow.test.ts` — 5 tests 🟢
 - `tests/integration/subgraph-agent-transparency.test.ts` — 3 tests 🟢
-- `tests/integration/subgraph-nested-levels.test.ts` — 1 tests 🟢
+- `tests/integration/subgraph-nested-levels.test.ts` — three-level execution plus Todo's exact empty terminal result at root/one/nested levels with persisted reload 🟢
 - `tests/integration/subgraph-performance.test.ts` — 2 tests 🟡
 - `tests/integration/subgraph-sequential.test.ts` — 1 tests 🟢
 - `tests/integration/workflow-mutation-service.test.ts` — 18 tests 🟢
 - `tests/integration/workflow-outputs.test.ts` — 3 tests 🟡
 - `tests/integration/workflow-pagination.test.ts` — 7 tests 🟢
 
-**workflow** (26 files)
+**workflow** (27 files)
 
 - `tests/workflow/engine/agent-directive-validation.test.ts` — 9 tests 🟢
-- `tests/workflow/engine/catalog-validation.test.ts` — 6 tests 🟢 (incl. workspace_path path-join guard, numeric-global counter-pinning guard)
+- `tests/workflow/engine/catalog-validation.test.ts` — 11 tests 🟢 (incl. pinned 43-path/13-workflow End migration inventory, real four-scope terminal projections, workspace_path guard, numeric counter-pinning, and subgraph error routes)
 - `tests/workflow/engine/agent-message-queue.test.ts` — 9 tests 🟢
 - `tests/workflow/engine/context-mapper.test.ts` — 15 tests 🟢
 - `tests/workflow/engine/cycle-detector.test.ts` — 6 tests 🟢
 - `tests/workflow/engine/error-formatting.test.ts` — 11 tests 🟢
-- `tests/workflow/engine/expression-handler.test.ts` — 15 tests 🟢
-- `tests/workflow/engine/expression-parser.test.ts` — 42 tests 🟢
+- `tests/workflow/engine/expression-handler.test.ts` — 23 tests 🟢 (ordered scalar/member/fingerprint projection, undeclared-target rejection, atomic registry-default reset/rollback, JSON-assignment metadata, content-free error-edge routing and error context)
+- `tests/workflow/engine/expression-parser.test.ts` — 61 tests 🟢 (safe numeric/dynamic array reads, closed reset parsing, bounds, prototype rejection, bare-only assignment targets)
 - `tests/workflow/engine/max-nodes-validation.test.ts` — 4 tests 🟢
-- `tests/workflow/engine/node-handlers.test.ts` — 12 tests 🟢
+- `tests/workflow/engine/node-handlers.test.ts` — 19 tests 🟢 (including strict empty/nested/missing End projection and runtime-input rejection)
 - `tests/workflow/engine/node-type-validation.test.ts` — 23 tests 🟢
 - `tests/workflow/engine/note-handlers.test.ts` — 34 tests 🟢
 - `tests/workflow/engine/note-node-validation.test.ts` — 15 tests 🟢
@@ -826,7 +827,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/engine/registry-schema-validation.test.ts` — 5 tests 🟢 (registry entry compiled as JSON Schema; malformed → blocking)
 - `tests/workflow/engine/schema-validator-agent-format.test.ts` — 16 tests 🟢
 - `tests/workflow/engine/subgraph-delegation.test.ts` — 9 tests 🟢
-- `tests/workflow/engine/subgraph-handler-simple.test.ts` — 5 tests 🟢
+- `tests/workflow/engine/subgraph-handler-simple.test.ts` — 6 tests 🟢 (including discriminated child-failure provenance)
 - `tests/workflow/engine/subgraph-handler.test.ts` — 16 tests 🟢
 - `tests/workflow/engine/subgraph-validation.test.ts` — 16 tests 🟢
 - `tests/workflow/engine/system-reminder-priority.test.ts` — 10 tests 🟢
@@ -863,9 +864,9 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-scenarios
 
-**23 files, 138 tests**
+**25 files, 160 tests**
 
-**workflow** (23 files)
+**workflow** (25 files)
 
 - `tests/workflow/scenarios/artifacts-demo-dashboard-builder.test.ts` — 5 tests 🟢
 - `tests/workflow/scenarios/artifacts-demo-report-publisher.test.ts` — 5 tests 🟢
@@ -874,22 +875,24 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/scenarios/content-creation.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/coverage.test.ts` — 11 tests 🟢
 - `tests/workflow/scenarios/data-analysis.test.ts` — 5 tests 🔴
-- `tests/workflow/scenarios/development-workflow.test.ts` — 8 tests 🟢
+- `tests/workflow/scenarios/development-workflow.test.ts` — 3 tests 🟢 (source-grounded filesystem-first state/authority contract; conditional screenshot/HTML directives; representative baseline, planning, repair, replan, runtime, expensive, affected-documentation, accepted-unit checkpoint success/repository-failure/abort, final acceptance/reconciliation, rejection, and abort routes; 100% node/branch scenario coverage)
 - `tests/workflow/scenarios/directive-validation.test.ts` — 4 tests 🟡
 - `tests/workflow/scenarios/iterative-research.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/marketing-campaign.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/notes-demo-metrics-collector.test.ts` — 10 tests 🟢
 - `tests/workflow/scenarios/notes-demo-metrics-reporter.test.ts` — 13 tests 🟢
 - `tests/workflow/scenarios/prd-creation.test.ts` — 5 tests 🟡
-- `tests/workflow/scenarios/robust-task.test.ts` — 5 tests 🔴
+- `tests/workflow/scenarios/quick-task.test.ts` — 7 tests 🟢 (2 behavioral runs: filesystem workspace and immutable iteration paths, bounded typed path outputs, disk-only feedback/findings/evidence, minimal global state, clean execution, plan repair and user revision, result repair and rework, empty End output, and 100% node/branch coverage)
+- `tests/workflow/scenarios/robust-task.test.ts` — 3 tests 🟢 (filesystem-only durable state and native-routing contract; complete, plan repair/rejection, ordinary retry, verifier and teleport replanning, retry-exhaustion retry/replan/incomplete delivery, criteria/final repair and explicit loop-bound decisions; 100% node/branch scenario coverage)
 - `tests/workflow/scenarios/smart-purchase-assistant.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/telegram-setup.test.ts` — 5 tests 🟢
 - `tests/workflow/scenarios/test-generation.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/test-planning.test.ts` — 5 tests 🟡
+- `tests/workflow/scenarios/todo-list.test.ts` — minimal registry and graph contract, unified planning/supplied-task intake, unchanged typed supplied tasks, one-based projection, local evidence bounds and malformed-input retry, empty End output, and reachable node/branch coverage 🟢
 - `tests/workflow/scenarios/user-onboarding.test.ts` — 5 tests 🟢
 - `tests/workflow/scenarios/ux-design.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/verified-research.test.ts` — 5 tests 🟡
-- `tests/workflow/scenarios/workflow-management-flow.test.ts` — 13 tests 🔴 (incl. explicit output-scope variable-model teaching + authored-per-guidance validation)
+- `tests/workflow/scenarios/workflow-management-flow.test.ts` — 2 tests 🟢 (embedded authoring policy and minimal state contract; create/edit/audit/review/publication/error/local-sync routes with 100% node/branch scenario coverage)
 
 ## Agent Instructions
 

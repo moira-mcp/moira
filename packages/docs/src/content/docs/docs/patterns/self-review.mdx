@@ -5,65 +5,61 @@ description: Verify every requirement against the real artifact before delivery
 
 import { Aside } from "@astrojs/starlight/components";
 
-A workflow that produces a deliverable from explicit requirements runs a completeness self-review before final delivery. The review checks the produced artifact against the frozen original requirements, counts the unmet ones, and routes any gaps into a bounded fix path so the workflow never delivers silently with requirements outstanding.
+A workflow that produces a deliverable from explicit requirements should verify the finished artifact before delivery. The workflow that owns the domain also owns this review: it reads the frozen requirements, inspects the real implementation, writes a durable report, and returns the report path and counts in one schema-validated response.
 
-## Five Rules
+## Rules
 
-1. **Source of truth is the frozen original requirements.** Compare against the original requirements file or the `success_criteria` captured at the start — not the current plan and not the agent's memory of what was asked.
-2. **Verify against the artifact, not claims.** For each requirement, find concrete evidence in the produced work: a code path, a file, a test, an output. For code, read the real code or run tests.
-3. **One check per requirement.** Optionally delegate to a child `moira/todo-list` with one task per requirement. Return `requirements_gaps_count` and `total_requirements`.
-4. **Gaps route to a bounded fix path.** A condition node on `requirements_gaps_count` sends gaps to a fix/extend branch. Never deliver with gaps greater than zero. Bound the loop with `validation_attempt_count` and escalation.
-5. **Persist a coverage report.** Write a report such as `requirements-coverage-report-v{attempt}.md` recording each requirement and its evidence.
+1. **Use the frozen requirements as the source of truth.** Do not substitute the current plan or the agent's memory.
+2. **Inspect the real artifact.** For each requirement, cite concrete code, files, test output, or another reproducible observation.
+3. **Write one durable report.** Record one ordered entry per requirement and classify it `COVERED` only when evidence proves it; otherwise use `GAP`.
+4. **Return the complete summary atomically.** The same action returns `coverage_report_path`, `total_requirements`, and `requirements_gaps_count`. JSON Schema validates their shape; another agent or graph recount does not repeat the domain judgment.
+5. **Route gaps back to implementation.** Zero gaps proceeds to delivery. A nonzero count enters the workflow's fix or replan branch.
 
-## Variable Registry
+Todo List is a generic sequential checklist and has an empty terminal result. Do not use it as a transport for coverage classifications, outcomes, or counters.
 
-Declare the review counters with numeric defaults:
+## Variable registry
+
+Declare coverage values without defaults so an execution that has not completed the review cannot fabricate a zero-gap result:
 
 ```json
 {
-  "variableRegistry": {
-    "validation_attempt_count": {
-      "type": "number",
-      "description": "Coverage review attempt",
-      "default": 1
-    },
-    "requirements_gaps_count": {
-      "type": "number",
-      "description": "Requirements with no evidence of completion",
-      "default": 0
-    },
-    "total_requirements": {
-      "type": "number",
-      "description": "Total requirements checked",
-      "default": 0
-    }
+  "coverage_report_path": {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 1000
+  },
+  "total_requirements": {
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 100
+  },
+  "requirements_gaps_count": {
+    "type": "integer",
+    "minimum": 0,
+    "maximum": 100
   }
 }
 ```
 
-## Coverage Review Node
+## Coverage action
 
-The review node checks every requirement against the artifact and writes the gap count and total as globals:
+The producing `agent-directive` writes a versioned report such as `requirements-coverage-report-v{attempt}.md` and returns all three globals together:
 
 ```json
 {
-  "type": "agent-directive",
-  "id": "validate-requirements-coverage",
-  "directive": "Read the frozen original requirements (the requirements file or captured success_criteria), NOT the current plan.\n\nFor each requirement, find concrete evidence in the produced artifact: code path, file, test, or output. For code, read the real code or run the tests.\n\nWrite requirements-coverage-report-v{{validation_attempt_count}}.md listing every requirement and its evidence. Set total_requirements to the count checked and requirements_gaps_count to the count with no evidence.",
-  "completionCondition": "Every requirement verified against the artifact and the coverage report written",
-  "inputSchema": {
-    "type": "object",
-    "globalInputs": ["requirements_gaps_count", "total_requirements"],
-    "properties": {
-      "coverage_report_path": { "type": "string" }
-    },
-    "required": ["requirements_gaps_count", "total_requirements", "coverage_report_path"]
-  },
-  "connections": { "success": "check-requirements-gaps" }
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "required": ["coverage_report_path", "total_requirements", "requirements_gaps_count"],
+  "globalInputs": ["coverage_report_path", "total_requirements", "requirements_gaps_count"]
 }
 ```
 
-## Gap Check
+The report may use domain terms such as `COVERED` and `GAP`; those classifications remain inside the owning workflow. JSON Schema proves only the returned types and bounds. The agent remains responsible for reading every requirement and making an evidence-based classification.
+
+Record the completed pass immediately after this response, before any gap decision or agent-visible pause. This gives later abort and replan paths an unambiguous distinction between “coverage never ran” and “a complete prior report exists.”
+
+## Gap check
 
 ```json
 {
@@ -81,44 +77,13 @@ The review node checks every requirement against the artifact and writes the gap
 }
 ```
 
-When `requirements_gaps_count` is 0, the workflow proceeds to delivery. Otherwise it enters the fix/extend branch.
-
-## Bounding the Fix Loop
-
-The fix branch increments the attempt counter and re-enters the coverage review. A bound check routes the limit to a user escalation rather than looping forever:
-
-```json
-{
-  "type": "expression",
-  "id": "increment-validation-attempt",
-  "expressions": ["validation_attempt_count = validation_attempt_count + 1"],
-  "connections": { "default": "check-attempt-limit" }
-}
-```
-
-```json
-{
-  "type": "condition",
-  "id": "check-attempt-limit",
-  "condition": {
-    "operator": "lt",
-    "left": { "contextPath": "validation_attempt_count" },
-    "right": 5
-  },
-  "connections": {
-    "true": "validate-requirements-coverage",
-    "false": "escalate-to-user"
-  }
-}
-```
-
 <Aside type="caution">
-  A gap count above zero must reach the fix branch. Routing the coverage check straight to delivery
-  when gaps remain is the silent-skip anti-pattern.
+  A zero default is not evidence that review ran. Keep review outputs absent until the coverage
+  action returns a complete schema-valid response.
 </Aside>
 
 ## Related
 
-- [Validation Loop](/docs/patterns/validation-loop/) - Bounded re-validation mechanics
+- [Validation Loop](/docs/patterns/validation-loop/) - Re-validation mechanics
 - [Replan Pattern](/docs/patterns/replan/) - Extending the plan when coverage finds gaps
-- [Subagent Review](/docs/patterns/subagent-review/) - Delegating per-requirement checks to a child workflow
+- [Todo List](/docs/reference/workflows/todo-list/) - Generic sequential checklist semantics

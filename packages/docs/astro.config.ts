@@ -29,7 +29,12 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const { MOIRA_HOST, CONTACT_EMAIL, STATIC_ARTIFACTS_DOMAIN } = loadEnv("", process.cwd(), "");
+const localAppEnv = loadEnv("development", path.resolve(__dirname, "../.."), "");
+const docsEnv = loadEnv("", process.cwd(), "");
+const { MOIRA_HOST, CONTACT_EMAIL, STATIC_ARTIFACTS_DOMAIN } = {
+  ...localAppEnv,
+  ...docsEnv,
+};
 setHost(MOIRA_HOST);
 // CONTACT_EMAIL is optional in self-host (DEPLOYMENT_MODE=self-host) — getContactEmail()
 // falls back to support@localhost. Push the raw value into the env first so the
@@ -207,6 +212,10 @@ export default defineConfig({
             {
               label: "Robust Task",
               slug: "docs/reference/workflows/robust-task",
+            },
+            {
+              label: "Todo List",
+              slug: "docs/reference/workflows/todo-list",
             },
           ],
         },

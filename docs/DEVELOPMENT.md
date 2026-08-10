@@ -127,12 +127,13 @@ At Docker container startup, `scripts/migrate-workflows-in-docker.ts` runs:
 
 At startup, `scripts/prompt-migration.ts` syncs `config/prompts/` files into `globalSettings` DB table:
 
-- **First deploy (no manifest):** Records current DB hash as baseline. Does not overwrite existing DB values.
-- **Subsequent deploys:** Compares file hash vs manifest hash. If file changed and DB value unchanged → updates DB. If DB was manually edited (DB hash ≠ manifest hash) → migration fails with conflict error (`process.exit(1)`), blocking service startup via sentinel.
-- **Null safety:** Handles null `globalSetting.value` gracefully (skips hash comparison).
+- **Fresh key:** Inserts the file value when the DB key does not exist. If a DB value predates the manifest, records its hash as the baseline without overwriting it.
+- **Subsequent deploys:** Compares the DB value with the last deployed manifest hash. An unchanged DB value is updated from the file; a manually edited DB value is preserved and reported as a conflict.
+- **Removed agent/model override:** Deletes its DB row only when the value still matches the last deployed hash. A manually edited override remains in the DB and is reported as a conflict.
+- **Null safety:** Treats a null `globalSetting.value` as an empty string for hashing.
 - **Atomicity:** All DB writes wrapped in `db.transaction()`.
 
-Manifest stored in `config/prompts/manifest.json`.
+Manifest stored beside the SQLite database as `data/prompt-manifest.json` in the default layout.
 
 ### Adding New Workflows
 
@@ -304,8 +305,10 @@ NodeResultBuilder.error(nodeId, errorMessage); // Fail execution
 
 - **Pause behavior** - pauses for user input when no input provided
 - **Template processing** - processes templates in directive/completionCondition
-- **Validation** - validates input against inputSchema
-- **Retry logic** - maxRetries (default: 3) with retry counter
+- **Validation** - validates input against inputSchema; a rejected submission is logged and pauses
+  again at the same node with sanitized feedback that does not echo the rejected payload
+- **Legacy fields** - `maxRetries`, `retryMessage`, and `connections.maxRetriesExceeded` remain
+  accepted in stored definitions but do not control runtime behavior
 
 ### ConditionHandler
 
@@ -332,9 +335,11 @@ NodeResultBuilder.error(nodeId, errorMessage); // Fail execution
 
 - **Auto-execution** - evaluates expressions and continues
 - **Sandboxed parser** - custom arithmetic parser, NOT JavaScript eval
-- **Operations** - `+`, `-`, `*`, `/`, parentheses
-- **Assignment** - `result = a + b`, context path access
-- **Error handling** - division by zero and undefined variables route to `error` connection
+- **Operations** - `+`, `-`, `*`, `/`, parentheses, string/boolean literals
+- **Assignment** - safe bare targets such as `result = a + b`
+- **Member reads** - own-property paths and bounded fixed or variable array indexes such as `tasks[current_index].action`
+- **Registry validation** - assignments must name declared globals and satisfy their JSON Schemas before publication
+- **Error handling** - invalid arithmetic, paths, indexes, targets, or values route to `error` without partial writes
 
 ### LockHandler
 
@@ -375,11 +380,15 @@ describe("Feature", () => {
 npm test                          # All tests
 
 # By category
-npm run test:unit [path]          # Unit tests (in-memory)
-npm run test:integration [path]   # Integration (test-integration.db)
-npm run test:api [path]           # API (Docker required)
-npm run test:mcp-tools [path]     # MCP tools (Docker required)
-npm run test:e2e [path]           # E2E browser (Docker required)
+npm run test:unit                 # Unit tests (in-memory)
+npm run test:workflow             # Workflow scenarios (test-integration.db)
+npm run test:integration          # Integration (test-integration.db)
+npm run test:api                  # API (Docker required)
+npm run test:mcp-tools            # MCP tools (Docker required)
+npm run test:e2e                  # E2E browser (Docker required)
+
+# One file (Testfold requires Node.js 20+)
+npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 ```
 
 Full documentation: `tests/TESTING-GUIDE.md`
@@ -393,12 +402,12 @@ npm install            # Install dependencies first
 npm run docker:restart # Build and start Docker container
 ```
 
-**Result:** All services available at http://localhost:${DOCKER_PORT} (from .env.local)
+**Result:** All services available at `http://localhost:${DOCKER_PORT}` (from `.env.local`).
 
 ### Verification Steps
 
 1. Check health: `curl http://localhost:${DOCKER_PORT}/startup-ready`
-2. Open UI: `http://localhost:${DOCKER_PORT}/app`
+2. Open UI: `http://localhost:${DOCKER_PORT}/`
 3. **MANDATORY**: Run E2E tests after ANY changes: `npm run test:e2e`
 
 ## Web UI Testing Protocol
@@ -551,21 +560,16 @@ context.nodeStates[nodeId] = nodeData;
 // context.variables = {}; // WRONG - loses data
 ```
 
-## Hot Reload
+## Rebuild and Restart
 
-### Auto-Reload (No Restart)
+The contributor container runs a baked image. Backend, frontend, engine, prompt,
+documentation, and bundled workflow changes require rebuilding the image. Test
+files run on the host and do not require a container rebuild unless the application
+code or fixture state they exercise changed.
 
-- Workflow JSON file changes
-- Test file modifications
-- Web UI code changes
-
-### Restart Required
-
-- Core engine changes (`src/graph/`)
-- MCP tool modifications
-- Server configuration changes
-
-### Restart Process
+The local helper bind-mounts `workflows/` for catalog development, but startup
+migrations load bundled definitions into SQLite. Rebuild and recreate the container
+before container-backed verification so the image, database, and catalog agree.
 
 ```bash
 npm run docker:stop     # Stop container
@@ -584,9 +588,9 @@ npm run test:e2e        # Run E2E tests
 
 ### MCP Servers
 
-| Server        | URL                       | Purpose                  |
-| ------------- | ------------------------- | ------------------------ |
-| `moira-local` | http://localhost:8080/mcp | Local Docker development |
+| Server        | URL                                   | Purpose                  |
+| ------------- | ------------------------------------- | ------------------------ |
+| `moira-local` | `http://localhost:${DOCKER_PORT}/mcp` | Local Docker development |
 
 ### Test Execution
 
@@ -633,7 +637,11 @@ Server validates client MCP tools version on each request. OAuth tokens store `t
 
 - **20+ agent-directive nodes** - Warning in validator (not limit)
 
-### Retry Logic
+### Agent Input Rejection
 
-- **maxRetries default** - 3 attempts for agent-directive nodes
-- **Configurable per node** - Can override default
+- Invalid agent input never advances the graph.
+- The engine returns the same node with schema-derived corrective feedback and no rejected-payload
+  echo.
+- A workflow that needs a bounded business retry policy must model it explicitly with ordinary
+  expression, condition, and decision nodes after valid submissions; legacy per-node retry fields
+  are non-operative.

@@ -596,6 +596,71 @@ describe("prompt-migration", () => {
       expect(result.conflicts).toContain("mcp.agent.chatgpt.systemReminder");
     });
 
+    it("removes a previously managed agent override when its file is deleted", () => {
+      const content = "Deployed ChatGPT reminder";
+      const db = createTestDb(dbPath);
+      db.prepare(
+        "INSERT INTO globalSetting (key, value, type, label, category, sortOrder, updatedAt) VALUES (?, ?, 'text', 'Test', 'mcp-agent-prompts', 0, ?)",
+      ).run("mcp.agent.chatgpt.systemReminder", content, Date.now());
+      db.close();
+
+      writeManifest(manifestPath, {
+        version: 1,
+        entries: {
+          "mcp.agent.chatgpt.systemReminder": {
+            hash: computeHash(content),
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      const result = migratePrompts(getConfig());
+
+      expect(result.removed).toContain("mcp.agent.chatgpt.systemReminder");
+      expect(result.conflicts).toHaveLength(0);
+
+      const db2 = new Database(dbPath);
+      const row = db2
+        .prepare("SELECT value FROM globalSetting WHERE key = ?")
+        .get("mcp.agent.chatgpt.systemReminder");
+      expect(row).toBeUndefined();
+      db2.close();
+      expect(
+        readManifest(manifestPath).entries["mcp.agent.chatgpt.systemReminder"],
+      ).toBeUndefined();
+    });
+
+    it("preserves a manually edited agent override when its file is deleted", () => {
+      const db = createTestDb(dbPath);
+      db.prepare(
+        "INSERT INTO globalSetting (key, value, type, label, category, sortOrder, updatedAt) VALUES (?, ?, 'text', 'Test', 'mcp-agent-prompts', 0, ?)",
+      ).run("mcp.agent.chatgpt.systemReminder", "Admin edit", Date.now());
+      db.close();
+
+      writeManifest(manifestPath, {
+        version: 1,
+        entries: {
+          "mcp.agent.chatgpt.systemReminder": {
+            hash: computeHash("Last deployed value"),
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      const result = migratePrompts(getConfig());
+
+      expect(result.removed).not.toContain("mcp.agent.chatgpt.systemReminder");
+      expect(result.conflicts).toContain("mcp.agent.chatgpt.systemReminder");
+
+      const db2 = new Database(dbPath);
+      const row = db2
+        .prepare("SELECT value FROM globalSetting WHERE key = ?")
+        .get("mcp.agent.chatgpt.systemReminder") as { value: string };
+      expect(row.value).toBe("Admin edit");
+      db2.close();
+      expect(readManifest(manifestPath).entries["mcp.agent.chatgpt.systemReminder"]).toBeDefined();
+    });
+
     it("handles empty agent override file (override to empty string)", () => {
       createPromptFiles(promptsDir, {
         "agents/chatgpt/systemPrompt.md": "",

@@ -7,8 +7,9 @@ import { execSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
+import { randomUUID } from "crypto";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "scripts/workflow-tool.ts");
+const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/src/workflow-tool.ts");
 
 function runWorkflowTool(args: string): string {
   return execSync(`npx tsx ${WORKFLOW_TOOL} ${args}`, {
@@ -19,7 +20,7 @@ function runWorkflowTool(args: string): string {
 
 function createTempWorkflow(workflow: object): string {
   const tmpDir = os.tmpdir();
-  const tmpFile = path.join(tmpDir, `test-workflow-${Date.now()}.json`);
+  const tmpFile = path.join(tmpDir, `test-workflow-${randomUUID()}.json`);
   fs.writeFileSync(tmpFile, JSON.stringify(workflow, null, 2));
   return tmpFile;
 }
@@ -321,6 +322,25 @@ describe("workflow-tool variables command", () => {
       }
     });
 
+    test("set-variable-schema accepts --force without including it in JSON", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      try {
+        runWorkflowTool(
+          `${tmpFile} set-variable-schema result '{"type":"array","description":"Result history","items":{"type":"string"},"default":[]}' --force`,
+        );
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.result).toEqual({
+          type: "array",
+          description: "Result history",
+          items: { type: "string" },
+          default: [],
+        });
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
     test("delete-variable removes a global from variableRegistry", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
@@ -329,6 +349,138 @@ describe("workflow-tool variables command", () => {
         expect(saved.variableRegistry.report_template).toBeUndefined();
       } finally {
         fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("workflow metadata commands", () => {
+    test("set-description updates the package CLI target without storing --force", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Old description" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      try {
+        runWorkflowTool(`${tmpFile} set-description "New workflow description" --force`);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.metadata.description).toBe("New workflow description");
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+  });
+
+  describe("workflow migration commands", () => {
+    function migrationWorkflow() {
+      return {
+        id: "migration-flow",
+        metadata: { name: "Migration", version: "2.0.0", description: "Test" },
+        variableRegistry: {
+          global_result: { type: "string", description: "Global result", default: "" },
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "produce" } },
+          {
+            id: "produce",
+            type: "agent-directive",
+            directive: "Produce",
+            completionCondition: "Produced",
+            inputSchema: {
+              type: "object",
+              properties: { local_result: { type: "string" } },
+              required: ["local_result"],
+            },
+            maxRetries: 3,
+            retryMessage: "legacy",
+            currentRetries: 1,
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end", finalOutput: ["local_result", "global_result"] },
+        ],
+      };
+    }
+
+    test("replace preserves node position and requires the same id", () => {
+      const tmpFile = createTempWorkflow(migrationWorkflow());
+      const replacementFile = path.join(os.tmpdir(), `replacement-${Date.now()}.json`);
+      fs.writeFileSync(
+        replacementFile,
+        JSON.stringify({
+          id: "produce",
+          type: "expression",
+          expressions: ["global_result = 1"],
+          connections: { default: "end" },
+        }),
+      );
+      try {
+        runWorkflowTool(`${tmpFile} replace produce ${replacementFile} --force`);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.nodes.map((node: { id: string }) => node.id)).toEqual([
+          "start",
+          "produce",
+          "end",
+        ]);
+        expect(saved.nodes[1].type).toBe("expression");
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(replacementFile);
+      }
+    });
+
+    test("update --final-output configures an End projection", () => {
+      const tmpFile = createTempWorkflow(migrationWorkflow());
+      try {
+        runWorkflowTool(`${tmpFile} update end --final-output '["global_result"]'`);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.nodes[2].finalOutput).toEqual(["global_result"]);
+        expect(saved.metadata.version).toBe("2.0.1");
+      } finally {
+        fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("sync replaces content while preserving the destination identity", () => {
+      const sourceWorkflow = {
+        ...migrationWorkflow(),
+        id: "workspace-copy",
+      };
+      const source = createTempWorkflow(sourceWorkflow);
+      const destination = createTempWorkflow({
+        ...migrationWorkflow(),
+        id: "catalog-workflow",
+        slug: "catalog-slug",
+        owner: "catalog-owner",
+        visibility: "public",
+        metadata: {
+          name: "Old",
+          version: "1.0.0",
+          description: "Old",
+          author: "catalog-author",
+          tags: ["catalog-tag"],
+        },
+      });
+      try {
+        runWorkflowTool(`${source} sync ${destination}`);
+        const saved = JSON.parse(fs.readFileSync(destination, "utf-8"));
+        expect(saved).toEqual({
+          ...sourceWorkflow,
+          id: "catalog-workflow",
+          slug: "catalog-slug",
+          owner: "catalog-owner",
+          visibility: "public",
+          metadata: {
+            ...sourceWorkflow.metadata,
+            author: "catalog-author",
+            tags: ["catalog-tag"],
+          },
+        });
+      } finally {
+        fs.unlinkSync(source);
+        fs.unlinkSync(destination);
       }
     });
   });

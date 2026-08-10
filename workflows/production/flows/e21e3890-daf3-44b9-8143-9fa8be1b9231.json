@@ -5,8 +5,8 @@
   "id": "e21e3890-daf3-44b9-8143-9fa8be1b9231",
   "metadata": {
     "name": "Quick Task",
-    "version": "2.1.1",
-    "description": "Быстрое выполнение задач без сложной инфраструктуры. Пользователь даёт задачу, агент разбивает её на этапы и предлагает план. Пользователь одобряет или отправляет на исправление. После принятия запускается цикл выполнения этапов. После выполнения всех этапов — ревью субагентом. Финальный отчёт пользователю. Оптимально для задач от 2 шагов без необходимости сложной валидации."
+    "version": "4.0.0",
+    "description": "Ограниченное выполнение многошаговой задачи с файловым workspace: сохраняет неизменяемые версии плана, решений и ревью, последовательно выполняет утверждённый план с долговечными доказательствами и завершает независимой проверкой и приёмкой пользователя."
   },
   "nodes": [
     {
@@ -19,29 +19,28 @@
     {
       "id": "get-task",
       "type": "agent-directive",
-      "directive": "Получи задачу от пользователя.\n\nСпроси:\n1. Что нужно сделать? (описание задачи)\n2. Какой ожидаемый результат?\n\n⚠️ ОБЯЗАТЕЛЬНО: Дождись ответа пользователя.\nНЕ заполняй поля пока пользователь не ответит.",
-      "completionCondition": "Пользователь описал задачу и ожидаемый результат",
+      "directive": "Establish the complete task contract from the triggering conversation. Reuse information already present and ask only for a material fact that cannot be discovered; do not ask the user to repeat a complete request. Create ./moira-ws/quick-task-{{executionId}}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for one concise evidence entry per approved plan position. Return the exact task and execution file paths. Do not plan or execute the task. If the complete files cannot be created and verified, report the blocker and do not call step().",
+      "completionCondition": "The execution workspace, process correlation, complete task contract, and execution evidence file exist at the returned bounded paths",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "task_description": {
+          "task_file": {
             "type": "string",
-            "minLength": 10,
-            "description": "Описание задачи от пользователя"
+            "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/task\\.md$",
+            "maxLength": 200,
+            "description": "Execution-specific complete task contract file"
           },
-          "expected_result": {
+          "execution_file": {
             "type": "string",
-            "minLength": 5,
-            "description": "Ожидаемый результат"
+            "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/execution\\.md$",
+            "maxLength": 200,
+            "description": "Execution-specific bounded evidence journal"
           }
         },
         "required": [
-          "task_description",
-          "expected_result",
-          "execution_note"
-        ],
-        "globalInputs": [
-          "execution_note"
+          "task_file",
+          "execution_file"
         ]
       },
       "connections": {
@@ -51,47 +50,121 @@
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Разбей задачу на конкретные этапы.\n\nЗадача: {{get-task.task_description}}\nОжидаемый результат: {{get-task.expected_result}}\n\nТребования:\n{{process_requirements}}\n\nПравила:\n- Количество этапов не ограничено — столько сколько нужно (1, 5, 20...)\n- Каждый этап = одно конкретное действие\n- Для каждого этапа укажи что должно быть сделано и как проверить\n\nФормат этапа:\n- id: порядковый номер\n- action: что делаем\n- expected_result: как проверяем что сделано",
-      "completionCondition": "План создан, каждый этап имеет action и expected_result",
+      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work. Prepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and exact item count; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().",
+      "completionCondition": "A complete immutable initial plan covering the task contract is published at current_plan_file and total_steps exactly equals its 1..10 work units",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "steps",
+          "current_plan_file",
           "total_steps"
         ],
         "globalInputs": [
-          "steps",
+          "current_plan_file",
           "total_steps"
         ]
       },
       "connections": {
-        "success": "present-plan"
+        "success": "plan-review"
+      }
+    },
+    {
+      "id": "plan-review",
+      "type": "agent-directive",
+      "directive": "Obtain an independent reviewer through an available subagent or child workflow. The reviewer must read the complete current plan {{current_plan_file}} and task contract {{get-task.task_file}} directly. Write the complete current reproducible blocking finding set to review.md beside that exact plan; every finding contains the problem, concrete evidence, and required correction. A clean review is an explicit zero-findings report. Never overwrite an existing review for another plan. On resume, verify and reuse the already complete review for the unchanged plan. Return only its exact bounded path and issues_count. Do not correct the plan. If a complete independent review file cannot be obtained and verified, report the blocker and do not call step().",
+      "completionCondition": "An independent complete review associated with current_plan_file exists at review_file and issues_count exactly matches its findings, including zero",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/plans/[0-9]+/review\\.md$",
+            "maxLength": 240,
+            "description": "Immutable review of the current plan"
+          },
+          "issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "multipleOf": 1,
+            "description": "Exact number of blocking findings in review_file"
+          }
+        },
+        "required": [
+          "review_file",
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "check-plan-review-clean"
+      }
+    },
+    {
+      "id": "check-plan-review-clean",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan-review.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "present-plan",
+        "false": "repair-plan"
+      }
+    },
+    {
+      "id": "repair-plan",
+      "type": "agent-directive",
+      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md describing the review basis and a complete corrected plan.md preserving unaffected obligations. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().",
+      "completionCondition": "A new complete immutable plan iteration corrects every confirmed finding and current_plan_file and total_steps identify that verified plan",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "current_plan_file",
+          "total_steps"
+        ],
+        "globalInputs": [
+          "current_plan_file",
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "plan-review"
       }
     },
     {
       "id": "present-plan",
       "type": "agent-directive",
-      "directive": "Покажи план пользователю и запроси подтверждение.\n\nЗадача: {{get-task.task_description}}\nОжидаемый результат: {{get-task.expected_result}}\n\nПлан ({{total_steps}} этапов):\n{{steps}}\n\n⚠️ ОБЯЗАТЕЛЬНО: Спроси \"Подтверждаете план? (да/нет)\"\nДождись явного ответа.\n\n**КРИТИЧЕСКИ ВАЖНО — РЕАКЦИЯ НА FEEDBACK:**\n- Если пользователь сказал \"да\" → approved = \"yes\"\n- Если пользователь дал ЛЮБОЙ feedback или сказал \"нет\" → approved = \"no\"\n- НЕ исправляй сам!\n- Ответь approved = \"no\" и запиши feedback\n- Workflow сам направит в ветку исправления",
-      "completionCondition": "Пользователь явно ответил да или нет",
+      "directive": "Read and present the complete independently reviewed plan {{current_plan_file}} with its clean review {{plan-review.review_file}} and ask for explicit approval. After the user responds, write the exact decision and any feedback to immutable decision.md beside the plan. Return approval=yes only for explicit approval, otherwise approval=no, plus the exact decision file path. Do not copy feedback into the response and do not revise or execute the plan here. If the decision file cannot be created and verified, do not call step().",
+      "completionCondition": "The user explicitly decided on the reviewed plan and the complete exact decision is preserved at decision_file",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "approved": {
+          "approval": {
             "type": "string",
             "enum": [
               "yes",
               "no"
             ],
-            "description": "Пользователь подтвердил план"
+            "description": "Minimal routing value for the user's explicit plan decision"
           },
-          "feedback": {
+          "decision_file": {
             "type": "string",
-            "description": "Замечания пользователя (если есть)"
+            "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/plans/[0-9]+/decision\\.md$",
+            "maxLength": 240,
+            "description": "Immutable complete plan decision and feedback record"
           }
         },
         "required": [
-          "approved"
+          "approval",
+          "decision_file"
         ]
       },
       "connections": {
@@ -104,7 +177,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "present-plan.approved"
+          "contextPath": "present-plan.approval"
         },
         "right": "yes"
       },
@@ -116,22 +189,23 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Исправь план по замечаниям пользователя.\n\nЗамечания: {{present-plan.feedback}}\n\nТекущий план:\n{{steps}}\n\nИсправь план учитывая замечания.",
-      "completionCondition": "План исправлен с учётом замечаний",
+      "directive": "Read the current plan {{current_plan_file}}, exact user decision and feedback {{present-plan.decision_file}}, and task contract {{get-task.task_file}}. Create the next immutable plan iteration with change.md preserving the exact feedback basis and a complete revised plan.md preserving unaffected obligations. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return feedback or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().",
+      "completionCondition": "A new complete immutable plan iteration incorporates the exact disk-backed feedback and current_plan_file and total_steps identify that verified plan",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "steps",
+          "current_plan_file",
           "total_steps"
         ],
         "globalInputs": [
-          "steps",
+          "current_plan_file",
           "total_steps"
         ]
       },
       "connections": {
-        "success": "present-plan"
+        "success": "plan-review"
       }
     },
     {
@@ -148,33 +222,25 @@
       },
       "connections": {
         "true": "execute-step",
-        "false": "subagent-review"
+        "false": "final-review"
       }
     },
     {
       "id": "execute-step",
       "type": "agent-directive",
-      "directive": "Выполни этап {{current_step}} из {{total_steps}} (нумерация с 0).\n\nДействие: {{steps[current_step].action}}\nОжидаемый результат: {{steps[current_step].expected_result}}\n\nТребования:\n{{validation_criteria}}\n\nИзбегай ошибок:\n{{common_mistakes}}\n\nПОСЛЕ ВЫПОЛНЕНИЯ:\n- Опиши что конкретно было сделано\n- Приведи доказательства (файлы, команды, результаты)",
-      "completionCondition": "Этап выполнен с доказательствами",
+      "directive": "Read the approved plan {{current_plan_file}} and execute only its work unit at zero-based position {{current_step}}. Follow that unit's action, expected result, and verification method. Use full technical judgment, inspect real dependencies, perform the work, and verify the actual result rather than relying only on mechanical checks. Before advancing, write or verify exactly one concise evidence entry of at most 500 characters for this plan position in {{get-task.execution_file}}; do not duplicate an existing entry on resume. If the work is incomplete or blocked, tell the user the verified reason and do not call step().",
+      "completionCondition": "The current approved plan unit is completely implemented and verified and its single bounded durable evidence entry exists",
       "inputSchema": {
         "type": "object",
-        "properties": {},
-        "required": [
-          "step_completed",
-          "what_was_done"
-        ],
-        "globalInputs": [
-          "step_completed",
-          "what_was_done",
-          "evidence"
-        ]
+        "additionalProperties": false,
+        "properties": {}
       },
       "connections": {
-        "success": "increment-step"
+        "success": "close-completed-step"
       }
     },
     {
-      "id": "increment-step",
+      "id": "close-completed-step",
       "type": "expression",
       "expressions": [
         "current_step = current_step + 1"
@@ -184,157 +250,93 @@
       }
     },
     {
-      "id": "subagent-review",
+      "id": "final-review",
       "type": "agent-directive",
-      "directive": "Re-validation pass {{review_iteration}} of up to {{max_review_iterations}} — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nДелегируй ревью субагенту через Task tool.\n\nИтерация ревью: {{review_iteration}} из {{max_review_iterations}}\n\n⚠️ КРИТИЧЕСКИ ВАЖНО: НЕ делай ревью сам — делегируй независимому субагенту.\n\n1) Передай субагенту:\n   - Задача: {{get-task.task_description}}\n   - Ожидаемый результат: {{get-task.expected_result}}\n   - План: {{steps}}\n   - Контекст: субагент должен проверить что ВСЕ этапы плана были выполнены в ходе сессии\n\n2) Промпт для субагента:\n   ТЫ — ревьювер работы. Проверь что все этапы плана выполнены.\n   \n   ПРОВЕРЬ:\n   - Все ли этапы плана выполнены?\n   - Соответствует ли результат ожидаемому?\n   - Есть ли пропущенные элементы?\n   - Достаточны ли доказательства?\n   \n   ВЕРНИ:\n   - issues_count: количество проблем (0 = всё ок)\n   - issues: список конкретных проблем с рекомендациями\n\n3) Честно передай результат субагента.",
-      "completionCondition": "Ревью завершено, issues_count указан",
+      "directive": "Obtain an independent reviewer through an available subagent or child workflow. Review the actual result and real artifacts against the task {{get-task.task_file}}, approved plan {{current_plan_file}}, plan approval {{present-plan.decision_file}}, and accumulated execution evidence {{get-task.execution_file}}. Inspect ./moira-ws/quick-task-{{executionId}}/result-reviews/: create the first numeric review record when none exists; after a latest review with change.md, create the next numeric record; on resume with no intervening change, verify and reuse the existing current review. Write every current reproducible blocking defect to the immutable review.md with problem, evidence, and required correction; an explicit zero-findings report is valid. Return only its bounded path and exact issues_count. Do not fix the result. If a complete independent review cannot be produced and verified, report the blocker and do not call step().",
+      "completionCondition": "A new or safely resumed independent immutable result review exists at review_file for the current result state and issues_count exactly matches its findings",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
+          "review_file": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/result-reviews/[0-9]+/review\\.md$",
+            "maxLength": 250,
+            "description": "Immutable independent review of the current result state"
+          },
           "issues_count": {
             "type": "number",
             "minimum": 0,
-            "description": "Количество проблем (0 = всё ок)"
-          },
-          "issues": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "problem": {
-                  "type": "string"
-                },
-                "recommendation": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Список проблем"
+            "maximum": 1000,
+            "multipleOf": 1,
+            "description": "Exact number of blocking findings in review_file"
           }
         },
         "required": [
+          "review_file",
           "issues_count"
         ]
       },
       "connections": {
-        "success": "check-review-passed"
+        "success": "check-review-clean"
       }
     },
     {
-      "id": "check-review-passed",
+      "id": "check-review-clean",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "subagent-review.issues_count"
+          "contextPath": "final-review.issues_count"
         },
         "right": 0
       },
       "connections": {
-        "true": "prepare-report",
-        "false": "check-review-iterations"
-      }
-    },
-    {
-      "id": "check-review-iterations",
-      "type": "condition",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "review_iteration"
-        },
-        "right": {
-          "contextPath": "max_review_iterations"
-        }
-      },
-      "connections": {
-        "true": "fix-issues",
-        "false": "ask-user-review-fix-limit-reached"
+        "true": "present-to-user",
+        "false": "fix-issues"
       }
     },
     {
       "id": "fix-issues",
       "type": "agent-directive",
-      "directive": "Исправь проблемы найденные ревьювером.\n\nПроблемы:\n{{subagent-review.issues}}\n\nДля КАЖДОЙ проблемы:\n1. Пойми что не так\n2. Исправь\n3. Задокументируй исправление",
-      "completionCondition": "Проблемы исправлены",
+      "directive": "Read the complete current result review {{final-review.review_file}}. Reproduce and correct the actual result by root cause for every confirmed finding while preserving unaffected approved work. Verify the changed result and write immutable change.md beside that exact review with a concise evidence record. Do not return findings, evidence, status, or a path already derivable from the supplied review. If a finding cannot be reproduced or corrected, or change.md cannot be completed and verified, report the blocker and do not call step().",
+      "completionCondition": "Every confirmed result defect is materially corrected and verified and the immutable change record beside the reviewed report is complete",
       "inputSchema": {
         "type": "object",
-        "properties": {},
-        "required": [
-          "fixes_applied"
-        ],
-        "globalInputs": [
-          "fixes_applied"
-        ]
+        "additionalProperties": false,
+        "properties": {}
       },
       "connections": {
-        "success": "expr-inc-review-iteration"
-      }
-    },
-    {
-      "id": "prepare-report-with-issues",
-      "type": "agent-directive",
-      "directive": "Подготовь отчёт с оставшимися проблемами.\n\nЗадача: {{get-task.task_description}}\nОжидаемый результат: {{get-task.expected_result}}\n\nОставшиеся проблемы после {{max_review_iterations}} итераций:\n{{subagent-review.issues}}\n\nПодготовь честный отчёт о проделанной работе с указанием нерешённых проблем.",
-      "completionCondition": "Отчёт подготовлен",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "report",
-          "unresolved_issues"
-        ],
-        "globalInputs": [
-          "report",
-          "unresolved_issues"
-        ]
-      },
-      "connections": {
-        "success": "present-to-user"
-      }
-    },
-    {
-      "id": "prepare-report",
-      "type": "agent-directive",
-      "directive": "Подготовь финальный отчёт.\n\nЗадача: {{get-task.task_description}}\nОжидаемый результат: {{get-task.expected_result}}\n\nПодготовь отчёт на основе выполненной работы:\n1. Что было сделано (по этапам плана)\n2. Какие артефакты созданы\n3. Как проверить результат",
-      "completionCondition": "Отчёт подготовлен",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "report"
-        ],
-        "globalInputs": [
-          "report",
-          "artifacts"
-        ]
-      },
-      "connections": {
-        "success": "present-to-user"
+        "success": "final-review"
       }
     },
     {
       "id": "present-to-user",
       "type": "agent-directive",
-      "directive": "Покажи отчёт пользователю и спроси нужна ли доработка.\n\n{{report}}\n\n{{#if unresolved_issues}}Нерешённые проблемы:\n{{unresolved_issues}}{{/if}}\n\n{{#if artifacts}}Артефакты:\n{{artifacts}}{{/if}}\n\n⚠️ ОБЯЗАТЕЛЬНО: Спроси \"Принимаете работу или нужна доработка? (принять/доработать)\"\nДождись явного ответа.\n\n**КРИТИЧЕСКИ ВАЖНО — РЕАКЦИЯ НА FEEDBACK:**\n- Если пользователь сказал \"принять\" → user_decision = \"accept\"\n- Если пользователь дал ЛЮБОЙ feedback или сказал \"доработать\" → user_decision = \"rework\"\n- НЕ исправляй сам!\n- Workflow сам направит в ветку доработки",
-      "completionCondition": "Пользователь ответил",
+      "directive": "Read the task {{get-task.task_file}}, approved plan {{current_plan_file}}, plan approval {{present-plan.decision_file}}, accumulated evidence {{get-task.execution_file}}, latest clean result review {{final-review.review_file}}, and actual artifacts. Present the actual independently reviewed result with important outcomes, concrete verification, and artifact locations, then ask whether the user accepts it or requests rework. Write the complete exact decision and any feedback to immutable decision.md beside the result review. Return decision=accept only for explicit acceptance, otherwise decision=rework, plus the exact decision file path. Do not copy feedback into the response and do not rework here. If the decision file cannot be created and verified, do not call step().",
+      "completionCondition": "The user explicitly decided on the reviewed result and the complete exact decision is preserved at decision_file",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "user_decision": {
+          "decision": {
             "type": "string",
             "enum": [
               "accept",
               "rework"
             ],
-            "description": "Решение пользователя"
+            "description": "Minimal routing value for the user's explicit result decision"
           },
-          "rework_feedback": {
+          "decision_file": {
             "type": "string",
-            "description": "Что доработать (если rework)"
+            "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/result-reviews/[0-9]+/decision\\.md$",
+            "maxLength": 250,
+            "description": "Immutable complete result decision and feedback record"
           }
         },
         "required": [
-          "user_decision"
+          "decision",
+          "decision_file"
         ]
       },
       "connections": {
@@ -347,7 +349,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "present-to-user.user_decision"
+          "contextPath": "present-to-user.decision"
         },
         "right": "accept"
       },
@@ -359,210 +361,44 @@
     {
       "id": "rework",
       "type": "agent-directive",
-      "directive": "Доработай по замечаниям пользователя.\n\nЗамечания: {{present-to-user.rework_feedback}}\n\nВыполни доработку на основе текущего состояния работы.\nСбрось review_iteration в 0 для нового цикла ревью.",
-      "completionCondition": "Доработка выполнена",
+      "directive": "Read the exact user decision and feedback {{present-to-user.decision_file}}, task {{get-task.task_file}}, approved plan {{current_plan_file}}, and current clean review {{final-review.review_file}}. Apply the requested rework to the actual result while preserving unaffected approved work. Verify the change and write immutable change.md beside that exact review with the exact request basis and concise evidence. Do not return feedback, evidence, status, or a derivable path. If the rework or change record cannot be completed and verified, report the blocker and do not call step().",
+      "completionCondition": "The exact disk-backed rework request is completely implemented and verified and the immutable change record beside the reviewed report is complete",
       "inputSchema": {
         "type": "object",
-        "properties": {},
-        "required": [
-          "rework_done",
-          "review_iteration"
-        ],
-        "globalInputs": [
-          "rework_done",
-          "review_iteration"
-        ]
+        "additionalProperties": false,
+        "properties": {}
       },
       "connections": {
-        "success": "subagent-review"
+        "success": "final-review"
       }
     },
     {
       "id": "end",
       "type": "end",
-      "finalOutput": [
-        "report",
-        "artifacts"
-      ]
-    },
-    {
-      "type": "agent-directive",
-      "id": "ask-user-review-fix-limit-reached",
-      "directive": "The review fix loop has reached its maximum iteration limit ({{max_review_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
-      "completionCondition": "User has made a decision on how to proceed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "decision": {
-            "type": "string",
-            "enum": [
-              "continue",
-              "reset"
-            ],
-            "description": "User decision: continue with current result or reset counter and retry"
-          }
-        },
-        "required": [
-          "decision"
-        ]
-      },
-      "connections": {
-        "success": "route-review-fix-limit-decision"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-review-fix-limit-decision",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-user-review-fix-limit-reached.decision"
-        },
-        "right": "reset"
-      },
-      "connections": {
-        "true": "expr-reset-review-fix-counter",
-        "false": "prepare-report-with-issues"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-reset-review-fix-counter",
-      "expressions": [
-        "review_iteration = 0"
-      ],
-      "connections": {
-        "default": "fix-issues"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-review-iteration",
-      "expressions": [
-        "review_iteration = review_iteration + 1"
-      ],
-      "connections": {
-        "default": "subagent-review"
-      }
+      "finalOutput": []
     }
   ],
   "variableRegistry": {
-    "current_step": {
-      "type": "number",
-      "description": "Текущий номер шага (0-indexed)",
-      "default": 0
+    "current_plan_file": {
+      "type": "string",
+      "description": "Path to the current complete immutable plan record.",
+      "pattern": "^\\./moira-ws/quick-task-[0-9a-f-]+/plans/[0-9]+/plan\\.md$",
+      "maxLength": 240
     },
     "total_steps": {
       "type": "number",
-      "description": "Общее количество шагов в плане",
-      "default": 0
+      "description": "Exact number of work units in the current immutable plan; authoritative for execution only after approval.",
+      "minimum": 1,
+      "maximum": 10,
+      "multipleOf": 1
     },
-    "steps": {
-      "type": "array",
-      "description": "Массив шагов плана [{id, action, expected_result}]",
-      "default": [],
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "action": {
-            "type": "string"
-          },
-          "expected_result": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "action",
-          "expected_result"
-        ]
-      },
-      "minItems": 1
-    },
-    "review_iteration": {
+    "current_step": {
       "type": "number",
-      "description": "Текущая итерация ревью субагентом",
+      "description": "Zero-based cursor of the next approved plan unit to execute.",
+      "minimum": 0,
+      "maximum": 10,
+      "multipleOf": 1,
       "default": 0
-    },
-    "max_review_iterations": {
-      "type": "number",
-      "description": "Максимум итераций ревью перед эскалацией",
-      "default": 3
-    },
-    "process_requirements": {
-      "type": "string",
-      "description": "Требования к процессу выполнения",
-      "default": "ТРЕБОВАНИЯ К ВЫПОЛНЕНИЮ:\n\n1. ДЕКОМПОЗИЦИЯ:\n- Разбей задачу на конкретные шаги\n- Каждый шаг = одно действие с измеримым результатом\n- Количество шагов не ограничено — столько сколько нужно\n\n2. ВЫПОЛНЕНИЕ:\n- Выполняй шаги последовательно\n- Для каждого шага предоставь доказательства выполнения\n- Не пропускай шаги молча\n\n3. HUMAN-IN-THE-LOOP:\n- Покажи план перед выполнением\n- Получи подтверждение пользователя\n- Покажи итоговый отчёт\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan item's directive in isolation.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
-    },
-    "validation_criteria": {
-      "type": "string",
-      "description": "Критерии валидации результатов",
-      "default": "КРИТЕРИИ ВАЛИДАЦИИ:\n\n1. ДОКАЗАТЕЛЬСТВА ОБЯЗАТЕЛЬНЫ:\n- Каждый шаг должен иметь доказательство выполнения\n- Типы: файл, команда, скриншот, детальное описание\n- 'Сделано' без деталей = НЕ принимается\n\n2. ПРОВЕРКА ШАГА:\n- Результат соответствует ожидаемому?\n- Есть конкретные доказательства?\n- Ничего не пропущено?\n\n3. ПРОВЕРКА ЗАДАЧИ:\n- Все шаги выполнены?\n- Ожидаемый результат достигнут?\n- Пользователь может проверить?"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Типичные ошибки и как их избегать",
-      "default": "ТИПИЧНЫЕ ОШИБКИ:\n\n❌ 'Готово!' без проверки → ✅ Всегда предоставляй доказательства\n❌ Молча пропускать шаги → ✅ Явно отмечай что пропущено и почему\n❌ 80% = готово → ✅ Только 100% = готово\n❌ Галлюцинации ('отправил', 'создал') → ✅ Только факты с доказательствами\n❌ Смешивать действие и проверку → ✅ Сначала сделай, потом проверь"
-    },
-    "artifacts": {
-      "type": "array",
-      "description": "Workflow-global artifacts",
-      "items": {
-        "type": "string"
-      }
-    },
-    "evidence": {
-      "type": "string",
-      "description": "Workflow-global evidence"
-    },
-    "execution_note": {
-      "type": "string",
-      "description": "Workflow-global execution_note"
-    },
-    "fixes_applied": {
-      "type": "array",
-      "description": "Workflow-global fixes_applied",
-      "items": {
-        "type": "object",
-        "properties": {
-          "problem": {
-            "type": "string"
-          },
-          "fix": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "report": {
-      "type": "string",
-      "description": "Workflow-global report"
-    },
-    "rework_done": {
-      "type": "string",
-      "description": "Workflow-global rework_done"
-    },
-    "step_completed": {
-      "type": "string",
-      "description": "Workflow-global step_completed",
-      "enum": [
-        "yes",
-        "no"
-      ]
-    },
-    "unresolved_issues": {
-      "type": "array",
-      "description": "Workflow-global unresolved_issues",
-      "items": {
-        "type": "string"
-      }
-    },
-    "what_was_done": {
-      "type": "string",
-      "description": "Workflow-global what_was_done"
     }
   }
 }

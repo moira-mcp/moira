@@ -15,7 +15,7 @@ Anti-patterns are recurring workflow design mistakes that lead to broken, ineffi
 
 ## Anti-Pattern Catalog
 
-### #1: Data Roundtrip
+### Data Roundtrip
 
 Directive tells agent to collect data, then `inputSchema` asks agent to return that same data as structured output. The agent acts as a data-entry clerk copying from tool output to schema fields.
 
@@ -30,21 +30,27 @@ Directive tells agent to collect data, then `inputSchema` asks agent to return t
    inputSchema: { architecture_assessment: string, risks_identified: string[] }
 ```
 
-### #2: Empty InputSchema with Side Effects
+### Decorative Outputs
 
-Node has no `inputSchema` but directive tells agent to perform side effects (create files, run commands). No evidence of what was done is captured.
+An `inputSchema` asks for `done`, `success`, `status`, `result_code`, pass numbers, or evidence that
+no downstream node reads. A successful node transition already means that its completion condition
+was met; JSON Schema does not make redundant confirmation useful.
 
-**Detection:** Agent-directive node without `inputSchema` where directive describes actions with observable outcomes.
+**Detection:** An output has no reader, does not affect a condition, and is not part of the required
+user-facing result.
 
 ```
-❌ Directive: "Create test files for auth module" (no inputSchema)
-   // Workflow doesn't know what was created or if it succeeded
+❌ inputSchema: { done: boolean, status: string, result_code: string }
+   // All routes continue on the node's success connection
 
-✅ inputSchema: { files_created: string[], tests_passing: boolean }
-   // Evidence of completion captured in workflow context
+✅ inputSchema: {}
+   // The node verifies its completion condition before advancing
+
+✅ inputSchema: { issues_count: integer }
+   // A condition node uses the count to select review or repair
 ```
 
-### #3: Undeclared Variable / Implicit Promotion
+### Undeclared Variable / Implicit Promotion
 
 Referencing a bare-name variable that is not declared in the workflow `variableRegistry`, or expecting a node's local output to become a global variable through name matching. Globals must be declared explicitly; a node writes a global only when it lists that name in `inputSchema.globalInputs`.
 
@@ -62,7 +68,7 @@ Referencing a bare-name variable that is not declared in the workflow `variableR
    Reference node-local outputs as node-id.name
 ```
 
-### #4: Review Loop via InputSchema Instead of Files
+### Review Loop via InputSchema Instead of Files
 
 Review feedback passed through `inputSchema` text fields instead of persistent files. Agent loses context between iterations.
 
@@ -76,7 +82,7 @@ Review feedback passed through `inputSchema` text fields instead of persistent f
    // Results persist across iterations and retries
 ```
 
-### #5: Implicit Fix Loops
+### Implicit Fix Loops
 
 Directive says "fix until done" without explicit loop structure in the graph. Agent retries internally without workflow control.
 
@@ -90,40 +96,32 @@ Directive says "fix until done" without explicit loop structure in the graph. Ag
    // Explicit graph loop with workflow visibility into each iteration
 ```
 
-### #6: Unbounded Cycles
+### Review-Loop Control Algebra
 
-Validation loops without iteration limits or escalation paths. Can run forever if condition never met.
+An ordinary review loop is expanded into a second state machine with pass IDs, counters, frozen
+finding sets, status codes, reset branches, and limit escalation even though none of these values
+serve a separate product requirement.
 
-**Detection:** Cycle in graph without iteration counter variable or without condition checking iteration limit.
+**Detection:** More state is used to control review bookkeeping than to produce and check the
+artifact itself.
 
 ```
-❌ Loop: [action] → [check] → [fix] → [action] (forever if quality never passes)
+❌ review → pass-id/counter/frozen-findings/status/limit machinery → fix → review
 
-❌ Counter + limit but silent skip:
-   expression(counter++) → condition(counter < max) → false → next-phase
-   // Silently skips fix loop — user never knows issues were unresolved!
-
-✅ Counter + limit + user decision:
-   expression(counter++) → condition(counter < max) → false → ask-user-limit-reached
-   // User decides: continue as-is / reset counter and retry / accept despite issues
+✅ change → review { issues_count } → issues_count == 0 ? next : fix → review
 ```
-
-**The `false` branch of a bounded loop limit check MUST route to a user decision node**, not directly to the next phase. Options should include:
-
-- **continue/accept** — proceed despite unresolved issues
-- **reset** — reset counter to 0 and retry the fix loop
 
 <Aside type="caution">
-  Routing the false branch directly to the next phase is a **silent failure** anti-pattern. The user
-  loses control and may not realize issues were left unresolved after max iterations.
+  Every repetition still needs a changed artifact, changed input, or new diagnostic hypothesis. If
+  repair cannot change or reproduce the finding, report that fact instead of looping unchanged.
 </Aside>
 
 <Aside type="note">
-  Human-in-the-loop cycles (user approval loops) are acceptable without bounds since the user
-  naturally terminates them.
+  Add retry limits and escalation only when the workflow has a real retry policy that requires them.
+  Do not add them mechanically to every review loop.
 </Aside>
 
-### #7: Dynamic Data in Workflow Variables
+### Dynamic Data in Workflow Variables
 
 Storing **dynamic data generated during workflow execution** (file contents, API responses, HTML output, extraction results) in workflow variables. These variables get injected into every directive via templates, bloating context with potentially unbounded content.
 
@@ -148,11 +146,11 @@ Storing **dynamic data generated during workflow execution** (file contents, API
 
 **Exception:** Static instructional content stored as a `variableRegistry` default (rules, standards, checklists) is a **correct pattern**, not variable abuse. These are deliberately placed to ensure the agent sees them on every relevant step. See [Static Workflow Configuration](/docs/patterns/static-configuration/).
 
-### #8: SystemReminder Modification
+### SystemReminder Modification
 
 System-level consideration. `systemReminder` is static and applied to ALL steps. Step-specific instructions belong in node directives, not in `systemReminder`.
 
-### #9: Manual Index Management by Agent
+### Manual Index Management by Agent
 
 Agent manually tracks array indices, counters, or pagination through `inputSchema`. Error-prone and breaks on retry.
 
@@ -167,7 +165,7 @@ Agent manually tracks array indices, counters, or pagination through `inputSchem
    // Workflow engine handles arithmetic deterministically
 ```
 
-### #10: File Upload via Content
+### File Upload via Content
 
 Passing entire workflow JSON through MCP tool parameters for large workflows. Hits size limits.
 
@@ -181,7 +179,7 @@ Passing entire workflow JSON through MCP tool parameters for large workflows. Hi
    // Token-based upload handles any size
 ```
 
-### #11: Context Duplication
+### Context Duplication
 
 Copying information already in agent's context into workflow variables. Redundant and bloats context.
 
@@ -194,7 +192,7 @@ Copying information already in agent's context into workflow variables. Redundan
 ✅ Let agent re-read current data when needed. Store only stable references (paths, IDs).
 ```
 
-### #12: Externalizing Critical Instructions to Files
+### Externalizing Critical Instructions to Files
 
 Moving essential agent instructions and standards from a `variableRegistry` default to external files, expecting the agent to read them each time. This creates risk of hallucination and adds unnecessary I/O.
 
@@ -215,31 +213,65 @@ Moving essential agent instructions and standards from a `variableRegistry` defa
   fine for large reference data the agent only needs occasionally (e.g., a 100KB dataset).
 </Aside>
 
-### #13: False-Loop Misreport
+### Reimplementing the Workflow Engine
 
-The agent sees the same review/validate directive twice and tells the user the flow is looping or stuck, then stops.
+The workflow builds its own runtime with step run IDs, phases, handoff protocols, locks, hashes,
+manifests, ledgers, or transaction and deduplication layers without a demonstrated requirement.
+Moira already persists the current node, node completion, and graph transition.
 
-**Detection:** A re-validate back-edge to an identical node with no round counter, no "expected, not a bug" cue, and often no bound.
-
-```
-❌ [validate] → condition(issues?) → true → [fix] → [validate]
-   // Same validate directive reappears; agent reports "the workflow is stuck in a loop"
-
-✅ expression(validation_round = validation_round + 1) → [validate] (renders the counter and the cue)
-   condition(validation_round < max_validation_rounds) → true → [fix] → expression(...) → [validate]
-                                                       → false → [ask-user-limit]
-```
-
-The loop-entry directive renders the round counter and states the loop is expected:
+**Detection:** A new control value duplicates execution state already owned by the engine and has no
+independent observable purpose.
 
 ```
-Re-validation pass {{validation_round}} of {{max_validation_rounds}} — a normal quality loop,
-expected to converge. This is NOT a bug and NOT a stuck flow; do not report a loop to the user.
+❌ create pass IDs and phase state to remember which graph node is active
+✅ rely on the execution record and graph connections
 ```
 
-The counter is incremented by an expression node (flow-automatic), declared in `variableRegistry` with a numeric `default` (counter default 0, max default e.g. 5). An agent-incremented counter is itself an anti-pattern (see #9).
+Add a control mechanism only after showing that the engine's model cannot satisfy a concrete
+requirement.
 
-### #14: Declared-But-No-Default Variable
+### Mechanical Validation State Machine
+
+A workflow recreates the official validator using `validation_passed`, error arrays, counters,
+reset expressions, and limit branches. This duplicates platform behavior and can drift from it.
+
+```
+❌ change → validation node → validation flags/counters → repair → reset → validation
+✅ change and run the official validator in the same node; complete only after it succeeds
+```
+
+Use a separate validation node only when validation is itself an observable workflow stage required
+by the user, not merely an implementation detail of creating a valid artifact.
+
+### State Without a Consumer
+
+Every output and global variable needs a writer, a named reader, and an observable effect on a
+route, rendered instruction, or required result. Remove values that fail any part of that trace.
+
+### Procedural Fragmentation
+
+Creating a separate agent turn to make a directory, copy a known value, rename a report, assemble
+a prompt from known files, or record the previous step adds coordination without new reasoning.
+The owner of a substantive operation should create its own artifacts.
+
+### Mechanical Implementation Plan
+
+A plan becomes an exhaustive script of microsteps, exact commands, file allowlists, local rewrite
+order, or implementation pseudocode. This prematurely chooses tactics and prevents the executor
+from following dependencies discovered during implementation.
+
+A useful plan fixes the outcome, scope, contracts, invariants, dependencies, acceptance criteria,
+behavioral checks, and material risks. Known nodes and files are entry points, not an exhaustive
+allowlist, unless an external contract explicitly makes them one.
+
+### Planning Without Offering a Source Audit
+
+Editing begins without checking whether the source workflow already contains known anti-patterns.
+Before planning, offer a separate full-workflow audit. Run it only with user consent, report
+concrete findings, and let the user choose which repairs join the edit scope. If declined, inspect
+only the requested area and the dependencies needed to change it correctly.
+
+### Declared-But-No-Default Variable
 
 `{{var}}` renders `[[UNDEFINED_VARIABLE]]` at runtime even though `var` is declared in `variableRegistry`; an expression like `var = var + 1` yields `NaN`.
 
@@ -256,7 +288,7 @@ The counter is incremented by an expression node (flow-automatic), declared in `
 
 Give every counter and flag a `default`. The validator emits a declared-but-no-default warning when a referenced variable has no `default` and is never written upstream.
 
-### #15: Template-in-Data
+### Template-in-Data
 
 A `{{name}}` the agent writes into data returned via `step()` renders `[[UNDEFINED_VARIABLE]]` when that value is later interpolated into a directive.
 
@@ -272,7 +304,7 @@ A `{{name}}` the agent writes into data returned via `step()` renders `[[UNDEFIN
 
 Never write bare `{{...}}` into `step()` data; templates belong only in static node fields (directive, completionCondition, message). The engine treats substituted data values as literal.
 
-### #16: Template Injection (SSTI)
+### Template Injection (SSTI)
 
 Untrusted input containing template syntax interpolated into a directive could attempt to dump the variable bag (`{{context.variables}}`), run an `each`/`if` helper, or traverse another node's scope via `node-id.field`.
 

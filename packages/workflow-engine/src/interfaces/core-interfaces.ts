@@ -120,6 +120,7 @@ export interface INodeHandler {
     repository: unknown, // IDataRepository - avoiding circular import
     engine: IGraphExecutionEngine,
     input?: unknown,
+    variableRegistry?: VariableRegistry,
   ): Promise<NodeExecutionResult>;
 
   /**

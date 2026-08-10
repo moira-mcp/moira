@@ -1,13 +1,13 @@
 ---
 title: Robust Task
-description: Reliable execution of complex tasks with disk workspace, independent review, and bounded retry loops
+description: Filesystem-backed execution for complex tasks with durable evidence, independent reviews, and bounded recovery
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-Workflow for reliable execution of complex, multi-step tasks. It saves the plan and evidence to a disk workspace for context recovery, validates the plan and every step through an **independent reviewer subagent**, and routes failures through bounded retry loops with user escalation. Use for critical tasks where reliability matters.
+Robust Task runs complex multi-step work from a durable filesystem workspace. It preserves every plan version and execution attempt, uses independent reviews before approval and after work, and asks the user for a decision when an automatic repair or retry budget is exhausted.
 
-For simpler tasks, consider [Quick Task](/docs/reference/workflows/quick-task/) instead.
+The workflow requires an agent with filesystem access. For smaller bounded tasks, use [Quick Task](/docs/reference/workflows/quick-task/).
 
 ## Start
 
@@ -17,195 +17,119 @@ mcp__moira__start({ workflowId: "moira/robust-task", parentExecutionId: "none" }
 
 ## Process
 
-The flow runs seven phases: UNDERSTAND → DECOMPOSE → VALIDATE → APPROVE → EXECUTE → VERIFY → DELIVER.
-
 ```mermaid
 flowchart LR
-    A[Understand] --> B[Decompose]
-    B --> C[Validate Plan]
-    C -->|issues| C
-    C -->|clean| D[Approve]
-    D -->|revise| B
-    D -->|ok| E[Execute Step]
-    E --> F[Gate Review]
-    F -->|fail| E
-    F -->|pass| G{More Steps?}
-    G -->|yes| E
-    G -->|no| H[Verify Criteria]
-    H --> I[Final Review]
-    I -->|gaps| H
-    I -->|ok| J[Deliver]
+    A[Create workspace] --> B[Create plan]
+    B --> C[Independent plan review]
+    C -->|findings| D[New plan version]
+    D --> C
+    C -->|clean or accepted at limit| E[User approval]
+    E -->|rejected| D
+    E -->|approved| F[Execute one step]
+    F --> G[Independent step review]
+    G -->|retry| F
+    G -->|replan| D
+    G -->|accepted| H{More steps?}
+    H -->|yes| F
+    H -->|no| I[Criteria review]
+    I --> J[Independent final review]
+    J -->|findings| I
+    J -->|clean or accepted at limit| K[Delivery]
 ```
 
-## Phases
+## Durable workspace
 
-| Phase | Action | Output |
-|-------|--------|--------|
-| Understand | Collect task description, expected deliverable, constraints, success criteria | Frozen requirements |
-| Decompose | Break the task into as many concrete steps as it genuinely needs, each with an `expected_output` | Self-contained plan |
-| Validate | Independent reviewer subagent checks plan self-sufficiency, requirements coverage, and standards | Validated plan |
-| Approve | User explicitly confirms the plan before execution begins | Approved plan |
-| Execute | Execute the current step, produce evidence | Step artifact |
-| Verify | Independent gate reviewer judges each step; an independent final review re-derives criteria coverage | Verified result |
-| Deliver | Compile the deliverable, summary, and artifact list | Complete deliverable |
+The first directive creates or resumes one workspace whose path matches:
 
-## File-Mode-First Workspace
+```text
+./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/
+```
 
-The first step checks whether the agent has file-system access (`Read`/`Write`/`Edit` tools). The rest of the flow adapts to the answer.
+The workspace is correlated with the execution by `process-id.txt`. It also contains:
 
-**With file access** (preferred), the workflow creates a workspace and works from disk:
+- `task-requirements.md` — the frozen active request;
+- `workflow-guide.md` — concise rules for recovery, planning, evidence, and review;
+- `plans/NNN/plan.md` — complete immutable plan versions;
+- `plans/NNN/review.md` — the current independent review of that plan version;
+- `plans/NNN/decision.md` — the user's exact approval or rejection;
+- `steps/<step>/plans/<plan-version>/attempts/<attempt>/evidence.md` — evidence for one exact execution attempt;
+- `verdict.md` beside each evidence file — its independent gate review;
+- `final/criteria/` and `final/reviews/` — versioned completion reviews and repair records;
+- `final/delivery.md` — the truthful final result.
 
-- Workspace folder: `./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/` (path ends with a trailing slash, stored in `workspace_path`).
-- The plan lives in `{{workspace_path}}plan.md` (one numbered item per step).
-- Requirements are frozen in `{{workspace_path}}task-requirements.md`; the planning standards in `{{workspace_path}}planning-standards.md`; the process ID in `{{workspace_path}}process-id.txt` for recovery after session archival.
-- Per-step evidence is written to `{{workspace_path}}step-{{current_step}}/evidence.md`.
-- The agent passes **paths, not payloads**: decompose returns `total_steps` and `plan_saved_to_file` — it does NOT echo the plan array back. Reviewers receive file paths and read the artifacts directly.
-
-**Without file access**, the flow falls back to in-context state: the plan lives only in workflow memory. Decompose must return the full `steps[]` array plus `current_step_action` and `current_step_expected_output` for step 1, and each `complete-step` returns the next step's action and expected output.
+Directives pass paths and small routing values through workflow context. They do not relay file bodies that the agent can read from the workspace. When a directive refers to a file the agent just wrote, the path remains the authority; the agent can reuse its current context or read the file again after context recovery.
 
 <Aside type="tip">
-Saving the process ID to `process-id.txt` lets a new session resume the same execution after the previous context is archived.
+`process-id.txt` and the durable artifacts let a later agent session resume the same execution with `session({ action: "current_step", executionId })`.
 </Aside>
 
-## Decomposition
+## Planning and approval
 
-Decompose produces as many steps as the task genuinely needs — small tasks may have a few, large tasks many. The plan is not padded or truncated to hit a target number; the task's real scope decides.
+Planning is goal-first: the plan contains as many substantive steps as the task needs. Each step gives an executor its purpose, relevant context, expected result, and a fitting acceptance gate without mechanically scripting intellectual work.
 
-### Planning Standards (S1–S11)
+An independent peer reviews the complete current plan against the frozen requirements and real project context. Only reproducible blocking defects count. A repair never overwrites the reviewed plan: it creates the next `plans/NNN/plan.md`, then the new version is reviewed.
 
-The decompose and validate steps enforce a single canon of planning standards:
+The automatic plan-review cycle is bounded by `max_review_rounds` (default `5`). At the bound, the user explicitly chooses whether to continue repair or accept the reviewed plan for the separate approval gate. Execution starts only after the user unconditionally approves the exact plan. Rejection creates another plan version and returns it to review.
 
-| # | Standard | Rule |
-|---|----------|------|
-| S1 | Step granularity | One logical unit of work per step; no micro- or mega-steps |
-| S2 | Dependencies | Correct order; each step's output enables the next; no cycles |
-| S3 | Verifiability | Every step has a measurable `expected_output` |
-| S4 | Completeness | Every requirement is covered; each step names the artifacts it produces |
-| S5 | Self-sufficiency | Each step carries all info to execute it; no "see previous step"; full paths |
-| S6 | Resilience | A step is executable in isolation even if context is lost between steps |
-| S7 | Structured reasoning | Chain-of-thought for complex steps; explicit methods and output formats |
-| S8 | Success criteria & human-in-the-loop | Criteria defined up front and measurable; plan shown to user; escalation available |
-| S9 | Atomicity & redundancy | No global scope — each item restates the nuances it needs and **duplicates** cross-cutting actions (progress report, tests, commit) into every item |
-| S10 | Item structure | Each item: name, why, what-to-do with full paths, cross-cutting actions, measurable expected output |
-| S11 | No tail degradation | The last items carry the same detail and quality as the first; context volume is no excuse to cut corners |
+## Step execution and review
 
-## Two-Level Independent Review
+The engine owns the one-based `current_step` cursor. For each plan step:
 
-Verification never relies on the executing agent's own judgment. Two layers of independent review run, plus a light self pre-pass before the final one.
+<Steps>
+1. The executor reads the current plan, frozen requirements, and relevant earlier evidence or decisions.
+2. It performs only the current step and writes a new plan-qualified `evidence.md`; earlier attempts remain intact.
+3. An independent peer reads the evidence, real artifact, requirements, and plan, then writes `verdict.md` beside that evidence.
+4. An accepted verdict advances the cursor. A rejected verdict either retries the same step or requests a new plan when the defect cannot be solved by retrying.
+</Steps>
 
-### Per-step gate review
-
-After each step executes, `verify-step-execution` delegates a **gate review** to an independent reviewer subagent (the executor does not review its own work). The reviewer:
-
-- Reads the full plan and the step's evidence directly — no trust in summaries.
-- Judges the step for **plan integrity**: does it correctly build on the previous steps and set up the future steps, with no drift, regression, or quality degradation?
-- Verifies the evidence fully matches the step's `expected_output` (partial match, no concrete evidence, or missing elements all count as NOT verified).
-- Returns `step_verified` (`yes`/`no`), `issues_found`, and `verification_details`.
-
-The reviewer's verdict is authoritative. On `no` (with file access), the issues are written to `{{workspace_path}}step-{{current_step}}/verification-issues.md`.
-
-### Final independent review
-
-When all steps are done, completion verification runs in two passes:
-
-1. `verify-criteria` — a **light self pre-pass**. The agent re-checks every success criterion against the **real artifact** (code, files, command output, tests), one criterion at a time, requiring concrete evidence per criterion. "Looks done" / "should work" / "documented as complete" is a gap, not evidence.
-2. `final-review` — an **independent final review**. A reviewer subagent **re-derives** success-criteria coverage from the **frozen requirements** and the **real artifacts** (not the executor's claims), one check per criterion, returning `final_issues_count` (`0` = fully covered) and a flat list of gaps.
-
-If the final review finds gaps, the flow routes to `fix-gaps` and re-verifies.
-
-## Bounded Loops
-
-Every quality loop is bounded by a round counter and escalates to the user instead of looping forever. Each looping step's directive states that re-entry is **expected, not a bug** — the agent must not report a stuck flow.
-
-| Loop | Counter | Limit | On limit |
-|------|---------|-------|----------|
-| Plan validation | `validation_round` | `max_validation_rounds` | Ask the user whether to continue or proceed |
-| Criteria gaps | `criteria_round` | `max_criteria_rounds` | Ask the user whether to continue or proceed |
-| Per-step retry | `step_retry` | `max_retries` | Escalate (skip / escalate / revise_plan / reset) |
-
-<Aside type="note">
-A looping step's directive opens with "this is a normal quality loop, expected to converge" — seeing the same step again is part of the design, not a fault to report.
-</Aside>
-
-## Retry and Escalation
-
-When a step's gate review fails, the per-step retry loop increments `step_retry` and retries with reviewer feedback until `max_retries`. On exhaustion, a Telegram notification fires and the user is asked to choose:
+`step_retry` controls the escalation budget; it is not the durable attempt directory number. After `max_retries` failed gates (default `3`), the user chooses one of three outcomes:
 
 | Decision | Effect |
 |----------|--------|
-| `skip` | Mark the step skipped, advance the cursor |
-| `escalate` | User completes the step manually, then continue |
-| `revise_plan` | Revise the plan from the execution problem and restart from step 1 |
-| `reset` | Reset the retry counter and try the step again |
+| `retry` | Retry only with changed input, a new hypothesis, changed external state, or concrete new work/evidence |
+| `replan` | Preserve completed steps and reshape the open step and unfinished tail |
+| `finish_incomplete` | Stop further execution and automatic repair, then deliver the exact unresolved scope as incomplete |
 
-## Plan Approval and Revision
+The decision is stored under `steps/<step>/decisions/NNN.md`. A replan may change frozen requirements only when that same user decision explicitly names and authorizes the change and reason.
 
-At the approval gate, `present-plan` waits for an explicit user `yes`/`no`. Anything other than a pure "yes" — including "Yes, but…" or "Good, just change…" — is treated as `plan_approved: no`, and the flow routes through the **revise-plan branch** (not teleport). The agent records the comments in `revision_feedback` and does not fix the plan itself; the workflow drives the revision.
+The `teleport-replan` node is also available when the agent discovers during execution that the current plan no longer fits the real work. It preserves completed steps and sends the new complete plan through review and approval.
 
-<Aside type="caution">
-Plan rejection uses the revise-plan branch. The `teleport-replan` jump is for mid-execution replanning only, never for rejecting a plan before execution.
-</Aside>
+## Completion reviews
 
-## Step-Close Replan (mid-execution)
+After all planned steps close, Robust Task performs two different checks:
 
-During execution, if the remaining plan no longer fits what has already been built, the agent uses the `teleport-replan` jump. It does **not** restart from step 1:
+1. `verify-criteria` checks every active success criterion and goal facet against the real deliverable, using mechanical checks only for properties they actually prove. It writes the next `final/criteria/NNN-review.md`.
+2. `final-review` delegates an independent re-derivation of completeness from the requirements, approved plan, real deliverable, step records, and latest criteria review. It writes the next `final/reviews/NNN-review.md`.
 
-<Steps>
-1. The current step is closed as-is — recorded honestly, even if partial.
-2. Completed steps (1..current) are kept untouched.
-3. Any unfinished part of the current step moves forward into a new next step.
-4. Only the tail (steps after the current one) is reshaped or extended to fit the revision reason.
-5. The steps are recounted and `total_steps` is refreshed.
-6. The cursor advances and the revised plan is re-validated.
-</Steps>
+Confirmed findings are repaired in the real artifact and recorded in a new fix file. Criteria are checked again before the next independent final review, so delivery never relies on a report produced before the latest repair.
 
-## Expression-Driven Step Cursor
+Criteria and final-review repair cycles use the same `max_review_rounds` bound. At a bound, the user explicitly chooses continued repair or acceptance of the exact remaining scope as incomplete. Accepted gaps stay visible in later reports and in delivery.
 
-The engine owns the step counter. Expression nodes advance `current_step` (`current_step = current_step + 1`) and reset `step_retry` to `0`; the agent never does the arithmetic and must not change `current_step` itself. The `check-all-steps-done` condition compares `current_step` against `total_steps` to decide whether to execute the next step or move to completion verification.
+## Result
+
+`final/delivery.md` is derived from the frozen requirements, current approved plan, durable step records, reviews, authorized requirement changes, and incomplete-acceptance decisions. `delivery_status` is `complete` only when no active obligation remains unresolved; otherwise it is `incomplete` and the unresolved scope is disclosed.
+
+The End node returns exactly:
 
 ```json
 {
-  "type": "expression",
-  "id": "expr-inc-current-step",
-  "expressions": [
-    "current_step = current_step + 1",
-    "step_retry = 0"
-  ],
-  "connections": { "default": "check-all-steps-done" }
+  "workspace_path": "./moira-ws/.../",
+  "delivery_file": "final/delivery.md",
+  "delivery_status": "complete | incomplete",
+  "summary": "Concise truthful terminal summary"
 }
 ```
 
-## Evidence
+Telegram notifications announce plan readiness, exhausted step retries, and completion. Notification failure does not stop the workflow.
 
-Each step must produce verifiable evidence, not a "done" claim.
+## Use cases
 
-| Evidence type | Example |
-|---------------|---------|
-| Screenshot | UI state verification |
-| File | Created or modified files |
-| Link | Published resource URL |
-| Description | Detailed account of exactly what was done |
-
-With file access the evidence is written to `{{workspace_path}}step-{{current_step}}/evidence.md`; reviewers read it directly.
-
-## Telegram Notifications
-
-The flow sends a Telegram notification at three points (and continues even if sending fails):
-
-- **Plan ready** — the validated plan is ready for the user to confirm.
-- **Escalation** — a step failed after `max_retries` and a decision is required.
-- **Completion** — the task is finished and the deliverable is ready.
-
-## Use Cases
-
-- Implement a feature with tests and verification
-- Write and publish an article
-- Conduct research and produce a report
-- Any multi-step task requiring verified completion and recovery after context loss
+- complex implementation or refactoring with several dependent stages;
+- work that must survive agent-context loss;
+- tasks requiring durable per-attempt evidence and independent gates;
+- critical work where unresolved obligations must not be silently treated as complete.
 
 ## Related
 
-- [Quick Task](/docs/reference/workflows/quick-task/) — For simpler tasks
-- [Content Creation](/docs/reference/workflows/content-creation/) — For text content creation
-- [Verified Research](/docs/reference/workflows/verified-research/) — For research with verified sources
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+- [Quick Task](/docs/reference/workflows/quick-task/) — smaller bounded tasks
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — all bundled workflows

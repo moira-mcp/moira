@@ -1,0 +1,61 @@
+---
+title: Todo List
+description: Minimal autonomous checklist with one task at a time and concise local evidence
+---
+
+Todo List turns one goal into an ordered checklist and presents one task at a time. It is intentionally not a result ledger: it does not classify task outcomes, aggregate evidence, or produce a completion report.
+
+## Start the workflow
+
+```js
+mcp__moira__start({ workflowId: "moira/todo-list", parentExecutionId: "none" })
+```
+
+The first step obtains 1–100 tasks. If the current user or caller context already contains a
+schema-valid ready list, the agent submits it unchanged. Otherwise the same step plans the list
+once from the current goal. Each task contains only:
+
+- `action`: the self-contained work to perform;
+- `expected_result`: the observable condition that proves completion.
+
+Both strings are non-empty and limited to 1,000 characters. Array position is the task identity; the agent does not supply IDs, cursors, totals, statuses, or result codes.
+
+## Execution
+
+Todo List owns a one-based cursor. It projects the current task, tells the agent its action and expected result, and waits. The agent performs the real work and verifies the expected result before calling `step()` with exactly one field:
+
+```json
+{ "evidence": "The focused test command passed." }
+```
+
+`evidence` is a non-empty string of at most 500 characters. It is a concise acknowledgement for the current step, remains node-local, and is not copied into a workflow-global array or terminal report.
+
+If the task is incomplete or blocked, the agent must not call `step()`. It reports the verified blocker to the user, so the cursor stays on the current task. A schema-valid acknowledgement advances the cursor exactly once. Exhausting the ordered array completes the workflow.
+
+## Supplying an existing checklist
+
+A caller starts Todo as a child workflow and includes its schema-valid ready task array in the
+child's task context. The first Todo step then submits that array through the ordinary `step()`
+response:
+
+```json
+{
+  "tasks": [
+    {
+      "action": "Check the implemented requirement",
+      "expected_result": "The caller's domain report contains the verified result"
+    }
+  ]
+}
+```
+
+There is no separate supplied-task branch and no pre-start input mapping. The intake step preserves
+the ready array rather than replanning it, then starts at the first item. Keep domain results in the
+caller. For example, a requirements-coverage workflow should write its own report and own
+`COVERED`/`GAP` classifications instead of asking Todo List to transport them.
+
+## Completion contract
+
+Todo List completes with an empty terminal output: `{}`. Completion means every supplied checklist item received a schema-valid acknowledgement after the agent performed and checked it. Per-item evidence remains in the execution interaction history; it is not promised as an accumulated output API.
+
+A subgraph caller that needs domain data must produce and persist that data itself. The Todo `success` connection only indicates that the checklist reached its End node.

@@ -93,11 +93,8 @@ describe("Production catalog validation", () => {
     expect(violations).toEqual([]);
   });
 
-  // A workspace_path reference is a directory; building a child path by writing
-  // {{workspace_path}}file.md (or {{node.workspace_path}}file.md) drops the
-  // directory separator and yields ...1645step-1 instead of ...1645/step-1.
-  // The template validator cannot catch this (it is valid template text), so it
-  // is guarded here across the whole catalog.
+  // A workspace_path reference is a directory. A child path needs an explicit slash unless the
+  // variable schema itself requires a trailing slash, as Robust Task deliberately does.
   test("no string field joins a workspace_path reference to a path segment without a slash", () => {
     const defect = /\{\{[a-zA-Z0-9_.-]*workspace_path\}\}[a-zA-Z]/g;
     // Recursively scan EVERY string in the graph — the defect appears not only in
@@ -115,6 +112,15 @@ describe("Production catalog validation", () => {
     };
     const violations: string[] = [];
     for (const entry of entries) {
+      const workspaceDeclaration = entry.graph.variableRegistry?.workspace_path as
+        | { pattern?: unknown }
+        | undefined;
+      if (
+        typeof workspaceDeclaration?.pattern === "string" &&
+        workspaceDeclaration.pattern.endsWith("/$")
+      ) {
+        continue;
+      }
       scan(entry.graph.nodes, `${entry.owner}/${entry.slug}:nodes`, violations);
       scan(
         entry.graph.variableRegistry,
@@ -125,20 +131,15 @@ describe("Production catalog validation", () => {
     expect(violations).toEqual([]);
   });
 
-  // The #565 counter-pinning defect: a GLOBAL numeric variable the flow grows at runtime (an
-  // expression counter, or an agent write across nodes) whose registry schema declares a value space
-  // it never truly has. validateUnified cannot catch this — enum:[0], minimum:1, maximum:7 are all
-  // well-formed — so the guarantee is machine-checked here.
-  //   - GLOBAL numeric (variableRegistry): NO enum/minimum/maximum. Globals are mutated across the
-  //     flow; a bound restored from a single reset-node output mis-describes the running value. The
-  //     remigration strips these for numeric/expression-target globals; this guard locks it in.
+  // The #565 counter-pinning defect was caused by reset-value enums such as enum:[0], which reject
+  // the next legitimate runtime value. Truthful domain bounds are different: minimum:0 for a
+  // non-negative cursor or an honest maximum remain valid across mutations.
   //   - NODE-LOCAL numeric output (inputSchema.properties): no enum (numeric enums are reset
   //     artifacts), but minimum/maximum are LEGITIMATE — a one-shot agent output like
   //     issues_count(min 0) or score(0..10) is validated once per node execution, not mutated.
-  test("no numeric global (or numeric enum) carries a value-bounding keyword (counter-pinning guard)", () => {
+  test("no numeric global or local output uses a reset-value enum (counter-pinning guard)", () => {
     const violations: string[] = [];
     const isNumeric = (t: unknown): boolean => t === "number" || t === "integer";
-    const globalBounding = ["enum", "minimum", "maximum"];
     for (const entry of entries) {
       const registry = (entry.graph.variableRegistry ?? {}) as Record<
         string,
@@ -146,10 +147,9 @@ describe("Production catalog validation", () => {
       >;
       for (const [name, schema] of Object.entries(registry)) {
         if (schema && isNumeric(schema.type)) {
-          const bad = globalBounding.filter((k) => k in schema);
-          if (bad.length) {
+          if ("enum" in schema) {
             violations.push(
-              `${entry.owner}/${entry.slug}: global registry '${name}' is numeric with [${bad.join(",")}]`,
+              `${entry.owner}/${entry.slug}: global registry '${name}' is numeric with enum`,
             );
           }
         }

@@ -444,7 +444,8 @@ describe("MCP Execution Audit Logging E2E", () => {
     // Step 12: Validation error returns comprehensive agent-friendly format
     expect(invalidResult).toContain("❌ VALIDATION ERROR");
     expect(invalidResult).toContain("EXPECTED INPUT FORMAT:");
-    expect(invalidResult).toContain("YOUR INPUT:");
+    expect(invalidResult).not.toContain("YOUR INPUT:");
+    expect(invalidResult).not.toContain('"requiredString": "abc"');
     expect(invalidResult).toContain("ERRORS:");
     expect(invalidResult).toContain("ACTION REQUIRED:");
 
