@@ -6,7 +6,7 @@
  * - Basic arithmetic: +, -, *, /
  * - Variable assignment: a = b + c
  * - Context variable access
- * - Literal numbers and booleans (true/false)
+ * - Literal numbers, strings, and booleans
  *
  * Architecture:
  * - Tokenizer converts expression string to tokens
@@ -195,8 +195,9 @@ export class Tokenizer {
 
     while (this.position < this.input.length) {
       const char = this.input[this.position];
-      // Support dot notation for nested paths like "step.index"
-      if (!/[a-zA-Z_0-9.]/.test(char)) break;
+      // Member reads remain one lexical token. The parser/evaluator validates the
+      // complete path and assignment targets separately.
+      if (!/[a-zA-Z_0-9.[\]]/.test(char)) break;
       this.position++;
     }
 
@@ -295,12 +296,19 @@ export class Parser {
 
       if (next && next.type === "ASSIGN") {
         const identifier = this.consume("IDENTIFIER");
+        const target = identifier.value as string;
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(target) || isForbiddenMember(target)) {
+          throw new ExpressionError(
+            `Assignment target '${target}' must be a safe bare variable name`,
+            identifier.position,
+          );
+        }
         this.consume("ASSIGN");
         const value = this.parseExpression();
 
         return {
           type: "AssignmentExpression",
-          target: identifier.value as string,
+          target,
           value,
         };
       }
@@ -398,21 +406,21 @@ export class Parser {
  */
 export class Evaluator {
   private context: Record<string, unknown>;
-  private assignments: Record<string, number | string | boolean> = {};
+  private assignments: Record<string, unknown> = {};
 
   constructor(context: Record<string, unknown>) {
     this.context = context;
   }
 
   evaluate(ast: ASTNode): {
-    value: number | string | boolean;
-    assignments: Record<string, number | string | boolean>;
+    value: unknown;
+    assignments: Record<string, unknown>;
   } {
     const value = this.evaluateNode(ast);
     return { value, assignments: this.assignments };
   }
 
-  private evaluateNode(node: ASTNode): number | string | boolean {
+  private evaluateNode(node: ASTNode): unknown {
     switch (node.type) {
       case "NumberLiteral":
         return node.value;
@@ -438,13 +446,14 @@ export class Evaluator {
   }
 
   private resolveVariable(name: string): number | string | boolean {
-    // First check assignments made in this expression
-    if (name in this.assignments) {
-      return this.assignments[name];
-    }
-
-    // Then check context (supports nested paths like "step.index")
-    const value = this.getNestedValue(this.context, name);
+    // First check assignments made in this expression, then context.
+    const value = Object.prototype.hasOwnProperty.call(this.assignments, name)
+      ? this.assignments[name]
+      : /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+        ? Object.prototype.hasOwnProperty.call(this.context, name)
+          ? this.context[name]
+          : undefined
+        : this.getNestedValue(this.context, name);
 
     if (value === undefined || value === null) {
       throw new ExpressionError(`Variable '${name}' is not defined or is null`, -1);
@@ -456,6 +465,10 @@ export class Evaluator {
 
     if (typeof value === "boolean") {
       return value;
+    }
+
+    if (typeof value === "object") {
+      throw new ExpressionError(`Variable '${name}' resolves to an object`, -1);
     }
 
     const num = Number(value);
@@ -470,18 +483,73 @@ export class Evaluator {
   }
 
   private getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-    // Support dot notation: "step.index" -> obj.step.index
-    const parts = path.split(".");
-    let current: unknown = obj;
-
-    for (const part of parts) {
-      if (current === null || current === undefined) {
-        return undefined;
-      }
-      current = (current as Record<string, unknown>)[part];
+    const root = /^[A-Za-z_][A-Za-z0-9_]*/.exec(path);
+    if (
+      !root ||
+      isForbiddenMember(root[0]) ||
+      !Object.prototype.hasOwnProperty.call(obj, root[0])
+    ) {
+      throw new ExpressionError(`Invalid or unresolved member path '${path}'`, -1);
     }
 
+    let current: unknown = obj[root[0]];
+    let position = root[0].length;
+    while (position < path.length) {
+      if (path[position] === ".") {
+        const member = /^[A-Za-z_][A-Za-z0-9_]*/.exec(path.slice(position + 1));
+        if (!member || isForbiddenMember(member[0])) {
+          throw new ExpressionError(`Invalid member path '${path}'`, position);
+        }
+        if (
+          current === null ||
+          typeof current !== "object" ||
+          !Object.prototype.hasOwnProperty.call(current, member[0])
+        ) {
+          throw new ExpressionError(`Member '${member[0]}' is not an own property`, position);
+        }
+        current = (current as Record<string, unknown>)[member[0]];
+        position += member[0].length + 1;
+        continue;
+      }
+
+      if (path[position] === "[") {
+        const end = path.indexOf("]", position + 1);
+        if (end === -1) throw new ExpressionError(`Unclosed array index in '${path}'`, position);
+        const token = path.slice(position + 1, end);
+        if (!/^\d+$/.test(token) && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(token)) {
+          throw new ExpressionError(`Invalid array index '${token}'`, position);
+        }
+        const rawIndex = /^\d+$/.test(token) ? Number(token) : this.resolveIndex(token);
+        if (!Number.isInteger(rawIndex) || rawIndex < 0) {
+          throw new ExpressionError(
+            `Array index '${token}' must resolve to a non-negative integer`,
+            position,
+          );
+        }
+        if (!Array.isArray(current) || rawIndex >= current.length) {
+          throw new ExpressionError(`Array index ${rawIndex} is out of bounds`, position);
+        }
+        current = current[rawIndex];
+        position = end + 1;
+        continue;
+      }
+
+      throw new ExpressionError(`Malformed member path '${path}'`, position);
+    }
     return current;
+  }
+
+  private resolveIndex(name: string): number {
+    if (isForbiddenMember(name)) throw new ExpressionError(`Forbidden array index '${name}'`, -1);
+    const value = Object.prototype.hasOwnProperty.call(this.assignments, name)
+      ? this.assignments[name]
+      : Object.prototype.hasOwnProperty.call(this.context, name)
+        ? this.context[name]
+        : undefined;
+    if (typeof value !== "number") {
+      throw new ExpressionError(`Array index '${name}' is not a number`, -1);
+    }
+    return value;
   }
 
   private evaluateBinary(node: BinaryExpression): number {
@@ -509,11 +577,17 @@ export class Evaluator {
     }
   }
 
-  private evaluateAssignment(node: AssignmentExpression): number | string | boolean {
+  private evaluateAssignment(node: AssignmentExpression): unknown {
     const value = this.evaluateNode(node.value);
     this.assignments[node.target] = value;
     return value;
   }
+}
+
+const FORBIDDEN_MEMBERS = new Set(["__proto__", "prototype", "constructor"]);
+
+function isForbiddenMember(name: string): boolean {
+  return FORBIDDEN_MEMBERS.has(name);
 }
 
 /**
@@ -543,8 +617,8 @@ export interface IExpressionInterpreter {
 }
 
 export interface ExpressionResult {
-  value: number | string | boolean;
-  assignments: Record<string, number | string | boolean>;
+  value: unknown;
+  assignments: Record<string, unknown>;
   error?: string;
 }
 
@@ -573,6 +647,10 @@ export class SafeExpressionInterpreter implements IExpressionInterpreter {
       };
     }
   }
+}
+
+export function parseExpressionAst(expression: string): ASTNode {
+  return new Parser(new Tokenizer(expression).tokenize()).parse();
 }
 
 // Default singleton for convenience

@@ -1102,16 +1102,19 @@ export const planComplete = {
  * Requirements coverage validation - all requirements covered (zero gaps)
  */
 export const requirementsCoverageValid = {
-  requirements_gaps_count: 0,
+  coverage_report_path: "./moira-ws/user-auth-20251225-1200/requirements-coverage-report-v1.md",
   total_requirements: 5,
+  requirements_gaps_count: 0,
 };
 
 /**
  * Requirements coverage validation - gaps found
  */
 export const requirementsCoverageWithGaps = {
-  requirements_gaps_count: 2,
+  coverage_report_path:
+    "./moira-ws/user-auth-20251225-1200/requirements-coverage-report-with-gaps-v1.md",
   total_requirements: 5,
+  requirements_gaps_count: 2,
 };
 
 /**

@@ -407,5 +407,46 @@ describe("Expression Parser", () => {
 
       expect(result.value).toBeCloseTo(110);
     });
+
+    test.each([
+      ["value = steps[0].action", { steps: [{ action: "build" }] }, "build"],
+      [
+        "value = steps[projection_index].expected_output",
+        { steps: [{ expected_output: "verified" }], projection_index: 0 },
+        "verified",
+      ],
+    ])("reads safe numeric and dynamic array members: %s", (expression, context, expected) => {
+      const result = interpreter.evaluate(expression, context);
+      expect(result).toMatchObject({ value: expected, assignments: { value: expected } });
+      expect(result.error).toBeUndefined();
+    });
+
+    test.each([
+      ["value = steps[index].action", { steps: [{ action: "x" }], index: -1 }],
+      ["value = steps[index].action", { steps: [{ action: "x" }], index: 0.5 }],
+      ["value = steps[1].action", { steps: [{ action: "x" }] }],
+      ["value = steps[missing].action", { steps: [{ action: "x" }] }],
+      ["value = steps[index.action", { steps: [], index: 0 }],
+      ["value = steps[0].missing", { steps: [{}] }],
+      ["value = steps", { steps: [] }],
+      ["value = item.__proto__", { item: {} }],
+      ["value = item.constructor", { item: {} }],
+      ["value = item.prototype", { item: { prototype: 1 } }],
+    ])("rejects unsafe or unresolved member read: %s", (expression, context) => {
+      expect(interpreter.evaluate(expression, context).error).toBeDefined();
+    });
+
+    test.each([
+      "a.b = 1",
+      "a[0] = 1",
+      "a[i] = 1",
+      "__proto__ = 1",
+      "prototype = 1",
+      "constructor = 1",
+    ])("rejects non-bare or forbidden assignment target: %s", (expression) => {
+      expect(interpreter.evaluate(expression, { a: [], i: 0 }).error).toContain(
+        "safe bare variable name",
+      );
+    });
   });
 });

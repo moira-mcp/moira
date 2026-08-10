@@ -97,6 +97,10 @@ export interface TestScenario {
   description?: string;
   mockInputs: Record<string, MockInput>;
   expect: ScenarioExpectations;
+  /** Seed globals for focused branch scenarios before the start node initializes defaults. */
+  initialVariables?: Record<string, unknown>;
+  /** Validation errors expected as part of a bounded input-retry scenario. */
+  allowValidationErrorsAt?: string[];
   /**
    * Teleport jump configuration: after visiting a node, jump to a teleport node.
    * Format: { afterNode: "node-id", visitNumber: 1, teleportTo: "teleport-node-id" }
@@ -127,6 +131,8 @@ export interface ScenarioResult {
   status: "completed" | "failed" | "running" | "waiting";
   error?: string;
   failedExpectations?: string[];
+  /** Number of non-empty mock inputs submitted while each node was current. */
+  inputSubmissionCounts: Record<string, number>;
   /** Diagnostic info when scenario hits max steps (likely loop) */
   loopDiagnostics?: LoopDiagnostics;
 }
@@ -167,6 +173,7 @@ export async function runScenario(
 ): Promise<ScenarioResult> {
   const startTime = Date.now();
   const allVisitedNodes: string[] = [];
+  const inputSubmissionCounts: Record<string, number> = {};
   const maxSteps = scenario.expect.maxSteps ?? MAX_STEPS_DEFAULT;
 
   // Create fresh repository and engine for each scenario
@@ -193,6 +200,7 @@ export async function runScenario(
       executionTime: Date.now() - startTime,
       status: "failed",
       error: "No start node found",
+      inputSubmissionCounts,
     };
   }
 
@@ -219,32 +227,19 @@ export async function runScenario(
     while (stepCount < maxSteps && status !== "completed" && status !== "failed") {
       const messageQueue = new AgentMessageQueue();
 
-      // Check maxRetries: if current node has been visited maxRetries times, redirect to maxRetriesExceeded
-      const currentNodeDef = workflow.nodes.find((n) => n.id === currentNodeId);
-      if (
-        currentNodeDef &&
-        currentNodeDef.type === "agent-directive" &&
-        "maxRetries" in currentNodeDef &&
-        typeof currentNodeDef.maxRetries === "number" &&
-        (nodeVisitCounts[currentNodeId] || 0) >= currentNodeDef.maxRetries
-      ) {
-        const connections = currentNodeDef.connections as Record<string, string>;
-        const maxRetriesTarget = connections?.maxRetriesExceeded;
-        if (maxRetriesTarget) {
-          allVisitedNodes.push(currentNodeId);
-          currentNodeId = maxRetriesTarget;
-          stepCount++;
-          continue;
-        }
-      }
-
       // Get mock input for current node, supporting dynamic inputs
-      const mockInput = resolveMockInput(
+      let mockInput = resolveMockInput(
         scenario.mockInputs[currentNodeId],
         currentNodeId,
         context.variables as Record<string, unknown>,
         nodeVisitCounts,
       );
+      if (currentNodeId === startNode.id && scenario.initialVariables) {
+        mockInput = { ...scenario.initialVariables, ...mockInput };
+      }
+      if (Object.keys(mockInput).length > 0) {
+        inputSubmissionCounts[currentNodeId] = (inputSubmissionCounts[currentNodeId] || 0) + 1;
+      }
 
       // Increment visit count for this node
       nodeVisitCounts[currentNodeId] = (nodeVisitCounts[currentNodeId] || 0) + 1;
@@ -259,7 +254,9 @@ export async function runScenario(
       );
 
       // Check for input validation errors - fail fast instead of looping
-      checkForValidationError(messageQueue, currentNodeId, mockInput);
+      if (!scenario.allowValidationErrorsAt?.includes(currentNodeId)) {
+        checkForValidationError(messageQueue, currentNodeId, mockInput);
+      }
 
       // Validate rendered directives - check for unrendered templates
       validateRenderedDirectives(messageQueue, currentNodeId);
@@ -344,6 +341,7 @@ export async function runScenario(
       status,
       error: loopError,
       failedExpectations: failedExpectations.length > 0 ? failedExpectations : undefined,
+      inputSubmissionCounts,
       loopDiagnostics,
     };
   } catch (error) {
@@ -359,6 +357,7 @@ export async function runScenario(
       executionTime: Date.now() - startTime,
       status: "failed",
       error: errorStack ? `${errorMessage}\n\nStack trace:\n${errorStack}` : errorMessage,
+      inputSubmissionCounts,
     };
   }
 }

@@ -489,7 +489,9 @@ interface AgentDirectiveNode {
   // JSON Schema of the node's local outputs. May carry `globalInputs?: string[]` — names of the
   // registry globals this node writes (inlined into the agent-facing schema, routed to global scope).
   inputSchema?: JSONSchema;
+  // Compatibility-only authoring fields; accepted by the definition schema but ignored at runtime.
   maxRetries?: number;
+  retryMessage?: string;
   connections: { success: string; error?: string; timeout?: string; maxRetriesExceeded?: string };
 }
 
@@ -641,7 +643,7 @@ Per-node-type checks that AJV schema cannot perform:
 - **ConditionNode** — operator must be in allowed list (eq, neq, gt, gte, lt, lte, contains, exists, and, or, not). Binary operators require `left` + `right`. `exists` requires `value`. Logical operators require non-empty `conditions` array. `not` requires `condition` field. Connections restricted to `true`/`false` only (`additionalProperties: false`). Nested conditions validated recursively.
 - **AgentDirectiveNode** — `inputSchema` (if present) must be compilable JSON Schema (validated via AJV compile).
 - **Output-scope declaration (AgentDirectiveNode / TeleportNode)** — Blocking errors. Every name in `inputSchema.globalInputs` must exist in the workflow `variableRegistry` (`declares global write '<name>' which is not in the workflow variableRegistry`); a name must not be both a declared global write and a node-local output, i.e. a `globalInputs` name cannot also appear in `inputSchema.properties` (`local output '<name>' shadows the declared global write of the same name`). Non-string `globalInputs` entries are rejected.
-- **ExpressionNode** — each expression checked for balanced parentheses and valid characters.
+- **ExpressionNode** — each expression is parsed before execution; targets must be safe bare names, and member reads support own-property paths plus bounded fixed or variable array indexes.
 
 ## Web UI Architecture
 
@@ -738,8 +740,11 @@ interface ValidationError {
 ### AgentDirectiveHandler
 
 - **Pause behavior** - pauses for user input when no input provided
-- **Retry logic** - maxRetries (default: 3) with validation
 - **Template processing** - processes directive and completionCondition
+- **Validation failure** - logs the rejection, returns sanitized schema feedback without the
+  rejected payload, and pauses again at the same node
+- **Legacy retry fields** - `maxRetries`, `retryMessage`, and `maxRetriesExceeded` are accepted for
+  stored-definition compatibility but are not read by the handler or execution engine
 
 ### ConditionHandler
 
@@ -773,9 +778,11 @@ Public endpoint `POST /api/telegram/webhook` handles inline keyboard button pres
 
 - **Auto-execution** - evaluates expressions and continues
 - **Sandboxed parser** - custom arithmetic parser, NOT JavaScript eval
-- **Operations** - `+`, `-`, `*`, `/`, parentheses
-- **Assignment** - `result = a + b`, context path access
-- **Error handling** - division by zero and undefined variables route to `error` connection
+- **Operations** - `+`, `-`, `*`, `/`, parentheses, string/boolean literals
+- **Assignment** - safe bare targets such as `result = a + b`
+- **Member reads** - own-property paths and bounded fixed or variable array indexes such as `tasks[current_index].action`
+- **Registry validation** - assignments must name declared globals and satisfy their JSON Schemas before publication
+- **Error handling** - invalid arithmetic, paths, indexes, targets, or values route to `error` without partial writes
 - **Counter management** - expression nodes handle all loop counter increments; agent-directive nodes must not manage counters
 
 ### Bounded Loop Pattern

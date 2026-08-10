@@ -5,44 +5,54 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "1.1.0",
-    "description": "Autonomous task list management for agents. Plan → execute loop → summary. No human review gates. Designed as replacement for built-in todo lists and task tracking tools. Agent self-manages task decomposition, execution, and completion tracking through structured workflow steps."
+    "version": "3.1.1",
+    "description": "Autonomous sequential checklist with optional supplied tasks, an engine-owned one-based cursor, and one concise local evidence acknowledgement per completed task."
   },
-  "systemReminder": "You are executing an autonomous todo-list workflow. This is YOUR internal task tracker — manage it independently without asking the user for approval at each step. Execute tasks sequentially, track completion, report results at the end.",
+  "systemReminder": "Execute this autonomous checklist sequentially without asking the user to approve each task. Complete and verify the current task before calling step(). If the task is incomplete or blocked, do not advance; report the verified blocker to the user. After the last completed task, let the workflow end without inventing a separate summary or result report.",
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "define-tasks"
+        "default": "obtain-tasks"
       }
     },
     {
-      "id": "define-tasks",
+      "id": "obtain-tasks",
       "type": "agent-directive",
-      "directive": "Define the task list to execute.\n\nBreak the work into concrete, actionable tasks:\n- Each task = one specific action with a measurable result\n- Order tasks by dependency (independent tasks first)\n- Include expected_result for each task to verify completion\n\nThis is YOUR internal task tracker. Decompose thoroughly.",
-      "completionCondition": "Task list defined with at least 1 task, each having action and expected_result",
+      "directive": "Obtain the complete ordered checklist for the user's current goal.\n\nIf the current user or caller context already provides a ready task array matching the required schema, return that array unchanged. Do not replan, rewrite, renumber, summarize, or enrich supplied tasks.\n\nOtherwise plan the checklist once. Return 1 to 100 self-contained tasks. Each action must name the concrete work, relevant constraints, and verification. Each expected_result must describe an observable completion condition. Do not execute tasks in this step and do not add IDs, statuses, result codes, counters, or reporting fields.",
+      "completionCondition": "One bounded typed task array is returned unchanged from supplied context or planned once from the current goal",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "tasks",
-          "total_tasks"
+          "tasks"
         ],
         "globalInputs": [
-          "tasks",
-          "total_tasks"
+          "tasks"
         ]
       },
       "connections": {
-        "success": "check-tasks-remaining"
+        "success": "derive-plan-state"
+      }
+    },
+    {
+      "id": "derive-plan-state",
+      "type": "expression",
+      "expressions": [
+        "total_tasks = tasks.length",
+        "current_task = 1"
+      ],
+      "connections": {
+        "default": "check-tasks-remaining"
       }
     },
     {
       "id": "check-tasks-remaining",
       "type": "condition",
       "condition": {
-        "operator": "lt",
+        "operator": "lte",
         "left": {
           "contextPath": "current_task"
         },
@@ -51,201 +61,120 @@
         }
       },
       "connections": {
-        "true": "execute-task",
-        "false": "generate-summary"
+        "true": "project-current-task",
+        "false": "end"
+      }
+    },
+    {
+      "id": "project-current-task",
+      "type": "expression",
+      "expressions": [
+        "projection_index = current_task - 1",
+        "current_task_action = tasks[projection_index].action",
+        "current_task_expected_result = tasks[projection_index].expected_result"
+      ],
+      "connections": {
+        "default": "execute-task"
       }
     },
     {
       "id": "execute-task",
       "type": "agent-directive",
-      "directive": "Execute task {{current_task}} of {{total_tasks}} (0-indexed).\n\nAction: {{tasks[current_task].action}}\nExpected result: {{tasks[current_task].expected_result}}\n\nEXECUTION RULES:\n- Do the work, do not just describe what to do\n- Provide concrete evidence of completion\n- If task cannot be completed, explain why and mark as failed\n\nAfter execution, report what was done and whether the task succeeded.",
-      "completionCondition": "Task executed with evidence, status reported",
+      "directive": "Execute task {{current_task}} of {{total_tasks}}. Action: {{current_task_action}}. Expected result: {{current_task_expected_result}}. Perform the real work and verify the expected result before calling step(). If the task is incomplete or blocked, do not call step(); report the verified blocker to the user. After successful completion, return only one concise evidence string describing the concrete check that passed.",
+      "completionCondition": "The current task is completed, its expected result is verified, and one concise evidence string is returned",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "task_status": {
+          "evidence": {
             "type": "string",
-            "enum": [
-              "completed",
-              "failed"
-            ],
-            "description": "Whether the task was completed or failed"
-          },
-          "failure_reason": {
-            "type": "string",
-            "description": "Reason for failure (if failed)"
+            "description": "Concise evidence that the current task's expected result was verified",
+            "minLength": 1,
+            "maxLength": 500
           }
         },
         "required": [
-          "task_status",
-          "what_was_done"
-        ],
-        "globalInputs": [
-          "what_was_done"
+          "evidence"
         ]
       },
       "connections": {
-        "success": "track-completion"
+        "success": "advance-task-cursor"
       }
     },
     {
-      "id": "track-completion",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "execute-task.task_status"
-        },
-        "right": "completed"
-      },
-      "connections": {
-        "true": "increment-completed",
-        "false": "record-failure"
-      }
-    },
-    {
-      "id": "increment-completed",
-      "type": "expression",
-      "expressions": [
-        "completed_count = completed_count + 1",
-        "current_task = current_task + 1"
-      ],
-      "connections": {
-        "default": "check-tasks-remaining"
-      }
-    },
-    {
-      "id": "record-failure",
-      "type": "agent-directive",
-      "directive": "Record the failed task.\n\nTask {{current_task}}: {{tasks[current_task].action}}\nFailure reason: {{execute-task.failure_reason}}\n\nAdd to failed_tasks list.",
-      "completionCondition": "Failed task recorded in failed_tasks array",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "failed_tasks"
-        ],
-        "globalInputs": [
-          "failed_tasks"
-        ]
-      },
-      "connections": {
-        "success": "increment-after-failure"
-      }
-    },
-    {
-      "id": "increment-after-failure",
+      "id": "advance-task-cursor",
       "type": "expression",
       "expressions": [
         "current_task = current_task + 1"
       ],
       "connections": {
         "default": "check-tasks-remaining"
-      }
-    },
-    {
-      "id": "generate-summary",
-      "type": "agent-directive",
-      "directive": "Generate completion summary.\n\nTotal tasks: {{total_tasks}}\nCompleted: {{completed_count}}\nFailed: {{failed_tasks}}\n\nSummarize:\n1. What was accomplished\n2. Any failed tasks and why\n3. Overall completion status",
-      "completionCondition": "Summary generated with completion statistics",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "summary",
-          "completion_rate"
-        ],
-        "globalInputs": [
-          "summary",
-          "completion_rate"
-        ]
-      },
-      "connections": {
-        "success": "end"
       }
     },
     {
       "id": "end",
       "type": "end",
-      "finalOutput": [
-        "summary",
-        "completion_rate",
-        "completed_count",
-        "failed_tasks"
-      ]
+      "finalOutput": []
     }
   ],
   "variableRegistry": {
-    "current_task": {
-      "type": "number",
-      "description": "Current task index (0-indexed)",
-      "default": 0
-    },
-    "total_tasks": {
-      "type": "number",
-      "description": "Total number of tasks in the list",
-      "default": 0
-    },
     "tasks": {
       "type": "array",
-      "description": "Array of tasks [{id, action, expected_result, status}]",
-      "default": [],
+      "description": "Bounded ordered checklist; position is task identity",
+      "minItems": 1,
+      "maxItems": 100,
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "id": {
-            "type": "number"
-          },
           "action": {
-            "type": "string"
+            "type": "string",
+            "description": "Concrete self-contained work to perform",
+            "minLength": 1,
+            "maxLength": 1000
           },
           "expected_result": {
-            "type": "string"
+            "type": "string",
+            "description": "Observable result that proves the task is complete",
+            "minLength": 1,
+            "maxLength": 1000
           }
         },
         "required": [
-          "id",
           "action",
           "expected_result"
         ]
-      },
-      "minItems": 1
-    },
-    "completed_count": {
-      "type": "number",
-      "description": "Number of completed tasks",
-      "default": 0
-    },
-    "failed_tasks": {
-      "type": "array",
-      "description": "List of tasks that could not be completed",
-      "default": [],
-      "items": {
-        "type": "object",
-        "properties": {
-          "task_id": {
-            "type": "number"
-          },
-          "action": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          }
-        }
       }
     },
-    "completion_rate": {
-      "type": "string",
-      "description": "Workflow-global completion_rate"
+    "total_tasks": {
+      "type": "integer",
+      "description": "Engine-derived checklist length",
+      "minimum": 1,
+      "maximum": 100
     },
-    "summary": {
-      "type": "string",
-      "description": "Workflow-global summary"
+    "current_task": {
+      "type": "integer",
+      "description": "Engine-owned one-based checklist cursor",
+      "minimum": 1,
+      "maximum": 101
     },
-    "what_was_done": {
+    "projection_index": {
+      "type": "integer",
+      "description": "Engine-derived zero-based projection index",
+      "minimum": 0,
+      "maximum": 99
+    },
+    "current_task_action": {
       "type": "string",
-      "description": "Workflow-global what_was_done"
+      "description": "Projected action for the current task",
+      "minLength": 1,
+      "maxLength": 1000
+    },
+    "current_task_expected_result": {
+      "type": "string",
+      "description": "Projected expected result for the current task",
+      "minLength": 1,
+      "maxLength": 1000
     }
   }
 }

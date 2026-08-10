@@ -5,7 +5,7 @@
   "id": "b33e227c-cc2c-4931-ae5d-2de69932e41e",
   "metadata": {
     "name": "Smart Purchase Assistant",
-    "version": "3.1.0",
+    "version": "3.1.4",
     "description": "Intelligent product analysis with persistent notes storage for session recovery, HTML reports via Moira artifacts, and Telegram notifications."
   },
   "nodes": [
@@ -20,7 +20,6 @@
       "id": "check-agent-capabilities",
       "type": "agent-directive",
       "directive": "Determine your technical capabilities for this session:\n\n1. **File Access**: Can you create/write local files? (Check for Write, Edit, or file tools)\n2. **Visual Artifacts**: Can you create visual artifacts? (Like Claude canvas in browser)\n\nCheck your available tools and answer honestly. These capabilities affect how results will be delivered.\n\nNote: Moira artifacts (for publishing HTML reports) is always available since you're using this workflow.",
-      "maxRetries": 1,
       "connections": {
         "success": "analyze-user-needs"
       },
@@ -46,7 +45,6 @@
       "id": "analyze-user-needs",
       "type": "agent-directive",
       "directive": "Analyze user's purchasing needs. Find out: what product is needed, budget, purchase purpose, important requirements and constraints. Ask clarifying questions to understand context.",
-      "maxRetries": 2,
       "connections": {
         "success": "write-note-01"
       },
@@ -96,7 +94,6 @@
       "id": "research-product-category",
       "type": "agent-directive",
       "directive": "Research the product category based on user needs.\n\n**User needs data:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Part 1: Category expertise**\nDetermine: main types and kinds, key comparison parameters, technology trends, alternative solutions, price seasonality.\n\n**Part 2: Product variant map (REQUIRED)**\nCreate a comprehensive \"variant map\" for the category:\n\n1. **Device/product types**: List ALL distinct types/technologies in this category. For each type provide: name, operating principle (1-2 sentences), typical price range, best suited for whom.\n   Example for humidifiers: ultrasonic, evaporative, steam, air washer.\n\n2. **Form factors**: List physical form factors available. For each: name, typical dimensions, placement.\n   Example: portable, tabletop, floor-standing, wall-mounted.\n\n3. **Use cases with recommendations**: Identify common use cases/scenarios. For each: scenario description, which product type is best, what to prioritize.\n   Example: \"small bedroom 10-15m²\" → ultrasonic or evaporative, prioritize noise level <30dB.\n\n4. **Price segments**: Define budget/mid-range/premium boundaries for this category with typical feature differences between segments.\n\n5. **Buyer checklist**: List the TOP 8-12 parameters a buyer should evaluate when choosing in this category, ordered by importance. For each: parameter name, why it matters, what values are good/bad.",
-      "maxRetries": 2,
       "connections": {
         "success": "write-note-02"
       },
@@ -143,7 +140,6 @@
       "id": "determine-search-sources",
       "type": "agent-directive",
       "directive": "Determine optimal sources for searching products.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Category research:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\nInclude: marketplaces, specialized stores, manufacturers, regional chains. Consider category specifics and user's region.",
-      "maxRetries": 2,
       "connections": {
         "success": "write-note-03"
       },
@@ -181,7 +177,6 @@
       "id": "search-and-analyze",
       "type": "agent-directive",
       "directive": "Search for products on identified sources.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Product variant map (types, use cases, segments):**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Search sources:**\n{{note:purchase-{{executionId}}-03-search-sources}}\n\nFind products within budget, filter by requirements and constraints.\n\n**CRITICAL RULES:**\n\n1. **Search across ALL product types** from the variant map. Do not limit to one type — cover at least the top 2-3 most relevant types for the user's use case.\n\n2. **Search for model line variations**: For EACH promising model found, check if line variations exist (Lite, Mini, Pro, Plus, Max, SE, Gen 2/3, etc.). If a variation fits user requirements — include it as a separate candidate. Different variations often have fundamentally different price/performance ratios.\n\n3. **Cover multiple price segments**: Include candidates from budget, mid-range, and premium segments.\n\n4. **Collect for EACH candidate:**\n   - Direct product URL (clickable link to product page)\n   - Store URLs where product can be purchased\n   - Current prices at each store\n   - Which product type/category it belongs to\n\nCreate initial candidate list with specifications and URLs.",
-      "maxRetries": 3,
       "connections": {
         "success": "write-note-04"
       },
@@ -216,7 +211,6 @@
       "id": "deep-analysis",
       "type": "agent-directive",
       "directive": "Conduct deep analysis of top candidates.\n\n**Candidates list:**\n{{note:purchase-{{executionId}}-04-candidates}}\n\n**FOCUS ON REAL CUSTOMER REVIEWS:**\n- Prioritize reviews from verified purchasers over expert opinions\n- Count total reviews and percentage from verified buyers\n- Note review recency (latest review date)\n- Identify common complaints (repeated issues from multiple buyers)\n- Identify common praises (consistently mentioned positives)\n- Look for signs of fake reviews (generic language, suspicious patterns)\n\nAlso study: brand reputation, technical specifications comparison, expert reviews where helpful.\n\nIdentify pros, cons and real-world pitfalls of each option.",
-      "maxRetries": 2,
       "connections": {
         "success": "write-note-05"
       },
@@ -249,7 +243,6 @@
       "id": "analyze-purchase-conditions",
       "type": "agent-directive",
       "directive": "Analyze purchase conditions for best options.\n\n**Detailed analysis:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\nCompare: total cost (product + delivery), warranty and return conditions, delivery times, availability, current promotions and discounts.",
-      "maxRetries": 2,
       "connections": {
         "success": "write-note-06"
       },
@@ -282,7 +275,6 @@
       "id": "generate-recommendations",
       "type": "agent-directive",
       "directive": "Create final recommendations based on all collected data.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Analysis:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Purchase conditions:**\n{{note:purchase-{{executionId}}-06-purchase-conditions}}\n\n**INCLUDE CLICKABLE LINKS:**\n- Direct product URL for each recommendation\n- Best store URL with price for immediate purchase\n- Alternative store URLs if available\n\n**RECOMMENDATIONS (5-8 options):**\nPresent recommendations grouped by profile/use case. Each recommendation must have a clear `best_for` label. Example categories:\n- \"Best value for money\" (цена/качество)\n- \"Best budget option\" (бюджетный)\n- \"Best premium\" (премиум)\n- \"Best for [specific use case from user needs]\"\n- \"Most compact / quiet / powerful\" (based on category specifics)\n\nFor EACH top recommendation: verify that all available model variations were checked. If a cheaper variation covers user requirements — recommend it instead of or alongside the more expensive model.\n\n**BUYER'S GUIDE (REQUIRED):**\nCreate a buyer's guide section for users who are not experts in this category:\n\n1. **Product types overview**: For each type from the variant map — 2-3 sentences explaining what it is, main pros/cons, who it's best for.\n2. **Selection checklist**: Ordered list of what to look for when buying, with brief explanations.\n3. **Decision matrix**: Table format — \"If you value X → choose type Y\" for 5-8 common priorities.\n4. **Common mistakes**: 3-5 frequent mistakes buyers make in this category and how to avoid them.",
-      "maxRetries": 1,
       "connections": {
         "success": "write-note-07"
       },
@@ -359,7 +351,6 @@
       "type": "agent-directive",
       "directive": "Upload the generated HTML report to Moira artifacts.\n\n**Steps:**\n\n1. Get upload token:\n   artifacts({ action: \"token\", ttlMinutes: 30 })\n   Returns: { token, uploadUrl, expiresAt }\n\n2. Read the HTML report file that was saved in the previous step (purchase-report.html in current working directory).\n\n3. Upload via HTTP POST to uploadUrl:\n   POST {uploadUrl}\n   Content-Type: application/json\n   Body: {\"name\": \"purchase-report.html\", \"content\": \"<html content>\"}\n\n   Use curl, fetch, or HTTP tool available to you.\n\n4. Response: { uuid, url, name, size, expiresAt }\n   Save the url field as report_url.\n\nIf upload fails with 5xx or network error, the system will retry automatically. If 4xx error, report the error.",
       "completionCondition": "Report uploaded via artifacts token, public URL obtained",
-      "maxRetries": 2,
       "connections": {
         "success": "telegram-notification"
       },

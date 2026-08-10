@@ -246,7 +246,7 @@ These prove functionality works.
 **Task**: Fix failing test
 
 - BAD: "Fixed the test by updating expected value"
-- GOOD: "npm run test:unit auth.test.ts → 15/15 pass (was 14/15)"
+- GOOD: "npm run test:unit -- --file tests/unit/shared/api-token.test.ts → pass"
 
 **Task**: Add new API endpoint
 

@@ -19,19 +19,30 @@ mcp__moira__start({ workflowId: "<workflow-id>" })
 
 ### software-development-flow
 
-Complete feature development cycle with planning, iterative implementation, and validation.
+Filesystem-first feature development with source-grounded planning, complete implementation units, independent semantic gates, impact-based validation, accepted-unit checkpoints, and explicit side-effect authority.
 
 ```mermaid
 flowchart LR
-    A[Study] --> B[Plan] --> C[Approve] --> D[Implement] --> E[Validate] --> F[Deliver]
+    A[Requirements] --> B[Plan and approve] --> C[Implement unit]
+    C --> D[Test adequacy and architecture]
+    D --> E[Impact-based validation]
+    E --> G[Conditional acceptance and checkpoint]
+    G -->|more units| C
+    G --> F[Docs, final coverage, and report]
+    F --> H[Final acceptance]
+    H --> I[Conditional VCS reconciliation]
 ```
 
 | Feature | Description |
 |---------|-------------|
-| Full dev cycle | From requirements to validated delivery |
-| Iterative implementation | Step-by-step with gate validation |
-| Plan review | Subagent validates plan before execution |
-| Numerical checks | Evidence-based completion verification |
+| Durable artifacts | Requirements, plan revisions, implementation evidence, reviews, feedback, and final coverage stay in one correlated workspace |
+| Source-grounded planning | Assigned tickets, PRs, specifications, and documents are preserved before requirements are extracted; initial VCS and discovery evidence protects unrelated work |
+| Complete implementation units | Each approved unit owns dependencies, tests, applicable permanent docs, and focused evidence |
+| Independent quality gates | Test adequacy and project-grounded architecture are reviewed separately from test execution |
+| Impact-based validation | Runtime, browser, security, performance, broad builds, and full suites run only when project policy or actual risk makes them applicable |
+| Conditional visual evidence | A plan unit explicitly opts into screenshot inspection and a portable self-contained HTML report; incidental UI changes do not enable it automatically |
+| Incremental history | With approved VCS authority, each accepted unit checkpoints only its own changes before the next unit starts; unrelated work and workflow artifacts are excluded |
+| Explicit authority | Checkpoints and final project-native VCS reconciliation are conditional; final user acceptance occurs before reconciliation, and tool availability never authorizes a side effect |
 
 **Use for:** Feature development, bug fixes, code tasks requiring structured planning and validation.
 
@@ -71,7 +82,7 @@ mcp__moira__start({ workflowId: "moira/software-development-flow-lite", parentEx
 
 ### quick-task (Recommended)
 
-Fast task execution for 2-10 step tasks without complex infrastructure.
+Filesystem-backed execution for a bounded plan of 1-10 meaningful work units.
 
 ```mermaid
 flowchart LR
@@ -80,11 +91,11 @@ flowchart LR
 
 | Feature | Description |
 |---------|-------------|
-| Lightweight process | Fast start with minimal overhead |
-| Simple validation | Plan approval + single review phase |
-| Evidence required | Verifiable output for each step |
+| Durable workspace | Immutable task, plan, review, decision, change, and evidence records |
+| Independent gates | Plan review before approval and result review after execution |
+| Minimal context | Typed file references, plan length, cursor, and routing values only |
 
-**Use for:** Most multi-step tasks. This is the recommended default workflow.
+**Use for:** Most bounded multi-step tasks executed by an agent with filesystem access. This is the recommended default workflow.
 
 ```bash
 mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
@@ -94,7 +105,7 @@ mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
 
 ### robust-task
 
-Reliable execution of complex, critical tasks with full infrastructure.
+Filesystem-backed execution of complex, critical tasks with durable recovery.
 
 ```mermaid
 flowchart LR
@@ -103,12 +114,12 @@ flowchart LR
 
 | Feature | Description |
 |---------|-------------|
-| Self-sufficient steps | Each step executable without full plan context |
-| Evidence required | Proof of completion for each step |
-| Retry mechanism | Up to 3 attempts with escalation options |
-| Plan persistence | Saved to `./claude-temp-files/plan-{timestamp}.md` |
+| Durable workspace | Frozen requirements, immutable plan versions, attempt evidence, reviews, decisions, and delivery stay under `./moira-ws/` |
+| Independent gates | Plans, step attempts, criteria coverage, and the final result receive fitting independent review |
+| Bounded recovery | Review and step-retry budgets end in an explicit user decision, never silent success |
+| Truthful delivery | End returns the workspace, delivery file, complete/incomplete status, and concise summary |
 
-**Use for:** Any task with 3+ steps requiring verified completion.
+**Use for:** Complex multi-step work that must survive context loss and retain per-attempt evidence.
 
 ```bash
 mcp__moira__start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
@@ -317,14 +328,23 @@ mcp__moira__start({ workflowId: "marketing-campaign" })
 
 ### workflow-management-flow
 
-Workflow creation, editing, and deployment.
+Workflow creation, editing, review, and optional publication.
 
 ```mermaid
 flowchart LR
-    A[Start] --> B[Understand] --> C{Action}
-    C --> D[Create]
-    C --> E[Edit]
-    C --> F[Deploy]
+    A[Start] --> B{Action}
+    B -->|create| C[Design]
+    B -->|edit| D[Load source]
+    D --> E{Full anti-pattern audit?}
+    E -->|yes| F[Audit and choose scope]
+    E -->|no| G[Analyze requested scope]
+    F --> G
+    C --> H[Build and validate]
+    G --> I[Plan and approve]
+    I --> H
+    H --> J[Semantic review]
+    J --> K[User review]
+    K --> L{Publish?}
 ```
 
 <Aside type="tip">
@@ -333,10 +353,15 @@ Use this workflow to create custom workflows or modify existing templates.
 
 | Feature | Description |
 |---------|-------------|
-| Node types | start, end, agent-directive, condition, notification |
-| Operators | eq, ne, lt, gt, in, contains, exists, and, or, not |
-| Templates | Variable substitution with validation |
-| Validation | Schema and connection verification |
+| Disk-backed artifacts | Requirements, analysis, plans, and review reports stay in the workspace |
+| Embedded authoring reference | Engine rules, patterns, anti-patterns, review criteria, cost ordering, and authority rules are shipped inside the workflow |
+| Identity-aware editing | The edit path reconciles local and server provenance before semantic planning |
+| Optional source audit | A full anti-pattern audit runs only with user consent |
+| Outcome-oriented plans | Plans preserve executor freedom while fixing scope and acceptance criteria |
+| Simple review loops | Review reports stay on disk; only issue counts are used for routing |
+| Validation | The creating or editing node runs the official schema and graph validator |
+| Context-aware handoff | Stable file paths are referenced without forcing unchanged rereads or copying file bodies through workflow state |
+| Publication gate | Standard, copy-new, and admin-override semantics require an explicit user decision; a real local target is synchronized separately |
 
 ```bash
 mcp__moira__start({ workflowId: "workflow-management-flow" })

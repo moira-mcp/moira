@@ -15,6 +15,8 @@
  *   delete <node-id>                 Delete node
  *   clone <node-id> <new-id>         Clone node with new ID
  *   export-node <node-id> <path>     Export node to JSON file
+ *   replace <node-id> <node-file>    Replace node in place from JSON
+ *   sync <dest-file>                 Replace an existing workflow copy, preserving identity
  *   move <node-id> --after <target>  Move node after target in array
  *   add <node-json-file>             Add nodes from JSON file
  *   search <text>                    Search nodes (supports regex: "a|b")
@@ -24,6 +26,7 @@
  *   get-variable <name>              Get declared global from variableRegistry
  *   set-variable <name> <value>      Set declared global in variableRegistry
  *   list-variables                   List declared globals from variableRegistry
+ *   set-description <text>           Set workflow description
  *   set-version <version>            Set workflow version
  */
 
@@ -253,6 +256,34 @@ function exportNode(workflow: WorkflowGraph, nodeId: string, outputPath: string)
   }
 }
 
+function replaceNode(workflow: WorkflowGraph, nodeId: string, nodeFile: string): WorkflowGraph {
+  const nodeIndex = workflow.nodes.findIndex((node) => node.id === nodeId);
+  if (nodeIndex === -1) {
+    console.error(c("red", `ERROR: Node not found: ${nodeId}`));
+    process.exit(1);
+  }
+  if (!fs.existsSync(nodeFile)) {
+    console.error(c("red", `ERROR: Replacement node file not found: ${nodeFile}`));
+    process.exit(1);
+  }
+
+  let replacement: GraphNode;
+  try {
+    replacement = JSON.parse(fs.readFileSync(nodeFile, "utf-8")) as GraphNode;
+  } catch (error) {
+    console.error(c("red", `ERROR: Invalid replacement node JSON: ${(error as Error).message}`));
+    process.exit(1);
+  }
+  if (!replacement || typeof replacement !== "object" || replacement.id !== nodeId) {
+    console.error(c("red", `ERROR: Replacement node must have id '${nodeId}'`));
+    process.exit(1);
+  }
+
+  workflow.nodes[nodeIndex] = replacement;
+  console.log(c("green", `✓ Replaced node in place: ${nodeId}`));
+  return workflow;
+}
+
 // === MOVE COMMAND ===
 function moveNode(workflow: WorkflowGraph, nodeId: string, afterNodeId: string): WorkflowGraph {
   const nodeIndex = workflow.nodes.findIndex((n) => n.id === nodeId);
@@ -284,6 +315,7 @@ interface UpdateOptions {
   connections?: string;
   addConnection?: { key: string; target: string };
   removeConnection?: string;
+  finalOutput?: string;
 }
 
 // === UPDATE COMMAND ===
@@ -340,6 +372,25 @@ function updateNode(
     node.completionCondition = options.completionCondition;
     changes++;
     console.log(c("green", `✓ Updated completionCondition`));
+  }
+
+  if (options.finalOutput !== undefined) {
+    if (node.type !== "end") {
+      console.error(c("red", "ERROR: --final-output is valid only for end nodes"));
+      process.exit(1);
+    }
+    try {
+      const parsed = JSON.parse(options.finalOutput);
+      if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "string")) {
+        throw new Error("expected a JSON array of strings");
+      }
+      node.finalOutput = parsed;
+      changes++;
+      console.log(c("green", "✓ Updated finalOutput"));
+    } catch (error) {
+      console.error(c("red", `ERROR: Invalid finalOutput JSON: ${(error as Error).message}`));
+      process.exit(1);
+    }
   }
 
   if (options.connections !== undefined) {
@@ -670,6 +721,37 @@ function setVariable(workflow: WorkflowGraph, varName: string, value: string): W
   return updated;
 }
 
+function setVariableSchema(
+  workflow: WorkflowGraph,
+  varName: string,
+  schemaJson: string,
+): WorkflowGraph {
+  let schema: unknown;
+  try {
+    schema = JSON.parse(schemaJson);
+  } catch (error) {
+    console.error(c("red", `ERROR: Invalid variable schema JSON: ${(error as Error).message}`));
+    process.exit(1);
+  }
+
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    console.error(c("red", "ERROR: Variable schema must be a JSON object"));
+    process.exit(1);
+  }
+
+  const declaration = schema as Record<string, unknown>;
+  if (typeof declaration.type !== "string" || typeof declaration.description !== "string") {
+    console.error(c("red", "ERROR: Variable schema requires string type and description"));
+    process.exit(1);
+  }
+
+  const updated = JSON.parse(JSON.stringify(workflow)) as WorkflowGraph;
+  updated.variableRegistry ??= {};
+  updated.variableRegistry[varName] = declaration as (typeof updated.variableRegistry)[string];
+  console.log(c("green", `✓ Set variable schema: ${varName}`));
+  return updated;
+}
+
 function deleteVariable(workflow: WorkflowGraph, varName: string): WorkflowGraph {
   const existing = getWorkflowVariables(workflow)[varName];
 
@@ -702,6 +784,19 @@ function setVersion(workflow: WorkflowGraph, version: string): WorkflowGraph {
   workflow.metadata.version = version;
 
   console.log(c("green", `✓ Version updated: ${oldVersion || "none"} → ${version}`));
+
+  return workflow;
+}
+
+function setDescription(workflow: WorkflowGraph, description: string): WorkflowGraph {
+  const oldDescription = workflow.metadata.description;
+  workflow.metadata.description = description;
+
+  console.log(c("green", "✓ Workflow description updated"));
+  if (oldDescription) {
+    console.log(c("dim", `Old description: ${oldDescription}`));
+  }
+  console.log(c("bright", `New description: ${description}`));
 
   return workflow;
 }
@@ -1065,6 +1160,34 @@ function copyWorkflow(sourcePath: string, destPath: string, newName?: string): v
   console.log(c("dim", `  New Name: ${copiedWorkflow.metadata.name}`));
 }
 
+function syncWorkflow(sourcePath: string, destPath: string): void {
+  if (!fs.existsSync(destPath)) {
+    console.error(c("red", `ERROR: Sync destination does not exist: ${destPath}`));
+    process.exit(1);
+  }
+  const sourceWorkflow = loadWorkflow(sourcePath);
+  const destinationWorkflow = loadWorkflow(destPath);
+  const synchronizedWorkflow: WorkflowGraph = JSON.parse(JSON.stringify(sourceWorkflow));
+  synchronizedWorkflow.id = destinationWorkflow.id;
+  const sourceRecord = synchronizedWorkflow as WorkflowGraph & Record<string, unknown>;
+  const destinationRecord = destinationWorkflow as WorkflowGraph & Record<string, unknown>;
+  for (const field of ["slug", "owner", "visibility"] as const) {
+    if (destinationRecord[field] !== undefined) {
+      sourceRecord[field] = destinationRecord[field];
+    }
+  }
+  synchronizedWorkflow.metadata.author ??= destinationWorkflow.metadata.author;
+  synchronizedWorkflow.metadata.tags ??= destinationWorkflow.metadata.tags;
+  createBackup(destPath);
+  saveWorkflow(destPath, synchronizedWorkflow, destinationWorkflow, { force: true });
+  console.log(c("green", `✓ Synchronized workflow copy: ${destPath}`));
+  if (sourceWorkflow.id !== destinationWorkflow.id) {
+    console.log(
+      c("dim", `  Preserved destination ID: ${sourceWorkflow.id} → ${destinationWorkflow.id}`),
+    );
+  }
+}
+
 // === ARGUMENT PARSING ===
 interface ParsedConfig {
   file: string;
@@ -1093,6 +1216,8 @@ ${c("cyan", "Commands:")}
   delete <node-id>                 Delete node
   clone <node-id> <new-id>         Clone node with new ID
   export-node <node-id> <path>     Export node to JSON file
+  replace <node-id> <node-file>    Replace node in place from JSON
+  sync <dest-file>                 Replace an existing workflow copy, preserving identity
   move <node-id> --after <target>  Move node after target in array
   add <node-json-file>             Add nodes from JSON file
   search <text>                    Search nodes (supports regex: "a|b")
@@ -1102,8 +1227,10 @@ ${c("cyan", "Commands:")}
   variables [--usage]              Analyze all workflow variables
   get-variable <name>              Get declared global from variableRegistry
   set-variable <name> <value>      Set declared global in variableRegistry
+  set-variable-schema <name> <json> Replace a declared global's complete JSON Schema
   delete-variable <name>           Delete declared global from variableRegistry
   list-variables                   List declared globals from variableRegistry
+  set-description <text>           Set workflow description
   set-version <version>            Set workflow version
   diff <other-file>                Compare with another workflow file
   create <file> --name <name>      Create new workflow
@@ -1114,6 +1241,7 @@ ${c("cyan", "Update Options:")}
   --directive-file <path>              Update directive from file
   --completion-condition "text"        Update completionCondition
   --input-schema '{"type":"object"}'   Update inputSchema
+  --final-output '["result"]'           Update an End node terminal projection
   --condition "expression"             Update condition
   --message "text"                     Update message
   --connections '{"key":"target"}'     Update connections
@@ -1192,6 +1320,9 @@ ${c("cyan", "Examples:")}
       i++;
     } else if (args[i] === "--completion-condition" && args[i + 1]) {
       config.options.completionCondition = args[i + 1];
+      i++;
+    } else if (args[i] === "--final-output" && args[i + 1]) {
+      config.options.finalOutput = args[i + 1];
       i++;
     } else if (args[i] === "--connections" && args[i + 1]) {
       config.options.connections = args[i + 1];
@@ -1316,6 +1447,24 @@ async function main(): Promise<void> {
       exportNode(workflow, config.nodeId, args[3]);
       break;
 
+    case "replace":
+      if (!config.nodeId) {
+        console.error(c("red", "ERROR: Missing node-id for replace command"));
+        process.exit(1);
+      }
+      if (!args[3]) {
+        console.error(c("red", "ERROR: Missing replacement node file"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(
+        config.file,
+        replaceNode(workflow, config.nodeId, args[3]),
+        originalWorkflow,
+        saveOptions,
+      );
+      break;
+
     case "move": {
       if (!config.nodeId) {
         console.error(c("red", "ERROR: Missing node-id for move command"));
@@ -1383,6 +1532,47 @@ async function main(): Promise<void> {
       );
       break;
 
+    case "set-variable-schema":
+      if (!config.nodeId || args.length < 4) {
+        console.error(c("red", "Usage: set-variable-schema <name> <schema-json>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(
+        config.file,
+        setVariableSchema(
+          workflow,
+          config.nodeId,
+          args
+            .slice(3)
+            .filter((argument) => argument !== "--force")
+            .join(" "),
+        ),
+        originalWorkflow,
+        saveOptions,
+      );
+      break;
+
+    case "set-description": {
+      const description = args
+        .slice(2)
+        .filter((argument) => argument !== "--force")
+        .join(" ")
+        .trim();
+      if (!description) {
+        console.error(c("red", "Usage: set-description <text>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(
+        config.file,
+        setDescription(workflow, description),
+        originalWorkflow,
+        saveOptions,
+      );
+      break;
+    }
+
     case "set-version": {
       if (!config.nodeId) {
         console.error(c("red", "ERROR: Missing version"));
@@ -1446,6 +1636,14 @@ async function main(): Promise<void> {
       copyWorkflow(config.file, config.nodeId, newName);
       break;
     }
+
+    case "sync":
+      if (!config.nodeId) {
+        console.error(c("red", "ERROR: Missing destination file for sync command"));
+        process.exit(1);
+      }
+      syncWorkflow(config.file, config.nodeId);
+      break;
 
     default:
       console.error(c("red", `ERROR: Unknown command: ${config.command}`));

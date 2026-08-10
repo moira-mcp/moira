@@ -59,7 +59,6 @@ export class AgentDirectiveHandler implements INodeHandler {
       nodeId: agentNode.id,
       executionId: context.executionId,
       hasInput: !!input,
-      currentRetries: agentNode.currentRetries || 0,
     });
 
     // Agent sees and interacts with child workflow steps directly
@@ -230,11 +229,6 @@ export class AgentDirectiveHandler implements INodeHandler {
       subgraphDepth: context._subgraphDepth,
       responseKeys: Object.keys(responseData),
     });
-
-    // Reset retry counter on success
-    if (node.currentRetries) {
-      node.currentRetries = 0;
-    }
 
     // Return continue with success path and auto-generated data
     return NodeResultBuilder.continue(node.id, "success", responseData);

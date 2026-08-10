@@ -48,6 +48,7 @@ export interface PromptMigrationConfig {
 export interface MigrationResult {
   inserted: string[];
   updated: string[];
+  removed: string[];
   unchanged: string[];
   conflicts: string[];
   skipped: string[];
@@ -315,6 +316,7 @@ export function migratePrompts(config: PromptMigrationConfig): MigrationResult {
   const result: MigrationResult = {
     inserted: [],
     updated: [],
+    removed: [],
     unchanged: [],
     conflicts: [],
     skipped: [],
@@ -324,6 +326,31 @@ export function migratePrompts(config: PromptMigrationConfig): MigrationResult {
     // Wrap all DB operations in a single synchronous transaction for atomicity.
     // If any unexpected error occurs (e.g. TypeError), all changes roll back.
     const runMigration = sqlite.transaction(() => {
+      const activeKeys = new Set(mappings.map((mapping) => mapping.dbKey));
+
+      // Agent/model overrides are discovered from files. If a previously managed
+      // override file is removed, delete its DB row only when the stored value
+      // still matches the last deployed hash. Preserve manually edited values as
+      // conflicts so removing a repository file cannot erase admin changes.
+      for (const [dbKey, manifestEntry] of Object.entries(manifest.entries)) {
+        if (!dbKey.startsWith("mcp.agent.") || activeKeys.has(dbKey)) continue;
+
+        const dbRow = sqlite.prepare("SELECT value FROM globalSetting WHERE key = ?").get(dbKey) as
+          | { value: string | null }
+          | undefined;
+
+        if (dbRow && computeHash(dbRow.value ?? "") !== manifestEntry.hash) {
+          result.conflicts.push(dbKey);
+          continue;
+        }
+
+        if (dbRow) {
+          sqlite.prepare("DELETE FROM globalSetting WHERE key = ?").run(dbKey);
+        }
+        delete manifest.entries[dbKey];
+        result.removed.push(dbKey);
+      }
+
       for (const mapping of mappings) {
         const fullFilePath = path.join(promptsDir, mapping.filePath);
 
@@ -458,6 +485,13 @@ export function runPromptMigration(dbPath: string): void {
     }
   }
 
+  if (result.removed.length > 0) {
+    console.log(`  ✅ Removed ${result.removed.length} obsolete prompt overrides:`);
+    for (const key of result.removed) {
+      console.log(`     - ${key}`);
+    }
+  }
+
   if (result.unchanged.length > 0) {
     console.log(`  ⏭️  ${result.unchanged.length} prompts unchanged`);
   }
@@ -476,7 +510,7 @@ export function runPromptMigration(dbPath: string): void {
     console.error(
       `  ${isFatal ? "❌" : "⚠️"} PROMPT CONFLICT: The following prompts were manually edited in the database`,
     );
-    console.error("     but the deployment has different file-based versions:");
+    console.error("     but the deployment changed or removed their file-based versions:");
     console.error("");
     for (const key of result.conflicts) {
       // Find the prompt file path for this key

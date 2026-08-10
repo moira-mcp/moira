@@ -38,6 +38,30 @@ Select "edit" when prompted for action.
   changes.
 </Aside>
 
+For an edit, the management workflow loads the complete current workflow and records the edit
+requirements, analysis, plan, and review reports in its workspace. Their contents stay in files;
+the graph carries only small values that affect routing.
+
+The initial choice also records whether server access is allowed. An explicit local-only or
+offline instruction is reused without asking again and prevents the edit path from downloading or
+comparing a server definition.
+
+Before planning, the workflow asks whether to audit the whole source workflow against the known
+anti-pattern catalog. The audit runs only with explicit user consent. When enabled, it reports
+concrete existing findings and asks which of them should join the edit scope. When skipped, the
+analysis remains limited to the requested change and its necessary dependencies.
+
+The plan describes outcomes, affected contracts, invariants, acceptance criteria, and risks. It
+does not prescribe an exhaustive file list, exact commands, pseudocode, or a fixed sequence of
+local edits unless an external contract requires them. This leaves the implementing agent free to
+follow the dependencies it discovers without changing the approved goal or scope.
+
+Plan and workflow reviews use a simple file-backed loop: the reviewer overwrites a known report
+file and returns only an issue count for routing. A non-zero count returns to the repair step and
+then to the same reviewer; zero is a normal successful result. Structural validation is performed
+with Moira's official validator by the node that creates or changes the workflow, rather than by a
+second validation state machine in the graph.
+
 ## Change Types
 
 ### Update Metadata

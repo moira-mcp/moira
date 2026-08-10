@@ -22,12 +22,12 @@ describe("SchemaValidator.formatValidationErrorForAgent", () => {
 
       const result = SchemaValidator.formatValidationErrorForAgent(schema, userInput, errors);
 
-      // Check all sections are present
+      // Describe the correction contract without echoing rejected input.
       expect(result).toContain("❌ VALIDATION ERROR");
       expect(result).toContain("EXPECTED INPUT FORMAT:");
-      expect(result).toContain("YOUR INPUT:");
       expect(result).toContain("ERRORS:");
       expect(result).toContain("ACTION REQUIRED:");
+      expect(result).not.toContain("YOUR INPUT:");
     });
 
     test("shows expected schema format", () => {
@@ -54,7 +54,7 @@ describe("SchemaValidator.formatValidationErrorForAgent", () => {
       expect(result).toContain("optional");
     });
 
-    test("shows user input as JSON", () => {
+    test("does not echo user input", () => {
       const schema = {
         type: "object",
         properties: {
@@ -68,9 +68,8 @@ describe("SchemaValidator.formatValidationErrorForAgent", () => {
       const result = SchemaValidator.formatValidationErrorForAgent(schema, userInput, errors);
 
       expect(result).toContain('"value"');
-      expect(result).toContain('"wrong"');
-      expect(result).toContain('"extra"');
-      expect(result).toContain("true");
+      expect(result).not.toContain('"wrong"');
+      expect(result).not.toContain('"extra"');
     });
 
     test("shows all validation errors", () => {
@@ -125,8 +124,7 @@ describe("SchemaValidator.formatValidationErrorForAgent", () => {
 
       const result = SchemaValidator.formatValidationErrorForAgent(schema, null, errors);
 
-      expect(result).toContain("YOUR INPUT:");
-      expect(result).toContain("null");
+      expect(result).not.toContain("YOUR INPUT:");
     });
 
     test("handles empty errors array", () => {
@@ -140,14 +138,14 @@ describe("SchemaValidator.formatValidationErrorForAgent", () => {
       expect(result).toContain("ERRORS:");
     });
 
-    test("truncates very long user input", () => {
+    test("does not include very long user input", () => {
       const schema = { type: "object", properties: {} };
       const userInput = { data: "x".repeat(1000) };
       const errors = ["Unknown field"];
 
       const result = SchemaValidator.formatValidationErrorForAgent(schema, userInput, errors);
 
-      expect(result).toContain("...[truncated]");
+      expect(result).not.toContain("x".repeat(20));
       expect(result.length).toBeLessThan(2000);
     });
 

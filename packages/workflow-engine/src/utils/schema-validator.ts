@@ -314,17 +314,18 @@ export class SchemaValidator {
 
   /**
    * Format validation error comprehensively for AI agents
-   * Includes: schema description, user input, specific errors, action required
+   * Includes schema description, specific errors, and the required corrective action.
+   * Rejected payloads are deliberately never echoed.
    * This format is designed to be clear even for simpler models (Haiku, GPT-3.5)
    *
    * @param schema The JSON Schema that was used for validation
-   * @param userInput The actual input that failed validation
+   * @param _userInput Rejected input (accepted for call-site compatibility, never rendered)
    * @param errors List of specific validation error messages
    * @returns Comprehensive error message for agent
    */
   static formatValidationErrorForAgent(
     schema: Record<string, unknown> | undefined,
-    userInput: unknown,
+    _userInput: unknown,
     errors: string[],
   ): string {
     const sections: string[] = [];
@@ -339,22 +340,6 @@ export class SchemaValidator {
       sections.push(this.formatSchemaForAgent(schema));
     } else {
       sections.push("null or {} (no inputSchema defined - node accepts empty input only)");
-    }
-    sections.push("");
-
-    // User input section
-    sections.push("YOUR INPUT:");
-    try {
-      const inputStr = JSON.stringify(userInput, null, 2);
-      // Truncate very long inputs
-      const maxLength = 500;
-      if (inputStr.length > maxLength) {
-        sections.push(inputStr.substring(0, maxLength) + "...[truncated]");
-      } else {
-        sections.push(inputStr);
-      }
-    } catch {
-      sections.push(String(userInput));
     }
     sections.push("");
 

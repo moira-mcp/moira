@@ -7,20 +7,21 @@
 ```bash
 # Docker tests
 npm test                          # All tests
-npm run test:api [path]           # API tests
-npm run test:mcp-tools [path]     # MCP tools tests
-npm run test:e2e [path]           # E2E browser tests
+npm run test:api                  # API tests
+npm run test:mcp-tools            # MCP tools tests
+npm run test:e2e                  # E2E browser tests
 
 # No Docker dependency
-npm run test:unit [path]          # Unit tests (in-memory)
-npm run test:integration [path]   # Integration tests (test-integration.db)
+npm run test:unit                 # Unit tests (in-memory)
+npm run test:integration          # Integration tests (test-integration.db)
 ```
 
-**Path argument:** Full path or just filename
+Testfold requires Node.js 20 or newer. Select a single test file with its
+`--file` option after npm's argument separator:
 
 ```bash
-npm run test:unit template-processor.test.ts
-npm run test:e2e admin-panel.spec.ts
+npm run test:workflow -- --file tests/workflow/engine/template-processor.test.ts
+npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 ```
 
 **Docker requirement:**
@@ -115,7 +116,7 @@ Do NOT read `unit.log` for workflow tests — it's huge and wastes tokens.
 
 ### 4. MCP Tools Tests
 
-**Location:** `tests/e2e/mcp-tools/`
+**Location:** `tests/mcp-tools/`
 **Purpose:** Test MCP protocol - **critical for all MCP functionality**
 
 ### 5. E2E Tests
@@ -371,7 +372,7 @@ If the answer to #2 is "yes" and #3 is "no" — don't write the test.
 ```bash
 cat test-results/artifacts/failures/e2e/01-test-name.md
 sqlite3 ./data/moira.db "SELECT * FROM user;"
-npm run test:e2e specific-test.spec.ts
+npm run test:e2e -- --file tests/e2e/specific-test.spec.ts
 ```
 
 ---
@@ -382,7 +383,7 @@ npm run test:e2e specific-test.spec.ts
 # Run tests
 npm test
 npm run test:unit
-npm run test:e2e admin-panel.spec.ts
+npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 
 # Analyze failures
 cat test-results/artifacts/failures/e2e/01-test-name.md

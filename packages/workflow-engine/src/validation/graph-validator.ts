@@ -24,6 +24,7 @@ import type { ConditionOperator, StructuredCondition } from "../types/structured
 import { createLogger } from "@mcp-moira/shared/logging/logger";
 import { ConfigurationError } from "@mcp-moira/shared/errors";
 import type { UnifiedValidationResult, UnifiedValidationIssue } from "./validation-types.js";
+import { parseExpressionAst } from "../expression/expression-parser.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -646,6 +647,17 @@ export class GraphValidator {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const testAjv = new (AjvModule as any).default({ allErrors: true });
         testAjv.compile(decl);
+        if (Object.prototype.hasOwnProperty.call(decl, "default")) {
+          const validateDefault = testAjv.compile(decl);
+          if (!validateDefault(decl.default)) {
+            issues.push({
+              type: "structure",
+              severity: "error",
+              field: `variableRegistry.${name}.default`,
+              message: `Registry variable '${name}' has a default that does not satisfy its schema.`,
+            });
+          }
+        }
       } catch (error) {
         issues.push({
           type: "structure",
@@ -653,6 +665,30 @@ export class GraphValidator {
           field: `variableRegistry.${name}`,
           message: `Registry variable '${name}' is not a valid JSON Schema: ${error instanceof Error ? error.message : String(error)}`,
         });
+      }
+    }
+
+    for (const node of workflow.nodes) {
+      if (node.type !== "start" || !node.initialData?.variables) continue;
+      for (const [name, definition] of Object.entries(node.initialData.variables)) {
+        const schema = registry[name];
+        if (!schema) continue;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const testAjv = new (AjvModule as any).default({ allErrors: true });
+          const validate = testAjv.compile(schema);
+          if (!validate(definition.value ?? null)) {
+            issues.push({
+              type: "structure",
+              severity: "error",
+              nodeId: node.id,
+              field: `initialData.variables.${name}.value`,
+              message: `Start variable '${name}' does not satisfy its declared registry schema.`,
+            });
+          }
+        } catch {
+          // The registry schema compilation issue is already reported above.
+        }
       }
     }
 
@@ -996,6 +1032,18 @@ export class GraphValidator {
           nodeId: node.id,
           field: `expressions[${i}]`,
           message: `Node ${node.id}: expression "${expr}" contains unusual characters`,
+        });
+      }
+
+      try {
+        parseExpressionAst(expr);
+      } catch (error) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId: node.id,
+          field: `expressions[${i}]`,
+          message: `Node ${node.id}: invalid expression syntax: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
     }

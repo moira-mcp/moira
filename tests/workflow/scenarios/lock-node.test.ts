@@ -86,6 +86,7 @@ class MockLockHandler implements INodeHandler {
       // Simulate PIN validation: "123456" is the correct PIN
       if (pin === "123456") {
         existingLock.status = "unlocked";
+        context.variables.lockResolution = "unlocked";
         return {
           nodeId: node.id,
           action: "continue",

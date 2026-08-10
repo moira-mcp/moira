@@ -412,7 +412,7 @@ function getTopicList(): string {
   result += `| --------------------- | -------------- |\n`;
   result += `| "develop feature", "implement", "build feature", "fix bug" | \`moira/software-development-flow\` |\n`;
   result += `| "small feature", "quick fix", "simple task with tests" | \`moira/software-development-flow-lite\` |\n`;
-  result += `| any multi-step task (2-10 steps) **Recommended** | \`moira/quick-task\` |\n`;
+  result += `| filesystem-backed multi-step task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
   result += `| complex critical task | \`moira/robust-task\` |\n`;
   result += `| "create workflow", "make workflow", "new workflow" | \`moira/workflow-management-flow\` |\n`;
   result += `| "write tests", "create tests", "add tests" | \`moira/test-generation\` |\n`;

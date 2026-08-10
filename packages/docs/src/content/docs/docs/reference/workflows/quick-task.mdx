@@ -1,14 +1,14 @@
 ---
 title: Quick Task
-description: Fast task execution for 2-10 step tasks
+description: Filesystem-backed bounded planning, execution, independent review, and user acceptance
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Lightweight workflow for fast task execution without complex infrastructure. Plan → Approve → Execute → Review → Report.
+Quick Task runs a bounded multi-step task as Plan → Approve → Execute → Review → Accept. It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the approved plan length, the execution cursor, and short values used for routing.
 
 <Aside type="tip">
-This is the recommended workflow for most multi-step tasks. Use [Robust Task](/docs/reference/workflows/robust-task/) only for critical tasks requiring full infrastructure.
+Use Quick Task when an agent has filesystem access and the work fits a plan of at most ten meaningful units. Use [Robust Task](/docs/reference/workflows/robust-task/) when the task needs a stronger recovery policy for partial execution or operational failures.
 </Aside>
 
 ## Start
@@ -21,77 +21,84 @@ mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
 
 ```mermaid
 flowchart LR
-    A[Understand] --> B[Plan]
-    B --> C[Approve]
-    C --> D[Execute]
-    D --> E[Review]
-    E --> F[Report]
+    A[Write task contract] --> B[Write plan iteration]
+    B --> C[Independent plan review]
+    C -->|Findings| D[Write corrected plan iteration]
+    D --> C
+    C -->|Clean| E[User approval]
+    E -->|Revision requested| F[Write revised plan iteration]
+    F --> C
+    E -->|Approved| G[Execute units in order]
+    G --> H[Independent result review]
+    H -->|Findings| I[Fix result and record change]
+    I --> H
+    H -->|Clean| J[User acceptance]
+    J -->|Rework requested| K[Rework and record change]
+    K --> H
+    J -->|Accepted| L[End]
 ```
 
-## Steps
+## Workspace contract
 
-| Step | Action | Output |
-|------|--------|--------|
-| 1. Understand | Analyze task and gather context | Clear task definition |
-| 2. Plan | Create 3-10 step plan | Numbered step list |
-| 3. Approve | User confirms plan | Approved plan |
-| 4. Execute | Execute all steps | Completed work |
-| 5. Review | Check all criteria met | Verified completion |
-| 6. Report | Summary with evidence | Final report |
+The intake step derives the complete task contract from the triggering conversation, asking only for a material fact that cannot be discovered. It creates a workspace correlated with the Moira execution:
 
-## Features
-
-### Lightweight Process
-
-- No complex setup or configuration
-- Fast start with minimal overhead
-- Focus on getting work done
-
-### Simple Validation
-
-- Plan approval before execution
-- Single review phase after completion
-- Clear success criteria
-
-### Evidence Required
-
-Each completed step should have verifiable output:
-- Modified files
-- Test results
-- Screenshots
-- Descriptions
-
-## When to Use
-
-- Tasks with 2-10 concrete steps
-- Standard development work
-- Content creation
-- Research tasks
-- Any task that doesn't require retry/escalation infrastructure
-
-## When to Use Robust Task Instead
-
-- Critical tasks that cannot fail
-- Multi-hour or multi-day tasks
-- Tasks requiring session recovery
-- Tasks requiring escalation workflow
-
-## Example Node Configuration
-
-```json
-{
-  "id": "execute-plan",
-  "type": "agent-directive",
-  "directive": "Execute the approved plan step by step. Provide evidence for each step.",
-  "completionCondition": "All steps executed with evidence",
-  "connections": {
-    "success": "review-results"
-  }
-}
+```text
+./moira-ws/quick-task-<executionId>/
+├── process-id.txt
+├── task.md
+├── execution.md
+├── plans/
+│   └── <iteration>/
+│       ├── plan.md
+│       ├── review.md
+│       ├── decision.md
+│       └── change.md
+└── result-reviews/
+    └── <iteration>/
+        ├── review.md
+        ├── decision.md
+        └── change.md
 ```
+
+Numeric iteration directories are published only after their record is complete. Existing completed iterations are not overwritten. A resumed node verifies and reuses its complete current record instead of duplicating it.
+
+Returned paths are constrained by JSON Schema for shape and length. File existence, completeness, and correctness remain part of the creating node's directive and completion condition; a path-shaped string alone does not prove completion.
+
+## Planning and approval
+
+The planner writes between one and ten meaningful ordered work units. Each unit states its action, expected result, and a verification method appropriate to the work. The plan body stays in `plan.md`; the workflow receives only its bounded path and exact item count.
+
+An independent reviewer reads `task.md` and the current `plan.md` directly. It writes the complete reproducible blocking finding set to `review.md` and returns only the report path plus `issues_count`. A nonzero count routes to a separate repair node, which writes a new immutable plan iteration before returning to the same reviewer. Zero findings is valid and reaches the approval gate.
+
+The user's exact decision and feedback are written to `decision.md`. Context receives only the decision-file path and `yes`/`no` routing value. Requested revisions read the exact feedback from disk, create a new plan iteration, and pass through independent review again.
+
+The plan length becomes authoritative for execution only after the current plan has a clean review and explicit user approval.
+
+## Execution and evidence
+
+The engine owns a zero-based cursor. For each position, the agent reads the approved `plan.md`, executes only that work unit, applies technical judgment, and verifies the actual result. Before advancing, it writes exactly one concise evidence entry of at most 500 characters for that position to `execution.md`.
+
+Evidence is not returned through workflow context. If work is incomplete or blocked, the agent reports the verified reason and remains at the current directive; the workflow does not convert failure into a status code or advance the cursor. Quick Task has no automatic retry counter or skip-as-success route.
+
+## Result review and acceptance
+
+After all approved units, an independent reviewer reads the task, approved plan, plan decision, execution evidence, and actual artifacts. Each result state receives an immutable numeric review record. The reviewer writes all current blocking defects to `review.md` and returns only its path and `issues_count`.
+
+A nonzero count routes to a separate fix node. The fix reads the complete report, reproduces and corrects confirmed defects, and writes `change.md`; the changed result then returns through the same independent review. A clean review reaches user presentation.
+
+The user's exact acceptance or rework request is written to `decision.md`. Rework reads that file, changes the result, writes `change.md`, and returns through independent review. Only explicit acceptance reaches End.
+
+## Guarantees and limits
+
+- Complete plans, reviews, decisions, feedback, changes, and evidence have one durable source on disk instead of duplicated context payloads.
+- Every returned dynamic path has a typed schema and a named downstream consumer.
+- Review and mutation remain separate; every changed plan or result returns through the appropriate independent review.
+- Automatic review loops advance only after a new artifact or result state exists. A non-reproducible or incomplete repair does not call `step()`.
+- Mechanical checks prove only the properties they directly test; the executing and reviewing agents still judge the actual result.
+- End has an empty terminal projection and does not expose internal file-backed records.
+- Quick Task requires filesystem access. It does not provide Robust Task's stronger failure-recovery policy.
 
 ## Related
 
-- [Robust Task](/docs/reference/workflows/robust-task/) — For complex tasks requiring full infrastructure
-- [Content Creation](/docs/reference/workflows/content-creation/) — For text content creation
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+- [Robust Task](/docs/reference/workflows/robust-task/) — Durable execution with an explicit recovery policy
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All bundled workflows

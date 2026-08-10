@@ -2,27 +2,27 @@
 
 ## Public Workflows
 
-| ID                             | Name                      | Description                                                            |
-| ------------------------------ | ------------------------- | ---------------------------------------------------------------------- |
-| software-development-flow      | Software Development      | Complete feature development cycle with planning and validation        |
-| software-development-flow-lite | Software Development Lite | Lightweight development process for small features (1-5 steps)         |
-| quick-task ⭐                  | Quick Task (Recommended)  | Fast task execution for 2-10 step tasks. Use for most tasks            |
-| robust-task                    | Robust Task               | Reliable execution of complex critical tasks with retry and escalation |
-| user-onboarding                | User Onboarding           | Interactive onboarding for new Moira users                             |
-| content-creation               | Content Creation          | Text content creation: articles, posts, documentation                  |
-| verified-research              | Verified Research         | Research with verified and reproducible sources                        |
-| iterative-research             | Iterative Research        | Iterative research with critique/improve cycle                         |
-| prd-creation                   | PRD Creation              | Product Requirements Document with completeness guarantees             |
-| ux-design                      | UX Design                 | UX/UI design with WCAG AA accessibility verification                   |
-| test-generation                | Test Generation           | Automated test code generation (unit, integration, e2e)                |
-| test-planning                  | Test Planning             | Test plan creation with P0-P3 prioritization                           |
-| data-analysis                  | Data Analysis             | Data analysis from problem definition to conclusions                   |
-| marketing-campaign             | Marketing Campaign        | Marketing materials with differentiation focus                         |
-| workflow-management-flow       | Workflow Management       | Workflow creation, editing, and deployment                             |
-| bug-hunting-workflow           | Bug Hunting               | Systematic bug investigation                                           |
-| smart-purchase-assistant       | Smart Purchase            | Purchase decision assistance                                           |
-| telegram-setup                 | Telegram Setup            | Guided Telegram bot configuration for workflow notifications           |
-| todo-list                      | Todo List                 | Autonomous agent task list for subtask management (no human gates)     |
+| ID                             | Name                      | Description                                                             |
+| ------------------------------ | ------------------------- | ----------------------------------------------------------------------- |
+| software-development-flow      | Software Development      | Complete feature development cycle with planning and validation         |
+| software-development-flow-lite | Software Development Lite | Lightweight development process for small features (1-5 steps)          |
+| quick-task ⭐                  | Quick Task (Recommended)  | Bounded plan, evidence-backed execution, independent review, acceptance |
+| robust-task                    | Robust Task               | Reliable execution of complex critical tasks with retry and escalation  |
+| user-onboarding                | User Onboarding           | Interactive onboarding for new Moira users                              |
+| content-creation               | Content Creation          | Text content creation: articles, posts, documentation                   |
+| verified-research              | Verified Research         | Research with verified and reproducible sources                         |
+| iterative-research             | Iterative Research        | Iterative research with critique/improve cycle                          |
+| prd-creation                   | PRD Creation              | Product Requirements Document with completeness guarantees              |
+| ux-design                      | UX Design                 | UX/UI design with WCAG AA accessibility verification                    |
+| test-generation                | Test Generation           | Automated test code generation (unit, integration, e2e)                 |
+| test-planning                  | Test Planning             | Test plan creation with P0-P3 prioritization                            |
+| data-analysis                  | Data Analysis             | Data analysis from problem definition to conclusions                    |
+| marketing-campaign             | Marketing Campaign        | Marketing materials with differentiation focus                          |
+| workflow-management-flow       | Workflow Management       | Workflow creation, editing, and deployment                              |
+| bug-hunting-workflow           | Bug Hunting               | Systematic bug investigation                                            |
+| smart-purchase-assistant       | Smart Purchase            | Purchase decision assistance                                            |
+| telegram-setup                 | Telegram Setup            | Guided Telegram bot configuration for workflow notifications            |
+| todo-list                      | Todo List                 | Minimal one-based checklist with concise local evidence                 |
 
 ## Private Workflows
 
@@ -30,6 +30,12 @@
 | --------------------------- | ------------------ | ---------------------------------------------------------- |
 | development-flow            | Development Flow   | Feature development with planning, implementation, testing |
 | feature-completion-workflow | Feature Completion | Branch finalization: squash, rebase, merge/PR support      |
+
+## Todo List caller contract
+
+`todo-list` owns only planning and sequential checklist execution. A task is a bounded `{action, expected_result}` object; ordered position is its identity. For each item the agent performs the work, checks the expected result, and returns one node-local `evidence` string of at most 500 characters. If work is incomplete or blocked, the agent does not call `step()`, so the cursor does not advance.
+
+A caller may map an existing typed array directly to `tasks` and bypass planning. Todo returns an empty terminal object and does not transport outcomes, counters, statuses, domain result codes, or accumulated evidence. Callers that need domain data own its production, persistence, validation, and routing. A subgraph requires a `success` connection; `error` is optional in the current schema. Thrown child-execution or mapping failures are logged by the execution engine and pause the parent at the subgraph for correction/retry—they are not routed through `connections.error`.
 
 ## Workflow Migration
 

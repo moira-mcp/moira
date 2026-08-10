@@ -461,7 +461,7 @@ export function getTestBaseUrl(): string {
 
 ```bash
 # Default: Docker local (localhost:${DOCKER_PORT} from .env.local)
-npm run test:e2e:docker
+npm run test:e2e
 
 # Custom Docker port
 TEST_BASE_URL=http://localhost:3031 npm test
@@ -476,8 +476,8 @@ TEST_BASE_URL=https://moira.example.com npm test
 # Playwright E2E on Docker (default)
 npm run test:e2e
 
-# Playwright E2E on specific environment
-npm run test:e2e:local
+# One Playwright E2E file
+npm run test:e2e -- --file tests/e2e/oauth-consent.spec.ts
 
 # Jest integration tests (uses Docker by default)
 npm run test:integration

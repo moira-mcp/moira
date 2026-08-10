@@ -13,6 +13,11 @@ export interface PathSegment {
 
 export class PathResolver {
   private static logger = createLogger({ component: "PathResolver" });
+  private static readonly FORBIDDEN_PROPERTY_KEYS = new Set([
+    "__proto__",
+    "prototype",
+    "constructor",
+  ]);
 
   /**
    * Resolve nested variable paths (e.g., "user.profile.name", "items[0].value")
@@ -33,7 +38,9 @@ export class PathResolver {
 
       if (segment.type === "property") {
         current =
-          current && typeof current === "object"
+          current &&
+          typeof current === "object" &&
+          Object.prototype.hasOwnProperty.call(current, segment.key!)
             ? (current as Record<string, unknown>)[segment.key!]
             : undefined;
       } else if (segment.type === "index") {
@@ -63,9 +70,12 @@ export class PathResolver {
       const segment = segments[i];
 
       if (segment.type === "property") {
+        if (!current || typeof current !== "object" || Array.isArray(current)) {
+          throw new Error(`Cannot access property on non-object value in path: ${path}`);
+        }
         const currentObj = current as Record<string, unknown>;
         if (
-          !(segment.key! in currentObj) ||
+          !Object.prototype.hasOwnProperty.call(currentObj, segment.key!) ||
           currentObj[segment.key!] === null ||
           currentObj[segment.key!] === undefined
         ) {
@@ -87,10 +97,16 @@ export class PathResolver {
     // Set final value
     const lastSegment = segments[segments.length - 1];
     if (lastSegment.type === "property") {
+      if (!current || typeof current !== "object" || Array.isArray(current)) {
+        throw new Error(`Cannot set property on non-object value in path: ${path}`);
+      }
       (current as Record<string, unknown>)[lastSegment.key!] = value;
     } else if (lastSegment.type === "index") {
       if (!Array.isArray(current)) {
         throw new Error(`Cannot set array index on non-array value in path: ${path}`);
+      }
+      if (lastSegment.index! >= current.length) {
+        throw new Error(`Array index ${lastSegment.index} out of bounds in path: ${path}`);
       }
       current[lastSegment.index!] = value;
     }
@@ -103,52 +119,53 @@ export class PathResolver {
    * "items[0].name" → [{type: 'property', key: 'items'}, {type: 'index', index: 0}, {type: 'property', key: 'name'}]
    */
   static parseVariablePath(path: string): PathSegment[] {
-    const segments: PathSegment[] = [];
-    let current = "";
-    let i = 0;
-
-    while (i < path.length) {
-      const char = path[i];
-
-      if (char === ".") {
-        if (current) {
-          segments.push({ type: "property", key: current });
-          current = "";
-        }
-      } else if (char === "[") {
-        if (current) {
-          segments.push({ type: "property", key: current });
-          current = "";
-        }
-
-        // Parse array index
-        i++; // Skip '['
-        let indexStr = "";
-        while (i < path.length && path[i] !== "]") {
-          indexStr += path[i];
-          i++;
-        }
-
-        if (i >= path.length) {
-          throw new Error(`Unclosed array index in path: ${path}`);
-        }
-
-        const index = parseInt(indexStr, 10);
-        if (isNaN(index) || index < 0) {
-          throw new Error(`Invalid array index "${indexStr}" in path: ${path}`);
-        }
-
-        segments.push({ type: "index", index });
-        // i is now at ']', will be incremented at end of loop
-      } else {
-        current += char;
-      }
-
-      i++;
+    if (typeof path !== "string" || path.length === 0) {
+      throw new Error("Path cannot be empty");
     }
 
-    if (current) {
-      segments.push({ type: "property", key: current });
+    const segments: PathSegment[] = [];
+    let i = 0;
+
+    const readProperty = (): void => {
+      const start = i;
+      while (i < path.length && path[i] !== "." && path[i] !== "[") i++;
+      const key = path.slice(start, i);
+      if (!key) throw new Error(`Empty property segment in path: ${path}`);
+      if (this.FORBIDDEN_PROPERTY_KEYS.has(key)) {
+        throw new Error(`Forbidden property segment '${key}' in path: ${path}`);
+      }
+      segments.push({ type: "property", key });
+    };
+
+    readProperty();
+    while (i < path.length) {
+      if (path[i] === ".") {
+        i++;
+        if (i >= path.length || path[i] === "." || path[i] === "[") {
+          throw new Error(`Empty property segment in path: ${path}`);
+        }
+        readProperty();
+        continue;
+      }
+
+      if (path[i] !== "[") {
+        throw new Error(`Invalid path syntax at offset ${i} in path: ${path}`);
+      }
+      const close = path.indexOf("]", i + 1);
+      if (close === -1) throw new Error(`Unclosed array index in path: ${path}`);
+      const indexText = path.slice(i + 1, close);
+      if (!/^(0|[1-9][0-9]*)$/.test(indexText)) {
+        throw new Error(`Invalid array index "${indexText}" in path: ${path}`);
+      }
+      const index = Number(indexText);
+      if (!Number.isSafeInteger(index)) {
+        throw new Error(`Array index "${indexText}" is not a safe integer in path: ${path}`);
+      }
+      segments.push({ type: "index", index });
+      i = close + 1;
+      if (i < path.length && path[i] !== "." && path[i] !== "[") {
+        throw new Error(`Missing separator after array index in path: ${path}`);
+      }
     }
 
     return segments;

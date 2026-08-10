@@ -174,6 +174,25 @@ describe("ExpressionHandler", () => {
     ).rejects.toThrow(/unknown_var/);
   });
 
+  test("does not retain the raw expression in ValidationError context", async () => {
+    const context = TestUtils.createTestContext({});
+    const expressionNode: ExpressionNode = {
+      type: "expression",
+      id: "private-expression",
+      expressions: ['result = "sensitive literal" + missing'],
+      connections: { default: "next-node" },
+    };
+
+    const error = await handler
+      .execute(expressionNode, context, new AgentMessageQueue(), mockStorage, mockEngine)
+      .catch((caught) => caught as { context?: Record<string, unknown> });
+
+    expect(error.context).toEqual(
+      expect.objectContaining({ nodeId: "private-expression", expressionIndex: 0 }),
+    );
+    expect(error.context).not.toHaveProperty("expression");
+  });
+
   test("should use error connection if available", async () => {
     const context = TestUtils.createTestContext({});
 
@@ -198,10 +217,11 @@ describe("ExpressionHandler", () => {
     expect(result.action).toBe("continue");
     expect(result.outputPath).toBe("error");
     expect(result.data).toMatchObject({
-      expressionError: expect.any(String),
-      failedExpression: "result = missing + 1",
+      expressionFailed: true,
       failedIndex: 0,
     });
+    expect(result.data).not.toHaveProperty("expressionError");
+    expect(result.data).not.toHaveProperty("failedExpression");
   });
 
   test("should throw ValidationError on division by zero (no error connection)", async () => {
@@ -304,5 +324,121 @@ describe("ExpressionHandler", () => {
     };
 
     expect(handler.canExecute(startNode as any, context)).toBe(false);
+  });
+
+  test("projects a nofile step through ordered member reads", async () => {
+    const context = TestUtils.createTestContext({
+      current_step: 2,
+      steps: [
+        { id: 1, action: "first", expected_output: "one" },
+        { id: 2, action: "second", expected_output: "two" },
+      ],
+    });
+    const expressionNode: ExpressionNode = {
+      type: "expression",
+      id: "project-step",
+      expressions: [
+        "projection_index = current_step - 1",
+        "projected_step_id = steps[projection_index].id",
+        "current_step_action = steps[projection_index].action",
+        "current_step_expected_output = steps[projection_index].expected_output",
+      ],
+      connections: { default: "execute", error: "reject" },
+    };
+
+    const result = await handler.execute(
+      expressionNode,
+      context,
+      new AgentMessageQueue(),
+      mockStorage,
+      mockEngine,
+    );
+
+    expect(result.outputPath).toBe("default");
+    expect(result.data).toEqual({
+      projection_index: 1,
+      projected_step_id: 2,
+      current_step_action: "second",
+      current_step_expected_output: "two",
+    });
+  });
+
+  test("routes an invalid member projection through the expression error edge", async () => {
+    const context = TestUtils.createTestContext({ current_step: 2, steps: [{ id: 1 }] });
+    const expressionNode: ExpressionNode = {
+      type: "expression",
+      id: "bad-projection",
+      expressions: [
+        "projection_index = current_step - 1",
+        "projected_step_id = steps[projection_index].id",
+      ],
+      connections: { default: "execute", error: "reject" },
+    };
+
+    const result = await handler.execute(
+      expressionNode,
+      context,
+      new AgentMessageQueue(),
+      mockStorage,
+      mockEngine,
+    );
+
+    expect(result.outputPath).toBe("error");
+    expect(result.data).toMatchObject({ failedIndex: 1 });
+  });
+
+  test("rejects an undeclared target through the error route without leaking earlier assignments", async () => {
+    const context = TestUtils.createTestContext({ declared: 0 });
+    const expressionNode: ExpressionNode = {
+      type: "expression",
+      id: "strict-targets",
+      expressions: ["declared = 1", "undeclared = 2"],
+      connections: { default: "next", error: "reject" },
+    };
+    const registry = {
+      declared: { type: "integer", minimum: 0, maximum: 10, default: 0 },
+    };
+
+    const result = await handler.execute(
+      expressionNode,
+      context,
+      new AgentMessageQueue(),
+      mockStorage,
+      mockEngine,
+      undefined,
+      registry,
+    );
+
+    expect(result.outputPath).toBe("error");
+    expect(result.data).toEqual({ expressionFailed: true, failedIndex: 1 });
+    expect(context.variables.declared).toBe(0);
+  });
+
+  test("validates repeated targets in evaluation order and rolls back an invalid intermediate", async () => {
+    const context = TestUtils.createTestContext({ value: 1, dependent: 0 });
+    const expressionNode: ExpressionNode = {
+      type: "expression",
+      id: "ordered-target-validation",
+      expressions: ["value = 11", "value = 2", "dependent = value + 1"],
+      connections: { default: "next", error: "reject" },
+    };
+    const registry = {
+      value: { type: "integer", minimum: 0, maximum: 10, default: 1 },
+      dependent: { type: "integer", minimum: 0, maximum: 10, default: 0 },
+    };
+
+    const result = await handler.execute(
+      expressionNode,
+      context,
+      new AgentMessageQueue(),
+      mockStorage,
+      mockEngine,
+      undefined,
+      registry,
+    );
+
+    expect(result.outputPath).toBe("error");
+    expect(result.data).toEqual({ expressionFailed: true, failedIndex: 0 });
+    expect(context.variables).toMatchObject({ value: 1, dependent: 0 });
   });
 });

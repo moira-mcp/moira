@@ -480,7 +480,7 @@ describe("Node Type Validation", () => {
           graphId: "test",
           inputMapping: {},
           outputMapping: {},
-          connections: { success: "end" },
+          connections: { success: "end", error: "end" },
         },
         { id: "end", type: "end" },
       ]);

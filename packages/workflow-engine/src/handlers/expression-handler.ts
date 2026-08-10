@@ -7,14 +7,21 @@
  * SECURITY: Uses SafeExpressionInterpreter - NOT JavaScript eval()
  */
 
-import { GraphNode, ExpressionNode, ExecutionContext, isExpressionNode } from "../types/index.js";
+import {
+  GraphNode,
+  ExpressionNode,
+  ExecutionContext,
+  VariableRegistry,
+  isExpressionNode,
+} from "../types/index.js";
 import { NodeExecutionResult, NodeResultBuilder } from "../types/node-execution.js";
 import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { createLogger, InternalError, ValidationError } from "@mcp-moira/shared";
-import { SafeExpressionInterpreter, ExpressionResult } from "../expression/index.js";
+import { SafeExpressionInterpreter } from "../expression/index.js";
+import { validateDeclaredRegistryValues } from "../utils/registry-value-validator.js";
 
 export class ExpressionHandler implements INodeHandler {
   private logger = createLogger({ component: "ExpressionHandler" });
@@ -35,6 +42,7 @@ export class ExpressionHandler implements INodeHandler {
     _repository: IDataRepository,
     _engine: IGraphExecutionEngine,
     _input?: unknown,
+    variableRegistry?: VariableRegistry,
   ): Promise<NodeExecutionResult> {
     if (!isExpressionNode(node)) {
       throw new InternalError("ExpressionHandler can only execute expression nodes", {
@@ -52,8 +60,7 @@ export class ExpressionHandler implements INodeHandler {
     });
 
     // Collect all assignments from all expressions
-    const allAssignments: Record<string, number | string | boolean> = {};
-    const results: ExpressionResult[] = [];
+    const allAssignments: Record<string, unknown> = {};
 
     // Execute each expression in order
     // Use a merged context that includes previous assignments
@@ -65,18 +72,15 @@ export class ExpressionHandler implements INodeHandler {
       this.logger.debug("Evaluating expression", {
         nodeId: expressionNode.id,
         expressionIndex: i,
-        expression,
       });
 
       const result = this.interpreter.evaluate(expression, mergedContext);
-      results.push(result);
 
       if (result.error) {
         // Check if error connection exists - use it for graceful handling
         if (expressionNode.connections.error) {
           return NodeResultBuilder.continue(expressionNode.id, "error", {
-            expressionError: result.error,
-            failedExpression: expression,
+            expressionFailed: true,
             failedIndex: i,
           });
         }
@@ -85,19 +89,38 @@ export class ExpressionHandler implements INodeHandler {
         throw new ValidationError(`Expression evaluation failed at index ${i}: ${result.error}`, {
           nodeId: expressionNode.id,
           expressionIndex: i,
-          expression,
         });
       }
 
-      // Merge assignments into context for subsequent expressions
-      Object.assign(allAssignments, result.assignments);
-      Object.assign(mergedContext, result.assignments);
+      let normalizedAssignments: Record<string, unknown>;
+      try {
+        normalizedAssignments = validateDeclaredRegistryValues(
+          result.assignments,
+          variableRegistry,
+          `expression node '${expressionNode.id}' index ${i}`,
+          true,
+        );
+      } catch (error) {
+        if (expressionNode.connections.error) {
+          return NodeResultBuilder.continue(expressionNode.id, "error", {
+            expressionFailed: true,
+            failedIndex: i,
+          });
+        }
+        throw new ValidationError(
+          `Expression assignment failed at index ${i}: ${error instanceof Error ? error.message : String(error)}`,
+          { nodeId: expressionNode.id, expressionIndex: i },
+        );
+      }
 
+      // Merge only validated assignments into the temporary context. The engine
+      // commits the accumulated map after the complete node succeeds.
+      Object.assign(allAssignments, normalizedAssignments);
+      Object.assign(mergedContext, normalizedAssignments);
       this.logger.debug("Expression evaluated", {
         nodeId: expressionNode.id,
         expressionIndex: i,
-        value: result.value,
-        assignments: result.assignments,
+        assignmentNames: Object.keys(result.assignments),
       });
     }
 
@@ -107,7 +130,7 @@ export class ExpressionHandler implements INodeHandler {
       nodeId: expressionNode.id,
       executionTime,
       totalAssignments: Object.keys(allAssignments).length,
-      assignments: allAssignments,
+      assignmentNames: Object.keys(allAssignments),
     });
 
     // Return continue with all assignments as data

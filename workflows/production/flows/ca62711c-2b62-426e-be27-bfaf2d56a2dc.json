@@ -1,0 +1,1269 @@
+{
+  "slug": "robust-research-task",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "ca62711c-2b62-426e-be27-bfaf2d56a2dc",
+  "metadata": {
+    "name": "Robust Research Task",
+    "version": "5.3.1",
+    "description": "Исследовательский вариант robust-task: планирование, исполнение каждого шага и все гейты выполняются субагентами, которые ОБЯЗАНЫ сначала прочитать весь корпус исследования ЦЕЛИКОМ и судить как пир по существу (чтением+рассуждением, а не grep/подсчётом). Замороженный-но-расширяемый corpus-manifest, retry/эскалация, Telegram, восстановление контекста. Процесс: UNDERSTAND → BUILD-CORPUS → PLAN(subagent) → VALIDATE → APPROVE → (EXECUTE(subagent) → GATE)×N → VERIFY → FINAL-REVIEW → DELIVER."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "understand-task"
+      }
+    },
+    {
+      "id": "understand-task",
+      "type": "agent-directive",
+      "directive": "Gather a real, deep understanding of the task and its GOAL from the user — this is a conversation to understand, NOT a form to fill.\n\nEstablish, by talking with the user (ask what you genuinely need, in your own words):\n1. What needs to be done and WHY — the real end goal for its consumer/reader.\n2. What an EXCELLENT result looks like for that consumer, and what DEPTH is required (depth over breadth).\n3. The GOAL'S FACETS — the distinct things the result must deliver (derive them for THIS task, whatever it is: e.g. correctness, understandability, coherent narrative, navigation, a working artifact…).\n4. Constraints (time, resources, dependencies).\n5. How we will know it is genuinely done — success criteria that cover the GOAL (including the usefulness/quality/depth axis when the task is research/writing/design/etc.), not only mechanical correctness. Criteria MAY be qualitative when that is what matters — for each such criterion, state HOW it will be judged (by reading against a rubric).\n6. The RESEARCH SCOPE — which sources / files / areas / codebases the result must be grounded in. This feeds the next step (setup-corpus), which enumerates the full corpus every subagent will be required to read in full. Capture it broadly: name the artifacts, docs, code, prior research and data that ground this task.\n\nDo NOT transcribe these fields back at the user mechanically. Understand first. The task may be ANYTHING (code, research, architecture design, an essay, a 3D model, data analysis, …) — use judgement; do not force it into a template.\n\nPlanning standards (context for what a good plan and good criteria need):\n{{planning_standards}}\n\nFold the goal, its FACETS, and the required DEPTH into expected_deliverable and success_criteria (there is no separate facet field — capture them there in words; the plan will trace items to these facets).\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until the user explicitly responds\n- Record in user_response_text exactly what the user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate a short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking",
+      "completionCondition": "User EXPLICITLY answered questions (response text exists in user_response_text)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_description": {
+            "type": "string",
+            "minLength": 10,
+            "description": "Task description"
+          },
+          "expected_deliverable": {
+            "type": "string",
+            "minLength": 5,
+            "description": "Expected result"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Constraints (time, resources, dependencies)"
+          },
+          "success_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Success criteria (specific and verifiable)"
+          }
+        },
+        "required": [
+          "task_description",
+          "task_short_name",
+          "expected_deliverable",
+          "success_criteria",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "task_short_name",
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "suggest-task-name"
+      }
+    },
+    {
+      "id": "suggest-task-name",
+      "type": "agent-directive",
+      "directive": "Choose the most appropriate workspace name based on task description.\n\nTask: {{understand-task.task_description}}\n\nNaming rules:\n- kebab-case: only lowercase letters, numbers and hyphens\n- starts with letter, ends with letter or number\n- describes task essence briefly (2-4 words)\n- not too long (maximum 30 characters)\n\nExamples of good names:\n- api-optimization\n- user-auth-fix\n- dashboard-charts\n- email-templates\n\n**IMPORTANT:** Choose the best name yourself based on the task description. DO NOT ask the user to choose — make the decision independently.",
+      "completionCondition": "Task name chosen by agent",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "task_name"
+        ],
+        "globalInputs": [
+          "task_name"
+        ]
+      },
+      "connections": {
+        "success": "setup-workspace"
+      }
+    },
+    {
+      "id": "setup-workspace",
+      "type": "agent-directive",
+      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/  (must end with a trailing slash)\nExample: ./moira-ws/auth-fix-20251212-1030/\n\n1) Create the workspace folder with the current date and time\n2) Save the current workflow process ID to {workspace}process-id.txt for recovery after archival\n3) Create {workspace}task-requirements.md with:\n   - Task description: {{understand-task.task_description}}\n   - Expected result: {{understand-task.expected_deliverable}}\n   - Success criteria: {{understand-task.success_criteria}}\n   - Constraints: {{understand-task.constraints}}\n4) Create {workspace}planning-standards.md with:\n   {{planning_standards}}\n\nReturn workspace_path ending with a trailing slash. Confirm workspace creation.",
+      "completionCondition": "Workspace created, process ID and requirements saved",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "workspace_path",
+          "process_id_saved",
+          "requirements_saved"
+        ],
+        "globalInputs": [
+          "workspace_path",
+          "process_id_saved",
+          "requirements_saved"
+        ]
+      },
+      "connections": {
+        "success": "setup-corpus"
+      }
+    },
+    {
+      "id": "decompose-into-steps",
+      "type": "agent-directive",
+      "directive": "Build the execution plan by DELEGATING to a PLANNER SUBAGENT (a teammate). Do NOT plan inline yourself. Spawn one subagent with the brief below and record its result.\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\nDELEGATION — DO NOT CAGE THE SUBAGENT: the subagent is the SAME model as you, with the same judgment. Hand it the GOAL, the full CONTEXT, and the peer principle below — then TRUST it to decide what to read closely, what matters, and how to assess. Do NOT over-narrow it (\"read exactly these\", rigid output formats, coordinate grids, step-by-step scripts). Over-narrowing mutes the very judgment you spawned it for; a subagent does better when it gets a goal and freedom, not a cage.\n\n[YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\nYou are a senior researcher/architect on this task — the SAME capability as whoever handed it to\nyou, with the same judgment. You were given the material and the goal; your job is to understand\nit deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\nREAD THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\nin {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\nfrozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n- In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n  or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n  NOT visible from the structure — what a section depends on is rarely the section next to it — and\n  they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n  a chain of inference, a hidden contradiction), not a keyword.\n- What that failure looks like:\n   · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n     library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n     over-broad; the fix depends on a part you'd never grep for.\n   · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n     keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n   · A whole later branch of the research is built on an early inference that, read closely, doesn't\n     hold — so everything downstream is load-bearing on sand.\n- If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n  these cross-dependencies — and that is precisely where the real problems (and the real insights)\n  live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\nSo read all of it, holding the connections in your head. grep/search/counting are fine as a\nNAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\nnever as a substitute for reading, and never as how you judge whether something is sound. If you\nfind an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\nnarrowing it is not.\n\nThen reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\nchain break and why; where do conclusions hang in the air (including about libraries); where does\nthe structure go in circles; are there real architectural alternatives and how do they compare; is\nit honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n(\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\nJUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\nresolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\nFor JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\nconclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\nreasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\nerror: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\nYou do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\nmust reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\nread everything will notice if it was.\n\nPLANNER BRIEF (verbatim):\n  After you have fully read the corpus, build a plan that LEADS TO THE GOAL (not to \"mechanical checks pass\"). Start from the end goal + real consumer, derive the goal's FACETS and required DEPTH, THEN decompose. Carry a one-paragraph ARGUMENT: why this structure reaches the goal, grounded in what you actually read.\n  Frame each item as a GOAL + the CRITERIA for a good result — trust the executing peer to decide HOW — and give each item its Execution: DELEGATE|INLINE marker per the planning standards.\n  Each step: one action, states which GOAL FACET it serves, and carries ITS OWN GATE (a substance/quality criterion judged by READING; a technical floor only where a genuinely machine-checkable part exists — necessary, not sufficient). Every facet covered by ≥1 step.\n  Anchor steps on RESULTS/questions, not pre-carved artifacts; mark provisional items PROVISIONAL.\n  OUTCOME-DEPENDENCY CHECK: judge whether later steps genuinely depend on the RESULTS of earlier ones (a reasoned chain where fixing an early link cascades downstream). If so, do NOT fabricate a detailed full plan — plan the near horizon concretely, mark the rest PROVISIONAL, and put an explicit re-planning/decision point, using approach A (child-flow-with-inherited-context) or B (planned recursive teleport-replan) from the planning standards. Trying to pre-plan work whose shape depends on results you don't have yet is the mistake, not thoroughness.\n  Follow the planning standards: {{planning_standards}}\n\n  Into EACH plan item, WRITE its [PLAN-ITEM INVARIANTS] (both in plan.md and in the steps[].action text) so an isolated executor cannot lose them:\n  [PLAN-ITEM INVARIANTS]\n  Every plan item embeds, inside the item text, the research invariants it must not violate (violating ANY = the item is failed even if everything else is perfect):\n   read the whole corpus first; produce explanatory narrative not tags; give WHAT/WHY/HOW per mechanism; cross-link every reference; no process meta-marks; hit the required depth. The item also restates the specific goal/requirements it serves (so an isolated executor keeps them).\n\n  Save the plan to {{workspace_path}}/plan.md (one numbered item per step: Why / What to do / Serves facet / Expected output / GATE / embedded PLAN-ITEM INVARIANTS).\n\n  The plan and every item must aim the eventual OUTPUT at this bar:\n  [OUTPUT QUALITY RUBRIC]\n  The OUTPUT (not just the reading) must meet this bar wherever the task is research/writing/explanatory:\n   - EXPLANATORY PROSE, not a telegraphic term-stream: connected narrative with intro and conclusion; code/data woven into the flow, not dumped as labelled blocks.\n   - Every mechanism/term gives WHAT (plain-words essence before first use) → WHY (the problem it solves; what a naive approach would do) → HOW (enough for the reader to get the idea), and ONLY THEN a reference as deepening — never a bare \"see X.Y\" IN PLACE of understanding.\n   - CROSS-LINK every reference to its definition+example where the medium allows.\n   - NO process meta-marks in the deliverable (\"review done\", \"for engineer\", \"step N trace\").\n   - REWRITE telegraphic passages into explanatory ones — do NOT merely gloss/annotate on top.\n   - Real DEPTH over breadth; no name-drop passing as coverage.\n\nReturn total_steps and plan_saved_to_file.",
+      "completionCondition": "Plan built by a subagent that first read the whole corpus; plan saved to plan.md",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "total_steps"
+        ],
+        "globalInputs": [
+          "total_steps",
+          "plan_saved_to_file"
+        ]
+      },
+      "connections": {
+        "success": "validate-plan"
+      }
+    },
+    {
+      "id": "validate-plan",
+      "type": "agent-directive",
+      "directive": "Re-validation pass {{validation_round}} of up to {{max_validation_rounds}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user. Just validate the current plan.\n\nDelegate plan validation to an INDEPENDENT reviewer subagent (do NOT validate the plan yourself).\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\nDELEGATION — DO NOT CAGE THE SUBAGENT: the subagent is the SAME model as you, with the same judgment. Hand it the GOAL, the full CONTEXT, and the peer principle below — then TRUST it to decide what to read closely, what matters, and how to assess. Do NOT over-narrow it (\"read exactly these\", rigid output formats, coordinate grids, step-by-step scripts). Over-narrowing mutes the very judgment you spawned it for; a subagent does better when it gets a goal and freedom, not a cage.\n\nGive the reviewer ONLY paths/inputs:\n- Plan: {{workspace_path}}/plan.md\n- Requirements & goal: {{workspace_path}}/task-requirements.md\n- Standards: {{workspace_path}}/planning-standards.md\n- Corpus manifest: {{corpus_manifest_path}}\n\nReviewer brief (verbatim):\n  [YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\n  You are a senior researcher/architect on this task — the SAME capability as whoever handed it to\n  you, with the same judgment. You were given the material and the goal; your job is to understand\n  it deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\n  READ THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\n  in {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\n  frozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n  - In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n    or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n    NOT visible from the structure — what a section depends on is rarely the section next to it — and\n    they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n    a chain of inference, a hidden contradiction), not a keyword.\n  - What that failure looks like:\n     · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n       library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n       over-broad; the fix depends on a part you'd never grep for.\n     · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n       keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n     · A whole later branch of the research is built on an early inference that, read closely, doesn't\n       hold — so everything downstream is load-bearing on sand.\n  - If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n    these cross-dependencies — and that is precisely where the real problems (and the real insights)\n    live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\n  So read all of it, holding the connections in your head. grep/search/counting are fine as a\n  NAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\n  never as a substitute for reading, and never as how you judge whether something is sound. If you\n  find an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\n  narrowing it is not.\n\n  Then reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\n  chain break and why; where do conclusions hang in the air (including about libraries); where does\n  the structure go in circles; are there real architectural alternatives and how do they compare; is\n  it honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n  (\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\n  JUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\n  resolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\n  For JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\n  conclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\n  reasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\n  error: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\n  You do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\n  must reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\n  read everything will notice if it was.\n\n  [REVIEWER CALIBRATION]\n  You are calibrated to FIND defects, NOT to confirm a pass. Default stance: suspicion. A GREEN verdict is the EXCEPTION, earned ONLY after you have read the whole corpus/artifact end-to-end as a stumbling novice and genuinely found nothing wrong. Do NOT wave things through, do NOT grade on \"most of it is fine / only residual issues\" — that calibration is exactly what let real defects slip before. Your job is to KICK the executor back on anything below the bar. issues=0 ONLY if, reading as the target reader, you stumble NOWHERE.\n\n  [UNDERSTANDING-NOT-CHECKLIST]\n  Judge by genuine UNDERSTANDING, not by a checklist and not by proxies. \"A gloss exists / a link exists / a TOC exists / a term appears\" is NOT evidence of clarity — a telegraphic passage can pass a checklist and remain unreadable. Reading-by-checklist ≠ reading-for-understanding. Ask: did a novice actually understand this mechanism? Your assessment must show YOU understood each file's content, not that you scanned it.\n\n  YOU ARE the plan validator. As a validator you are a PEER judging on the merits by reading + reasoning, not by a coordinate grid. Your assessment determines if the plan can proceed. Read the plan, requirements/goal, and standards directly — do not trust summaries.\n  WHOLE-CORPUS REASONING: the planner's plan and reasoning must reflect the WHOLE corpus; a skim-based plan shows and is rejected. Judge the plan by READING; grep/count forbidden as a quality proxy.\n  PLAN FRAMED FOR A SMART AGENT: check each item is framed for a smart autonomous agent (a GOAL + the CRITERIA for a good result, not a pre-scripted micro-sequence) and carries its Execution: DELEGATE|INLINE marker.\n  GOAL-FIT: do the success criteria cover the REAL goal — including the usefulness / clarity / depth axis where the task is research/writing/design — not only mechanical correctness? If the utility/depth axis is missing, that is an issue.\n  FACET COVERAGE (both directions): every goal FACET is served by at least one step (backward — a facet with no step is a GAP, e.g. \"narrative\"/\"navigation\" silently missing); and every step serves some facet (forward — an item serving no facet is work-for-a-checkbox).\n  PER-ITEM GATE: each step carries its own GATE (technical floor where applicable, necessary-not-sufficient, AND a substance criterion judged by the fitting method).\n  PLAN-ITEM INVARIANTS: check that EACH plan item carries its research invariants (read whole corpus first; explanatory narrative not tags; WHAT/WHY/HOW per mechanism; cross-link every reference; no process meta-marks; required depth; restated goal/requirements) AND a real substance gate — not just a mechanical floor.\n  STEP QUALITY: self-contained, explicit actions (not \"configure\"), full file paths, appropriate depth stated.\n  REDUNDANCY IS CONDITIONAL: do NOT demand unconditional duplication — redundancy must serve an item's isolation and the goal; flag missing NEEDED context, but do NOT force mechanical boilerplate into every item as a checkbox.\n  STANDARDS: dependencies, verifiability by the appropriate method, no tail degradation.\n  RETURN issues_count (0 = valid) and a FLAT list of specific issues (every issue mandatory; no severity tiers).\n\nWrite the issues to {{workspace_path}}/plan-validation-issues.md:\n   # Plan Validation Issues\n   Total issues: [count]\n   ## Issues Found\n   ### 1. [issue]\n   Category: [goal-fit/facet-coverage/gate/invariants/structure/standards]\n   Recommendation: [how to fix]\n\nRecord the reviewer's result honestly — reviewer findings are authoritative, your opinion does not override them.",
+      "completionCondition": "Plan validated, issues_count specified",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues_count": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Number of issues found (0 = plan is valid)"
+          },
+          "validation_issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "step_id": {
+                  "type": "number"
+                },
+                "issue": {
+                  "type": "string"
+                },
+                "suggestion": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "step_id",
+                "issue"
+              ]
+            },
+            "description": "Issues found (if any)"
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-validation"
+      }
+    },
+    {
+      "id": "route-plan-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-plan.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "notify-plan-ready",
+        "false": "fix-plan-issues"
+      }
+    },
+    {
+      "id": "fix-plan-issues",
+      "type": "agent-directive",
+      "directive": "CRITICAL: FIX THE ISSUES — NO REPORTS!\n\nFix all plan validation issues completely by DELEGATING to a PLANNER SUBAGENT (a teammate). Do NOT fix inline yourself. Spawn one subagent with the brief below.\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\n[YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\nYou are a senior researcher/architect on this task — the SAME capability as whoever handed it to\nyou, with the same judgment. You were given the material and the goal; your job is to understand\nit deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\nREAD THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\nin {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\nfrozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n- In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n  or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n  NOT visible from the structure — what a section depends on is rarely the section next to it — and\n  they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n  a chain of inference, a hidden contradiction), not a keyword.\n- What that failure looks like:\n   · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n     library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n     over-broad; the fix depends on a part you'd never grep for.\n   · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n     keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n   · A whole later branch of the research is built on an early inference that, read closely, doesn't\n     hold — so everything downstream is load-bearing on sand.\n- If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n  these cross-dependencies — and that is precisely where the real problems (and the real insights)\n  live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\nSo read all of it, holding the connections in your head. grep/search/counting are fine as a\nNAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\nnever as a substitute for reading, and never as how you judge whether something is sound. If you\nfind an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\nnarrowing it is not.\n\nThen reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\nchain break and why; where do conclusions hang in the air (including about libraries); where does\nthe structure go in circles; are there real architectural alternatives and how do they compare; is\nit honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n(\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\nJUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\nresolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\nFor JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\nconclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\nreasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\nerror: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\nYou do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\nmust reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\nread everything will notice if it was.\n\nPLANNER BRIEF (verbatim):\n  After fully reading the corpus, READ {{workspace_path}}/plan-validation-issues.md.\n  For EACH issue: understand it, apply the fix completely (no partial fixes), verify it is resolved. Reviewer findings are authoritative — do not skip any, even minor ones. Treat each finding as a CLASS: fix every instance of that pattern across the whole plan, not just the exact spot.\n  Follow the planning standards: {{planning_standards}}\n\n  Every repaired plan item must carry its [PLAN-ITEM INVARIANTS] (validate-plan re-checks them):\n  [PLAN-ITEM INVARIANTS]\n  Every plan item embeds, inside the item text, the research invariants it must not violate (violating ANY = the item is failed even if everything else is perfect):\n   read the whole corpus first; produce explanatory narrative not tags; give WHAT/WHY/HOW per mechanism; cross-link every reference; no process meta-marks; hit the required depth. The item also restates the specific goal/requirements it serves (so an isolated executor keeps them).\n\n  After fixing, update {{workspace_path}}/plan.md. Return only fixes_applied — do NOT echo the plan.",
+      "completionCondition": "Issues fixed, plan updated",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "fixes_applied"
+        ],
+        "globalInputs": [
+          "total_steps",
+          "fixes_applied"
+        ]
+      },
+      "connections": {
+        "success": "expr-inc-validation-round"
+      }
+    },
+    {
+      "id": "notify-plan-ready",
+      "type": "telegram-notification",
+      "message": "Plan ready for review\n\nTask: {{task_short_name}}\nSteps: {{total_steps}}\n\nPlease confirm the plan to continue.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "present-plan",
+        "error": "present-plan"
+      }
+    },
+    {
+      "id": "present-plan",
+      "type": "agent-directive",
+      "directive": "Show user the task execution plan.\n\nTask: {{understand-task.task_description}}\nExpected result: {{understand-task.expected_deliverable}}\n\nPresent the plan from {{workspace_path}}/plan.md ({{total_steps}} steps). Note the research corpus size: {{corpus_file_count}} sources enumerated in the corpus manifest (every subagent must read them all in full).\n\nSuccess will be measured by criteria:\n{{understand-task.success_criteria}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Do you confirm the plan? (yes/no)'\n- STOP and wait until the user writes a response\n- DO NOT fill plan_approved until the user explicitly says yes or no\n- Showing the plan ≠ getting confirmation\n- Record in user_response_text exactly what the user answered\n\n⚠️ HANDLING FEEDBACK:\n- Any comment, suggested change, or anything other than a pure 'yes' → plan_approved: 'no'\n- Record comments in revision_feedback\n- 'Yes, but...' = NO; 'Good, just change...' = NO\n- Only a pure 'yes'/'ok'/'confirm' without reservations = YES\n\nDO NOT fix the plan yourself. Reply plan_approved = 'no' with revision_feedback — the workflow routes to the fix branch.\n\nIf the user does NOT approve, do NOT use teleport-replan and do NOT fix the plan yourself — just answer plan_approved='no' with revision_feedback; the workflow routes to the revise-plan branch. teleport-replan is ONLY for mid-execution replans, not plan rejection.",
+      "completionCondition": "User EXPLICITLY answered yes or no (response text exists in user_response_text)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "plan_approved": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "User confirmed the plan"
+          },
+          "revision_feedback": {
+            "type": "string",
+            "description": "User comments (if not confirmed)"
+          }
+        },
+        "required": [
+          "plan_approved",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-approval"
+      }
+    },
+    {
+      "id": "route-plan-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-plan.plan_approved"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "check-all-steps-done",
+        "false": "revise-plan"
+      }
+    },
+    {
+      "id": "revise-plan",
+      "type": "agent-directive",
+      "directive": "Revise plan based on user comments.\n\nComments: {{present-plan.revision_feedback}}\n\nPRESERVE while revising:\n- Keep the original FROZEN requirements and goal facets — do not lose them.\n- PRESERVE the corpus manifest ({{corpus_manifest_path}}): the corpus may GROW (append newly in-scope sources) but must NOT silently shrink.\n- Carry forward every plan item that is STILL RELEVANT — do not drop still-valid work.\n- Do NOT silently narrow scope: if the revision reduces scope or removes content, EXPLICITLY name what would be lost and get the user's OK first. Read the current plan file in FULL before overwriting it.\n\nRead the current plan from {{workspace_path}}/plan.md IN FULL, revise it per the feedback (preserving the above), and update {{workspace_path}}/plan.md.",
+      "completionCondition": "Plan revised considering comments",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "globalInputs": [
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "expr-reset-after-revision"
+      }
+    },
+    {
+      "id": "check-all-steps-done",
+      "type": "condition",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "current_step"
+        },
+        "right": {
+          "contextPath": "total_steps"
+        }
+      },
+      "connections": {
+        "true": "verify-criteria",
+        "false": "execute-current-step"
+      }
+    },
+    {
+      "id": "execute-current-step",
+      "type": "agent-directive",
+      "directive": "Execute step {{current_step}} of {{total_steps}}. FIRST read the item's Execution: marker for this step in {{workspace_path}}/plan.md and DISPATCH accordingly: DELEGATE (the item needs an autonomous intellectual pass over fresh full/large context — reasoning, judgment, deep reading) → spawn one EXECUTOR SUBAGENT (a teammate) with the brief below and record its result; INLINE (small, mechanical, low-context) → you MAY do it yourself, still honoring the brief's bar. When in doubt on a research/reasoning item, DELEGATE — the point of a subagent is autonomous intellectual work.\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\nDELEGATION — DO NOT CAGE THE SUBAGENT: the subagent is the SAME model as you, with the same judgment. Hand it the GOAL, the full CONTEXT, and the peer principle below — then TRUST it to decide what to read closely, what matters, and how to assess. Do NOT over-narrow it (\"read exactly these\", rigid output formats, coordinate grids, step-by-step scripts). Over-narrowing mutes the very judgment you spawned it for; a subagent does better when it gets a goal and freedom, not a cage.\n\n[YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\nYou are a senior researcher/architect on this task — the SAME capability as whoever handed it to\nyou, with the same judgment. You were given the material and the goal; your job is to understand\nit deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\nREAD THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\nin {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\nfrozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n- In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n  or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n  NOT visible from the structure — what a section depends on is rarely the section next to it — and\n  they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n  a chain of inference, a hidden contradiction), not a keyword.\n- What that failure looks like:\n   · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n     library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n     over-broad; the fix depends on a part you'd never grep for.\n   · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n     keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n   · A whole later branch of the research is built on an early inference that, read closely, doesn't\n     hold — so everything downstream is load-bearing on sand.\n- If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n  these cross-dependencies — and that is precisely where the real problems (and the real insights)\n  live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\nSo read all of it, holding the connections in your head. grep/search/counting are fine as a\nNAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\nnever as a substitute for reading, and never as how you judge whether something is sound. If you\nfind an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\nnarrowing it is not.\n\nThen reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\nchain break and why; where do conclusions hang in the air (including about libraries); where does\nthe structure go in circles; are there real architectural alternatives and how do they compare; is\nit honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n(\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\nJUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\nresolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\nFor JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\nconclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\nreasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\nerror: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\nYou do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\nmust reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\nread everything will notice if it was.\n\nEXECUTOR BRIEF (verbatim):\n  After fully reading the corpus, read step {{current_step}} and ITS GATE from {{workspace_path}}/plan.md and do the work to the required depth. Honor the item's embedded PLAN-ITEM INVARIANTS (read whole corpus first; explanatory narrative not tags; WHAT/WHY/HOW per mechanism; cross-link every reference; no process meta-marks; hit the required depth; keep the goal/requirements the item restates). Use full AI strength: reason from what you READ, improvise beyond the plan where it serves the goal, follow leads. Discovering a better path and reshaping the remaining plan is NORMAL (teleport-replan). If this step is an outcome-dependent chunk, you MAY launch a CHILD flow for it via start({ parentExecutionId }); when you do, INHERIT context — pass the child the overall goal, {{workspace_path}}/task-requirements.md, the corpus-manifest ({{corpus_manifest_path}}), the sub-goal, and the relevant RESULTS of prior stages, so it never works in isolation. When the child returns, re-assess against its real result. A finding here that reshapes the remaining plan (a cascade from an earlier link) is NORMAL — use teleport-replan to reshape the tail, and if that reshape surfaces yet more coupled changes, replan again (recursion is expected, not a stuck loop). More broadly: replan mid-execution WHENEVER you realize you MISSED something, got NEW INPUTS, or a NEW ASPECT of the task surfaced during the work — not only for cascades. The plan no longer fitting the real task is a normal trigger for teleport-replan, never a failure. If you find a new in-scope source, append it to corpus-manifest.md and read it. Produce EVIDENCE appropriate to the step's gate (for quality work: what a READING against the rubric shows — not counts). Write evidence to {{workspace_path}}/step-{{current_step}}/evidence.md. Run an inline self-check against the step's own gate before returning.\n\n  The OUTPUT must meet this bar:\n  [OUTPUT QUALITY RUBRIC]\n  The OUTPUT (not just the reading) must meet this bar wherever the task is research/writing/explanatory:\n   - EXPLANATORY PROSE, not a telegraphic term-stream: connected narrative with intro and conclusion; code/data woven into the flow, not dumped as labelled blocks.\n   - Every mechanism/term gives WHAT (plain-words essence before first use) → WHY (the problem it solves; what a naive approach would do) → HOW (enough for the reader to get the idea), and ONLY THEN a reference as deepening — never a bare \"see X.Y\" IN PLACE of understanding.\n   - CROSS-LINK every reference to its definition+example where the medium allows.\n   - NO process meta-marks in the deliverable (\"review done\", \"for engineer\", \"step N trace\").\n   - REWRITE telegraphic passages into explanatory ones — do NOT merely gloss/annotate on top.\n   - Real DEPTH over breadth; no name-drop passing as coverage.\n\n  Rules: {{validation_criteria}}  Avoid: {{common_mistakes}}\nReturn step_completed; evidence saved to evidence.md.",
+      "completionCondition": "Step executed by a subagent that first read the whole corpus; evidence saved to evidence.md",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "step_completed"
+        ],
+        "globalInputs": [
+          "step_completed",
+          "evidence",
+          "notes"
+        ]
+      },
+      "connections": {
+        "success": "verify-step-execution"
+      }
+    },
+    {
+      "id": "verify-step-execution",
+      "type": "agent-directive",
+      "directive": "GATE REVIEW of step {{current_step}} — delegate to an INDEPENDENT reviewer subagent (do NOT review it yourself).\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\nDELEGATION — DO NOT CAGE THE SUBAGENT: the subagent is the SAME model as you, with the same judgment. Hand it the GOAL, the full CONTEXT, and the peer principle below — then TRUST it to decide what to read closely, what matters, and how to assess. Do NOT over-narrow it (\"read exactly these\", rigid output formats, coordinate grids, step-by-step scripts). Over-narrowing mutes the very judgment you spawned it for; a subagent does better when it gets a goal and freedom, not a cage.\n\nGive the reviewer ONLY paths/inputs, not content:\n- Plan: {{workspace_path}}/plan.md (read step {{current_step}} AND ITS GATE)\n- Step evidence: {{workspace_path}}/step-{{current_step}}/evidence.md\n- Frozen requirements/goal: {{workspace_path}}/task-requirements.md\n- Corpus manifest: {{corpus_manifest_path}}\n\nReviewer brief (verbatim):\n  [YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\n  You are a senior researcher/architect on this task — the SAME capability as whoever handed it to\n  you, with the same judgment. You were given the material and the goal; your job is to understand\n  it deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\n  READ THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\n  in {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\n  frozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n  - In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n    or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n    NOT visible from the structure — what a section depends on is rarely the section next to it — and\n    they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n    a chain of inference, a hidden contradiction), not a keyword.\n  - What that failure looks like:\n     · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n       library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n       over-broad; the fix depends on a part you'd never grep for.\n     · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n       keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n     · A whole later branch of the research is built on an early inference that, read closely, doesn't\n       hold — so everything downstream is load-bearing on sand.\n  - If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n    these cross-dependencies — and that is precisely where the real problems (and the real insights)\n    live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\n  So read all of it, holding the connections in your head. grep/search/counting are fine as a\n  NAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\n  never as a substitute for reading, and never as how you judge whether something is sound. If you\n  find an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\n  narrowing it is not.\n\n  Then reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\n  chain break and why; where do conclusions hang in the air (including about libraries); where does\n  the structure go in circles; are there real architectural alternatives and how do they compare; is\n  it honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n  (\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\n  JUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\n  resolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\n  For JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\n  conclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\n  reasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\n  error: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\n  You do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\n  must reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\n  read everything will notice if it was.\n\n  [REVIEWER CALIBRATION]\n  You are calibrated to FIND defects, NOT to confirm a pass. Default stance: suspicion. A GREEN verdict is the EXCEPTION, earned ONLY after you have read the whole corpus/artifact end-to-end as a stumbling novice and genuinely found nothing wrong. Do NOT wave things through, do NOT grade on \"most of it is fine / only residual issues\" — that calibration is exactly what let real defects slip before. Your job is to KICK the executor back on anything below the bar. issues=0 ONLY if, reading as the target reader, you stumble NOWHERE.\n\n  [THREE-ROLE READING]\n  Read the artifact in THREE roles, in full, not by sampling:\n   - NOVICE: is every term/jargon/private field introduced BEFORE use? Is the non-obvious actually explained (WHAT/WHY/HOW), or just named? Do you, as a newcomer, truly understand?\n   - EXPERT: is the depth real (mechanism derived/explained, not a name-drop or a code dump)? Are facts/claims correct against the primary source?\n   - EDITOR: is it coherent explanatory narrative (intro + flow + conclusion), NOT a telegraphic stream of terms/bullets? Are there process meta-marks that must not ship?\n\n  [UNDERSTANDING-NOT-CHECKLIST]\n  Judge by genuine UNDERSTANDING, not by a checklist and not by proxies. \"A gloss exists / a link exists / a TOC exists / a term appears\" is NOT evidence of clarity — a telegraphic passage can pass a checklist and remain unreadable. Reading-by-checklist ≠ reading-for-understanding. Ask: did a novice actually understand this mechanism? Your assessment must show YOU understood each file's content, not that you scanned it.\n\n  YOU ARE an independent gate reviewer for step {{current_step}}.\n  WHOLE-CORPUS REASONING: the executor's assessment/output must reflect the WHOLE corpus — shallow, skim-based work shows; reject it.\n  Read the plan step, ITS GATE, and this step's evidence directly, and verify against the PRIMARY SOURCE (the real artifact/code/goal) — NOT the executor's paraphrase.\n  Judge the step AGAINST ITS OWN GATE, not a generic checklist: (a) the technical floor if any (build/tests/links/paths — necessary, not sufficient), AND (b) the quality/substance criterion, judged by the method that fits (READ for qualitative work — do not grep/count as a proxy for quality).\n  OUTPUT QUALITY: judge the output against [OUTPUT QUALITY RUBRIC] AND the item's embedded PLAN-ITEM INVARIANTS:\n   - EXPLANATORY PROSE, not a telegraphic term-stream: connected narrative with intro and conclusion; code/data woven into the flow, not dumped as labelled blocks.\n   - Every mechanism/term gives WHAT (plain-words essence before first use) → WHY (the problem it solves; what a naive approach would do) → HOW (enough for the reader to get the idea), and ONLY THEN a reference as deepening — never a bare \"see X.Y\" IN PLACE of understanding.\n   - CROSS-LINK every reference to its definition+example where the medium allows.\n   - NO process meta-marks in the deliverable (\"review done\", \"for engineer\", \"step N trace\").\n   - REWRITE telegraphic passages into explanatory ones — do NOT merely gloss/annotate on top.\n   - Real DEPTH over breadth; no name-drop passing as coverage.\n  PLAN INTEGRITY: does it build correctly on previous steps and set up future ones, no drift/regression/quality degradation?\n  GOAL-CONTEXT CHECK: do the completed steps + the REMAINING plan still lead to the user's real goal and requirements? Are there inaccuracies in the plan itself? If the PLAN must change to reach the goal, say so.\n  CLASS, NOT POINT: any defect found is a CLASS — check whether the same pattern exists elsewhere in the artifact.\n  80% = NOT verified; no concrete evidence = NOT verified; floor passed but substance unmet = NOT verified.\n  RETURN step_verified (yes/no), a FLAT list of issues_found (every issue mandatory; no severity tiers), and verification_details explaining the verdict.\n\nRecord the reviewer's verdict honestly — reviewer findings are authoritative, your opinion does not override them.\n\nIf step_verified = no, write the issues to {{workspace_path}}/step-{{current_step}}/verification-issues.md:\n   # Step {{current_step}} Verification Issues\n\n   Step verified: no\n\n   ## Issues Found\n   ### 1. [issue — and the CLASS/pattern it belongs to]\n   Expected (per the step's gate): [floor and/or substance]\n   Actual: [what the evidence/primary source shows]\n   Gap: [what is missing or inconsistent, across the whole artifact where the class applies]",
+      "completionCondition": "Verification complete, verdict delivered",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "step_verified": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Step passed verification"
+          },
+          "issues_found": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issues found (if step_verified=no)"
+          }
+        },
+        "required": [
+          "step_verified",
+          "verification_details",
+          "issues_found"
+        ],
+        "globalInputs": [
+          "verification_details"
+        ]
+      },
+      "connections": {
+        "success": "route-step-verification"
+      }
+    },
+    {
+      "id": "route-step-verification",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "verify-step-execution.step_verified"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "complete-step",
+        "false": "expr-inc-retry"
+      }
+    },
+    {
+      "id": "complete-step",
+      "type": "agent-directive",
+      "directive": "Step {{current_step}} completed successfully.\n\nEvidence: {{evidence}}\n\nRecord the step result (the cursor advances automatically — do not change current_step yourself). The workflow increments the step counter via an expression node next.",
+      "completionCondition": "Result recorded, counter incremented, next step data extracted",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "step_result_saved"
+        ],
+        "globalInputs": [
+          "step_result_saved",
+          "execution_note"
+        ]
+      },
+      "connections": {
+        "success": "expr-inc-current-step"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-retry",
+      "expressions": [
+        "step_retry = step_retry + 1"
+      ],
+      "connections": {
+        "default": "check-retry-limit"
+      }
+    },
+    {
+      "id": "check-retry-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "step_retry"
+        },
+        "right": {
+          "contextPath": "max_retries"
+        }
+      },
+      "connections": {
+        "true": "notify-escalation",
+        "false": "retry-step-feedback"
+      }
+    },
+    {
+      "id": "retry-step-feedback",
+      "type": "agent-directive",
+      "directive": "Attempt {{step_retry}} of {{max_retries}} failed.\n\nREAD {{workspace_path}}/step-{{current_step}}/verification-issues.md\n\nFor EACH issue found by the verifier:\n1. Understand what was missing or incorrect (against the step's own gate — floor and/or substance).\n2. Treat it as a CLASS: fix not only the exact spot but every instance of that pattern across the artifact.\n3. Determine a different approach to address the gap; plan specific actions to fix.\n\nAnalyze why the step was not completed and try again with a different approach.\n\nDO NOT skip any issue. ALL verification findings must be addressed.\n\nAvoid mistakes:\n{{common_mistakes}}",
+      "completionCondition": "Feedback given, ready for retry",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "retry_approach"
+        ],
+        "globalInputs": [
+          "retry_approach"
+        ]
+      },
+      "connections": {
+        "success": "execute-current-step"
+      }
+    },
+    {
+      "id": "notify-escalation",
+      "type": "telegram-notification",
+      "message": "Decision required\n\nTask: {{task_short_name}}\nStep {{current_step}} failed after {{max_retries}} attempts.\n\nOptions:\n- Skip step\n- Complete manually",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "ask-user-skip-or-escalate",
+        "error": "ask-user-skip-or-escalate"
+      }
+    },
+    {
+      "id": "ask-user-skip-or-escalate",
+      "type": "agent-directive",
+      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\nRead step information from file {{workspace_path}}/plan.md\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problem\n  4. reset - reset retry counter and try again'\n- STOP and wait until the user writes a response\n- DO NOT fill user_decision until the user explicitly responds\n- Record in user_response_text exactly what the user answered\n\nDO NOT fix anything yourself — the workflow routes to the chosen branch.",
+      "completionCondition": "User EXPLICITLY chose action (response text exists in user_response_text)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "user_decision": {
+            "type": "string",
+            "enum": [
+              "skip",
+              "escalate",
+              "revise_plan",
+              "reset"
+            ],
+            "description": "User's decision"
+          },
+          "skip_reason": {
+            "type": "string",
+            "description": "Skip reason (if skip)"
+          }
+        },
+        "required": [
+          "user_decision",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "check-reset-retry"
+      }
+    },
+    {
+      "id": "route-user-decision",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-user-skip-or-escalate.user_decision"
+        },
+        "right": "skip"
+      },
+      "connections": {
+        "true": "mark-step-skipped",
+        "false": "route-escalate-or-revise"
+      }
+    },
+    {
+      "id": "route-escalate-or-revise",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-user-skip-or-escalate.user_decision"
+        },
+        "right": "escalate"
+      },
+      "connections": {
+        "true": "user-handles-step",
+        "false": "revise-plan-from-escalation"
+      }
+    },
+    {
+      "id": "revise-plan-from-escalation",
+      "type": "agent-directive",
+      "directive": "Revise plan considering execution problems.\n\nStep {{current_step}} could not be completed after {{max_retries}} attempts.\n\nRead the current plan from {{workspace_path}}/plan.md IN FULL.\n\nAnalyze why the step cannot be executed and revise the plan:\n- Maybe the step needs to be split into smaller ones?\n- Maybe a different approach is needed?\n- Maybe dependencies were not considered?\n\nPRESERVE while revising:\n- Keep the original FROZEN requirements and goal facets — do not lose them.\n- PRESERVE the corpus manifest ({{corpus_manifest_path}}) and the frozen requirements/goal: the corpus may GROW (append newly in-scope sources) but must NOT silently shrink.\n- Carry forward every still-relevant plan item.\n- Do NOT silently narrow scope: if the revision removes scope/content, EXPLICITLY name what is lost and get the user's OK; read the plan file in FULL before overwriting.\n\nPlanning standards:\n{{planning_standards}}\n\nAfter revision, update {{workspace_path}}/plan.md.",
+      "completionCondition": "Plan revised considering problems",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "revision_reason"
+        ],
+        "globalInputs": [
+          "total_steps",
+          "revision_reason"
+        ]
+      },
+      "connections": {
+        "success": "expr-restart-from-first"
+      }
+    },
+    {
+      "id": "mark-step-skipped",
+      "type": "agent-directive",
+      "directive": "Step {{current_step}} skipped.\n\nReason: {{ask-user-skip-or-escalate.skip_reason}}\n\nRecord that the step was skipped. The cursor advances automatically via an expression node next — do not change current_step yourself.",
+      "completionCondition": "Step marked as skipped, counter incremented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "skipped_recorded"
+        ],
+        "globalInputs": [
+          "skipped_recorded",
+          "execution_note"
+        ]
+      },
+      "connections": {
+        "success": "expr-inc-current-step"
+      }
+    },
+    {
+      "id": "user-handles-step",
+      "type": "agent-directive",
+      "directive": "User takes over step {{current_step}} execution.\n\nRead step information from file {{workspace_path}}/plan.md\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Wait until the user completes the step and provides evidence\n- DO NOT fill user_completed until the user explicitly confirms completion\n- Record in user_response_text exactly what the user answered",
+      "completionCondition": "User EXPLICITLY confirmed completion with evidence (response text exists in user_response_text)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "user_completed",
+          "evidence",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_completed",
+          "evidence",
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "complete-step"
+      }
+    },
+    {
+      "id": "verify-criteria",
+      "type": "agent-directive",
+      "directive": "Re-verification pass {{criteria_round}} of up to {{max_criteria_rounds}} — this is a normal completeness loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nThis is a completeness self-review — you MAY delegate it to a subagent; either way the SAME discipline applies to whoever performs it. If you delegate it, DO NOT CAGE THE SUBAGENT: it is the SAME model as you, with the same judgment. Hand it the GOAL, the full CONTEXT, and the peer principle below — then TRUST it to decide what to read closely, what matters, and how to assess. Do NOT over-narrow it (\"read exactly these\", rigid output formats, coordinate grids, step-by-step scripts); a subagent does better when it gets a goal and freedom, not a cage.\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\n[YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\nYou are a senior researcher/architect on this task — the SAME capability as whoever handed it to\nyou, with the same judgment. You were given the material and the goal; your job is to understand\nit deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\nREAD THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\nin {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\nfrozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n- In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n  or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n  NOT visible from the structure — what a section depends on is rarely the section next to it — and\n  they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n  a chain of inference, a hidden contradiction), not a keyword.\n- What that failure looks like:\n   · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n     library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n     over-broad; the fix depends on a part you'd never grep for.\n   · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n     keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n   · A whole later branch of the research is built on an early inference that, read closely, doesn't\n     hold — so everything downstream is load-bearing on sand.\n- If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n  these cross-dependencies — and that is precisely where the real problems (and the real insights)\n  live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\nSo read all of it, holding the connections in your head. grep/search/counting are fine as a\nNAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\nnever as a substitute for reading, and never as how you judge whether something is sound. If you\nfind an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\nnarrowing it is not.\n\nThen reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\nchain break and why; where do conclusions hang in the air (including about libraries); where does\nthe structure go in circles; are there real architectural alternatives and how do they compare; is\nit honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n(\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\nJUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\nresolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\nFor JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\nconclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\nreasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\nerror: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\nYou do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\nmust reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\nread everything will notice if it was.\n\n[REVIEWER CALIBRATION]\nYou are calibrated to FIND defects, NOT to confirm a pass. Default stance: suspicion. A GREEN verdict is the EXCEPTION, earned ONLY after you have read the whole corpus/artifact end-to-end as a stumbling novice and genuinely found nothing wrong. Do NOT wave things through, do NOT grade on \"most of it is fine / only residual issues\" — that calibration is exactly what let real defects slip before. Your job is to KICK the executor back on anything below the bar. issues=0 ONLY if, reading as the target reader, you stumble NOWHERE.\n\n[THREE-ROLE READING]\nRead the artifact in THREE roles, in full, not by sampling:\n - NOVICE: is every term/jargon/private field introduced BEFORE use? Is the non-obvious actually explained (WHAT/WHY/HOW), or just named? Do you, as a newcomer, truly understand?\n - EXPERT: is the depth real (mechanism derived/explained, not a name-drop or a code dump)? Are facts/claims correct against the primary source?\n - EDITOR: is it coherent explanatory narrative (intro + flow + conclusion), NOT a telegraphic stream of terms/bullets? Are there process meta-marks that must not ship?\n\n[UNDERSTANDING-NOT-CHECKLIST]\nJudge by genuine UNDERSTANDING, not by a checklist and not by proxies. \"A gloss exists / a link exists / a TOC exists / a term appears\" is NOT evidence of clarity — a telegraphic passage can pass a checklist and remain unreadable. Reading-by-checklist ≠ reading-for-understanding. Ask: did a novice actually understand this mechanism? Your assessment must show YOU understood each file's content, not that you scanned it.\n\nCOMPLETENESS SELF-REVIEW (verify ONLY — DO NOT fix here). This is a light pre-pass; an independent final review runs after it.\n\nVerify that EVERY success criterion AND EVERY goal FACET is ACTUALLY satisfied by the REAL deliverable — check the actual artifact (code, files, command output, tests, or by READING for qualitative facets), NOT documentation, NOT claims, NOT your own memory.\n\nSuccess criteria (the frozen source of truth):\n{{understand-task.success_criteria}}\n\nExpected deliverable and its goal facets: {{understand-task.expected_deliverable}}\n\nRules:\n- Check BOTH directions: every criterion/facet has concrete evidence (forward), and no required facet is left unserved (backward — this is how \"narrative\"/\"navigation\" silently fell through before).\n- Verify each by the method that FITS it: factual/code/build/links → tools; quality/clarity/depth/coherence → READING against the rubric, not grep/counting.\n- ONE check per criterion/facet — go one at a time, do not batch-approve. \"Looks done\" / \"should work\" / \"documented as complete\" is NOT evidence.\n- For each: Completed? (yes/no) + concrete evidence (file path, output, test result, or the reading verdict).\n\nVerification rules:\n{{validation_criteria}}\n\nSave a coverage report to {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md AND the gaps to {{workspace_path}}/criteria-gaps.md:\n# Success Criteria & Facet Coverage (attempt {{validation_attempt_count}})\n\n## Summary\nTotal criteria+facets: [count]\nCompleted: [count]\nGaps: [count]\n\n## Per-criterion / per-facet\n### 1. [criterion or facet]\nStatus: MET | NOT MET\nMethod: tool | reading\nEvidence: [concrete evidence OR what is missing]",
+      "completionCondition": "All success criteria verified against the real deliverable with concrete evidence",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "all_criteria_met": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "All criteria met"
+          },
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What is not completed (if any)"
+          }
+        },
+        "required": [
+          "all_criteria_met",
+          "criteria_results"
+        ],
+        "globalInputs": [
+          "criteria_results"
+        ]
+      },
+      "connections": {
+        "success": "route-criteria-check"
+      }
+    },
+    {
+      "id": "route-criteria-check",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "verify-criteria.all_criteria_met"
+        },
+        "right": "yes"
+      },
+      "connections": {
+        "true": "final-review",
+        "false": "fix-gaps"
+      }
+    },
+    {
+      "id": "fix-gaps",
+      "type": "agent-directive",
+      "directive": "CRITICAL: FIX THE GAPS - NO REPORTS!\n\nFix incomplete success criteria and unserved goal facets by DELEGATING to an EXECUTOR SUBAGENT (a teammate). Do NOT patch inline yourself. Spawn one subagent with the brief below.\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\n[YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\nYou are a senior researcher/architect on this task — the SAME capability as whoever handed it to\nyou, with the same judgment. You were given the material and the goal; your job is to understand\nit deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\nREAD THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\nin {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\nfrozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n- In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n  or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n  NOT visible from the structure — what a section depends on is rarely the section next to it — and\n  they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n  a chain of inference, a hidden contradiction), not a keyword.\n- What that failure looks like:\n   · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n     library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n     over-broad; the fix depends on a part you'd never grep for.\n   · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n     keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n   · A whole later branch of the research is built on an early inference that, read closely, doesn't\n     hold — so everything downstream is load-bearing on sand.\n- If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n  these cross-dependencies — and that is precisely where the real problems (and the real insights)\n  live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\nSo read all of it, holding the connections in your head. grep/search/counting are fine as a\nNAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\nnever as a substitute for reading, and never as how you judge whether something is sound. If you\nfind an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\nnarrowing it is not.\n\nThen reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\nchain break and why; where do conclusions hang in the air (including about libraries); where does\nthe structure go in circles; are there real architectural alternatives and how do they compare; is\nit honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n(\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\nJUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\nresolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\nFor JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\nconclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\nreasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\nerror: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\nYou do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\nmust reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\nread everything will notice if it was.\n\nEXECUTOR BRIEF (verbatim):\n  After fully reading the corpus, READ {{workspace_path}}/criteria-gaps.md.\n  For EACH gap:\n  1. Understand what's missing (a criterion, or a whole goal FACET with no coverage).\n  2. Complete the required work to the needed DEPTH — by the fitting method (real work + reading for quality, not a mechanical patch).\n  3. Treat each defect as a CLASS: find and fix ALL instances of that pattern across the whole artifact, not just the one spot.\n  4. Gather evidence of completion (concrete, or the reading verdict).\n  DO NOT skip any gap. ALL incomplete criteria/facets must be addressed. Complete what's missing and provide evidence for each fix.\n\n  The OUTPUT must meet this bar:\n  [OUTPUT QUALITY RUBRIC]\n  The OUTPUT (not just the reading) must meet this bar wherever the task is research/writing/explanatory:\n   - EXPLANATORY PROSE, not a telegraphic term-stream: connected narrative with intro and conclusion; code/data woven into the flow, not dumped as labelled blocks.\n   - Every mechanism/term gives WHAT (plain-words essence before first use) → WHY (the problem it solves; what a naive approach would do) → HOW (enough for the reader to get the idea), and ONLY THEN a reference as deepening — never a bare \"see X.Y\" IN PLACE of understanding.\n   - CROSS-LINK every reference to its definition+example where the medium allows.\n   - NO process meta-marks in the deliverable (\"review done\", \"for engineer\", \"step N trace\").\n   - REWRITE telegraphic passages into explanatory ones — do NOT merely gloss/annotate on top.\n   - Real DEPTH over breadth; no name-drop passing as coverage.",
+      "completionCondition": "Gaps fixed with evidence",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "gaps_fixed",
+          "fix_evidence"
+        ],
+        "globalInputs": [
+          "gaps_fixed",
+          "fix_evidence"
+        ]
+      },
+      "connections": {
+        "success": "expr-inc-validation-attempt"
+      }
+    },
+    {
+      "id": "deliver-result",
+      "type": "agent-directive",
+      "directive": "Compile final result.\n\nTask: {{understand-task.task_description}}\nDeliverable: {{understand-task.expected_deliverable}}\n\nPrepare:\n1. Final deliverable\n2. Summary of what was done (by steps)\n3. List of artifacts (files, links, results)\n4. Recommendations (if any)",
+      "completionCondition": "Final result compiled and presented",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deliverable": {
+            "type": "string",
+            "description": "Final result"
+          }
+        },
+        "required": [
+          "deliverable",
+          "summary"
+        ],
+        "globalInputs": [
+          "summary",
+          "artifacts",
+          "recommendations"
+        ]
+      },
+      "connections": {
+        "success": "notify-completion"
+      }
+    },
+    {
+      "id": "notify-completion",
+      "type": "telegram-notification",
+      "message": "Task completed\n\n{{task_short_name}}\n\nResult: {{deliver-result.deliverable}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end",
+        "error": "end"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "deliverable",
+        "summary",
+        "artifacts",
+        "recommendations",
+        "criteria_results"
+      ]
+    },
+    {
+      "type": "condition",
+      "id": "check-reset-retry",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-user-skip-or-escalate.user_decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-step-retry",
+        "false": "route-user-decision"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-step-retry",
+      "expressions": [
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "execute-current-step"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-validation-round",
+      "expressions": [
+        "validation_round = validation_round + 1"
+      ],
+      "connections": {
+        "default": "check-validation-round-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-validation-round-limit",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "validation_round"
+        },
+        "right": {
+          "contextPath": "max_validation_rounds"
+        }
+      },
+      "connections": {
+        "true": "ask-user-validation-limit-reached",
+        "false": "expr-reset-after-revision"
+      }
+    },
+    {
+      "id": "ask-user-validation-limit-reached",
+      "type": "agent-directive",
+      "directive": "Plan validation has run {{validation_round}} rounds (limit {{max_validation_rounds}}) and the plan may still have unresolved issues.\n\n⚠️ This is the BOUND on the normal re-validation loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — present the plan as-is and proceed (any remaining issues are accepted)\n  2. reset — zero the round counter and keep fixing the plan\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
+      "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "reset"
+            ],
+            "description": "User's decision: continue (accept and proceed) or reset (keep fixing)"
+          }
+        },
+        "required": [
+          "decision",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "check-reset-validation-round"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-reset-validation-round",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-user-validation-limit-reached.decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-validation-round",
+        "false": "notify-plan-ready"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-validation-round",
+      "expressions": [
+        "validation_round = 0"
+      ],
+      "connections": {
+        "default": "expr-reset-after-revision"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-criteria-round",
+      "expressions": [
+        "criteria_round = criteria_round + 1"
+      ],
+      "connections": {
+        "default": "check-criteria-round-limit"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-criteria-round-limit",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "criteria_round"
+        },
+        "right": {
+          "contextPath": "max_criteria_rounds"
+        }
+      },
+      "connections": {
+        "true": "ask-user-criteria-limit-reached",
+        "false": "verify-criteria"
+      }
+    },
+    {
+      "id": "ask-user-criteria-limit-reached",
+      "type": "agent-directive",
+      "directive": "The success-criteria gap-fixing loop has run {{criteria_round}} rounds (limit {{max_criteria_rounds}}) and some criteria may still be unmet.\n\n⚠️ This is the BOUND on the normal re-verification loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — deliver the result as-is (any remaining gaps are explicitly accepted)\n  2. reset — zero the round counter and keep closing the gaps\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
+      "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "continue",
+              "reset"
+            ],
+            "description": "User's decision: continue (accept and deliver) or reset (keep fixing gaps)"
+          }
+        },
+        "required": [
+          "decision",
+          "user_response_text"
+        ],
+        "globalInputs": [
+          "user_response_text"
+        ]
+      },
+      "connections": {
+        "success": "check-reset-criteria-round"
+      }
+    },
+    {
+      "type": "condition",
+      "id": "check-reset-criteria-round",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-user-criteria-limit-reached.decision"
+        },
+        "right": "reset"
+      },
+      "connections": {
+        "true": "expr-reset-criteria-round",
+        "false": "deliver-result"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-criteria-round",
+      "expressions": [
+        "criteria_round = 0"
+      ],
+      "connections": {
+        "default": "verify-criteria"
+      }
+    },
+    {
+      "type": "teleport",
+      "id": "teleport-replan",
+      "hint": "Use MID-EXECUTION when the remaining plan no longer fits what is already built — closes the current step, keeps completed steps, reshapes/extends only the tail (does NOT restart from step 1). Not for rejecting a plan before execution (use the plan-approval branch). Also use for CASCADING replans: when a change to an EARLY conclusion forces reshaping everything downstream; a replan may itself trigger another replan — that recursion is normal. Use whenever the plan no longer fits — a missed factor, new inputs, or a newly surfaced aspect discovered mid-execution — not only for cascades.",
+      "directive": "Step-close replan. This is a NORMAL, expected mechanism — a routine replan when you discover the remaining plan no longer best fits the goal. It is NOT a failure and NOT a bug.\n\nThe current step {{current_step}} is now closed as-is (record honestly what was actually done — it MAY be partial; the step need not be fully complete).\n\nCurrent state: step {{current_step}} of {{total_steps}}.\n\nIn {{workspace_path}}/plan.md:\n- Do NOT touch completed steps 1..{{current_step}} — keep them as they are.\n- Move any unfinished part of step {{current_step}} forward into a NEW step {{current_step}}+1.\n- Rewrite/extend ONLY the steps AFTER {{current_step}} to fit revision_reason; record honestly what was actually done.\n- PRESERVE the original frozen requirements and goal facets, and carry forward every still-relevant tail item. PRESERVE the corpus manifest ({{corpus_manifest_path}}): the corpus may GROW but must NOT silently shrink. Do NOT silently drop scope: if anything is removed, NAME it in revision_reason.\n- Recount the steps and return the refreshed total_steps.\n\nDescribe what changed and why in revision_reason.\n\nCascading/recursive replan is expected in outcome-dependent work: reshaping the tail after an early result may reveal further coupled changes needing another replan; that is normal, not a failure or a loop. Replan mid-execution ALSO whenever you realize you missed something, got new inputs, or a new aspect of the task surfaced — the plan no longer fitting the real task is a normal trigger, not a failure. Preserve the frozen requirements/goal; do not silently narrow scope.",
+      "completionCondition": "Required plan changes documented in revision_reason",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "revision_reason",
+          "total_steps"
+        ],
+        "globalInputs": [
+          "revision_reason",
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "expr-replan-advance"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-current-step",
+      "expressions": [
+        "current_step = current_step + 1",
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "check-all-steps-done"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-replan-advance",
+      "expressions": [
+        "current_step = current_step + 1",
+        "step_retry = 0",
+        "validation_round = 0",
+        "criteria_round = 0"
+      ],
+      "connections": {
+        "default": "validate-plan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-reset-after-revision",
+      "expressions": [
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "validate-plan"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-inc-validation-attempt",
+      "expressions": [
+        "validation_attempt_count = validation_attempt_count + 1"
+      ],
+      "connections": {
+        "default": "expr-inc-criteria-round"
+      }
+    },
+    {
+      "id": "final-review",
+      "type": "agent-directive",
+      "directive": "FINAL INDEPENDENT REVIEW — delegate to an INDEPENDENT reviewer subagent (do NOT self-review).\n\n[DELEGATION — SPELL OUT THE FULL-READ IMPERATIVE TO THE SUBAGENT]\nWhen you spawn the subagent, do NOT hand off silently and do NOT assume it will read the brief carefully. In YOUR OWN words, tell it directly: (1) WHY it must read ALL project/corpus files IN FULL here — the reasoning is entangled across files, so a partial read misses the cross-dependencies and produces wrong conclusions; (2) that a full read is NEAR-MANDATORY, not optional — this holds for planning, for doing the work, and for EVERY validation; (3) exactly WHAT to read: the whole corpus in {{corpus_manifest_path}} plus this step's specific artifacts. Subagents routinely UNDER-read to save tokens — counter that head-on: make explicit that skimming to save tokens is unacceptable and that its judgment is worthless if it did not actually read everything. Pass this as a direct instruction, not merely the pasted brief.\n\nDELEGATION — DO NOT CAGE THE SUBAGENT: the subagent is the SAME model as you, with the same judgment. Hand it the GOAL, the full CONTEXT, and the peer principle below — then TRUST it to decide what to read closely, what matters, and how to assess. Do NOT over-narrow it (\"read exactly these\", rigid output formats, coordinate grids, step-by-step scripts). Over-narrowing mutes the very judgment you spawned it for; a subagent does better when it gets a goal and freedom, not a cage.\n\nThe reviewer RE-DERIVES coverage of BOTH success criteria AND goal facets from the FROZEN requirements and the REAL artifacts (not claims).\n\nGive the reviewer ONLY paths/inputs:\n- Frozen requirements & goal facets: {{workspace_path}}/task-requirements.md\n- Step artifacts: {{workspace_path}}/step-*/ (evidence per step)\n- Prior self-pass coverage: {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md\n- Corpus manifest: {{corpus_manifest_path}}\n\nReviewer brief (verbatim):\n  [YOU ARE A PEER — READ THE WHOLE THING, THEN JUDGE ON THE MERITS]\n  You are a senior researcher/architect on this task — the SAME capability as whoever handed it to\n  you, with the same judgment. You were given the material and the goal; your job is to understand\n  it deeply and reason about it, not to fill a form, follow a checklist, or stamp coordinates.\n\n  READ THE ENTIRE RESEARCH CONTENT IN FULL before you conclude anything (the sources are enumerated\n  in {{corpus_manifest_path}} — that list tells you WHAT the whole is; task-requirements.md is the\n  frozen goal). This is not bureaucracy — it is the only way to do this right, and here is WHY, concretely:\n  - In real research the parts are not independent: a conclusion in one place almost always RESTS ON\n    or is ENTANGLED WITH reasoning, evidence, or decisions made ELSEWHERE. Those links are usually\n    NOT visible from the structure — what a section depends on is rarely the section next to it — and\n    they are NOT findable by grep/search, because the connection is conceptual (a shared assumption,\n    a chain of inference, a hidden contradiction), not a keyword.\n  - What that failure looks like:\n     · A headline conclusion — \"no existing engine fits our needs\" — actually rests entirely on ONE\n       library's analysis buried in another chapter. Read only the conclusion and you'd never see it's\n       over-broad; the fix depends on a part you'd never grep for.\n     · An architecture decision silently contradicts a requirement stated three files earlier. Neither\n       keyword surfaces the clash — only having read BOTH, and holding them together, reveals it.\n     · A whole later branch of the research is built on an early inference that, read closely, doesn't\n       hold — so everything downstream is load-bearing on sand.\n  - If you skim, or read only the \"relevant-looking\" parts, or navigate by grep, you will MISS exactly\n    these cross-dependencies — and that is precisely where the real problems (and the real insights)\n    live. Word-search finds strings; it cannot tell you whether an argument holds across the whole.\n\n  So read all of it, holding the connections in your head. grep/search/counting are fine as a\n  NAVIGATION aid or to check a purely mechanical fact (does this link resolve, does this build) —\n  never as a substitute for reading, and never as how you judge whether something is sound. If you\n  find an in-scope source not in the manifest, add it and read it too; growing scope is fine, silently\n  narrowing it is not.\n\n  Then reason like a senior reviewer told \"tear this apart on the merits\": where does the logical\n  chain break and why; where do conclusions hang in the air (including about libraries); where does\n  the structure go in circles; are there real architectural alternatives and how do they compare; is\n  it honest about depth and examples. Point to a specific place IN WORDS when it genuinely helps\n  (\"the 'no engine fits' conclusion holds only for Rive\") — not because you owe coordinates everywhere.\n\n  JUDGMENT IS NOT A COORDINATE. For factual/technical claims (code runs, a test passes, a link\n  resolves, a quoted fact is accurate, a path exists) the right evidence is a tool result / file:line.\n  For JUDGMENT claims (is the logic sound, does the chain hold, is the structure coherent, are the\n  conclusions warranted, is the architecture good, is it clear and deep) the \"evidence\" IS your\n  reasoned argument in prose — a line number, a coverage grid, a proof-of-read ledger is a category\n  error: it is an ADDRESS, not an assessment. Do not produce one; do not demand one.\n\n  You do NOT produce a per-file ledger, a coverage grid, or a proof-of-read. Your assessment itself\n  must reflect the WHOLE — a real senior judgment cannot be faked from a skim, and a peer who also\n  read everything will notice if it was.\n\n  [REVIEWER CALIBRATION]\n  You are calibrated to FIND defects, NOT to confirm a pass. Default stance: suspicion. A GREEN verdict is the EXCEPTION, earned ONLY after you have read the whole corpus/artifact end-to-end as a stumbling novice and genuinely found nothing wrong. Do NOT wave things through, do NOT grade on \"most of it is fine / only residual issues\" — that calibration is exactly what let real defects slip before. Your job is to KICK the executor back on anything below the bar. issues=0 ONLY if, reading as the target reader, you stumble NOWHERE.\n\n  [THREE-ROLE READING]\n  Read the artifact in THREE roles, in full, not by sampling:\n   - NOVICE: is every term/jargon/private field introduced BEFORE use? Is the non-obvious actually explained (WHAT/WHY/HOW), or just named? Do you, as a newcomer, truly understand?\n   - EXPERT: is the depth real (mechanism derived/explained, not a name-drop or a code dump)? Are facts/claims correct against the primary source?\n   - EDITOR: is it coherent explanatory narrative (intro + flow + conclusion), NOT a telegraphic stream of terms/bullets? Are there process meta-marks that must not ship?\n\n  [UNDERSTANDING-NOT-CHECKLIST]\n  Judge by genuine UNDERSTANDING, not by a checklist and not by proxies. \"A gloss exists / a link exists / a TOC exists / a term appears\" is NOT evidence of clarity — a telegraphic passage can pass a checklist and remain unreadable. Reading-by-checklist ≠ reading-for-understanding. Ask: did a novice actually understand this mechanism? Your assessment must show YOU understood each file's content, not that you scanned it.\n\n  YOU ARE the final independent reviewer. Read the frozen requirements and the REAL step artifacts directly, verifying against the PRIMARY SOURCE — do not trust the executor's claims. Read the ENTIRE corpus and all step artifacts; re-derive coverage of criteria AND facets from the primary source; grep/count forbidden as a quality proxy; a missing facet is a gap even if listed criteria pass.\n  ONE check per success criterion AND per goal facet: find concrete evidence in the real artifact, BY THE FITTING METHOD (tools for factual/code; READING against the rubric for quality/clarity/depth/narrative — never grep/count as a proxy for quality). No concrete evidence = a gap.\n  BACKWARD COVERAGE: is every goal facet actually served (not just the criteria the plan happened to list)? A missing facet is a gap even if all listed criteria pass.\n  RETURN final_issues_count (number of unmet criteria/facets; 0 = fully covered) and a FLAT list of gaps.\n\nWrite the verdict to {{workspace_path}}/final-review.md (each criterion/facet, MET/NOT MET, method, evidence or gap).\n\nReturn final_issues_count honestly — reviewer findings are authoritative.",
+      "completionCondition": "Independent review complete; final_issues_count returned",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "final_issues_count"
+        ],
+        "globalInputs": [
+          "final_issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-final-review"
+      }
+    },
+    {
+      "id": "route-final-review",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "final_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "deliver-result",
+        "false": "fix-gaps"
+      }
+    },
+    {
+      "type": "expression",
+      "id": "expr-restart-from-first",
+      "expressions": [
+        "current_step = 1",
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "validate-plan"
+      }
+    },
+    {
+      "id": "setup-corpus",
+      "type": "agent-directive",
+      "directive": "Establish the RESEARCH CORPUS — the complete set of sources this task must be grounded in.\n\nWith the user's task and scope in mind ({{understand-task.task_description}}), enumerate the corpus as the WHOLE relevant project, BIASED TOWARD INCLUSION: list EVERY in-scope file/source that could ground the research — target artifacts to read, reference docs, code, prior research, data. When in doubt, INCLUDE it; under-scoping is a defect. Exclude ONLY clearly generated / vendored / binary noise (node_modules, .git, build output, lockfiles, binaries).\n\nFor each source record its path and line count (or size). Write this to {{workspace_path}}/corpus-manifest.md:\n  # Corpus Manifest (frozen-but-expandable)\n  Task: {{task_short_name}}\n  | # | path | lines | added @ | reason |\n  |---|------|-------|---------|--------|\n  ... one row per file (initial rows: \"setup\") ...\n\nALWAYS make {{workspace_path}}/task-requirements.md (the frozen goal) ROW 1 of the manifest, so EVERY subagent re-reads the goal each time it reads the corpus (this kills goal-drift). Then one row per in-scope source.\n\nThis manifest is the single source of truth for \"what every subagent must read in full\". It is EXPANDABLE: any later subagent that finds a new in-scope source appends a row (path + line count + \"added @ <who>, reason: …\"). Growing the corpus is normal and encouraged; silently NARROWING scope is forbidden.\n\nReturn corpus_manifest_path (the file path) and corpus_file_count (number of rows).",
+      "completionCondition": "Corpus manifest written enumerating all in-scope sources with paths and line counts",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [
+          "corpus_manifest_path",
+          "corpus_file_count"
+        ],
+        "globalInputs": [
+          "corpus_manifest_path",
+          "corpus_file_count"
+        ]
+      },
+      "connections": {
+        "success": "decompose-into-steps"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "current_step": {
+      "type": "number",
+      "description": "Index of the current step in the plan",
+      "default": 1
+    },
+    "step_retry": {
+      "type": "number",
+      "description": "Stores step retry",
+      "default": 0
+    },
+    "max_retries": {
+      "type": "number",
+      "description": "Stores max retries",
+      "default": 3
+    },
+    "task_name": {
+      "type": "string",
+      "description": "Name of the task being broken down",
+      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
+    },
+    "task_short_name": {
+      "type": "string",
+      "description": "Stores task short name",
+      "minLength": 3,
+      "maxLength": 50
+    },
+    "validation_criteria": {
+      "type": "string",
+      "description": "Criteria for validation",
+      "default": "EXECUTION VALIDATION CRITERIA:\n\n0. TWO LAYERS — FLOOR vs SUBSTANCE (do not confuse them):\n- TECHNICAL FLOOR = the machine-checkable part (build passes, tests pass, links resolve, paths real, no hallucination). A technical floor applies ONLY where a genuinely machine-checkable part exists; where it does, it is NECESSARY but NOT SUFFICIENT — \"the floor passed\" is NEVER the same as \"done\". MANY research/reasoning items have NO machine-checkable part — do not invent one.\n- SUBSTANCE / QUALITY = does the result actually meet the goal for its consumer (clear, deep enough, coherent, fit-for-purpose). Judged by the method that fits: READING against the item's rubric and judgement, not by grep/counting.\n- Verify BOTH where both exist. A green floor with unmet substance is NOT done.\n\n1. EVIDENCE IS MANDATORY:\n- Each step must have proof of completion appropriate to its gate.\n- Evidence types: command output / test result / file / a concrete, specific description; for quality, the reviewer's READING verdict against the rubric.\n- 'Done' without details = NOT accepted.\n\n2. STEP VERIFICATION (against the ITEM'S OWN GATE, not a generic checklist):\n- Does the result meet the item's gate — both its technical floor and its substance/quality criterion?\n- Verify against the PRIMARY SOURCE (the real artifact / code / goal), not the executor's paraphrase.\n- Is evidence provided and specific? Are there missing elements? 80% is NOT verified.\n- Any defect is treated as a CLASS: find and fix all instances of that pattern across the whole artifact, not just the one spot.\n\n3. TASK VERIFICATION:\n- All steps completed (done or explicitly skipped with reason)?\n- Every success criterion AND every goal facet actually met by the real deliverable (both directions of traceability)?\n- Deliverable ready and fit for the goal, not merely passing mechanical checks?\n\n4. READING DISCIPLINE (this is a research flow — non-dodgeable):\n- Every subagent (planner, executor, reviewer) is a PEER and must have read the WHOLE corpus in full first. The subagent's assessment/output must reflect the WHOLE; skim-based work shows and is rejected; the guarantee is judgment + peer review, not a ledger.\n- A PARTIAL corpus read = NOT verified.\n- Judge quality by READING against the rubric, NOT by grep / counting / keyword-matching. Mechanical tools only for a pure technical floor (link resolves, build/test passes), and only after the full read.\n\n5. OUTPUT SUBSTANCE BAR:\n[OUTPUT QUALITY RUBRIC]: EXPLANATORY PROSE not a telegraphic term-stream (intro + flow + conclusion; code/data woven in, not dumped); every mechanism gives WHAT -> WHY -> HOW before any bare reference; cross-link every reference to its definition+example; NO process meta-marks in the deliverable; REWRITE telegraphic passages rather than gloss on top; real DEPTH over breadth (no name-drop as coverage).\n[PLAN-ITEM INVARIANTS]: each plan item must carry, in its own text, its research invariants (whole-corpus read first; narrative not tags; WHAT/WHY/HOW; cross-links; no meta-marks; required depth; restated goal/requirements). A missing invariant fails the item.\n[REVIEWER CALIBRATION]: reviewers are calibrated to FIND defects; a GREEN verdict is the exception, earned only after a full novice read finds nothing wrong; do NOT default to PASS.\n\n6. NAMED RESEARCH RULES:\nR-0 (FINDING = CLASS): any defect is a CLASS — verify/fix it everywhere the pattern occurs, not just the flagged spot.\nR-1 (QUALITY BY READING): quality is judged by reading; scripts/grep/counting only for a pure technical floor, never as a quality proxy.\n\n7. JUDGMENT IS NOT A COORDINATE:\n- For factual/technical claims (code runs, a test passes, a link resolves, a path exists) the evidence is a tool result / file:line. For JUDGMENT claims (is the logic sound, the structure coherent, the conclusions warranted, the writing clear and deep) the evidence IS the reasoned argument in prose — a line number, a coverage grid, a proof-of-read is a category error (an ADDRESS, not an assessment). Do not produce one; do not demand one.\n- VALIDATORS ARE PEERS who judge on the merits by reading + reasoning — never by mechanical conformance to a coordinate grid. A green verdict is an earned reasoned judgment."
+    },
+    "common_mistakes": {
+      "type": "string",
+      "description": "Stores common mistakes",
+      "default": "COMMON MISTAKES AND HOW TO AVOID:\n\n❌ 'Done!' without verification → ✅ Always provide evidence\n❌ Silently skipping steps → ✅ Explicitly mark skip with reason\n❌ 80% complete = done → ✅ Only 100% = done\n❌ Hallucinations ('sent', 'created') → ✅ Only facts with evidence\n❌ Losing context → ✅ Use step structure from plan\n❌ Mixing action and verification → ✅ Separate: first do, then verify\n❌ grep/search instead of reading whole files → ✅ read every corpus file in full\n❌ partial corpus read / skimming the 'relevant-looking' parts → ✅ full read; the cross-dependencies live exactly where you did not look\n❌ counting/keyword-matching as a quality proxy → ✅ judgement by reading against the rubric\n❌ caging / over-narrowing a subagent (read-exactly-these, rigid formats, scripts) → ✅ give goal + context + freedom; it is a peer\n❌ a file:line coverage grid / proof-of-read for a JUDGMENT question → ✅ a reasoned assessment in words; a coordinate is not an assessment\n❌ pre-scripting an intellectual plan item into mechanical micro-steps → ✅ frame it as goal + criteria for a smart autonomous agent\n❌ inventing a technical floor where there is no machine-checkable part → ✅ floor is conditional; judgment items are judged by reasoning\n❌ telegraphic tags/term-stream instead of narrative → ✅ connected explanatory prose (intro + flow + conclusion)\n❌ name-drop instead of depth → ✅ real WHAT/WHY/HOW mechanism, then a reference as deepening\n❌ additive glossing on top of a bad passage → ✅ REWRITE the passage into an explanatory one\n❌ process meta-marks left in the deliverable (\"review done\", \"for engineer\", \"step N trace\") → ✅ ship a clean artifact\n❌ reviewer defaulting to PASS / grading on \"mostly fine\" → ✅ suspicion-first; GREEN is the earned exception\n❌ checklist-reading (a gloss/link/TOC exists) instead of understanding → ✅ verify a novice actually understood the mechanism"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "No description",
+      "default": "TASK DECOMPOSITION PLANNING STANDARDS (single canon):\n\n0. UNIVERSALITY & JUDGEMENT (read first):\n- This flow is UNIVERSAL — the task may be anything: code, research, architecture design, writing an essay, a 3D model, data analysis, UX, content, mixed. There is NO fixed task-type switch.\n- The examples below (code / research / content / data …) are ILLUSTRATIVE, not an exhaustive list. YOU must derive what fits THIS task, using your judgement. Do not mechanically pick a template; reason about what \"good\" means here.\n\n1. HOW TO BUILD THE PLAN (method, not just shape):\n- Start from the END GOAL and the real consumer/reader, not from a fixed structure. Derive: what does an EXCELLENT result look like, and what DEPTH is required.\n- From the goal, derive the goal's FACETS (the distinct things the result must deliver — e.g. correctness, understandability, coherent narrative, navigation, a working artifact). Every facet must be covered by at least one plan item (see 12, traceability).\n- Only THEN decompose into steps. The plan must LEAD TO THE GOAL, not to \"the mechanical checks pass\".\n- Carry a short ARGUMENT in the plan: one paragraph on WHY this structure reaches the goal.\n- If you lack enough understanding to plan well, DO NOT decompose blindly — first do analysis: run a child flow (moira/todo-list autonomous research, moira/quick-task, or a child moira/robust-task for a large sub-topic) or an explicit analysis step, THEN plan.\n\n2. STEP GRANULARITY (your lever on review overhead):\n- Each step = one logical unit of work (not too small, not too large).\n- Each step gets ONE gate review. So STEP SIZE IS YOUR LEVER on the number of reviews: if you have many small same-type actions, fold them into ONE bigger step with one gate — do not shatter them into 40 micro-steps.\n- A big/multi-step item may DELEGATE its execution to a child flow (moira/quick-task with review, moira/todo-list autonomous, or a child moira/robust-task) via start({ parentExecutionId }). Two recipes: (a) \"plan-flow → execution sub-flows\" — this flow builds the plan, items launch child flows to execute; (b) \"main work → nuance sub-flow\" — do the core, then a child task finishes all the nuances.\n- Avoid micro-steps (\"create file\") and mega-steps (\"implement feature\").\n\n3. VERIFIABILITY BY THE APPROPRIATE METHOD (do NOT ban quality):\n- Every step must be verifiable, but BY THE METHOD THAT FITS IT: factual / code / build / links → verify with TOOLS (run it, read the real code, check the reference). Quality / clarity / depth / narrative coherence / fitness-for-reader → verify by READING against an explicit rubric and judgement.\n- \"Avoid VAGUE criteria\" (e.g. bare \"works well\") — YES. \"Avoid QUALITATIVE criteria\" — NO. For research/writing/design, quality IS the criterion; you are REQUIRED to state HOW it will be judged (the rubric), not forbidden from it.\n- YOU MUST formulate the fitting verification approach for THIS task, whatever it is. (Illustrative rubrics: code → build/tests/lint pass, no hallucinated paths; research → read as a novice (every term introduced before use) + expert (real depth: math derived not shown as code; real mechanism, not a name-drop) + editor (coherent narrative, not fragments); content → reader-walkthrough (1 click to definition+example), narrative, no meta-marks; data → conclusion backed by the real data, alternatives considered.)\n\n4. COMPLETENESS & DEPTH:\n- All user requirements AND all goal facets must be covered by steps. No implicit assumptions.\n- DEPTH over breadth: state the required depth per topic (better 6 well-explained than 10 shallow). Each step says what artifacts it produces AND to what depth.\n\n5. SELF-SUFFICIENCY:\n- Each step contains ALL information needed for execution: why, what to do, which files to read/modify, where to save, what to commit, and ITS OWN GATE (see 10).\n- No references to \"previous steps\"; full file paths, not relative references.\n\n6. RESILIENCE:\n- Plan must work even if the agent loses context between steps (session archival). Each step executable in isolation from its own description.\n\n7. STRUCTURED REASONING:\n- Chain-of-thought for complex steps; explicitly define methods and output formats; document reasoning for non-obvious decisions.\n\n8. SUCCESS CRITERIA & HUMAN-IN-THE-LOOP:\n- Success criteria defined BEFORE work starts, covering the goal (incl. the utility/depth axis where relevant), not only correctness. Plan shown to the user before execution; escalation available.\n\n9. ATOMICITY & CONDITIONAL REDUNDANCY (no \"global scope\", but no ritual bloat):\n- An agent often receives ONE plan item in isolation — other items and top-level \"general rules\" are NOT in its context.\n- So each item restates the nuances it needs, the relevant original requirements, and the goal/quality anchor for the item.\n- DUPLICATE a cross-cutting action into every item ONLY when it genuinely applies (e.g. \"append a progress report\", \"run the tests\", \"make a commit\"). Do NOT duplicate mechanical boilerplate into an item just to satisfy a rule when it adds nothing for that item — redundancy serves the item's isolation and the goal, it is not a checkbox. Judge per item.\n\n10. ITEM STRUCTURE (template for each plan item — now includes the item's GATE):\nN. **Task name** (what we're doing)\n   Why: (problem + the original requirement / goal facet it serves)\n   What to do:\n   - specific action 1 with full file paths\n   - specific action 2, save to /full/path\n   - the cross-cutting actions that genuinely apply\n   Serves goal facet: (which facet(s) from step 1 — for traceability)\n   Expected output: (specific)\n   Execution: DELEGATE (this item needs an autonomous intellectual pass over fresh full/large context — reasoning, judgment, deep reading; it MUST be run by a subagent given goal+context+freedom) OR INLINE (small, mechanical, low-context — the main agent may do it). In doubt on a research/reasoning item -> DELEGATE; the point of a subagent is autonomous intellectual work.\n   GATE (acceptance for THIS item — YOU formulate it under the task):\n   - technical floor (if any machine-checkable part exists — build/tests/links/paths — it MUST be here, as necessary-but-NOT-sufficient), AND\n   - quality/substance criterion judged by the appropriate method (reading against a rubric for qualitative work).\n\n11. NO TAIL DEGRADATION:\n- The last items carry the SAME detail and quality as the first. Context volume is never an excuse to cut the tail.\n\n12. GOAL TRACEABILITY (both directions):\n- FORWARD: every item states which goal facet it serves (an item serving no facet is \"work for the sake of a checkbox\" — cut or re-aim it).\n- BACKWARD: every goal facet is served by at least one item. A facet with NO item is a GAP surfaced at planning time (this is exactly how \"narrative\"/\"navigation\" silently fell through before).\n\n13. PLAN IS NOT STRUCTURE-LOCKED (outcome-anchored):\n- Anchor items on the RESULT/question, not on a pre-carved artifact (\"understand what X teaches us\", not \"produce page 51\"). The right structure often only emerges during execution.\n- Mark genuinely provisional structural items as PROVISIONAL — their revision mid-execution is NORMAL, not an emergency and not \"unfinished\". (Provisional ≠ an excuse to under-deliver; do not silently narrow scope — see the revise directives.)\n\n14. RESEARCH CORPUS & READING DISCIPLINE (non-dodgeable — this is a research flow):\n- Planning, per-step execution, and every gate review are performed by SUBAGENTS (teammates), not ad-hoc by the main agent — each is a PEER with full judgment, handed goal + context + freedom (see the peer principle in every subagent brief), never caged.\n- Every subagent MUST first read the WHOLE research corpus in full — every file listed in the corpus manifest (corpus-manifest.md), top to bottom — BEFORE doing anything else. A partial/selective read = the work is NOT done. WHY (the peer rationale): the parts are entangled — a conclusion here rests on reasoning elsewhere, through links that are conceptual and NOT findable by grep — so only a full read, holding the whole in your head, lets you judge whether it is sound. There is NO ledger and NO proof-of-read to fill in: the guarantee is that a skim cannot fake a real senior judgment, and a peer who also read everything will notice if it was faked.\n- grep / ripgrep / search / find-in-files / selective / head / tail / line-range reads are fine as a NAVIGATION aid or a mechanical fact-check (does a link resolve, does a build/test pass), but NEVER a substitute for reading and NEVER how you judge soundness/quality.\n- The corpus is FROZEN-BUT-EXPANDABLE: row 1 is always task-requirements.md (the frozen goal); any subagent that finds a new in-scope source APPENDS it to the manifest (path + line count + reason) and reads it. Growing the corpus is normal; silently NARROWING scope is forbidden.\n\n[BUILD THE PLAN FOR INTELLIGENT AUTONOMOUS AGENTS, NOT A MACHINE]\nWhere an item is intellectual work, frame it as a GOAL + the CRITERIA for a good result and TRUST the executing agent (a peer with full judgment) to decide HOW. Do NOT pre-script every micro-move, do NOT shatter reasoning into mechanical coordinate-steps, do NOT cage the executor. An item may be \"conduct an autonomous intellectual pass: <goal>, judged by <criteria>\" rather than a scripted sequence. Mechanical granularity is right ONLY for genuinely mechanical work.\n\n[JUDGMENT IS NOT A COORDINATE / CONDITIONAL FLOOR]\nThe technical floor exists ONLY where a genuinely machine-checkable part exists; many research/reasoning items have NONE — do not invent one, do not anchor to lines, do not build a coverage grid. For judgment claims the acceptance is a reasoned assessment, not coordinates.\n\n[OUTPUT QUALITY RUBRIC] (the substance bar for every deliverable where the task is research/writing/explanatory):\n - EXPLANATORY PROSE, not a telegraphic term-stream: connected narrative with intro and conclusion; code/data woven into the flow, not dumped as labelled blocks.\n - Every mechanism/term gives WHAT (plain-words essence before first use) -> WHY (the problem it solves; what a naive approach would do) -> HOW (enough for the reader to get the idea), and ONLY THEN a reference as deepening — never a bare \"see X.Y\" IN PLACE of understanding.\n - CROSS-LINK every reference to its definition+example where the medium allows.\n - NO process meta-marks in the deliverable (\"review done\", \"for engineer\", \"step N trace\").\n - REWRITE telegraphic passages into explanatory ones — do NOT merely gloss/annotate on top.\n - Real DEPTH over breadth; no name-drop passing as coverage.\n\n[PLAN-ITEM INVARIANTS] (the planner WRITES these into every plan item; the gate re-checks them): read the whole corpus first; produce explanatory narrative not tags; give WHAT/WHY/HOW per mechanism; cross-link every reference; no process meta-marks; hit the required depth; and restate the specific goal/requirements the item serves (so an isolated executor keeps them). Violating ANY invariant fails the item even if everything else is perfect.\n\n[REVIEWER CALIBRATION] (every gate reviewer): calibrated to FIND defects, not to confirm a pass. Default stance: suspicion. A GREEN verdict is the EXCEPTION, earned only after a full end-to-end read as a stumbling novice found nothing wrong. Do not wave things through or grade on \"most of it is fine\". issues=0 ONLY if, reading as the target reader, you stumble NOWHERE.\n\nR-0 (FINDING = CLASS): any defect found is a CLASS — fix/flag every instance of that pattern across the whole artifact or plan, not just the one spot.\nR-1 (QUALITY BY READING): quality/clarity/depth/coherence is judged by READING against the rubric; scripts/grep/counting are allowed ONLY for a pure technical floor (build, tests, links, paths) — never as a proxy for quality.\n\n15. OUTCOME-DEPENDENT / CASCADING WORK (do NOT over-plan) — extends §13 (outcome-anchored / PROVISIONAL):\n- Some work is OUTCOME-DEPENDENT: a later step depends on the RESULT of an earlier one. Example:\n  refactoring or extending a reasoned chain (aspect -> conclusion -> next investigation built on it\n  -> next conclusion, many times). If the user asks to fix or open up an EARLY link, that can cascade\n  into rethinking and rewriting everything downstream. The shape of step N genuinely depends on the\n  actual result of step N-1 — which does not exist yet.\n- Therefore you CANNOT fully plan such work upfront, and you MUST NOT fake a detailed downstream plan\n  (that is false precision — it will be wrong the moment the first result comes in). Do not try to\n  pre-plan the fix of an early conclusion AND how every later conclusion will change; you don't have\n  the information yet, and pretending you do is the mistake.\n- Instead: plan the NEAR HORIZON concretely, mark the rest PROVISIONAL, and encode the re-planning\n  point EXPLICITLY. Choose the approach that fits (your judgment):\n  A. CHILD-FLOW DECOMPOSITION WITH INHERITED CONTEXT. Make each dependent chunk a CHILD flow launched\n     with start({ parentExecutionId: <this execution> }). CRITICAL: the child must INHERIT this flow's\n     context — hand it the overall GOAL, the frozen task-requirements.md, the corpus-manifest, the\n     specific sub-goal, AND the relevant RESULTS of the prior stages. A child run in isolation, with\n     only its narrow slice, will drift from the whole — that is exactly what must not happen. When the\n     child returns, RE-ASSESS against the real result and only THEN plan the next chunk.\n  B. PLANNED RECURSIVE REPLAN. Put an EXPLICIT plan item whose job is: \"using the results of the\n     previous stage(s), DECIDE how to expand/reshape the remaining plan\", and route it through\n     teleport-replan. That replan may itself uncover further coupled changes that need ANOTHER explicit\n     replan — recursion here is NORMAL and expected, not a failure or a stuck loop. The plan openly\n     contains decision/replan items instead of pretending to know the downstream shape.\n- WHEN this is the better approach (examples — recognize the shape, don't force a full plan):\n   · Refactoring/deepening a research report whose reasoned chain has an EARLY conclusion you're asked\n     to fix (\"engine X doesn't fit our needs\"): fixing it can invalidate every later conclusion built\n     on it — you can't plan the downstream rewrite until you see how the early fix actually lands.\n   · An R&D investigation where each finding determines the NEXT question — you cannot know step 5's\n     topic until steps 1–4's results are in.\n   · An architecture-design task where evaluating one alternative reveals a constraint that reshapes\n     WHICH alternatives are even viable.\n   · A source/dependency exploration where reading one source surfaces new must-read sources that\n     change the scope.\n- RESEARCH DEFAULT: for research / R&D projects this outcome-dependent style (near horizon concrete,\n  tail PROVISIONAL, replan from the ACTUAL results) is OFTEN the RIGHT DEFAULT — genuinely\n  fully-upfront-plannable research is the EXCEPTION, not the rule. Prefer it whenever the work is\n  investigative and later steps hinge on what earlier steps find.\n- MID-EXECUTION REPLAN IS ALWAYS ALLOWED (not only for cascades): replan the moment you realize,\n  during the work, that you MISSED something, received NEW INPUTS, or a NEW ASPECT of the task\n  surfaced. Realizing the current plan no longer fits the real task is a NORMAL, expected trigger for\n  teleport-replan — never a failure and never a stuck loop.\n- Either way: don't silently narrow scope, keep the frozen requirements/goal, and let the actual\n  results — not a guessed upfront structure — drive the tail."
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Workflow-global artifacts",
+      "items": {
+        "type": "string"
+      }
+    },
+    "criteria_results": {
+      "type": "array",
+      "description": "Workflow-global criteria_results",
+      "items": {
+        "type": "object",
+        "properties": {
+          "criterion": {
+            "type": "string"
+          },
+          "met": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Workflow-global evidence"
+    },
+    "execution_note": {
+      "type": "string",
+      "description": "Workflow-global execution_note"
+    },
+    "fix_evidence": {
+      "type": "array",
+      "description": "Workflow-global fix_evidence",
+      "items": {
+        "type": "object",
+        "properties": {
+          "gap": {
+            "type": "string"
+          },
+          "fix": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "fixes_applied": {
+      "type": "array",
+      "description": "Workflow-global fixes_applied",
+      "items": {
+        "type": "string"
+      }
+    },
+    "gaps_fixed": {
+      "type": "string",
+      "description": "Workflow-global gaps_fixed",
+      "enum": [
+        "yes"
+      ]
+    },
+    "notes": {
+      "type": "string",
+      "description": "Workflow-global notes"
+    },
+    "plan_saved_to_file": {
+      "type": "string",
+      "description": "Workflow-global plan_saved_to_file",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "process_id_saved": {
+      "type": "string",
+      "description": "Workflow-global process_id_saved",
+      "enum": [
+        "yes"
+      ]
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "Workflow-global recommendations",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requirements_saved": {
+      "type": "string",
+      "description": "Workflow-global requirements_saved",
+      "enum": [
+        "yes"
+      ]
+    },
+    "retry_approach": {
+      "type": "string",
+      "description": "Workflow-global retry_approach"
+    },
+    "revision_reason": {
+      "type": "string",
+      "description": "Workflow-global revision_reason"
+    },
+    "skipped_recorded": {
+      "type": "string",
+      "description": "Workflow-global skipped_recorded",
+      "enum": [
+        "yes"
+      ]
+    },
+    "step_completed": {
+      "type": "string",
+      "description": "Workflow-global step_completed",
+      "enum": [
+        "yes",
+        "no"
+      ]
+    },
+    "step_result_saved": {
+      "type": "string",
+      "description": "Workflow-global step_result_saved",
+      "enum": [
+        "yes"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Workflow-global summary"
+    },
+    "total_steps": {
+      "type": "number",
+      "description": "Workflow-global total_steps"
+    },
+    "user_completed": {
+      "type": "string",
+      "description": "Workflow-global user_completed",
+      "enum": [
+        "yes"
+      ]
+    },
+    "user_response_text": {
+      "type": "string",
+      "description": "Workflow-global user_response_text",
+      "minLength": 2
+    },
+    "verification_details": {
+      "type": "string",
+      "description": "Workflow-global verification_details"
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Workflow-global workspace_path",
+      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$"
+    },
+    "validation_round": {
+      "type": "number",
+      "description": "Plan-validation fix-loop round counter (flow-incremented)",
+      "default": 0
+    },
+    "max_validation_rounds": {
+      "type": "number",
+      "description": "Max plan-validation rounds before user escalation",
+      "default": 5
+    },
+    "criteria_round": {
+      "type": "number",
+      "description": "Criteria-gap fix-loop round counter (flow-incremented)",
+      "default": 0
+    },
+    "max_criteria_rounds": {
+      "type": "number",
+      "description": "Max criteria-gap rounds before user escalation",
+      "default": 5
+    },
+    "validation_attempt_count": {
+      "type": "number",
+      "description": "Completeness self-review attempt counter (report versioning)",
+      "default": 1
+    },
+    "plan_change_target": {
+      "type": "string",
+      "description": "Replan dispatch target (refine|extend|update)",
+      "default": ""
+    },
+    "plan_iteration": {
+      "type": "number",
+      "description": "Plan revision iteration counter",
+      "default": 0
+    },
+    "final_issues_count": {
+      "type": "number",
+      "description": "Count of gaps from final independent review (0 = all criteria covered)",
+      "default": 0
+    },
+    "corpus_manifest_path": {
+      "type": "string",
+      "description": "Path to the frozen-but-expandable corpus-manifest.md (single source of truth for what every subagent must read in full)",
+      "default": ""
+    },
+    "corpus_file_count": {
+      "type": "number",
+      "description": "Number of source rows in the corpus manifest",
+      "default": 0
+    }
+  }
+}

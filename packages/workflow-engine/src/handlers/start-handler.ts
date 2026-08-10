@@ -3,13 +3,20 @@
  * Merges initial data and immediately continues - no agent interaction
  */
 
-import { GraphNode, StartNode, ExecutionContext, isStartNode } from "../types/index.js";
+import {
+  GraphNode,
+  StartNode,
+  ExecutionContext,
+  VariableRegistry,
+  isStartNode,
+} from "../types/index.js";
 import { NodeExecutionResult, NodeResultBuilder } from "../types/node-execution.js";
 import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
 import { createLogger, InternalError } from "@mcp-moira/shared";
+import { validateDeclaredRegistryValues } from "../utils/registry-value-validator.js";
 
 export class StartNodeHandler implements INodeHandler {
   private logger = createLogger({ component: "StartNodeHandler" });
@@ -25,6 +32,7 @@ export class StartNodeHandler implements INodeHandler {
     repository: IDataRepository,
     engine: IGraphExecutionEngine,
     input?: unknown,
+    variableRegistry?: VariableRegistry,
   ): Promise<NodeExecutionResult> {
     if (!isStartNode(node)) {
       throw new InternalError("StartHandler can only execute start nodes", { nodeType: node.type });
@@ -60,8 +68,14 @@ export class StartNodeHandler implements INodeHandler {
       executionTime: timer.elapsed(),
     });
 
+    const validatedData = validateDeclaredRegistryValues(
+      dataToMerge,
+      variableRegistry,
+      `start node '${startNode.id}'`,
+    );
+
     // IMMEDIATELY continue to next node - no agent interaction needed
-    return NodeResultBuilder.continue(startNode.id, "default", dataToMerge);
+    return NodeResultBuilder.continue(startNode.id, "default", validatedData);
   }
 
   canExecute(node: GraphNode, _context: ExecutionContext): boolean {

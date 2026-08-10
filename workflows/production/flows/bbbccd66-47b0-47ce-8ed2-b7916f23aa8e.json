@@ -2,203 +2,99 @@
   "slug": "robust-task",
   "owner": "system-moira",
   "visibility": "public",
-  "id": "bbbccd66-47b0-47ce-8ed2-b7916f23aa8e",
+  "id": "be95cedc-35ec-4314-87ce-331ac3d11579",
   "metadata": {
     "name": "Robust Task",
-    "version": "4.4.1",
-    "description": "Надёжное выполнение сложных задач с полной инфраструктурой: workspace на диске для восстановления контекста, валидация плана субагентом, retry механизм (до 3 попыток на шаг), Telegram уведомления, эскалация при проблемах. Structured process: UNDERSTAND → DECOMPOSE → VALIDATE → APPROVE → EXECUTE → VERIFY → DELIVER."
+    "version": "8.0.3",
+    "description": "Filesystem-only reliable execution for complex tasks with durable plans and evidence, independent reviews, bounded retry and escalation, replanning, and truthful delivery."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "check-file-access"
+        "default": "initialize-workspace"
+      },
+      "initialData": {
+        "variables": {}
       }
     },
     {
-      "id": "check-file-access",
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "delivery_file",
+        "delivery_status",
+        "summary"
+      ]
+    },
+    {
+      "id": "initialize-workspace",
       "type": "agent-directive",
-      "directive": "Check your file handling capabilities.\n\nQuestion: Can you create and read files on disk?\n\nCheck for tools:\n- Do you have access to file system (Read, Write, Edit tools)?\n- Can you create directories?\n- Can you save files?\n\nIf YES - this will allow saving plan to disk for recovery after session archival.\nIf NO - plan will be stored only in workflow memory (also works, but without recovery capability).\n\nAnswer honestly based on your actual capabilities.",
-      "completionCondition": "Presence or absence of file access determined",
+      "directive": "Establish the durable workspace for this Robust Task. Read the user's complete request and applicable local instructions. Resolve only ambiguity that materially changes the result; otherwise proceed autonomously. Create or resume exactly one ./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/ workspace, correlated by process-id.txt containing {{executionId}}. Write the authoritative task-requirements.md directly from the confirmed request and write a concise workflow-guide.md covering filesystem authority, recovery, plan quality, evidence, independent review, and the rule that mechanical checks prove only what they measure. Do not first return or relay either file body through workflow context. Read the files back and verify that they completely and accurately represent the task and guidance. Return only the trailing-slash workspace_path.",
+      "completionCondition": "One recoverable workspace contains the exact process ID, complete frozen requirements, and sufficient workflow guidance; workspace_path resolves to it.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "has_file_access"
+          "workspace_path"
         ],
         "globalInputs": [
-          "has_file_access"
+          "workspace_path"
         ]
       },
       "connections": {
-        "success": "understand-task"
+        "success": "create-plan"
       }
     },
     {
-      "id": "understand-task",
+      "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Gather complete understanding of the task from user.\n\nAsk:\n1. What needs to be done? (task description)\n2. What is the expected end result? (deliverable)\n3. What constraints exist? (time, resources, dependencies)\n4. How will we know the task is complete? (success criteria - must be specific and verifiable)\n\nPlanning standards (frame the questions around these):\n{{planning_standards}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until the user explicitly responds\n- Record in user_response_text exactly what the user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate a short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking",
-      "completionCondition": "User EXPLICITLY answered questions (response text exists in user_response_text)",
+      "directive": "Read {{workspace_path}}task-requirements.md, {{workspace_path}}workflow-guide.md, the real project context, and every source needed to understand the task. Build a coherent goal-first plan with as many substantive steps as the task actually requires. Give an intelligent executor the purpose, relevant context, expected outcome, and fitting acceptance gate for each step without scripting intellectual work mechanically. Create the next unused plans/NNN/ directory, write its plan.md, and preserve all earlier plan versions. Return only its workspace-relative current_plan_file and exact total_steps.",
+      "completionCondition": "A complete executable plan derived from the frozen requirements exists in a new immutable plan-version directory, and its returned path and length are exact.",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "task_description": {
-            "type": "string",
-            "minLength": 10,
-            "description": "Task description"
-          },
-          "expected_deliverable": {
-            "type": "string",
-            "minLength": 5,
-            "description": "Expected result"
-          },
-          "constraints": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Constraints (time, resources, dependencies)"
-          },
-          "success_criteria": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "description": "Success criteria (specific and verifiable)"
-          }
-        },
-        "required": [
-          "task_description",
-          "task_short_name",
-          "expected_deliverable",
-          "success_criteria",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "task_short_name",
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-file-access"
-      }
-    },
-    {
-      "id": "route-file-access",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "has_file_access"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "suggest-task-name",
-        "false": "decompose-into-steps"
-      }
-    },
-    {
-      "id": "suggest-task-name",
-      "type": "agent-directive",
-      "directive": "Choose the most appropriate workspace name based on task description.\n\nTask: {{understand-task.task_description}}\n\nNaming rules:\n- kebab-case: only lowercase letters, numbers and hyphens\n- starts with letter, ends with letter or number\n- describes task essence briefly (2-4 words)\n- not too long (maximum 30 characters)\n\nExamples of good names:\n- api-optimization\n- user-auth-fix\n- dashboard-charts\n- email-templates\n\n**IMPORTANT:** Choose the best name yourself based on the task description. DO NOT ask the user to choose — make the decision independently.",
-      "completionCondition": "Task name chosen by agent",
-      "inputSchema": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "task_name"
-        ],
-        "globalInputs": [
-          "task_name"
-        ]
-      },
-      "connections": {
-        "success": "setup-workspace"
-      }
-    },
-    {
-      "id": "setup-workspace",
-      "type": "agent-directive",
-      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/  (must end with a trailing slash)\nExample: ./moira-ws/auth-fix-20251212-1030/\n\n1) Create the workspace folder with the current date and time\n2) Save the current workflow process ID to {workspace}process-id.txt for recovery after archival\n3) Create {workspace}task-requirements.md with:\n   - Task description: {{understand-task.task_description}}\n   - Expected result: {{understand-task.expected_deliverable}}\n   - Success criteria: {{understand-task.success_criteria}}\n   - Constraints: {{understand-task.constraints}}\n4) Create {workspace}planning-standards.md with:\n   {{planning_standards}}\n\nReturn workspace_path ending with a trailing slash. Confirm workspace creation.",
-      "completionCondition": "Workspace created, process ID and requirements saved",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "workspace_path",
-          "process_id_saved",
-          "requirements_saved"
-        ],
-        "globalInputs": [
-          "workspace_path",
-          "process_id_saved",
-          "requirements_saved"
-        ]
-      },
-      "connections": {
-        "success": "decompose-into-steps"
-      }
-    },
-    {
-      "id": "decompose-into-steps",
-      "type": "agent-directive",
-      "directive": "Break down task '{{understand-task.task_description}}' into specific executable steps.\n\nRequirements:\n- As many steps as the task genuinely needs — small tasks may have a few, large tasks may have 20-40. Do NOT pad or truncate the plan to hit a target number; let the task's real scope decide.\n- Each step = one specific action\n- For each step specify expected_output (how to verify step is complete)\n- Steps should lead to deliverable: {{understand-task.expected_deliverable}}\n\nPlanning standards:\n{{planning_standards}}\n\n{{#if has_file_access}}Save the plan to {{workspace_path}}/plan.md in readable markdown (one numbered item per step). Return only total_steps and plan_saved_to_file — do NOT echo the plan back.{{else}}NO file access: you MUST return the full steps[] array AND current_step_action + current_step_expected_output of step 1 — the plan lives only in context (there is no plan.md).{{/if}}",
-      "completionCondition": "Plan created with one action per step, each step has expected_output{{#if has_file_access}}, plan saved to file{{/if}}",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
+          "current_plan_file",
           "total_steps"
         ],
         "globalInputs": [
-          "steps",
-          "total_steps",
-          "current_step_action",
-          "current_step_expected_output",
-          "plan_saved_to_file"
+          "current_plan_file",
+          "total_steps"
         ]
       },
       "connections": {
-        "success": "validate-plan"
+        "success": "reset-plan-review-round"
       }
     },
     {
-      "id": "validate-plan",
+      "id": "reset-plan-review-round",
+      "type": "expression",
+      "expressions": [
+        "plan_review_round = 1",
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "review-plan"
+      }
+    },
+    {
+      "id": "review-plan",
       "type": "agent-directive",
-      "directive": "Re-validation pass {{validation_round}} of up to {{max_validation_rounds}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user. Just validate the current plan.\n\nDelegate plan validation to an INDEPENDENT reviewer subagent (do NOT validate the plan yourself).\n\nGive the reviewer ONLY paths/inputs:\n{{#if has_file_access}}- Plan: {{workspace_path}}/plan.md\n- Requirements: {{workspace_path}}/task-requirements.md\n- Standards: {{workspace_path}}/planning-standards.md{{else}}- Plan from context: {{steps}}\n- Requirements: {{understand-task.task_description}}, {{understand-task.expected_deliverable}}, {{understand-task.success_criteria}}\n- Standards: {{planning_standards}}{{/if}}\n\nReviewer brief (verbatim):\n  YOU ARE the plan validator. Your assessment determines if the plan can proceed.\n  {{#if has_file_access}}Read the plan, requirements, and standards files directly — do not trust summaries.{{/if}}\n  CHECK each step: self-contained? explicit actions (not \"configure\")? expected_output measurable? full file paths? ATOMICITY (S9 — each item restates the nuances it needs and duplicates cross-cutting actions rather than relying on a global scope)?\n  CHECK requirements coverage: is every requirement covered by at least one step? any gaps?\n  CHECK standards compliance: granularity, dependencies, verifiability, and no tail degradation (S11).\n  RETURN issues_count (0 = valid) and a FLAT list of specific issues (every issue mandatory; no severity tiers).\n\n{{#if has_file_access}}Write the issues to {{workspace_path}}/plan-validation-issues.md:\n   # Plan Validation Issues\n   Total issues: [count]\n   ## Issues Found\n   ### 1. [issue]\n   Category: [structure/requirements/standards]\n   Recommendation: [how to fix]\n{{/if}}\n\nRecord the reviewer's result honestly — reviewer findings are authoritative, your opinion does not override them.",
-      "completionCondition": "Plan validated, issues_count specified",
+      "directive": "Delegate an independent peer review of {{workspace_path}}{{current_plan_file}} against the complete frozen requirements, real project context, and workflow-guide.md. Judge whether the plan reaches the goal, covers every obligation, uses coherent granularity, preserves executor judgment, supplies enough isolated context, and defines fitting verification. Report only reproducible blocking defects; zero is valid. Write the complete current finding set to review.md beside the reviewed plan, replacing only that plan version's current review report. Return only the exact issues_count.",
+      "completionCondition": "An independent complete review of the exact current plan is stored beside it and issues_count equals the report's blocking findings.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "issues_count": {
-            "type": "number",
+            "type": "integer",
             "minimum": 0,
-            "description": "Number of issues found (0 = plan is valid)"
-          },
-          "validation_issues": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "step_id": {
-                  "type": "number"
-                },
-                "issue": {
-                  "type": "string"
-                },
-                "suggestion": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "step_id",
-                "issue"
-              ]
-            },
-            "description": "Issues found (if any)"
+            "description": "Exact blocking finding count in the current plan review"
           }
         },
         "required": [
@@ -206,82 +102,154 @@
         ]
       },
       "connections": {
-        "success": "route-plan-validation"
+        "success": "route-plan-review"
       }
     },
     {
-      "id": "route-plan-validation",
+      "id": "route-plan-review",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "validate-plan.issues_count"
+          "contextPath": "review-plan.issues_count"
         },
         "right": 0
       },
       "connections": {
         "true": "notify-plan-ready",
-        "false": "fix-plan-issues"
+        "false": "check-plan-review-limit"
       }
     },
     {
-      "id": "fix-plan-issues",
+      "id": "check-plan-review-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "plan_review_round"
+        },
+        "right": {
+          "contextPath": "max_review_rounds"
+        }
+      },
+      "connections": {
+        "true": "ask-plan-review-limit",
+        "false": "fix-plan"
+      }
+    },
+    {
+      "id": "ask-plan-review-limit",
       "type": "agent-directive",
-      "directive": "CRITICAL: FIX THE ISSUES — NO REPORTS!\n\nFix all plan validation issues completely.\n\n{{#if has_file_access}}READ {{workspace_path}}/plan-validation-issues.md{{else}}Issues from context: {{validate-plan.validation_issues}}{{/if}}\n\nFor EACH issue: understand it, apply the fix completely (no partial fixes), verify it is resolved.\nReviewer findings are authoritative — do not skip any, even minor ones.\n\nPlanning standards:\n{{planning_standards}}\n\n{{#if has_file_access}}After fixing, update {{workspace_path}}/plan.md. Return only fixes_applied — do NOT echo the plan.{{/if}}",
-      "completionCondition": "Issues fixed, plan updated",
+      "directive": "Plan review reached the configured bound after changed plan versions. Show the user the current plan and its review.md by reading them from {{workspace_path}}{{current_plan_file}}. Ask whether to continue repairing confirmed findings or explicitly accept the current reviewed plan for the separate approval gate. Record the exact decision and reason in review-limit-decision.md beside the plan. Return only the decision.",
+      "completionCondition": "The user explicitly chose repair or accept and the exact decision is durable beside the current plan.",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "repair",
+              "accept"
+            ],
+            "description": "User decision at the bounded plan-review gate"
+          }
+        },
         "required": [
-          "fixes_applied"
-        ],
-        "globalInputs": [
-          "steps",
-          "total_steps",
-          "fixes_applied"
+          "decision"
         ]
       },
       "connections": {
-        "success": "expr-inc-validation-round"
+        "success": "route-plan-review-limit"
+      }
+    },
+    {
+      "id": "route-plan-review-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-plan-review-limit.decision"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "reset-plan-review-for-repair",
+        "false": "notify-plan-ready"
+      }
+    },
+    {
+      "id": "reset-plan-review-for-repair",
+      "type": "expression",
+      "expressions": [
+        "plan_review_round = 1"
+      ],
+      "connections": {
+        "default": "fix-plan"
+      }
+    },
+    {
+      "id": "fix-plan",
+      "type": "agent-directive",
+      "directive": "Read the complete review.md beside {{workspace_path}}{{current_plan_file}}, reproduce every blocking defect against the current plan and requirements, and fix each confirmed defect across its whole class. Create the next unused plans/NNN/plan.md as the new complete plan; preserve the reviewed version and report. If a finding cannot be reproduced or the plan cannot be changed meaningfully, stop at this directive and explain the concrete blocker to the user instead of submitting an unchanged loop. Return only the new current_plan_file and exact total_steps.",
+      "completionCondition": "Every reproducible finding is fixed in a distinct new complete plan version, and the returned path and length describe that changed plan.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "current_plan_file",
+          "total_steps"
+        ],
+        "globalInputs": [
+          "current_plan_file",
+          "total_steps"
+        ]
+      },
+      "connections": {
+        "success": "increment-plan-review-round"
+      }
+    },
+    {
+      "id": "increment-plan-review-round",
+      "type": "expression",
+      "expressions": [
+        "plan_review_round = plan_review_round + 1"
+      ],
+      "connections": {
+        "default": "review-plan"
       }
     },
     {
       "id": "notify-plan-ready",
       "type": "telegram-notification",
-      "message": "Plan ready for review\n\nTask: {{task_short_name}}\nSteps: {{total_steps}}\n\nPlease confirm the plan to continue.",
+      "message": "Robust Task plan is ready for approval.\n\nPlan: {{current_plan_file}}\nSteps: {{total_steps}}",
       "parseMode": "Markdown",
       "connections": {
-        "default": "present-plan",
-        "error": "present-plan"
+        "default": "approve-plan",
+        "error": "approve-plan"
       }
     },
     {
-      "id": "present-plan",
+      "id": "approve-plan",
       "type": "agent-directive",
-      "directive": "Show user the task execution plan.\n\nTask: {{understand-task.task_description}}\nExpected result: {{understand-task.expected_deliverable}}\n\n{{#if has_file_access}}Present the plan from {{workspace_path}}/plan.md ({{total_steps}} steps).{{else}}Plan ({{total_steps}} steps):\n{{steps}}{{/if}}\n\nSuccess will be measured by criteria:\n{{understand-task.success_criteria}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Do you confirm the plan? (yes/no)'\n- STOP and wait until the user writes a response\n- DO NOT fill plan_approved until the user explicitly says yes or no\n- Showing the plan ≠ getting confirmation\n- Record in user_response_text exactly what the user answered\n\n⚠️ HANDLING FEEDBACK:\n- Any comment, suggested change, or anything other than a pure 'yes' → plan_approved: 'no'\n- Record comments in revision_feedback\n- 'Yes, but...' = NO; 'Good, just change...' = NO\n- Only a pure 'yes'/'ok'/'confirm' without reservations = YES\n\nDO NOT fix the plan yourself. Reply plan_approved = 'no' with revision_feedback — the workflow routes to the fix branch.\n\nIf the user does NOT approve, do NOT use teleport-replan and do NOT fix the plan yourself — just answer plan_approved='no' with revision_feedback; the workflow routes to the revise-plan branch. teleport-replan is ONLY for mid-execution replans, not plan rejection.",
-      "completionCondition": "User EXPLICITLY answered yes or no (response text exists in user_response_text)",
+      "directive": "Show the user the complete reviewed plan at {{workspace_path}}{{current_plan_file}} and the review and review-limit decision beside it when present. Ask for explicit approval or rejection. Record the exact response in decision.md beside this plan. Return decision=yes only for unqualified approval; any feedback or requested change is decision=no and remains in the durable decision file rather than workflow context.",
+      "completionCondition": "The user explicitly approved or rejected the exact current plan and the complete response is durable beside it.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "plan_approved": {
+          "decision": {
             "type": "string",
             "enum": [
               "yes",
               "no"
             ],
-            "description": "User confirmed the plan"
-          },
-          "revision_feedback": {
-            "type": "string",
-            "description": "User comments (if not confirmed)"
+            "description": "Explicit approval of the exact current plan"
           }
         },
         "required": [
-          "plan_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
+          "decision"
         ]
       },
       "connections": {
@@ -294,7 +262,7 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "present-plan.plan_approved"
+          "contextPath": "approve-plan.decision"
         },
         "right": "yes"
       },
@@ -306,19 +274,23 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Revise plan based on user comments.\n\nComments: {{present-plan.revision_feedback}}\n\n{{#if has_file_access}}Read the current plan from {{workspace_path}}/plan.md, revise it per the feedback, and update {{workspace_path}}/plan.md.{{else}}Current plan:\n{{steps}}\n\nFix the plan considering the feedback. NO file access: you MUST return the full revised steps[] array AND current_step_action + current_step_expected_output of step 1 — the plan lives only in context (there is no plan.md).{{/if}}",
-      "completionCondition": "Plan revised considering comments",
+      "directive": "Read decision.md beside {{workspace_path}}{{current_plan_file}} and apply the user's exact feedback. If and only if that response explicitly changes the task contract, update task-requirements.md and record the authorization and reason in the new plan directory. Preserve completed steps 1 through {{current_step}} - 1 when execution has begun. Create a distinct new complete plan version and return only current_plan_file and exact total_steps.",
+      "completionCondition": "The exact user feedback is reflected in a new complete plan, any requirements change is explicitly authorized and durable, and completed work remains preserved.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
-        "required": [],
+        "required": [
+          "current_plan_file",
+          "total_steps"
+        ],
         "globalInputs": [
-          "steps",
+          "current_plan_file",
           "total_steps"
         ]
       },
       "connections": {
-        "success": "expr-reset-after-revision"
+        "success": "reset-plan-review-round"
       }
     },
     {
@@ -334,115 +306,145 @@
         }
       },
       "connections": {
-        "true": "verify-criteria",
-        "false": "execute-current-step"
+        "true": "reset-criteria-review-round",
+        "false": "execute-step"
       }
     },
     {
-      "id": "execute-current-step",
+      "id": "execute-step",
       "type": "agent-directive",
-      "directive": "Execute step {{current_step}} of {{total_steps}}.\n\nSame rigor as step 1 — no tail degradation, you have no fatigue. This step must serve the deliverable: {{understand-task.expected_deliverable}}. If the remaining plan no longer fits what's been built — teleport-replan.\n\n{{#if has_file_access}}Read step {{current_step}} from {{workspace_path}}/plan.md by its index. If you lost the thread, re-read {{workspace_path}}/task-requirements.md before acting.{{else}}Step text: {{current_step_action}}{{/if}}\n\nProvide EVIDENCE of completion (screenshot, link, file, or a detailed description of exactly what was done).\n{{#if has_file_access}}Write the evidence to {{workspace_path}}/step-{{current_step}}/evidence.md.{{/if}}\n\nRules:\n{{validation_criteria}}\n\nAvoid mistakes:\n{{common_mistakes}}",
-      "completionCondition": "Step completed with evidence",
+      "directive": "Execute only step {{current_step}} of {{total_steps}} from {{workspace_path}}{{current_plan_file}} against the real artifact and frozen requirements. Retry budget position {{step_retry}} controls escalation; it is not the durable attempt number. Read all prior evidence, verdicts, and the latest exhausted-retry decision for this step when present. Use its changed input or hypothesis; when the user already supplied concrete work or evidence, inspect and persist that result rather than repeating the mutation blindly. Derive the three-digit plan version from current_plan_file, choose the next unused numeric attempt directory under steps/{{current_step}}/plans/<plan-version>/attempts/, preserve every earlier attempt, and write concise sufficient evidence there as evidence.md. Return only that workspace-relative evidence_file.",
+      "completionCondition": "The current plan step is executed as far as its gate requires; a changed input or hypothesis justifies the attempt; and a new plan-qualified evidence file exists without overwriting any earlier attempt.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "step_completed"
+          "evidence_file"
         ],
         "globalInputs": [
-          "step_completed",
-          "evidence",
-          "notes"
+          "evidence_file"
         ]
       },
       "connections": {
-        "success": "verify-step-execution"
+        "success": "review-step"
       }
     },
     {
-      "id": "verify-step-execution",
+      "id": "review-step",
       "type": "agent-directive",
-      "directive": "GATE REVIEW of step {{current_step}} — delegate to an INDEPENDENT reviewer subagent (do NOT review it yourself).\n\nGive the reviewer ONLY paths, not content:\n{{#if has_file_access}}- Plan: {{workspace_path}}/plan.md (read step {{current_step}})\n- Step evidence: {{workspace_path}}/step-{{current_step}}/evidence.md{{else}}- Expected step output: {{current_step_expected_output}}\n- Evidence: {{evidence}}{{/if}}\n\nReviewer brief (verbatim):\n  YOU ARE an independent gate reviewer for step {{current_step}}.\n  Read the full plan and this step's evidence directly — do not trust summaries.\n  Judge step {{current_step}} for PLAN INTEGRITY: does it correctly build on PREVIOUS steps and set up the FUTURE steps, with no drift, regression, or quality degradation versus earlier steps?\n  Verify the evidence FULLY matches the step's expected output (80% = NOT verified; no concrete evidence = NOT verified; missing elements = NOT verified).\n  RETURN step_verified (yes/no), a FLAT list of issues_found, and verification_details explaining the verdict.\n\nRecord the reviewer's verdict honestly — if the reviewer says no, return no.\n\n{{#if has_file_access}}If step_verified = no, write the issues to {{workspace_path}}/step-{{current_step}}/verification-issues.md:\n   # Step {{current_step}} Verification Issues\n\n   Step verified: no\n\n   ## Issues Found\n   ### 1. [issue]\n   Expected: [what the plan required]\n   Actual: [what the evidence shows]\n   Gap: [what is missing or inconsistent with the rest of the plan]\n{{/if}}",
-      "completionCondition": "Verification complete, verdict delivered",
+      "directive": "Delegate an independent peer review of the exact attempt evidence at {{workspace_path}}{{evidence_file}}. Read the frozen requirements, current plan, real artifact, and relevant earlier outcomes. Judge the step's own gate and plan integrity by the fitting method; mechanical checks prove only the properties they measure. Write the complete verdict beside the evidence as verdict.md. Return its exact path, whether the step is accepted, and whether confirmed defects require changing the plan rather than retrying the same step.",
+      "completionCondition": "A complete independent verdict exists for the exact plan-qualified attempt and its two routing judgments accurately represent the findings.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "step_verified": {
+          "verdict_file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^steps/[0-9]+/plans/[0-9]{3}/attempts/[0-9]+/verdict\\.md$",
+            "description": "Workspace-relative independent verdict path"
+          },
+          "accepted": {
             "type": "string",
             "enum": [
               "yes",
               "no"
             ],
-            "description": "Step passed verification"
+            "description": "Whether the exact attempt fully passes the step gate"
           },
-          "issues_found": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Issues found (if step_verified=no)"
+          "plan_must_change": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no"
+            ],
+            "description": "Whether retry cannot resolve the confirmed defect without replanning"
           }
         },
         "required": [
-          "step_verified",
-          "verification_details",
-          "issues_found"
+          "verdict_file",
+          "accepted",
+          "plan_must_change"
         ],
-        "globalInputs": [
-          "verification_details"
+        "oneOf": [
+          {
+            "properties": {
+              "accepted": {
+                "const": "yes"
+              },
+              "plan_must_change": {
+                "const": "no"
+              }
+            }
+          },
+          {
+            "properties": {
+              "accepted": {
+                "const": "no"
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-step-verification"
+        "success": "route-verifier-replan"
       }
     },
     {
-      "id": "route-step-verification",
+      "id": "route-verifier-replan",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "verify-step-execution.step_verified"
+          "contextPath": "review-step.plan_must_change"
         },
         "right": "yes"
       },
       "connections": {
-        "true": "complete-step",
-        "false": "expr-inc-retry"
+        "true": "replan-from-verdict",
+        "false": "route-step-accepted"
       }
     },
     {
-      "id": "complete-step",
-      "type": "agent-directive",
-      "directive": "Step {{current_step}} completed successfully.\n\nEvidence: {{evidence}}\n\nRecord the step result{{#if has_file_access}} (the cursor advances automatically — do not change current_step yourself).{{else}}. NO file access: also return current_step_action + current_step_expected_output of the NEXT step (id = current_step+1) from the steps array — the cursor advances automatically, do not change current_step yourself.{{/if}} The workflow increments the step counter via an expression node next.",
-      "completionCondition": "Result recorded, counter incremented, next step data extracted",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "step_result_saved"
-        ],
-        "globalInputs": [
-          "step_result_saved",
-          "execution_note"
-        ]
+      "id": "route-step-accepted",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-step.accepted"
+        },
+        "right": "yes"
       },
       "connections": {
-        "success": "expr-inc-current-step"
+        "true": "close-step",
+        "false": "increment-step-retry"
       }
     },
     {
+      "id": "close-step",
       "type": "expression",
-      "id": "expr-inc-retry",
+      "expressions": [
+        "current_step = current_step + 1",
+        "step_retry = 0"
+      ],
+      "connections": {
+        "default": "check-all-steps-done"
+      }
+    },
+    {
+      "id": "increment-step-retry",
+      "type": "expression",
       "expressions": [
         "step_retry = step_retry + 1"
       ],
       "connections": {
-        "default": "check-retry-limit"
+        "default": "check-step-retry-limit"
       }
     },
     {
-      "id": "check-retry-limit",
+      "id": "check-step-retry-limit",
       "type": "condition",
       "condition": {
         "operator": "gte",
@@ -455,553 +457,304 @@
       },
       "connections": {
         "true": "notify-escalation",
-        "false": "retry-step-feedback"
-      }
-    },
-    {
-      "id": "retry-step-feedback",
-      "type": "agent-directive",
-      "directive": "Attempt {{step_retry}} of {{max_retries}} failed.\n\n{{#if has_file_access}}READ {{workspace_path}}/step-{{current_step}}/verification-issues.md{{else}}Issues from context: {{verify-step-execution.issues_found}}{{/if}}\n\nFor EACH issue found by the verifier:\n1. Understand what was missing or incorrect\n2. Determine a different approach to address the gap\n3. Plan specific actions to fix\n\nAnalyze why the step was not completed and try again with a different approach.\n\nDO NOT skip any issue. ALL verification findings must be addressed.\n\nAvoid mistakes:\n{{common_mistakes}}",
-      "completionCondition": "Feedback given, ready for retry",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "retry_approach"
-        ],
-        "globalInputs": [
-          "retry_approach"
-        ]
-      },
-      "connections": {
-        "success": "execute-current-step"
+        "false": "execute-step"
       }
     },
     {
       "id": "notify-escalation",
       "type": "telegram-notification",
-      "message": "Decision required\n\nTask: {{task_short_name}}\nStep {{current_step}} failed after {{max_retries}} attempts.\n\nOptions:\n- Skip step\n- Complete manually",
+      "message": "Robust Task step {{current_step}} exhausted {{max_retries}} attempts and needs a decision.",
       "parseMode": "Markdown",
       "connections": {
-        "default": "ask-user-skip-or-escalate",
-        "error": "ask-user-skip-or-escalate"
+        "default": "ask-retry-decision",
+        "error": "ask-retry-decision"
       }
     },
     {
-      "id": "ask-user-skip-or-escalate",
+      "id": "ask-retry-decision",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problem\n  4. reset - reset retry counter and try again'\n- STOP and wait until the user writes a response\n- DO NOT fill user_decision until the user explicitly responds\n- Record in user_response_text exactly what the user answered\n\nDO NOT fix anything yourself — the workflow routes to the chosen branch.",
-      "completionCondition": "User EXPLICITLY chose action (response text exists in user_response_text)",
+      "directive": "Read the current step, every plan- and attempt-qualified evidence/verdict pair, and the frozen requirements. Ask the user to choose exactly retry, replan, or finish_incomplete and provide the exact information that outcome needs. Retry requires changed input, a new hypothesis, changed external state, or concrete work/evidence already supplied by the user. Replan requires instructions for the unfinished work and may change requirements only when the user explicitly names and authorizes the exact change and reason. Finish_incomplete requires the exact unresolved scope and reason and means stop remaining execution and automatic repair. Write the complete response and current plan reference to the next unused steps/{{current_step}}/decisions/NNN.md. Return only the decision enum and exact decision_file consumed by the selected route.",
+      "completionCondition": "One explicit retry, replan, or finish_incomplete decision is durably recorded at an immutable path with all changed input, authorization, or unresolved scope its route requires.",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "user_decision": {
+          "decision": {
             "type": "string",
             "enum": [
-              "skip",
-              "escalate",
-              "revise_plan",
-              "reset"
+              "retry",
+              "replan",
+              "finish_incomplete"
             ],
-            "description": "User's decision"
+            "description": "User-selected exhausted-retry outcome"
           },
-          "skip_reason": {
+          "decision_file": {
             "type": "string",
-            "description": "Skip reason (if skip)"
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^steps/[0-9]+/decisions/[0-9]{3}\\.md$",
+            "description": "Workspace-relative immutable exhausted-retry decision"
           }
         },
         "required": [
-          "user_decision",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
+          "decision",
+          "decision_file"
         ]
       },
       "connections": {
-        "success": "check-reset-retry"
+        "success": "route-retry-choice"
       }
     },
     {
-      "id": "route-user-decision",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-user-skip-or-escalate.user_decision"
-        },
-        "right": "skip"
-      },
-      "connections": {
-        "true": "mark-step-skipped",
-        "false": "route-escalate-or-revise"
-      }
-    },
-    {
-      "id": "route-escalate-or-revise",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-user-skip-or-escalate.user_decision"
-        },
-        "right": "escalate"
-      },
-      "connections": {
-        "true": "user-handles-step",
-        "false": "revise-plan-from-escalation"
-      }
-    },
-    {
-      "id": "revise-plan-from-escalation",
-      "type": "agent-directive",
-      "directive": "Revise plan considering execution problems.\n\nStep {{current_step}} could not be completed after {{max_retries}} attempts.\n\n{{#if has_file_access}}Read the current plan from {{workspace_path}}/plan.md.{{else}}Current plan:\n{{steps}}{{/if}}\n\nAnalyze why the step cannot be executed and revise the plan:\n- Maybe the step needs to be split into smaller ones?\n- Maybe a different approach is needed?\n- Maybe dependencies were not considered?\n\nPlanning standards:\n{{planning_standards}}\n\n{{#if has_file_access}}After revision, update {{workspace_path}}/plan.md.{{/if}}",
-      "completionCondition": "Plan revised considering problems",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "revision_reason"
-        ],
-        "globalInputs": [
-          "steps",
-          "total_steps",
-          "revision_reason"
-        ]
-      },
-      "connections": {
-        "success": "expr-restart-from-first"
-      }
-    },
-    {
-      "id": "mark-step-skipped",
-      "type": "agent-directive",
-      "directive": "Step {{current_step}} skipped.\n\nReason: {{ask-user-skip-or-escalate.skip_reason}}\n\nRecord that the step was skipped. The cursor advances automatically via an expression node next — do not change current_step yourself.{{#if has_file_access}}{{else}} NO file access: also return current_step_action + current_step_expected_output of the NEXT step (id = current_step+1) from the steps array.{{/if}}",
-      "completionCondition": "Step marked as skipped, counter incremented",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "skipped_recorded"
-        ],
-        "globalInputs": [
-          "skipped_recorded",
-          "execution_note"
-        ]
-      },
-      "connections": {
-        "success": "expr-inc-current-step"
-      }
-    },
-    {
-      "id": "user-handles-step",
-      "type": "agent-directive",
-      "directive": "User takes over step {{current_step}} execution.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Wait until the user completes the step and provides evidence\n- DO NOT fill user_completed until the user explicitly confirms completion\n- Record in user_response_text exactly what the user answered",
-      "completionCondition": "User EXPLICITLY confirmed completion with evidence (response text exists in user_response_text)",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "user_completed",
-          "evidence",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_completed",
-          "evidence",
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "complete-step"
-      }
-    },
-    {
-      "id": "verify-criteria",
-      "type": "agent-directive",
-      "directive": "Re-verification pass {{criteria_round}} of up to {{max_criteria_rounds}} — this is a normal completeness loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nCOMPLETENESS SELF-REVIEW (verify ONLY — DO NOT fix here). This is a light pre-pass; an independent final review runs after it.\n\nVerify that EVERY success criterion is ACTUALLY satisfied by the REAL deliverable — check the actual artifact (code, files, command output, tests), NOT documentation, NOT claims, NOT your own memory.\n\nSuccess criteria (the frozen source of truth):\n{{understand-task.success_criteria}}\n\nExpected deliverable: {{understand-task.expected_deliverable}}\n\nRules:\n- ONE check per success criterion — go through them one at a time, do not batch-approve.\n- For each criterion: find the concrete EVIDENCE in the real artifact (file path + what proves it; for code tasks, read the real code and/or run the tests). If you cannot point to concrete evidence, it is a GAP.\n- \"Looks done\" / \"should work\" / \"documented as complete\" is NOT evidence.\n\nFor each criterion specify:\n- Completed? (yes/no)\n- Evidence of completion (concrete: file path, output, test result)\n\nVerification rules:\n{{validation_criteria}}\n\n{{#if has_file_access}}Save a coverage report to {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md AND the gaps to {{workspace_path}}/criteria-gaps.md:\n# Success Criteria Coverage (attempt {{validation_attempt_count}})\n\n## Summary\nTotal criteria: [count]\nCompleted: [count]\nGaps: [count]\n\n## Per-criterion\n### 1. [criterion]\nStatus: MET | NOT MET\nEvidence: [concrete evidence OR what is missing]\n{{/if}}",
-      "completionCondition": "All success criteria verified against the real deliverable with concrete evidence",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "all_criteria_met": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ],
-            "description": "All criteria met"
-          },
-          "gaps": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "What is not completed (if any)"
-          }
-        },
-        "required": [
-          "all_criteria_met",
-          "criteria_results"
-        ],
-        "globalInputs": [
-          "criteria_results"
-        ]
-      },
-      "connections": {
-        "success": "route-criteria-check"
-      }
-    },
-    {
-      "id": "route-criteria-check",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "verify-criteria.all_criteria_met"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "final-review",
-        "false": "fix-gaps"
-      }
-    },
-    {
-      "id": "fix-gaps",
-      "type": "agent-directive",
-      "directive": "CRITICAL: FIX THE GAPS - NO REPORTS!\n\nFix incomplete success criteria.\n\n{{#if has_file_access}}READ {{workspace_path}}/criteria-gaps.md{{else}}Gaps from context: {{verify-criteria.gaps}}{{/if}}\n\nFor EACH gap found:\n1. Understand what's missing\n2. Complete the required work\n3. Gather evidence of completion\n4. Document what was done\n\nDO NOT skip any gap. ALL incomplete criteria must be addressed.\n\nComplete what's missing and provide evidence for each fix.",
-      "completionCondition": "Gaps fixed with evidence",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "gaps_fixed",
-          "fix_evidence"
-        ],
-        "globalInputs": [
-          "gaps_fixed",
-          "fix_evidence"
-        ]
-      },
-      "connections": {
-        "success": "expr-inc-validation-attempt"
-      }
-    },
-    {
-      "id": "deliver-result",
-      "type": "agent-directive",
-      "directive": "Compile final result.\n\nTask: {{understand-task.task_description}}\nDeliverable: {{understand-task.expected_deliverable}}\n\nPrepare:\n1. Final deliverable\n2. Summary of what was done (by steps)\n3. List of artifacts (files, links, results)\n4. Recommendations (if any)",
-      "completionCondition": "Final result compiled and presented",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "deliverable": {
-            "type": "string",
-            "description": "Final result"
-          }
-        },
-        "required": [
-          "deliverable",
-          "summary"
-        ],
-        "globalInputs": [
-          "summary",
-          "artifacts",
-          "recommendations"
-        ]
-      },
-      "connections": {
-        "success": "notify-completion"
-      }
-    },
-    {
-      "id": "notify-completion",
-      "type": "telegram-notification",
-      "message": "Task completed\n\n{{task_short_name}}\n\nResult: {{deliver-result.deliverable}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "end",
-        "error": "end"
-      }
-    },
-    {
-      "id": "end",
-      "type": "end",
-      "finalOutput": [
-        "deliverable",
-        "summary",
-        "artifacts",
-        "recommendations",
-        "criteria_results"
-      ]
-    },
-    {
-      "type": "condition",
-      "id": "check-reset-retry",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-user-skip-or-escalate.user_decision"
-        },
-        "right": "reset"
-      },
-      "connections": {
-        "true": "expr-reset-step-retry",
-        "false": "route-user-decision"
-      }
-    },
-    {
+      "id": "reset-step-retry",
       "type": "expression",
-      "id": "expr-reset-step-retry",
       "expressions": [
         "step_retry = 0"
       ],
       "connections": {
-        "default": "execute-current-step"
+        "default": "execute-step"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-inc-validation-round",
-      "expressions": [
-        "validation_round = validation_round + 1"
-      ],
-      "connections": {
-        "default": "check-validation-round-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-validation-round-limit",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "validation_round"
-        },
-        "right": {
-          "contextPath": "max_validation_rounds"
-        }
-      },
-      "connections": {
-        "true": "ask-user-validation-limit-reached",
-        "false": "expr-reset-after-revision"
-      }
-    },
-    {
-      "id": "ask-user-validation-limit-reached",
+      "id": "replan-from-verdict",
       "type": "agent-directive",
-      "directive": "Plan validation has run {{validation_round}} rounds (limit {{max_validation_rounds}}) and the plan may still have unresolved issues.\n\n⚠️ This is the BOUND on the normal re-validation loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — present the plan as-is and proceed (any remaining issues are accepted)\n  2. reset — zero the round counter and keep fixing the plan\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
-      "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
+      "directive": "Read the exact failed verdict at {{workspace_path}}{{review-step.verdict_file}}, the current plan, frozen requirements, and completed outcomes. Replan the open step and unfinished tail so the confirmed plan-changing defect is resolved; preserve steps before {{current_step}} unchanged. Create a distinct complete plan version and return only current_plan_file and exact total_steps. This route does not consume a normal retry.",
+      "completionCondition": "A new complete plan resolves the verified plan defect, preserves completed work, and accurately reports its path and length.",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "decision": {
-            "type": "string",
-            "enum": [
-              "continue",
-              "reset"
-            ],
-            "description": "User's decision: continue (accept and proceed) or reset (keep fixing)"
-          }
-        },
+        "additionalProperties": false,
+        "properties": {},
         "required": [
-          "decision",
-          "user_response_text"
+          "current_plan_file",
+          "total_steps"
         ],
         "globalInputs": [
-          "user_response_text"
+          "current_plan_file",
+          "total_steps"
         ]
       },
       "connections": {
-        "success": "check-reset-validation-round"
+        "success": "reset-plan-review-round"
       }
     },
     {
-      "type": "condition",
-      "id": "check-reset-validation-round",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-user-validation-limit-reached.decision"
-        },
-        "right": "reset"
-      },
-      "connections": {
-        "true": "expr-reset-validation-round",
-        "false": "notify-plan-ready"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-reset-validation-round",
-      "expressions": [
-        "validation_round = 0"
-      ],
-      "connections": {
-        "default": "expr-reset-after-revision"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-criteria-round",
-      "expressions": [
-        "criteria_round = criteria_round + 1"
-      ],
-      "connections": {
-        "default": "check-criteria-round-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-criteria-round-limit",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "criteria_round"
-        },
-        "right": {
-          "contextPath": "max_criteria_rounds"
-        }
-      },
-      "connections": {
-        "true": "ask-user-criteria-limit-reached",
-        "false": "verify-criteria"
-      }
-    },
-    {
-      "id": "ask-user-criteria-limit-reached",
+      "id": "replan-from-decision",
       "type": "agent-directive",
-      "directive": "The success-criteria gap-fixing loop has run {{criteria_round}} rounds (limit {{max_criteria_rounds}}) and some criteria may still be unmet.\n\n⚠️ This is the BOUND on the normal re-verification loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — deliver the result as-is (any remaining gaps are explicitly accepted)\n  2. reset — zero the round counter and keep closing the gaps\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
-      "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
+      "directive": "Read the exact replan decision at {{workspace_path}}{{ask-retry-decision.decision_file}}, the current plan, frozen requirements, and completed outcomes. Preserve completed steps and reshape only the open step and unfinished tail. Keep requirements unchanged unless the same durable decision explicitly names and authorizes the exact requirement change and reason; when it does, update task-requirements.md and record that authorization in the new plan directory. Create a distinct complete plan version and return only current_plan_file and exact total_steps.",
+      "completionCondition": "The durable replan decision is fully applied, completed work is preserved, requirements change only under exact explicit authorization, and a complete new plan is ready for review.",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "decision": {
-            "type": "string",
-            "enum": [
-              "continue",
-              "reset"
-            ],
-            "description": "User's decision: continue (accept and deliver) or reset (keep fixing gaps)"
-          }
-        },
+        "additionalProperties": false,
+        "properties": {},
         "required": [
-          "decision",
-          "user_response_text"
+          "current_plan_file",
+          "total_steps"
         ],
         "globalInputs": [
-          "user_response_text"
+          "current_plan_file",
+          "total_steps"
         ]
       },
       "connections": {
-        "success": "check-reset-criteria-round"
+        "success": "reset-plan-review-round"
       }
     },
     {
-      "type": "condition",
-      "id": "check-reset-criteria-round",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "ask-user-criteria-limit-reached.decision"
-        },
-        "right": "reset"
+      "id": "teleport-replan",
+      "type": "teleport",
+      "hint": "Use during execution whenever new facts, missed scope, or the result of earlier work makes the unfinished plan inaccurate. Do not use it to reject a plan at the approval gate.",
+      "directive": "Reassess the current plan against the real work and frozen requirements. Record the concrete replan reason in the next plan-version directory, preserve completed steps before {{current_step}}, and reshape only the open step and unfinished tail. Create the complete new plan and return only current_plan_file and exact total_steps.",
+      "completionCondition": "A justified new complete plan preserves completed work and is ready for independent review and approval.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "current_plan_file",
+          "total_steps"
+        ],
+        "globalInputs": [
+          "current_plan_file",
+          "total_steps"
+        ]
       },
       "connections": {
-        "true": "expr-reset-criteria-round",
-        "false": "deliver-result"
+        "success": "reset-plan-review-round"
       }
     },
     {
+      "id": "reset-criteria-review-round",
       "type": "expression",
-      "id": "expr-reset-criteria-round",
       "expressions": [
-        "criteria_round = 0"
+        "criteria_review_round = 1"
       ],
       "connections": {
         "default": "verify-criteria"
       }
     },
     {
-      "type": "teleport",
-      "id": "teleport-replan",
-      "hint": "Use MID-EXECUTION when the remaining plan no longer fits what is already built — closes the current step, keeps completed steps, reshapes/extends only the tail (does NOT restart from step 1). Not for rejecting a plan before execution (use the plan-approval branch).",
-      "directive": "Step-close replan. The current step {{current_step}} is now closed as-is (record honestly what was actually done — it MAY be partial; the step need not be fully complete).\n\nCurrent state: step {{current_step}} of {{total_steps}}.\n\n{{#if has_file_access}}In {{workspace_path}}/plan.md:{{else}}In the plan:{{/if}}\n- Do NOT touch completed steps 1..{{current_step}} — keep them as they are.\n- Move any unfinished part of step {{current_step}} forward into a NEW step {{current_step}}+1.\n- Rewrite/extend ONLY the steps AFTER {{current_step}} to fit revision_reason; record honestly what was actually done.\n- Recount the steps and return the refreshed total_steps.\n\nDescribe what changed and why in revision_reason.",
-      "completionCondition": "Required plan changes documented in revision_reason",
+      "id": "verify-criteria",
+      "type": "agent-directive",
+      "directive": "Read the frozen active requirements, approved current plan, every durable step outcome and evidence/verdict pair, any explicit requirement changes, any existing final/criteria/acceptance.md, and the real deliverable. Verify every active success criterion and goal facet by the fitting method. Write the complete assessment to the next unused final/criteria/NNN-review.md. Keep accepted incomplete gaps visible in the report and exclude an unchanged gap already covered by explicit criteria acceptance from issues_count. Count every current unaccepted gap that requires repair. Return only review_file and exact issues_count; zero is valid.",
+      "completionCondition": "A complete current criteria assessment grounded in real artifacts exists; accepted gaps remain visible; and issues_count exactly matches current unaccepted findings.",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "review_file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^final/criteria/[0-9]{3}-review\\.md$",
+            "description": "Workspace-relative complete criteria review"
+          },
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Exact current unaccepted criteria count"
+          }
+        },
         "required": [
-          "revision_reason",
-          "total_steps"
-        ],
-        "globalInputs": [
-          "revision_reason",
-          "total_steps"
+          "review_file",
+          "issues_count"
         ]
       },
       "connections": {
-        "success": "expr-replan-advance"
+        "success": "route-criteria-review"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-inc-current-step",
-      "expressions": [
-        "current_step = current_step + 1",
-        "step_retry = 0"
-      ],
+      "id": "route-criteria-review",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "verify-criteria.issues_count"
+        },
+        "right": 0
+      },
       "connections": {
-        "default": "check-all-steps-done"
+        "true": "final-review",
+        "false": "check-criteria-review-limit"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-replan-advance",
-      "expressions": [
-        "current_step = current_step + 1",
-        "step_retry = 0",
-        "validation_round = 0",
-        "criteria_round = 0"
-      ],
+      "id": "check-criteria-review-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "criteria_review_round"
+        },
+        "right": {
+          "contextPath": "max_review_rounds"
+        }
+      },
       "connections": {
-        "default": "validate-plan"
+        "true": "ask-criteria-review-limit",
+        "false": "fix-criteria-gaps"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-after-revision",
-      "expressions": [
-        "step_retry = 0"
-      ],
+      "id": "ask-criteria-review-limit",
+      "type": "agent-directive",
+      "directive": "Criteria review reached the configured bound after changed repair attempts. Show the user the complete current report at {{workspace_path}}{{verify-criteria.review_file}}. Ask whether to authorize another repair pass or explicitly accept the reported gaps as incomplete. Record the exact decision, scope, and reason in final/criteria/acceptance.md when accepting, or in a continuation record beside the review when authorizing repair. Return only the decision.",
+      "completionCondition": "At the configured review bound, the user explicitly authorized another repair pass or accepted the exact reported gaps as incomplete, and the scoped decision is durable.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "repair",
+              "accept_incomplete"
+            ],
+            "description": "User decision at the criteria-review bound"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
       "connections": {
-        "default": "validate-plan"
+        "success": "route-criteria-review-limit"
       }
     },
     {
+      "id": "route-criteria-review-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-criteria-review-limit.decision"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "reset-criteria-for-repair",
+        "false": "final-review"
+      }
+    },
+    {
+      "id": "reset-criteria-for-repair",
       "type": "expression",
-      "id": "expr-inc-validation-attempt",
       "expressions": [
-        "validation_attempt_count = validation_attempt_count + 1"
+        "criteria_review_round = 1"
       ],
       "connections": {
-        "default": "expr-inc-criteria-round"
+        "default": "fix-criteria-gaps"
+      }
+    },
+    {
+      "id": "fix-criteria-gaps",
+      "type": "agent-directive",
+      "directive": "Read the complete current criteria report at {{workspace_path}}{{verify-criteria.review_file}} and any existing criteria acceptance. Reproduce and repair only current unaccepted findings represented by issues_count; preserve every accepted incomplete scope. Write concise repair evidence to the next unused final/criteria/NNN-fix.md. If no meaningful authorized change can be made or a finding cannot be reproduced, stop here and explain the blocker rather than submitting an unchanged loop.",
+      "completionCondition": "Every reproducible current unaccepted criteria finding is repaired, accepted gaps remain untouched, and a new durable record proves a meaningful artifact change.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "increment-criteria-review-round"
+      }
+    },
+    {
+      "id": "increment-criteria-review-round",
+      "type": "expression",
+      "expressions": [
+        "criteria_review_round = criteria_review_round + 1"
+      ],
+      "connections": {
+        "default": "verify-criteria"
       }
     },
     {
       "id": "final-review",
       "type": "agent-directive",
-      "directive": "FINAL INDEPENDENT REVIEW — delegate to an INDEPENDENT reviewer subagent (do NOT self-review).\n\nThe reviewer RE-DERIVES success-criteria coverage from the FROZEN requirements and the REAL artifacts (not claims).\n\nGive the reviewer ONLY paths/inputs:\n{{#if has_file_access}}- Frozen requirements: {{workspace_path}}/task-requirements.md\n- Step artifacts: {{workspace_path}}/step-*/ (evidence per step)\n- Prior self-pass coverage: {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md{{else}}- Success criteria: {{understand-task.success_criteria}}\n- Expected deliverable: {{understand-task.expected_deliverable}}{{/if}}\n\nReviewer brief (verbatim):\n  YOU ARE the final independent reviewer. Read the frozen requirements and the real step artifacts directly — do not trust the executor's claims.\n  ONE check per success criterion: find concrete evidence in the real artifact (file path + what proves it; run/inspect for code). No concrete evidence = a gap.\n  RETURN final_issues_count (number of unmet criteria; 0 = fully covered) and a FLAT list of gaps.\n\n{{#if has_file_access}}Write the verdict to {{workspace_path}}/final-review.md (criteria, MET/NOT MET, evidence or gap).{{/if}}\n\nReturn final_issues_count honestly — reviewer findings are authoritative.",
-      "completionCondition": "Independent review complete; final_issues_count returned",
+      "directive": "Delegate an independent final review. Read the frozen active requirements, approved plan, real deliverable, durable step attempts/verdicts/outcomes, latest criteria review, and any explicit criteria acceptance. Re-derive completeness rather than trusting executor summaries. Write the complete current finding set to the next unused final/reviews/NNN-review.md. Do not reclassify explicitly accepted criteria gaps as new findings, but identify any additional unresolved defect. Return only review_file and exact issues_count; zero is valid.",
+      "completionCondition": "A complete independent review of the current real result exists and issues_count exactly matches its unresolved findings beyond explicit acceptance.",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "review_file": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^final/reviews/[0-9]{3}-review\\.md$",
+            "description": "Workspace-relative independent final-review report"
+          },
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Exact unresolved independent final-review finding count"
+          }
+        },
         "required": [
-          "final_issues_count"
-        ],
-        "globalInputs": [
-          "final_issues_count"
+          "review_file",
+          "issues_count"
         ]
       },
       "connections": {
@@ -1014,310 +767,263 @@
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "final_issues_count"
+          "contextPath": "final-review.issues_count"
         },
         "right": 0
       },
       "connections": {
         "true": "deliver-result",
-        "false": "fix-gaps"
+        "false": "check-final-review-limit"
       }
     },
     {
+      "id": "check-final-review-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "gte",
+        "left": {
+          "contextPath": "final_review_round"
+        },
+        "right": {
+          "contextPath": "max_review_rounds"
+        }
+      },
+      "connections": {
+        "true": "ask-final-review-limit",
+        "false": "fix-final-review"
+      }
+    },
+    {
+      "id": "ask-final-review-limit",
+      "type": "agent-directive",
+      "directive": "Independent final review reached the configured bound after changed repairs. Show the complete report at {{workspace_path}}{{final-review.review_file}}. Ask whether to continue repair or explicitly accept the unresolved findings as incomplete. Record the exact decision and reason in final/reviews/acceptance.md when accepting, or beside the current review when continuing. Return only the decision.",
+      "completionCondition": "The user explicitly chose repair or accept_incomplete and the exact decision is durable.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "repair",
+              "accept_incomplete"
+            ],
+            "description": "User decision at the final-review bound"
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "route-final-review-limit"
+      }
+    },
+    {
+      "id": "route-final-review-limit",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-final-review-limit.decision"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "reset-final-for-repair",
+        "false": "deliver-result"
+      }
+    },
+    {
+      "id": "reset-final-for-repair",
       "type": "expression",
-      "id": "expr-restart-from-first",
       "expressions": [
-        "current_step = 1",
-        "step_retry = 0"
+        "final_review_round = 1"
       ],
       "connections": {
-        "default": "validate-plan"
+        "default": "fix-final-review"
+      }
+    },
+    {
+      "id": "fix-final-review",
+      "type": "agent-directive",
+      "directive": "Read the complete independent report at {{workspace_path}}{{final-review.review_file}}. Reproduce and repair every confirmed unresolved finding across its whole defect class in the real deliverable. Write concise evidence to the next unused final/reviews/NNN-fix.md. If no meaningful change can be made or a finding cannot be reproduced, stop here and explain the blocker instead of submitting an unchanged loop.",
+      "completionCondition": "Every reproducible final-review finding is repaired and a new durable record proves a meaningful artifact change.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "increment-final-review-round"
+      }
+    },
+    {
+      "id": "increment-final-review-round",
+      "type": "expression",
+      "expressions": [
+        "final_review_round = final_review_round + 1"
+      ],
+      "connections": {
+        "default": "reset-criteria-review-round"
+      }
+    },
+    {
+      "id": "deliver-result",
+      "type": "agent-directive",
+      "directive": "Derive the truthful final result from task-requirements.md, the approved current plan, durable decisions and step outcomes, latest criteria and independent final reviews when present, explicit requirement changes, and incomplete-acceptance records. If the latest decision for the still-open current step is finish_incomplete, read that exact durable decision, stop without further execution or repair, force delivery_status=incomplete, and disclose the open step, remaining active obligations, and user reason. Otherwise use delivery_status=complete only when no active obligation remains unresolved; use incomplete for explicitly accepted gaps or unresolved findings. Write the complete bounded result to final/delivery.md and disclose every incomplete scope in both the file and concise summary. Return only delivery_file, delivery_status, and summary.",
+      "completionCondition": "The durable delivery accurately reflects the latest applicable state; finish_incomplete always produces disclosed incomplete delivery without further work; every returned value resolves; and complete versus incomplete is truthful.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_file",
+          "delivery_status",
+          "summary"
+        ],
+        "globalInputs": [
+          "delivery_file",
+          "delivery_status",
+          "summary"
+        ]
+      },
+      "connections": {
+        "success": "notify-completion"
+      }
+    },
+    {
+      "id": "notify-completion",
+      "type": "telegram-notification",
+      "message": "Robust Task finished ({{delivery_status}}).\n\n{{summary}}\n\nDetails: {{delivery_file}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end",
+        "error": "end"
+      }
+    },
+    {
+      "id": "route-retry-choice",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-retry-decision.decision"
+        },
+        "right": "retry"
+      },
+      "connections": {
+        "true": "reset-step-retry",
+        "false": "route-replan-choice"
+      }
+    },
+    {
+      "id": "route-replan-choice",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask-retry-decision.decision"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "replan-from-decision",
+        "false": "deliver-result"
       }
     }
   ],
   "variableRegistry": {
+    "workspace_path": {
+      "type": "string",
+      "description": "Trailing-slash path to the execution workspace",
+      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$"
+    },
+    "current_plan_file": {
+      "type": "string",
+      "description": "Workspace-relative path to the current complete plan",
+      "pattern": "^plans/[0-9]{3}/plan\\.md$"
+    },
+    "total_steps": {
+      "type": "number",
+      "description": "Exact number of steps in the current plan",
+      "minimum": 1,
+      "multipleOf": 1
+    },
     "current_step": {
       "type": "number",
-      "description": "Index of the current step in the plan",
+      "description": "One-based current plan step; total_steps plus one after completion",
+      "minimum": 1,
+      "multipleOf": 1,
       "default": 1
     },
     "step_retry": {
       "type": "number",
-      "description": "Stores step retry",
+      "description": "Zero-based retry index for the current open step",
+      "minimum": 0,
+      "multipleOf": 1,
       "default": 0
     },
     "max_retries": {
       "type": "number",
-      "description": "Stores max retries",
+      "description": "Number of failed step attempts before user escalation",
+      "minimum": 1,
+      "multipleOf": 1,
       "default": 3
     },
-    "has_file_access": {
+    "plan_review_round": {
+      "type": "number",
+      "description": "Current automatic plan-review round within the bounded escalation policy",
+      "minimum": 1,
+      "multipleOf": 1,
+      "default": 1
+    },
+    "criteria_review_round": {
+      "type": "number",
+      "description": "Current automatic criteria-review round within the bounded escalation policy",
+      "minimum": 1,
+      "multipleOf": 1,
+      "default": 1
+    },
+    "final_review_round": {
+      "type": "number",
+      "description": "Current automatic final-review round within the bounded escalation policy",
+      "minimum": 1,
+      "multipleOf": 1,
+      "default": 1
+    },
+    "max_review_rounds": {
+      "type": "number",
+      "description": "Maximum changed-artifact review rounds before an explicit user decision",
+      "minimum": 1,
+      "multipleOf": 1,
+      "default": 5
+    },
+    "delivery_file": {
       "type": "string",
-      "description": "Stores has file access",
-      "default": "no",
+      "description": "Workspace-relative path to the durable final delivery record",
+      "const": "final/delivery.md"
+    },
+    "delivery_status": {
+      "type": "string",
+      "description": "Whether active obligations remain unresolved in the delivered result",
       "enum": [
-        "yes",
-        "no"
+        "complete",
+        "incomplete"
       ]
-    },
-    "task_name": {
-      "type": "string",
-      "description": "Name of the task being broken down",
-      "default": "",
-      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
-    },
-    "task_short_name": {
-      "type": "string",
-      "description": "Stores task short name",
-      "default": "",
-      "minLength": 3,
-      "maxLength": 50
-    },
-    "current_step_action": {
-      "type": "string",
-      "description": "Stores current step action",
-      "default": ""
-    },
-    "current_step_expected_output": {
-      "type": "string",
-      "description": "Output or result",
-      "default": ""
-    },
-    "validation_criteria": {
-      "type": "string",
-      "description": "Criteria for validation",
-      "default": "EXECUTION VALIDATION CRITERIA:\n\n1. EVIDENCE IS MANDATORY:\n- Each step must have proof of completion\n- Evidence types: screenshot, link, file, detailed text description\n- 'Done' without details = NOT accepted\n\n2. STEP VERIFICATION:\n- Does result match expected_output?\n- Is evidence provided and specific?\n- Are there no missing elements?\n\n3. TASK VERIFICATION:\n- All steps completed (done or skipped with reason)?\n- Success criteria from UNDERSTAND phase met?\n- Deliverable ready and matches expectations?"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Stores common mistakes",
-      "default": "COMMON MISTAKES AND HOW TO AVOID:\n\n❌ 'Done!' without verification → ✅ Always provide evidence\n❌ Silently skipping steps → ✅ Explicitly mark skip with reason\n❌ 80% complete = done → ✅ Only 100% = done\n❌ Hallucinations ('sent', 'created') → ✅ Only facts with evidence\n❌ Losing context → ✅ Use step structure from plan\n❌ Mixing action and verification → ✅ Separate: first do, then verify"
-    },
-    "planning_standards": {
-      "type": "string",
-      "description": "No description",
-      "default": "TASK DECOMPOSITION PLANNING STANDARDS (single canon):\n\n1. STEP GRANULARITY:\n- Each step = one logical unit of work (not too small, not too large)\n- One item = one complete task (e.g. \"update workflow to v2.1.0\"), not a micro-step (\"download file\")\n- Avoid micro-steps (\"create file\") and mega-steps (\"implement feature\")\n\n2. DEPENDENCIES:\n- Steps must be in correct execution order\n- Each step's output should enable the next step\n- No circular dependencies\n\n3. VERIFIABILITY:\n- Every step must have clear, measurable expected_output (easy to verify completion)\n- Avoid subjective criteria (\"works well\", \"looks good\")\n\n4. COMPLETENESS:\n- All user requirements must be covered by steps\n- No implicit assumptions about what will be done\n- Each step explicitly states what files/artifacts it produces\n\n5. SELF-SUFFICIENCY:\n- Each step contains ALL information needed for execution: why, what to do, which files to read/modify, where to save, what to commit\n- No references to \"previous steps\" or \"as mentioned before\"\n- Full file paths, not relative references\n\n6. RESILIENCE:\n- Plan must work even if the agent loses context between steps (session archival, forgetting)\n- Each step can be executed in isolation with only its own description\n\n7. STRUCTURED REASONING:\n- Use chain-of-thought for complex steps\n- Explicitly define methods and output formats\n- Document reasoning for non-obvious decisions\n\n8. SUCCESS CRITERIA & HUMAN-IN-THE-LOOP:\n- Success criteria are defined BEFORE work starts and are verifiable (measurable)\n- Plan is shown to the user before execution; escalation is available for problematic steps\n\n9. ATOMICITY & REDUNDANCY (no \"global scope\"):\n- An agent often receives ONE plan item's directive in isolation — other items and any \"general rules\" stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every implementation nuance it needs, even if obvious.\n- Repeat the original task requirements relevant to the item INSIDE the item.\n- DUPLICATE cross-cutting actions into EVERY item (e.g. \"append a progress report to /full/path/report.md\", \"run the tests\", \"make a commit\").\n- There is NO shared/global scope — redundancy across items is REQUIRED, not a smell.\n- Every item carries: why (problem + original requirement), what to do (explicit actions + full paths), the cross-cutting actions, and a measurable expected_output.\n\n10. ITEM STRUCTURE (template for each plan item):\nN. **Task name** (what we're doing)\n   Why: (what problem we're solving)\n   What to do:\n   - specific action 1 with full file paths\n   - specific action 2\n   - save to /full/path/to/file\n   - the cross-cutting actions (progress report, tests, commit)\n   Expected output: (specific, measurable)\n\n11. NO TAIL DEGRADATION:\n- The last items of the plan carry the SAME level of detail and quality as the first ones.\n- Context volume is never an excuse to cut corners on the tail of the plan."
-    },
-    "artifacts": {
-      "type": "array",
-      "description": "Workflow-global artifacts",
-      "items": {
-        "type": "string"
-      }
-    },
-    "criteria_results": {
-      "type": "array",
-      "description": "Workflow-global criteria_results",
-      "items": {
-        "type": "object",
-        "properties": {
-          "criterion": {
-            "type": "string"
-          },
-          "met": {
-            "type": "boolean"
-          },
-          "evidence": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "evidence": {
-      "type": "string",
-      "description": "Workflow-global evidence"
-    },
-    "execution_note": {
-      "type": "string",
-      "description": "Workflow-global execution_note"
-    },
-    "fix_evidence": {
-      "type": "array",
-      "description": "Workflow-global fix_evidence",
-      "items": {
-        "type": "object",
-        "properties": {
-          "gap": {
-            "type": "string"
-          },
-          "fix": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "fixes_applied": {
-      "type": "array",
-      "description": "Workflow-global fixes_applied",
-      "items": {
-        "type": "string"
-      }
-    },
-    "gaps_fixed": {
-      "type": "string",
-      "description": "Workflow-global gaps_fixed",
-      "enum": [
-        "yes"
-      ]
-    },
-    "notes": {
-      "type": "string",
-      "description": "Workflow-global notes"
-    },
-    "plan_saved_to_file": {
-      "type": "string",
-      "description": "Workflow-global plan_saved_to_file",
-      "enum": [
-        "yes",
-        "no"
-      ]
-    },
-    "process_id_saved": {
-      "type": "string",
-      "description": "Workflow-global process_id_saved",
-      "enum": [
-        "yes"
-      ]
-    },
-    "recommendations": {
-      "type": "array",
-      "description": "Workflow-global recommendations",
-      "items": {
-        "type": "string"
-      }
-    },
-    "requirements_saved": {
-      "type": "string",
-      "description": "Workflow-global requirements_saved",
-      "enum": [
-        "yes"
-      ]
-    },
-    "retry_approach": {
-      "type": "string",
-      "description": "Workflow-global retry_approach"
-    },
-    "revision_reason": {
-      "type": "string",
-      "description": "Workflow-global revision_reason"
-    },
-    "skipped_recorded": {
-      "type": "string",
-      "description": "Workflow-global skipped_recorded",
-      "enum": [
-        "yes"
-      ]
-    },
-    "step_completed": {
-      "type": "string",
-      "description": "Workflow-global step_completed",
-      "enum": [
-        "yes",
-        "no"
-      ]
-    },
-    "step_result_saved": {
-      "type": "string",
-      "description": "Workflow-global step_result_saved",
-      "enum": [
-        "yes"
-      ]
-    },
-    "steps": {
-      "type": "array",
-      "description": "Workflow-global steps",
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "number"
-          },
-          "action": {
-            "type": "string"
-          },
-          "expected_output": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "action",
-          "expected_output"
-        ]
-      },
-      "minItems": 1
     },
     "summary": {
       "type": "string",
-      "description": "Workflow-global summary"
+      "description": "Concise truthful terminal summary",
+      "minLength": 1,
+      "maxLength": 4000
     },
-    "total_steps": {
-      "type": "number",
-      "description": "Workflow-global total_steps"
-    },
-    "user_completed": {
+    "evidence_file": {
       "type": "string",
-      "description": "Workflow-global user_completed",
-      "enum": [
-        "yes"
-      ]
-    },
-    "user_response_text": {
-      "type": "string",
-      "description": "Workflow-global user_response_text",
-      "minLength": 2
-    },
-    "verification_details": {
-      "type": "string",
-      "description": "Workflow-global verification_details"
-    },
-    "workspace_path": {
-      "type": "string",
-      "description": "Workflow-global workspace_path",
-      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$"
-    },
-    "validation_round": {
-      "type": "number",
-      "description": "Plan-validation fix-loop round counter (flow-incremented)",
-      "default": 0
-    },
-    "max_validation_rounds": {
-      "type": "number",
-      "description": "Max plan-validation rounds before user escalation",
-      "default": 5
-    },
-    "criteria_round": {
-      "type": "number",
-      "description": "Criteria-gap fix-loop round counter (flow-incremented)",
-      "default": 0
-    },
-    "max_criteria_rounds": {
-      "type": "number",
-      "description": "Max criteria-gap rounds before user escalation",
-      "default": 5
-    },
-    "validation_attempt_count": {
-      "type": "number",
-      "description": "Completeness self-review attempt counter (report versioning)",
-      "default": 1
-    },
-    "plan_change_target": {
-      "type": "string",
-      "description": "Replan dispatch target (refine|extend|update)",
-      "default": ""
-    },
-    "plan_iteration": {
-      "type": "number",
-      "description": "Plan revision iteration counter",
-      "default": 0
-    },
-    "final_issues_count": {
-      "type": "number",
-      "description": "Count of gaps from final independent review (0 = all criteria covered)",
-      "default": 0
+      "description": "Workspace-relative evidence path for the current exact attempt",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^steps/[0-9]+/plans/[0-9]{3}/attempts/[0-9]+/evidence\\.md$"
     }
   }
 }

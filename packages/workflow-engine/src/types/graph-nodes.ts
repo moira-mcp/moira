@@ -32,7 +32,7 @@ export interface InitialData {
  */
 export interface RegistryVariable {
   /** JSON Schema primitive type of the variable's value. */
-  type: "string" | "number" | "boolean" | "object" | "array" | "null";
+  type: "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
   /** Required human-readable description (single source of truth). */
   description: string;
   /** Optional default value, applied at workflow start when present. */
@@ -84,16 +84,16 @@ export interface AgentDirectiveNode extends BaseNode {
   // neither is rejected.
   inputSchema?: Record<string, unknown>;
 
-  // Safety features from architect feedback
-  maxRetries?: number; // Prevent infinite validation loops (default: 3)
-  retryMessage?: string; // Custom message for retry attempts
-  currentRetries?: number; // Internal counter (runtime state)
+  // Legacy authoring fields retained for compatibility with stored definitions.
+  maxRetries?: number;
+  retryMessage?: string;
+  currentRetries?: number;
 
   connections: {
     success: string; // Next node on successful completion
     error?: string; // Next node on error (v1: structure ready, not used)
     timeout?: string; // Next node on timeout
-    maxRetriesExceeded?: string; // Next node when retries exhausted
+    maxRetriesExceeded?: string;
   };
 }
 

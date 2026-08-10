@@ -41,7 +41,7 @@ describe("test-suite-audit Scenarios", () => {
     });
 
     it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(44);
+      expect(workflow.nodes.length).toBe(49);
     });
   });
 
@@ -199,7 +199,7 @@ describe("test-suite-audit Scenarios", () => {
         {
           name: "Setup rejected, taxonomy fix exhausted, taxonomy rejected then approved",
           description:
-            "User rejects setup once. Taxonomy has persistent issues, fix retries exhausted (maxRetriesExceeded → approve-taxonomy). Taxonomy rejected once then approved",
+            "User rejects setup once. Taxonomy has persistent issues, the bounded fix cycle exhausts and routes to approve-taxonomy. Taxonomy is rejected once and then approved.",
           mockInputs: {
             "collect-project-info": [
               { workspace_path: "audit-ws", test_file_count: 200, source_dirs: ["src", "lib"] },
@@ -481,7 +481,7 @@ describe("test-suite-audit Scenarios", () => {
           },
           expect: {
             status: "completed",
-            reaches: ["ask-user-batch-skip", "check-batch-skip-decision", "end"],
+            reaches: ["ask-user-batch-skip", "check-batch-skip-decision", "end-aborted"],
             avoids: ["resolve-unmapped", "build-coverage-matrix", "generate-report"],
           },
         },
@@ -696,7 +696,7 @@ describe("test-suite-audit Scenarios", () => {
               "fix-test-failures",
               "ask-user-test-failures",
               "check-test-failure-decision",
-              "end",
+              "end-aborted",
             ],
             avoids: ["generate-report", "notify-completion"],
           },

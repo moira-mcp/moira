@@ -139,8 +139,8 @@ sqlite3 ./data/moira.db "SELECT * FROM user;"
 ### 4. Run specific test
 
 ```bash
-npm run test:unit specific-test.test.ts
-npm run test:e2e specific-test.spec.ts
+npm run test:unit -- --file tests/unit/scripts/prompt-migration.test.ts
+npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 ```
 
 ---

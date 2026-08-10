@@ -46,7 +46,7 @@ const testWorkflow: WorkflowGraph = {
     {
       id: "end",
       type: "end",
-      finalOutput: ["result"],
+      finalOutput: ["testVar"],
     },
   ],
 };
