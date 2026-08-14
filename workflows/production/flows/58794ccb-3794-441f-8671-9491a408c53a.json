@@ -1,5 +1,8 @@
 {
   "slug": "deep-corpus-research",
+  "previousSlugs": [
+    "robust-research-task"
+  ],
   "owner": "system-moira",
   "visibility": "public",
   "id": "58794ccb-3794-441f-8671-9491a408c53a",

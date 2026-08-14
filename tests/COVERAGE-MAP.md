@@ -778,7 +778,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-engine
 
-**63 files, 883 tests**
+**63 files, 884 tests**
 
 **unit** (7 files)
 
@@ -794,7 +794,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **integration** (13 files)
 
 - `tests/integration/agent-response-contract.test.ts` — 3 tests 🟢
-- `tests/integration/workflow-catalog-loader.test.ts` — 10 tests 🟢 (+ multi-directory → install end-to-end: merged catalog from two dirs installs incl. real-user-owned flow from the 2nd dir + idempotent; later-dir-wins override before install; WORKFLOWS_DIRS-unset → single bundled default)
+- `tests/integration/workflow-catalog-loader.test.ts` — 13 tests 🟢 (owner/visibility mapping, version-aware idempotence, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior)
 - `tests/integration/database/workflow-privacy-defaults.test.ts` — 2 tests 🟡
 - `tests/integration/manage-workflow-actions.test.ts` — 32 tests 🟢
 - `tests/integration/manage-workflow-new-actions.test.ts` — 29 tests 🟢

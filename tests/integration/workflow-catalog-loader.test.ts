@@ -37,10 +37,12 @@ function entry(
   version: string,
   visibility: "public" | "private" = "public",
   extraNodeDirective = "Do the work",
+  previousSlugs?: string[],
 ): CatalogEntry {
   return {
     id: `${owner}-${slug}`,
     slug,
+    previousSlugs,
     owner,
     visibility,
     isSystemOwner: false,
@@ -234,6 +236,33 @@ describe("Workflow Catalog Loader Integration", () => {
     const result = await installCatalogEntries([entry(OWNER_A, slug, "1.0.0")], deps);
     expect(result.installed).toBe(0);
     expect(await deps.workflowRepo.resolveSlug(slug, OWNER_A)).toBe(id);
+  });
+
+  test("migrates an explicitly replaced catalog slug without creating a duplicate", async () => {
+    const stamp = Date.now();
+    const oldSlug = `loader-old-slug-${stamp}`;
+    const newSlug = `loader-new-slug-${stamp}`;
+    await installCatalogEntries([entry(OWNER_A, oldSlug, "1.0.0")], deps);
+    const originalId = await deps.workflowRepo.resolveSlug(oldSlug, OWNER_A);
+    expect(originalId).toBeTruthy();
+
+    const result = await installCatalogEntries(
+      [entry(OWNER_A, newSlug, "2.0.0", "public", "Renamed flow", [oldSlug])],
+      deps,
+    );
+
+    expect(result.updated).toBe(1);
+    expect(await deps.workflowRepo.resolveSlug(oldSlug, OWNER_A)).toBeNull();
+    expect(await deps.workflowRepo.resolveSlug(newSlug, OWNER_A)).toBe(originalId);
+    const migrated = await deps.workflowRepo.get(originalId!, OWNER_A);
+    expect(migrated?.metadata?.version).toBe("2.0.0");
+    expect(migrated).not.toHaveProperty("previousSlugs");
+
+    const rerun = await installCatalogEntries(
+      [entry(OWNER_A, newSlug, "2.0.0", "public", "Renamed flow", [oldSlug])],
+      deps,
+    );
+    expect(rerun.outcomes[0].outcome).toBe("skipped-unchanged");
   });
 
   describe("multi-directory catalog → install (Step 2 end-to-end)", () => {

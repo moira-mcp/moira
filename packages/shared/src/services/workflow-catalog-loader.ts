@@ -59,6 +59,8 @@ export interface CatalogWorkflowRepo {
   resolveSlugIncludingDeleted(slug: string, ownerUserId: string): Promise<string | null>;
   /** Un-delete a soft-deleted flow so the install can update it instead of colliding on INSERT. */
   restore(workflowId: string, ownerUserId: string): Promise<boolean>;
+  /** Change an existing flow's slug while preserving its database identity. */
+  updateSlug(workflowId: string, ownerUserId: string, newSlug: string): Promise<boolean>;
   get(
     workflowId: string,
     userId: string,
@@ -122,6 +124,36 @@ export async function installCatalogEntry(
 
   let existingWorkflowId = await workflowRepo.resolveSlug(slug, owner);
   let workflowExists = !!existingWorkflowId;
+  let previousSlugToReplace: string | undefined;
+
+  if (!workflowExists && entry.previousSlugs?.length) {
+    const legacyMatches: Array<{ slug: string; id: string; deleted: boolean }> = [];
+    for (const previousSlug of entry.previousSlugs) {
+      const activeId = await workflowRepo.resolveSlug(previousSlug, owner);
+      if (activeId) {
+        legacyMatches.push({ slug: previousSlug, id: activeId, deleted: false });
+        continue;
+      }
+      const deletedId = await workflowRepo.resolveSlugIncludingDeleted(previousSlug, owner);
+      if (deletedId) legacyMatches.push({ slug: previousSlug, id: deletedId, deleted: true });
+    }
+
+    if (legacyMatches.length > 1) {
+      throw new Error(
+        `${owner}/${slug} matches more than one previous catalog identity: ${legacyMatches
+          .map((match) => match.slug)
+          .join(", ")}`,
+      );
+    }
+    if (legacyMatches.length === 1) {
+      const [legacy] = legacyMatches;
+      if (legacy.deleted) await workflowRepo.restore(legacy.id, owner);
+      existingWorkflowId = legacy.id;
+      workflowExists = true;
+      previousSlugToReplace = legacy.slug;
+      log(`  ♻️  ${owner}/${legacy.slug} → ${slug} (catalog identity migration)`);
+    }
+  }
 
   // A soft-deleted row still occupies the (owner, slug) uniqueness slot, so a plain INSERT would
   // collide ("slug already exists for this user") — resolveSlug hides it, but slugExists and the
@@ -178,6 +210,15 @@ export async function installCatalogEntry(
     visibility,
     skipAudit: true,
   });
+
+  if (previousSlugToReplace) {
+    const renamed = await workflowRepo.updateSlug(existingWorkflowId!, owner, slug);
+    if (!renamed) {
+      throw new Error(
+        `Failed to migrate catalog identity ${owner}/${previousSlugToReplace} to ${owner}/${slug}`,
+      );
+    }
+  }
 
   if (workflowExists) {
     log(`  🔄 ${owner}/${slug} (updated)`);
