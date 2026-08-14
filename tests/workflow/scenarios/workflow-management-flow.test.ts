@@ -12,9 +12,9 @@ function loadWorkflow(): WorkflowGraph {
 }
 
 function createInputs(name: string): Record<string, MockInput> {
-  const workspace = `./moira-ws/${name}-create`;
+  const workspace = `./moira-ws/workflow-management-flow-${name}-create`;
   return {
-    "get-action-type": { action_type: "create" },
+    "get-action-type": { action_type: "create", operating_mode: "interactive" },
     "gather-workflow-requirements": { workspace_path: workspace },
     "design-workflow-structure": {},
     "approve-structure": { structure_approved: "yes" },
@@ -32,9 +32,14 @@ function createInputs(name: string): Record<string, MockInput> {
 }
 
 function editInputs(name: string, localPath = `workflows/${name}.json`): Record<string, MockInput> {
-  const workspace = `./moira-ws/${name}-edit`;
+  const workspace = `./moira-ws/workflow-management-flow-${name}-edit`;
   return {
-    "get-action-type": { action_type: "edit", workflow_identity: name, offline_mode: false },
+    "get-action-type": {
+      action_type: "edit",
+      workflow_identity: name,
+      offline_mode: false,
+      operating_mode: "interactive",
+    },
     "prepare-edit-workflow": {
       workspace_path: workspace,
       local_workflow_path: localPath,
@@ -61,13 +66,29 @@ function editInputs(name: string, localPath = `workflows/${name}.json`): Record<
   };
 }
 
+/** Same run as the interactive helpers, but with the mode that routes around the approval gates. */
+function autonomous(inputs: Record<string, MockInput>): Record<string, MockInput> {
+  const entry = inputs["get-action-type"] as Record<string, unknown>;
+  return {
+    ...inputs,
+    "get-action-type": { ...entry, operating_mode: "autonomous" },
+    "report-final-result": {},
+  };
+}
+
 function scenario(
   name: string,
   mockInputs: Record<string, MockInput>,
   reaches: string[] = [],
   avoids: string[] = [],
+  options: Pick<TestScenario, "teleportAfter"> = {},
 ): TestScenario {
-  return { name, mockInputs, expect: { status: "completed", reaches, avoids, maxSteps: 120 } };
+  return {
+    name,
+    mockInputs,
+    ...options,
+    expect: { status: "completed", reaches, avoids, maxSteps: 120 },
+  };
 }
 
 const scenarios: TestScenario[] = [
@@ -164,6 +185,48 @@ const scenarios: TestScenario[] = [
     ["route-error-skip-or-cancel", "end"],
   ),
   scenario(
+    "autonomous create reaches the final report without design or result approval",
+    autonomous(createInputs("autonomous-create")),
+    ["route-operating-mode-structure", "route-operating-mode-final", "report-final-result", "end"],
+    ["approve-structure", "refine-structure", "user-final-review"],
+  ),
+  scenario(
+    "autonomous edit selects the audit scope itself and skips both approval gates",
+    {
+      ...autonomous(editInputs("autonomous-edit")),
+      "ask-full-antipattern-audit": { full_antipattern_audit: "yes" },
+      "audit-complete-workflow": { additional_edit_scope: "Repair the confirmed blocking finding" },
+    },
+    [
+      "audit-complete-workflow",
+      "route-operating-mode-plan",
+      "apply-workflow-changes",
+      "report-final-result",
+      "sync-local-file",
+      "end",
+    ],
+    ["present-edit-plan", "revise-edit-plan", "user-final-review", "revise-edit-requirements"],
+  ),
+  scenario(
+    "process revision teleport re-enters the ordinary analysis and plan contract",
+    {
+      ...editInputs("revise-process"),
+      "teleport-revise-process": {},
+    },
+    [
+      "teleport-revise-process",
+      "analyze-edit-problem",
+      "create-edit-plan",
+      "present-edit-plan",
+      "apply-workflow-changes",
+      "end",
+    ],
+    [],
+    {
+      teleportAfter: { afterNode: "apply-workflow-changes", teleportTo: "teleport-revise-process" },
+    },
+  ),
+  scenario(
     "upload failure can cancel",
     {
       ...createInputs("upload-cancel"),
@@ -187,8 +250,8 @@ describe("workflow-management-flow v5", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("5.0.1");
-    expect(workflow.nodes).toHaveLength(42);
+    expect(workflow.metadata.version).toBe("5.6.0");
+    expect(workflow.nodes).toHaveLength(47);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
 
@@ -199,7 +262,9 @@ describe("workflow-management-flow v5", () => {
       "action_type",
       "workflow_artifact_path",
       "workflow_authoring_reference",
+      "operating_mode",
     ]);
+    expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     const reference = String(workflow.variableRegistry?.workflow_authoring_reference?.default);
     for (const section of [
       "## Engine contract",
@@ -209,6 +274,11 @@ describe("workflow-management-flow v5", () => {
       "## Patterns",
       "## Antipattern catalog",
       "## Reviewer contract",
+      "### Operating mode (autonomous vs interactive)",
+      "### Revising the process while the work runs",
+      "### The reference the run writes itself",
+      "### Routing a repair by the reach of the correction",
+      "### A reference with no address",
       "mechanical validation",
       "decorative flags",
       "do not force the same agent to reread",
@@ -227,6 +297,44 @@ describe("workflow-management-flow v5", () => {
     expect(nodes["ask-full-antipattern-audit"].connections.success).toBe(
       "route-full-antipattern-audit",
     );
+
+    // Autonomous mode is routed, not schema-driven: every approval gate is entered through its
+    // own mode condition, and the autonomous branch continues where approval would have led.
+    for (const [routeId, gateId, approvedTarget] of [
+      ["route-operating-mode-structure", "approve-structure", "create-workflow-json"],
+      ["route-operating-mode-plan", "present-edit-plan", "apply-workflow-changes"],
+      ["route-operating-mode-final", "user-final-review", "report-final-result"],
+    ] as const) {
+      expect(nodes[routeId].type).toBe("condition");
+      expect(nodes[routeId].condition.left.contextPath).toBe("operating_mode");
+      expect(nodes[routeId].condition.right).toBe("autonomous");
+      expect(nodes[routeId].connections.true).toBe(approvedTarget);
+      expect(nodes[routeId].connections.false).toBe(gateId);
+    }
+    expect(nodes["report-final-result"].connections.success).toBe("ask-upload");
+
+    // The revision teleport is a jump target: no ordinary incoming edges, landing on the node that
+    // re-derives scope, so a revision re-enters the ordinary plan/review contract.
+    const teleports = workflow.nodes.filter((candidate) => candidate.type === "teleport");
+    expect(teleports.map((candidate) => candidate.id)).toEqual(["teleport-revise-process"]);
+    expect(
+      workflow.nodes.some((candidate) =>
+        Object.values(
+          (candidate as { connections?: Record<string, string> }).connections ?? {},
+        ).includes("teleport-revise-process"),
+      ),
+    ).toBe(false);
+    expect(nodes["teleport-revise-process"].connections.success).toBe("analyze-edit-problem");
+    expect(nodes["teleport-revise-process"].hint).toContain("belong to their repair owners");
+    expect(nodes["report-final-result"].inputSchema.properties).toEqual({});
+    // The nodes that keep asking in interactive mode must state their autonomous rule.
+    expect(nodes["ask-upload"].directive).toContain("`autonomous` mode do not ask");
+    expect(nodes["audit-complete-workflow"].directive).toContain("select the scope yourself");
+    expect(nodes["prepare-edit-workflow"].directive).toContain("decide on evidence");
+    // A workspace under ./moira-ws/ says which flow produced it.
+    for (const id of ["gather-workflow-requirements", "prepare-edit-workflow"]) {
+      expect(nodes[id].directive).toContain("./moira-ws/workflow-management-flow-");
+    }
 
     const serialized = JSON.stringify(workflow);
     for (const removed of [
