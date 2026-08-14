@@ -14,6 +14,7 @@
 | Input Schema         | JSON Schema validating agent responses                   |
 | Template Variable    | `{{variable}}` syntax for dynamic content                |
 | Connection           | Link between nodes defining flow direction               |
+| Materialize          | One-use tar delivery of registry-backed files            |
 
 ## Execution Management
 
@@ -84,6 +85,9 @@ mcp__moira__session({
   note: "Updated task description",
 });
 ```
+
+For a paused `materialize` node, `current_step` re-presents that node without traversing a
+connection or changing execution state. It issues a fresh one-use download URL each time.
 
 ### Recovery After Interruption
 
@@ -379,7 +383,7 @@ Node task-1: unclosed template bracket '{{' at position 15
 
 **All Nodes:**
 
-- `type` - One of: start, agent-directive, condition, expression, subgraph, telegram-notification, teleport, lock, end
+- `type` - One of: start, agent-directive, condition, expression, subgraph, telegram-notification, teleport, lock, materialize, read-note, write-note, upsert-note, end
 - `id` - Unique within workflow
 - `connections` - Required (except end nodes)
 
@@ -595,6 +599,59 @@ PIN-based execution gate. Creates an execution lock, sends PIN via Telegram with
 4. Stores `_lockId` in context variables for lock lookup on re-entry
 
 **Unlock methods:** PIN validation via MCP step input, Telegram approve button, admin override unlock.
+
+### Materialize Node
+
+Delivers files from the current workflow registry to the agent filesystem without including their
+rendered contents in the agent context.
+
+```json
+{
+  "type": "materialize",
+  "id": "materialize-standards",
+  "basePath": "{{workspace_path}}",
+  "files": [
+    { "path": "standards/planning.md", "from": "planning_standards" },
+    { "path": "plans/.keep", "content": "" }
+  ],
+  "connections": {
+    "success": "create-plan",
+    "error": "materialize-failed"
+  }
+}
+```
+
+| Property              | Required | Contract                                                           |
+| --------------------- | -------- | ------------------------------------------------------------------ |
+| `basePath`            | Yes      | Non-empty templated destination on the agent filesystem            |
+| `files`               | Yes      | 1–100 file declarations                                            |
+| `files[].path`        | Yes      | Templated safe path relative to `basePath`                         |
+| `files[].from`        | One of   | Declared registry string whose current string default is rendered  |
+| `files[].content`     | One of   | Exactly `""` for a skeleton file; non-empty inline text is invalid |
+| `connections.success` | Yes      | Route after completion with `null` or `{}`                         |
+| `connections.error`   | No       | Route for validation, configuration, or token issuance errors      |
+
+The generated directive contains an already POSIX-quoted command. The agent must copy it exactly:
+
+```bash
+mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+```
+
+The tar contains archive-relative entries and extracts under `basePath`; it does not contain the
+destination prefix. Declared and rendered paths must be normalized, relative, and unique, with no
+NUL, absolute/backslash root, empty segment, `.`, or `..`. Runtime limits are 1 MiB UTF-8 content
+per file and 10 MiB total uncompressed content.
+
+The five-minute token is one-use and bound to user, execution, and node. When the step is presented,
+the handler renders `basePath` and the file-path summary shown in the directive; that rendered
+`basePath` is embedded in the issued shell command. When the HTTP request arrives, the route reloads
+the current workflow and re-renders each archive entry path and registry-backed content with the
+bound execution context, including system variables such as `executionId`. A workflow change after
+issuance can therefore change the downloaded archive paths or contents, but it cannot change the
+destination in the already-issued command. Re-presenting the paused node through `current_step`
+creates a new grant and recomputes the directive without advancing the graph. The UI and MCP response
+show paths and counts only, never rendered content. There is no textual fallback; a failed client
+command is a blocker.
 
 ### End Node
 
@@ -903,6 +960,8 @@ Templates processed in:
 - `directive` field of agent-directive nodes
 - `completionCondition` field of agent-directive nodes
 - `message` field of telegram-notification nodes
+- `basePath` and `files[].path` fields of materialize nodes
+- registry-backed materialize file contents when the archive is requested
 
 NOT processed in `inputSchema` or `condition` fields.
 

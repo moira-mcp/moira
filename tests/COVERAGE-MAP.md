@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **262 files**, **3335 tests**
+- **40 domains**, **263 files**, **3345 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -54,8 +54,8 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | user-blocking       | 3     | 27    | e2e:2, integration:1                                           |
 | user-management     | 3     | 34    | api:1, e2e:2                                                   |
 | validation          | 4     | 90    | api:1, integration:1, unit:2                                   |
-| web-ui              | 7     | 61    | e2e:7                                                          |
-| workflow-engine     | 63    | 883   | api:4, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:27 |
+| web-ui              | 8     | 64    | e2e:7, unit:1                                                  |
+| workflow-engine     | 63    | 890   | api:4, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:27 |
 | workflow-scenarios  | 25    | 167   | workflow:25                                                    |
 
 ## Domain Details
@@ -762,10 +762,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### web-ui
 
-**6 files, 38 tests**
+**7 files, 41 tests**
 
-**unit** (1 files)
+**unit** (2 files)
 
+- `tests/unit/web-frontend/compact-node.test.tsx` — 3 tests 🟢 (same-node refresh of materialize tooltip, validation text, and subgraph navigation callback)
 - `tests/unit/web-frontend/quick-start-card.test.ts` — 14 tests 🟢 (i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked)
 
 **e2e** (5 files)
@@ -778,14 +779,14 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-engine
 
-**63 files, 884 tests**
+**63 files, 891 tests**
 
 **unit** (7 files)
 
 - `tests/unit/logging/compute-changes.test.ts` — 11 tests 🟢
 - `tests/unit/shared/workflow-query-service.test.ts` — 45 tests 🟢 (incl. setWorkflowVariable preserves rich schema)
 - `tests/unit/shared/workflow-catalog.test.ts` — 18 tests 🟢 (+ readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; + getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop)
-- `tests/unit/web-frontend/workflow-transformer.test.ts` — 13 tests 🟢
+- `tests/unit/web-frontend/workflow-transformer.test.ts` — 20 tests 🟢 (including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning)
 - `tests/unit/workflow-engine/variable-resolver.test.ts` — 9 tests 🟢
 - `tests/unit/workflow-engine/registry-converter.test.ts` — 13 tests 🟢
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — 14 tests 🟢 (incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection)

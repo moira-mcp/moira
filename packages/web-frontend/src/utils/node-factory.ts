@@ -15,6 +15,7 @@ import {
   ReadNoteNode as ReadNoteNodeType,
   WriteNoteNode as WriteNoteNodeType,
   UpsertNoteNode as UpsertNoteNodeType,
+  MaterializeNode as MaterializeNodeType,
   isStartNode,
   isAgentDirectiveNode,
   isConditionNode,
@@ -24,6 +25,7 @@ import {
   isReadNoteNode,
   isWriteNoteNode,
   isUpsertNoteNode,
+  isMaterializeNode,
   ExpressionNode as ExpressionNodeType,
   StructuredCondition,
 } from "../types";
@@ -37,6 +39,7 @@ import {
   ReadNoteNodeData,
   WriteNoteNodeData,
   UpsertNoteNodeData,
+  MaterializeNodeData,
   EndNodeData,
   ExpressionNodeData,
   DEFAULT_NODE_STYLES,
@@ -63,6 +66,7 @@ export const nodeTypes: NodeTypes = {
   "read-note": CompactNode,
   "write-note": CompactNode,
   "upsert-note": CompactNode,
+  materialize: CompactNode,
   end: CompactNode,
 };
 
@@ -128,6 +132,10 @@ export class NodeFactory {
 
     if (isUpsertNoteNode(mcpNode)) {
       return this.createUpsertNoteNode(mcpNode, baseNodeData);
+    }
+
+    if (isMaterializeNode(mcpNode)) {
+      return this.createMaterializeNode(mcpNode, baseNodeData);
     }
 
     if (isEndNode(mcpNode)) {
@@ -456,6 +464,38 @@ export class NodeFactory {
     return {
       id: mcpNode.id,
       type: "upsert-note",
+      position: { x: 0, y: 0 },
+      data: nodeData,
+      draggable: true,
+      selectable: true,
+      deletable: false,
+    };
+  }
+
+  /** Create Materialize Node without exposing rendered content or grant tokens. */
+  private static createMaterializeNode(
+    mcpNode: MaterializeNodeType,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    baseData: any,
+  ): MoiraReactFlowNode {
+    const noun = mcpNode.files.length === 1 ? "file" : "files";
+    const nodeData: MaterializeNodeData = {
+      ...baseData,
+      nodeType: "materialize",
+      label: mcpNode.metadata?.displayName || "Materialize Files",
+      description: `${mcpNode.files.length} ${noun} → ${mcpNode.basePath}`,
+      basePath: mcpNode.basePath,
+      filePaths: mcpNode.files.map((file) => file.path),
+      fileCount: mcpNode.files.length,
+      successConnection: mcpNode.connections.success,
+      errorConnection: mcpNode.connections.error,
+      color: DEFAULT_NODE_STYLES.materialize.colors.primary,
+      icon: DEFAULT_NODE_STYLES.materialize.icon,
+    };
+
+    return {
+      id: mcpNode.id,
+      type: "materialize",
       position: { x: 0, y: 0 },
       data: nodeData,
       draggable: true,
@@ -822,6 +862,20 @@ export const NodeValidation = {
         if (isUpsertNoteNode(node)) {
           if (!node.connections?.default) {
             errors.push("Upsert-note node must have default connection");
+          }
+        }
+        break;
+
+      case "materialize":
+        if (isMaterializeNode(node)) {
+          if (!node.basePath) {
+            errors.push("Materialize node must have a base path");
+          }
+          if (!node.files || node.files.length === 0) {
+            errors.push("Materialize node must have at least one file");
+          }
+          if (!node.connections?.success) {
+            errors.push("Materialize node must have success connection");
           }
         }
         break;

@@ -49,6 +49,7 @@ export type MoiraNodeType =
   | "read-note"
   | "write-note"
   | "upsert-note"
+  | "materialize"
   | "end"
   | "fallback";
 
@@ -163,6 +164,15 @@ export interface UpsertNoteNodeData extends MoiraNodeData {
   errorConnection?: string;
 }
 
+export interface MaterializeNodeData extends MoiraNodeData {
+  nodeType: "materialize";
+  basePath: string;
+  filePaths: string[];
+  fileCount: number;
+  successConnection: string;
+  errorConnection?: string;
+}
+
 /**
  * Fallback node data for unknown/unsupported node types
  * Displays with warning badge instead of crashing the application
@@ -185,6 +195,7 @@ export type MoiraNodeDataUnion =
   | ReadNoteNodeData
   | WriteNoteNodeData
   | UpsertNoteNodeData
+  | MaterializeNodeData
   | EndNodeData
   | FallbackNodeData;
 
@@ -408,6 +419,19 @@ export const DEFAULT_NODE_STYLES: Record<MoiraNodeType, NodeStyleConfig> = {
     minWidth: 120,
     minHeight: 40,
   },
+  materialize: {
+    nodeType: "materialize",
+    colors: {
+      primary: "#6366f1",
+      background: "#eef2ff",
+      border: "#a5b4fc",
+      text: "#4338ca",
+    },
+    shape: "rectangle",
+    icon: "archive-restore",
+    minWidth: 120,
+    minHeight: 40,
+  },
   fallback: {
     nodeType: "fallback",
     colors: {
@@ -467,6 +491,10 @@ export const NODE_HANDLE_POSITIONS: Record<
     sources: [Position.Bottom],
   },
   "upsert-note": {
+    targets: [Position.Top],
+    sources: [Position.Bottom],
+  },
+  materialize: {
     targets: [Position.Top],
     sources: [Position.Bottom],
   },

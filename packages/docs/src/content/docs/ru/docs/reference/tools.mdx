@@ -512,6 +512,8 @@ session({ action: "execution_context", executionId: "abc-123" })
 - Условие завершения
 - Input schema
 - Информацию о контексте
+- Для приостановленной ноды `materialize` — новую одноразовую команду скачивания без продвижения
+  выполнения
 
 **Пример:**
 
@@ -519,6 +521,17 @@ session({ action: "execution_context", executionId: "abc-123" })
 session({ action: "current_step", executionId: "abc-123" })
 → { directive: "Complete task...", completionCondition: "...", inputSchema: {...} }
 ```
+
+Для `materialize` скопируйте возвращённую команду без изменений, затем завершите шаг значением
+`null` или `{}`:
+
+```bash
+mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+```
+
+При каждом показе выпускается новый URL: он живёт пять минут, привязан к текущим пользователю,
+выполнению и ноде и скачивается один раз. Архив содержит пути относительно `basePath`;
+отрендеренное содержимое файлов MCP-инструмент не возвращает. Текстового fallback нет.
 
 ### Action: update-note
 

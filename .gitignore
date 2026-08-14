@@ -84,6 +84,7 @@ Thumbs.db
 .test-graph-storage-*
 .graph-storage-test
 claude-temp-files/
+agent_temp_files_local/
 
 # Generated test-discovery artifact (contains absolute project paths)
 tests/DISCOVERED-TESTS.json

@@ -633,6 +633,8 @@ Repeats current workflow step without advancing execution.
 - Completion condition
 - Input schema
 - Context information
+- For a paused `materialize` node, a freshly generated one-use download command without advancing
+  execution
 
 **Example:**
 
@@ -640,6 +642,16 @@ Repeats current workflow step without advancing execution.
 session({ action: "current_step", executionId: "abc-123" })
 → { directive: "Complete task...", completionCondition: "...", inputSchema: {...} }
 ```
+
+For `materialize`, copy the returned command exactly and then complete the step with `null` or `{}`:
+
+```bash
+mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+```
+
+Each presentation issues a new URL that expires after five minutes, is bound to the current user,
+execution, and node, and can be downloaded once. The archive contains paths relative to
+`basePath`; rendered file contents are never returned by the MCP tool. There is no textual fallback.
 
 ### Action: update-note
 

@@ -150,6 +150,22 @@ export interface UpsertNoteNode extends BaseNode {
   };
 }
 
+export interface MaterializeFile {
+  path: string;
+  from?: string;
+  content?: "";
+}
+
+export interface MaterializeNode extends BaseNode {
+  type: "materialize";
+  basePath: string;
+  files: MaterializeFile[];
+  connections: {
+    success: string;
+    error?: string;
+  };
+}
+
 export type WorkflowNode =
   | StartNode
   | AgentDirectiveNode
@@ -159,6 +175,7 @@ export type WorkflowNode =
   | ReadNoteNode
   | WriteNoteNode
   | UpsertNoteNode
+  | MaterializeNode
   | EndNode;
 
 export interface WorkflowMetadata {
@@ -280,6 +297,10 @@ export function isWriteNoteNode(node: WorkflowNode): node is WriteNoteNode {
 
 export function isUpsertNoteNode(node: WorkflowNode): node is UpsertNoteNode {
   return node.type === "upsert-note";
+}
+
+export function isMaterializeNode(node: WorkflowNode): node is MaterializeNode {
+  return node.type === "materialize";
 }
 
 export interface WorkflowFileInfo {

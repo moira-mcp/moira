@@ -39,6 +39,9 @@ Moira supports interactive node types and automatic node types:
   <Card title="Lock" icon="lock">
     PIN-based execution gate with Telegram approval.
   </Card>
+  <Card title="Materialize" icon="seti:archive">
+    Deliver registry-backed files as a one-use tar archive.
+  </Card>
 </CardGrid>
 
 ## Start Node
@@ -378,6 +381,63 @@ PIN-based execution gate. Creates a lock, sends PIN via Telegram with Approve in
 2. Subsequent visits: checks lock status or validates PIN from input
 3. Routes to `unlocked` connection when lock is resolved
 4. Stores `_lockId` in context variables for lock lookup on re-entry
+
+## Materialize Node
+
+Delivers author-defined files to the agent filesystem without placing their rendered contents in
+the agent context. The server creates a one-use tar download; the agent runs the exact command in
+the generated directive and then completes the step with `null` or `{}`.
+
+```json
+{
+  "id": "materialize-standards",
+  "type": "materialize",
+  "basePath": "{{workspace_path}}",
+  "files": [
+    { "path": "standards/planning.md", "from": "planning_standards" },
+    { "path": "plans/.keep", "content": "" }
+  ],
+  "connections": {
+    "success": "create-plan",
+    "error": "materialize-failed"
+  }
+}
+```
+
+| Property              | Required | Description                                                         |
+| --------------------- | -------- | ------------------------------------------------------------------- |
+| `basePath`            | Yes      | Templated destination directory on the agent filesystem             |
+| `files`               | Yes      | 1–100 archive entries                                               |
+| `files[].path`        | Yes      | Templated safe path relative to `basePath`                          |
+| `files[].from`        | One of   | `variableRegistry` string entry whose current default is the source |
+| `files[].content`     | One of   | Must be exactly `""`; creates a skeleton file                       |
+| `connections.success` | Yes      | Next node after empty completion input                              |
+| `connections.error`   | No       | Route for validation, configuration, or grant-issuance failure      |
+
+`from` and `content` are mutually exclusive. A `from` entry must name a declared string variable
+with a string `default`; arbitrary inline text is rejected. When the step is presented, the server
+renders `basePath` and the file-path summary shown in the directive. The rendered `basePath` is part
+of the issued command. When the HTTP archive is requested, the server reloads the current workflow
+and re-renders each archive entry path and registry-backed content with the bound execution context.
+Changing the workflow after the command was issued can therefore change the downloaded paths or
+contents, but not that command's destination. Re-presenting the paused step uses the current
+definition to issue a new command and grant instead of using a seeded execution snapshot.
+
+The generated POSIX command has this shape, with every argument already shell-quoted:
+
+```bash
+mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+```
+
+Copy the emitted command exactly. Archive entries are relative to `basePath`; the tar never
+contains `basePath` itself. Paths must be normalized, relative, non-empty, unique after template
+rendering, and contain no empty, `.`, `..`, absolute, backslash-rooted, or NUL segments. Limits are
+100 files, 1 MiB UTF-8 content per file, and 10 MiB total uncompressed content.
+
+The URL expires after five minutes, is bound to the current user, execution, and node, and succeeds
+only once. Calling `session({ action: "current_step" })` while paused issues a new one-use URL without
+advancing the graph. There is intentionally no textual content fallback: if the command cannot be
+run or the download fails, report the blocker instead of copying file contents through chat.
 
 ## Input Schema
 

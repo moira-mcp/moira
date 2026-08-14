@@ -29,6 +29,9 @@ Graph structure is analyzed for correctness:
 - **Circular dependencies** - Loops are detected and flagged
 - **Unreachable nodes** - Nodes no entry point leads to. Entry points are the start node and every `teleport`: a teleport has no ordinary incoming connections, so whatever it routes to is reachable through `step({ teleportTo })` and is not reported
 - **Registry entries** - Each `variableRegistry` entry must be a valid JSON Schema (a malformed `items`/`pattern`/etc. is a blocking error) with a non-empty description
+- **Materialize declarations** - Every entry has exactly one source (`from` or empty `content`),
+  registry sources are string defaults, declared paths are safe and unique, and all connection
+  targets exist
 
 ### 3. Input Validation
 
@@ -240,6 +243,22 @@ This means templates only ever execute in author-controlled static node fields, 
   and reference them explicitly. Prefer explicit named variables over `{{context.variables}}`
   full-dumps, which can expose the entire variable bag.
 </Aside>
+
+## Materialize Validation
+
+A `materialize` node is accepted only when `basePath` is non-empty, `files` contains 1–100 entries,
+and `connections.success` is present. Every declared `files[].path` must be a normalized relative
+path without NUL, absolute roots, backslash roots, empty segments, `.`, or `..`; declared paths must
+be unique. Each entry declares exactly one of:
+
+- `from`: the name of a `variableRegistry` entry with `type: "string"` and a string `default`;
+- `content: ""`: an empty skeleton file. Non-empty inline content is rejected.
+
+Because paths can contain templates, the same safety and collision checks run again after
+rendering against the current execution context. Runtime rendering additionally enforces 1 MiB per
+file and 10 MiB total uncompressed content. A failure while preparing the step routes through the
+optional `connections.error`; otherwise it is raised. The HTTP download validates the one-use,
+five-minute grant and its user/execution/node binding before rendering any content.
 
 ## Best Practices
 

@@ -20,9 +20,11 @@ import {
   isReadNoteNode,
   isWriteNoteNode,
   isUpsertNoteNode,
+  isMaterializeNode,
   ReadNoteNode,
   WriteNoteNode,
   UpsertNoteNode,
+  MaterializeNode,
 } from "../types";
 
 import {
@@ -39,6 +41,7 @@ import {
   ReadNoteNodeData,
   WriteNoteNodeData,
   UpsertNoteNodeData,
+  MaterializeNodeData,
   FallbackNodeData,
   LayoutOptions,
   DEFAULT_LAYOUT_OPTIONS,
@@ -266,6 +269,23 @@ export class WorkflowTransformer {
         color: DEFAULT_NODE_STYLES["upsert-note"].colors.primary,
         icon: DEFAULT_NODE_STYLES["upsert-note"].icon,
       } as UpsertNoteNodeData;
+    }
+
+    if (isMaterializeNode(node)) {
+      const materializeNode = node as MaterializeNode;
+      return {
+        ...baseData,
+        nodeType: "materialize",
+        label: node.metadata?.displayName || "Materialize Files",
+        description: this.generateMaterializeDescription(materializeNode),
+        basePath: materializeNode.basePath,
+        filePaths: materializeNode.files.map((file) => file.path),
+        fileCount: materializeNode.files.length,
+        successConnection: materializeNode.connections.success,
+        errorConnection: materializeNode.connections.error,
+        color: DEFAULT_NODE_STYLES.materialize.colors.primary,
+        icon: DEFAULT_NODE_STYLES.materialize.icon,
+      } as MaterializeNodeData;
     }
 
     // Handle telegram-notification nodes (not in WorkflowNode union, runtime-only check)
@@ -536,6 +556,12 @@ export class WorkflowTransformer {
       ? `find by ${node.search.tag || node.search.keyPattern || "criteria"}`
       : "create new";
     return `${searchDesc} → ${node.keyTemplate}`;
+  }
+
+  /** Generate a content-free summary for a materialize node. */
+  private static generateMaterializeDescription(node: MaterializeNode): string {
+    const noun = node.files.length === 1 ? "file" : "files";
+    return `${node.files.length} ${noun} → ${node.basePath}`;
   }
 
   /**

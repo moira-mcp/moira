@@ -26,6 +26,8 @@ import {
   ArrowRight,
   ArrowLeft,
   FileJson,
+  ArchiveRestore,
+  Files,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +52,7 @@ const NODE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   subgraph: Workflow,
   end: Square,
   expression: Code,
+  materialize: ArchiveRestore,
 };
 
 /**
@@ -122,6 +125,8 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
   const message = data.message as string | undefined;
   const expressions = data.expressions as string[] | undefined;
   const graphId = data.graphId as string | undefined;
+  const basePath = data.basePath as string | undefined;
+  const filePaths = data.filePaths as string[] | undefined;
   const validationErrors = data.validationErrors as string[] | undefined;
   const validationWarnings = data.validationWarnings as string[] | undefined;
 
@@ -134,6 +139,7 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
     subgraph: "bg-chart-3/10 text-chart-3",
     end: "bg-destructive/10 text-destructive",
     expression: "bg-chart-3/10 text-chart-3",
+    materialize: "bg-primary/10 text-primary",
   };
 
   return (
@@ -243,6 +249,28 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
             {graphId && (
               <Section title={t("components.workflowGraph.nodeDetails.subgraphId", "Subgraph ID")}>
                 <code className="text-sm font-mono bg-muted px-2 py-1 rounded">{graphId}</code>
+              </Section>
+            )}
+
+            {/* Materialize declaration summary. Rendered contents and download grants are never UI data. */}
+            {basePath && filePaths && (
+              <Section title="Materialize" icon={ArchiveRestore}>
+                <div className="space-y-2 text-sm">
+                  <code className="font-mono bg-muted px-2 py-1 rounded block overflow-x-auto">
+                    {basePath}
+                  </code>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Files className="w-3.5 h-3.5" />
+                    <span>{filePaths.length === 1 ? "1 file" : `${filePaths.length} files`}</span>
+                  </div>
+                  <ul className="space-y-1">
+                    {filePaths.map((path) => (
+                      <li key={path} className="text-xs font-mono break-all">
+                        {path}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </Section>
             )}
 
