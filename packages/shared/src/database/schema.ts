@@ -264,10 +264,14 @@ export const auditLog = sqliteTable("auditLog", {
 export const workflowTokens = sqliteTable("workflow_tokens", {
   token: text("token").primaryKey(),
   workflowId: text("workflow_id"), // null for upload (workflow doesn't exist yet)
+  executionId: text("execution_id").references(() => workflowExecution.executionId, {
+    onDelete: "cascade",
+  }),
+  nodeId: text("node_id"),
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-  type: text("type").notNull(), // 'upload' | 'download'
+  type: text("type").notNull(), // 'upload' | 'download' | 'materialize'
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   used: integer("used", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

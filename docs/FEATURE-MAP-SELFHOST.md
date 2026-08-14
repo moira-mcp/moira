@@ -35,15 +35,15 @@ Individual targeted overrides remain possible (e.g. `REQUIRE_EMAIL_VERIFICATION=
 
 ## Zone A — workflow-engine (execution core)
 
-| Block                             | What                                                                                                            | Verdict | Effort | Note                                        |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------- | ------ | ------------------------------------------- |
-| Graph executor (universal/engine) | Graph execution, routing, error-as-pause                                                                        | 🟢 KEEP | —      | Pure core, deterministic, DI                |
-| 12 node types                     | start/end/agent-directive/teleport/condition/expression/subgraph/telegram/lock/read-note/write-note/upsert-note | 🟢 KEEP | —      | Safe parsers (NOT eval)                     |
-| Template processor `{{}}`         | Variable interpolation, escaping                                                                                | 🟢 KEEP | —      | —                                           |
-| Validation (AJV + structural)     | Schema + graph validation                                                                                       | 🟢 KEEP | —      | —                                           |
-| AgentMessageQueue                 | Protocol-agnostic message transport                                                                             | 🟢 KEEP | —      | —                                           |
-| Telegram-notification handler     | Notifications                                                                                                   | 🟢 KEEP | —      | Graceful degradation (no token → skip)      |
-| Lock handler (PIN)                | PIN gate, telegram                                                                                              | 🟢 KEEP | —      | PIN stored as a scrypt hash (`pin-hash.ts`) |
+| Block                             | What                                                                                                                                     | Verdict | Effort | Note                                                 |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------ | ---------------------------------------------------- |
+| Graph executor (universal/engine) | Graph execution, routing, error-as-pause                                                                                                 | 🟢 KEEP | —      | Pure core, deterministic, DI                         |
+| Workflow node types               | start/end/agent-directive/teleport/condition/expression/subgraph/telegram-notification/lock/materialize/read-note/write-note/upsert-note | 🟢 KEEP | —      | Safe parsers (NOT eval); bounded tar materialization |
+| Template processor `{{}}`         | Variable interpolation, escaping                                                                                                         | 🟢 KEEP | —      | —                                                    |
+| Validation (AJV + structural)     | Schema + graph validation                                                                                                                | 🟢 KEEP | —      | —                                                    |
+| AgentMessageQueue                 | Protocol-agnostic message transport                                                                                                      | 🟢 KEEP | —      | —                                                    |
+| Telegram-notification handler     | Notifications                                                                                                                            | 🟢 KEEP | —      | Graceful degradation (no token → skip)               |
+| Lock handler (PIN)                | PIN gate, telegram                                                                                                                       | 🟢 KEEP | —      | PIN stored as a scrypt hash (`pin-hash.ts`)          |
 
 **Zone summary:** ~70% pure core, all KEEP. External deps via DI (clean interfaces).
 

@@ -99,6 +99,13 @@
       "when": 1773216000000,
       "tag": "0012_self_host_quotas_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1786723200000,
+      "tag": "0013_materialize_tokens",
+      "breakpoints": true
     }
   ]
 }

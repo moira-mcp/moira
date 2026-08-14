@@ -14,15 +14,23 @@ export interface RequestLoggerOptions {
   logger: ServiceLogger;
 }
 
+export function sanitizeRequestUrl(url: string): string {
+  return url.replace(/(\/api\/public\/executions\/materialize\/)[^/?#]+/g, "$1[REDACTED]");
+}
+
 /**
  * Create morgan middleware integrated with winston logger
  * Logs all HTTP requests with method, url, status, duration, and GeoIP country
  */
 export function requestLogger(options: RequestLoggerOptions) {
   const { logger } = options;
+  morgan.token("safe-url", (req) => {
+    const expressRequest = req as Request;
+    return sanitizeRequestUrl(expressRequest.originalUrl || expressRequest.url || "");
+  });
 
   // Custom morgan format: method url status duration
-  return morgan(":method :url :status :response-time ms", {
+  return morgan(":method :safe-url :status :response-time ms", {
     stream: {
       write: (message: string) => {
         logger.info(message.trim());

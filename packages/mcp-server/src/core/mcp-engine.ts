@@ -236,6 +236,18 @@ class MCPEngineClass {
     }
   }
 
+  async getCurrentStep(processId: string): Promise<string> {
+    const execution = await this.executor.getExecutionState(processId);
+    if (!execution) {
+      throw new NotFoundError(`Process ${processId} not found`, { processId });
+    }
+
+    const presented = await this.executor.presentCurrentStep(processId);
+    if (presented !== null) return presented;
+
+    return await this.executeStep(processId, undefined);
+  }
+
   /**
    * Log successful step execution to audit trail
    */

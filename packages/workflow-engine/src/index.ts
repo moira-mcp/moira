@@ -16,6 +16,7 @@ export * from "./handlers/index.js";
 
 // Services
 export * from "./services/index.js";
+export * from "./materialize/index.js";
 
 // Factory patterns
 export {

@@ -3,11 +3,172 @@
  * Verifies transformation of workflow nodes to React Flow visualization format
  */
 
-import { describe, test, expect } from "@jest/globals";
+import { describe, test, expect, jest } from "@jest/globals";
 import { WorkflowTransformer } from "../../../packages/web-frontend/src/utils/workflow-transformer";
 import { WorkflowGraph } from "../../../packages/web-frontend/src/types";
+import {
+  CompactNode,
+  NodeFactory,
+  NodeValidation,
+  nodeTypes,
+} from "../../../packages/web-frontend/src/utils/node-factory";
 
 describe("WorkflowTransformer", () => {
+  describe("Materialize Node", () => {
+    test("registers materialize on the shared CompactNode renderer", () => {
+      expect(nodeTypes.materialize).toBe(CompactNode);
+    });
+
+    test("creates declaration-only materialize data through NodeFactory", () => {
+      const node: WorkflowGraph["nodes"][number] = {
+        type: "materialize",
+        id: "prepare-files",
+        basePath: "workspace/{{projectSlug}}",
+        files: [{ path: "README.md", from: "projectReadme" }],
+        connections: { success: "done", error: "failed" },
+      };
+
+      const result = NodeFactory.createReactFlowNode(node);
+
+      expect(result).toMatchObject({
+        id: "prepare-files",
+        type: "materialize",
+        data: {
+          nodeType: "materialize",
+          label: "Materialize Files",
+          description: "1 file → workspace/{{projectSlug}}",
+          basePath: "workspace/{{projectSlug}}",
+          fileCount: 1,
+          filePaths: ["README.md"],
+          successConnection: "done",
+          errorConnection: "failed",
+        },
+      });
+      expect(result.data).not.toHaveProperty("token");
+      expect(result.data).not.toHaveProperty("renderedFiles");
+      expect(result.data).not.toHaveProperty("files");
+    });
+
+    test("accepts a complete materialize declaration in frontend validation", () => {
+      const result = NodeValidation.validateNode({
+        type: "materialize",
+        id: "prepare-files",
+        basePath: "workspace",
+        files: [{ path: "README.md", content: "" }],
+        connections: { success: "done" },
+      });
+
+      expect(result).toEqual({ isValid: true, errors: [] });
+    });
+
+    test.each([
+      {
+        condition: "base path is empty",
+        node: {
+          type: "materialize",
+          id: "prepare-files",
+          basePath: "",
+          files: [{ path: "README.md", content: "" }],
+          connections: { success: "done" },
+        },
+        error: "Materialize node must have a base path",
+      },
+      {
+        condition: "file list is empty",
+        node: {
+          type: "materialize",
+          id: "prepare-files",
+          basePath: "workspace",
+          files: [],
+          connections: { success: "done" },
+        },
+        error: "Materialize node must have at least one file",
+      },
+      {
+        condition: "success connection is missing",
+        node: {
+          type: "materialize",
+          id: "prepare-files",
+          basePath: "workspace",
+          files: [{ path: "README.md", content: "" }],
+          connections: {},
+        },
+        error: "Materialize node must have success connection",
+      },
+    ])("rejects a materialize declaration when $condition", ({ node, error }) => {
+      const result = NodeValidation.validateNode(node as unknown as WorkflowGraph["nodes"][number]);
+
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain(error);
+    });
+
+    test("uses CompactNode data with a content-free file summary and success/error edges", () => {
+      const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+      const workflow: WorkflowGraph = {
+        id: "materialize-demo",
+        metadata: {
+          name: "Materialize Demo",
+          version: "1.0.0",
+          description: "Materialize frontend contract",
+        },
+        nodes: [
+          {
+            type: "start",
+            id: "start",
+            connections: { default: "prepare-files" },
+          },
+          {
+            type: "materialize",
+            id: "prepare-files",
+            basePath: "workspace/{{projectSlug}}",
+            files: [
+              { path: "README.md", from: "projectReadme" },
+              { path: "src/index.ts", content: "" },
+            ],
+            connections: { success: "done", error: "failed" },
+          },
+          { type: "end", id: "done" },
+          { type: "end", id: "failed" },
+        ],
+      };
+
+      const result = WorkflowTransformer.transformWorkflow(workflow);
+      const materialize = result.nodes.find((node) => node.id === "prepare-files");
+
+      expect(materialize).toBeDefined();
+      expect(materialize!.type).toBe("materialize");
+      expect(materialize!.data).toMatchObject({
+        nodeType: "materialize",
+        label: "Materialize Files",
+        description: "2 files → workspace/{{projectSlug}}",
+        basePath: "workspace/{{projectSlug}}",
+        fileCount: 2,
+        filePaths: ["README.md", "src/index.ts"],
+        successConnection: "done",
+        errorConnection: "failed",
+      });
+      expect(materialize!.data).not.toHaveProperty("token");
+      expect(materialize!.data).not.toHaveProperty("renderedFiles");
+      expect(materialize!.data).not.toHaveProperty("files");
+
+      const materializeEdges = result.edges.filter((edge) => edge.source === "prepare-files");
+      expect(materializeEdges).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            target: "done",
+            data: expect.objectContaining({ connectionType: "success", style: "solid" }),
+          }),
+          expect.objectContaining({
+            target: "failed",
+            data: expect.objectContaining({ connectionType: "error", style: "dashed" }),
+          }),
+        ]),
+      );
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
   describe("Note Node Types", () => {
     test("should transform read-note node correctly", () => {
       const workflow: WorkflowGraph = {

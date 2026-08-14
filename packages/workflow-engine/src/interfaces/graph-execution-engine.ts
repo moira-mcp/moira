@@ -13,6 +13,17 @@ export interface IGraphExecutionEngine {
     startNodeId: string,
     userInput?: unknown,
   ): Promise<GraphExecutionResult>;
+
+  /**
+   * Re-present one materialize node without traversing any of its connections.
+   * The handler must pause; every other result is surfaced as a presentation failure.
+   */
+  presentMaterializeNode(
+    graph: WorkflowGraph,
+    context: ExecutionContext,
+    messageQueue: AgentMessageQueue,
+    nodeId: string,
+  ): Promise<void>;
 }
 
 export interface GraphExecutionResult {

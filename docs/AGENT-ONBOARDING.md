@@ -83,6 +83,8 @@ curl http://localhost:${DOCKER_PORT}/api/health        # Backend API health
 - **telegram-notification** - Auto-executes, sends message, continues
 - **teleport** - Jump target only reachable via explicit teleport, behaves like agent-directive
 - **subgraph** - Delegates to another workflow, maps input/output context
+- **lock** - Pauses at a PIN/Telegram approval gate until unlocked
+- **materialize** - Pauses with a one-use command that delivers registry-backed files as a tar archive
 - **end** - Auto-executes, collects final data, completes
 
 Automatic node types (execute without agent interaction):

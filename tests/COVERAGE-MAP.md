@@ -5,58 +5,58 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **262 files**, **3335 tests**
+- **40 domains**, **267 files**, **3369 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
 
-| Domain              | Files | Tests | Levels                                                         |
-| ------------------- | ----- | ----- | -------------------------------------------------------------- |
-| admin               | 7     | 89    | api:3, e2e:4                                                   |
-| api-tokens          | 5     | 79    | unit:1, api:2, mcp-tools:1, e2e:1                              |
-| artifacts           | 8     | 179   | api:1, e2e:3, mcp-tools:3, unit:1                              |
-| audit               | 4     | 66    | e2e:1, integration:2, mcp-tools:1                              |
-| auth                | 16    | 112   | api:4, e2e:10, integration:2                                   |
-| chat                | 3     | 53    | integration:1, unit:2                                          |
-| context             | 7     | 73    | integration:2, mcp-tools:1, unit:4                             |
-| deployment-mode     | 8     | 49    | unit:4, integration:1, api:2, e2e:1                            |
-| email               | 1     | 22    | unit:1                                                         |
-| self-host-limits    | 2     | 12    | unit:2                                                         |
-| pin-hash            | 1     | 7     | unit:1                                                         |
-| error-handling      | 11    | 133   | api:1, e2e:2, integration:2, mcp-tools:1, unit:5               |
-| execution           | 13    | 108   | api:1, e2e:3, integration:5, mcp-tools:3, unit:1               |
-| execution-lock      | 9     | 79    | unit:2, workflow:1, mcp-tools:2, api:2, e2e:1                  |
-| expressions         | 4     | 16    | api:1, e2e:1, mcp-tools:2                                      |
-| file-transfer       | 1     | 4     | mcp-tools:1                                                    |
-| health              | 1     | 4     | e2e:1                                                          |
-| help-system         | 1     | 26    | unit:1                                                         |
-| http-infrastructure | 5     | 62    | api:2, unit:3                                                  |
-| i18n                | 11    | 100   | e2e:10, unit:1                                                 |
-| infrastructure      | 4     | 87    | unit:4                                                         |
-| input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1               |
-| inspector           | 1     | 1     | e2e:1                                                          |
-| mcp-clients         | 2     | 50    | e2e:1, unit:1                                                  |
-| mcp-tools           | 14    | 135   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2               |
-| metrics             | 1     | 20    | unit:1                                                         |
-| node-handlers       | 1     | 6     | unit:1                                                         |
-| notes               | 7     | 166   | api:1, e2e:2, integration:1, mcp-tools:1, unit:2               |
-| other               | 3     | 24    | e2e:2, integration:1                                           |
-| rate-limiting       | 2     | 13    | integration:1, unit:1                                          |
-| security            | 2     | 49    | unit:2                                                         |
-| settings            | 11    | 142   | api:3, e2e:2, integration:3, mcp-tools:1, unit:2               |
-| sharing             | 5     | 125   | api:1, e2e:1, integration:1, mcp-tools:1, unit:1               |
-| slug-handle         | 4     | 56    | api:2, integration:2                                           |
-| storage             | 1     | 42    | unit:1                                                         |
-| telegram            | 2     | 18    | integration:1, unit:1                                          |
-| template-engine     | 2     | 6     | integration:2                                                  |
-| tokens              | 2     | 21    | integration:1, mcp-tools:1                                     |
-| url-routing         | 5     | 65    | unit:5                                                         |
-| user-blocking       | 3     | 27    | e2e:2, integration:1                                           |
-| user-management     | 3     | 34    | api:1, e2e:2                                                   |
-| validation          | 4     | 90    | api:1, integration:1, unit:2                                   |
-| web-ui              | 7     | 61    | e2e:7                                                          |
-| workflow-engine     | 63    | 883   | api:4, e2e:7, integration:13, mcp-tools:5, unit:7, workflow:27 |
-| workflow-scenarios  | 25    | 167   | workflow:25                                                    |
+| Domain              | Files | Tests | Levels                                                          |
+| ------------------- | ----- | ----- | --------------------------------------------------------------- |
+| admin               | 7     | 89    | api:3, e2e:4                                                    |
+| api-tokens          | 5     | 79    | unit:1, api:2, mcp-tools:1, e2e:1                               |
+| artifacts           | 8     | 179   | api:1, e2e:3, mcp-tools:3, unit:1                               |
+| audit               | 4     | 66    | e2e:1, integration:2, mcp-tools:1                               |
+| auth                | 16    | 112   | api:4, e2e:10, integration:2                                    |
+| chat                | 3     | 53    | integration:1, unit:2                                           |
+| context             | 7     | 73    | integration:2, mcp-tools:1, unit:4                              |
+| deployment-mode     | 8     | 49    | unit:4, integration:1, api:2, e2e:1                             |
+| email               | 1     | 22    | unit:1                                                          |
+| self-host-limits    | 2     | 12    | unit:2                                                          |
+| pin-hash            | 1     | 7     | unit:1                                                          |
+| error-handling      | 11    | 133   | api:1, e2e:2, integration:2, mcp-tools:1, unit:5                |
+| execution           | 13    | 108   | api:1, e2e:3, integration:5, mcp-tools:3, unit:1                |
+| execution-lock      | 9     | 79    | unit:2, workflow:1, mcp-tools:2, api:2, e2e:1                   |
+| expressions         | 4     | 16    | api:1, e2e:1, mcp-tools:2                                       |
+| file-transfer       | 1     | 4     | mcp-tools:1                                                     |
+| health              | 1     | 4     | e2e:1                                                           |
+| help-system         | 1     | 26    | unit:1                                                          |
+| http-infrastructure | 5     | 62    | api:2, unit:3                                                   |
+| i18n                | 11    | 100   | e2e:10, unit:1                                                  |
+| infrastructure      | 4     | 87    | unit:4                                                          |
+| input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1                |
+| inspector           | 1     | 1     | e2e:1                                                           |
+| mcp-clients         | 2     | 50    | e2e:1, unit:1                                                   |
+| mcp-tools           | 14    | 129   | api:4, e2e:2, integration:5, mcp-tools:1, unit:2                |
+| metrics             | 1     | 20    | unit:1                                                          |
+| node-handlers       | 1     | 6     | unit:1                                                          |
+| notes               | 7     | 166   | api:1, e2e:2, integration:1, mcp-tools:1, unit:2                |
+| other               | 3     | 24    | e2e:2, integration:1                                            |
+| rate-limiting       | 2     | 13    | integration:1, unit:1                                           |
+| security            | 2     | 49    | unit:2                                                          |
+| settings            | 11    | 142   | api:3, e2e:2, integration:3, mcp-tools:1, unit:2                |
+| sharing             | 5     | 125   | api:1, e2e:1, integration:1, mcp-tools:1, unit:1                |
+| slug-handle         | 4     | 56    | api:2, integration:2                                            |
+| storage             | 1     | 42    | unit:1                                                          |
+| telegram            | 2     | 18    | integration:1, unit:1                                           |
+| template-engine     | 2     | 6     | integration:2                                                   |
+| tokens              | 2     | 24    | integration:1, mcp-tools:1                                      |
+| url-routing         | 5     | 65    | unit:5                                                          |
+| user-blocking       | 3     | 27    | e2e:2, integration:1                                            |
+| user-management     | 3     | 34    | api:1, e2e:2                                                    |
+| validation          | 4     | 90    | api:1, integration:1, unit:2                                    |
+| web-ui              | 7     | 41    | e2e:5, unit:2                                                   |
+| workflow-engine     | 69    | 924   | api:4, e2e:7, integration:14, mcp-tools:5, unit:11, workflow:28 |
+| workflow-scenarios  | 25    | 167   | workflow:25                                                     |
 
 ## Domain Details
 
@@ -445,7 +445,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### mcp-tools
 
-**14 files, 128 tests**
+**14 files, 129 tests**
 
 **unit** (2 files)
 
@@ -457,7 +457,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/integration/cli-mcp-parity.test.ts` — 16 tests 🟢
 - `tests/integration/essential-cases-split.test.ts` — 2 tests 🟢
-- `tests/integration/get-current-step-enhanced.test.ts` — 2 tests 🟢
+- `tests/integration/get-current-step-enhanced.test.ts` — 3 tests 🟢 (including read-only materialize re-presentation versus empty public `step()` completion)
 - `tests/integration/mcp-text-service.test.ts` — 12 tests 🟢
 - `tests/integration/step-response-child-info.test.ts` — 4 tests 🟡
 
@@ -687,11 +687,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### tokens
 
-**2 files, 21 tests**
+**2 files, 24 tests**
 
 **integration** (1 files)
 
-- `tests/integration/workflow-file-tokens.test.ts` — 10 tests 🟢
+- `tests/integration/workflow-file-tokens.test.ts` — 13 tests 🟢 (including fixed five-minute materialize TTL, grant binding, and atomic one-use claim)
 
 **mcp-tools** (1 files)
 
@@ -762,10 +762,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### web-ui
 
-**6 files, 38 tests**
+**7 files, 41 tests**
 
-**unit** (1 files)
+**unit** (2 files)
 
+- `tests/unit/web-frontend/compact-node.test.tsx` — 3 tests 🟢 (same-node refresh of materialize tooltip, validation text, and subgraph navigation callback)
 - `tests/unit/web-frontend/quick-start-card.test.ts` — 14 tests 🟢 (i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked)
 
 **e2e** (5 files)
@@ -778,21 +779,25 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-engine
 
-**63 files, 884 tests**
+**69 files, 924 tests**
 
-**unit** (7 files)
+**unit** (11 files)
 
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — 2 tests 🟢 (both shipped nginx modes suppress materialize grant URLs from access logs)
+- `tests/unit/shared/logging/express-middleware.test.ts` — 3 tests 🟢 (materialize grant redaction with routing/query preservation and unrelated-URL non-regression)
+- `tests/unit/web-backend/execution-materialize.test.ts` — 5 tests 🟢 (current-definition fetch, execution binding, tar response, one-use endpoint behavior, non-consumption on render overflow, and expected-4xx versus unexpected-boundary error mapping)
 - `tests/unit/logging/compute-changes.test.ts` — 11 tests 🟢
 - `tests/unit/shared/workflow-query-service.test.ts` — 45 tests 🟢 (incl. setWorkflowVariable preserves rich schema)
 - `tests/unit/shared/workflow-catalog.test.ts` — 18 tests 🟢 (+ readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; + getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop)
-- `tests/unit/web-frontend/workflow-transformer.test.ts` — 13 tests 🟢
+- `tests/unit/web-frontend/workflow-transformer.test.ts` — 20 tests 🟢 (including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning)
 - `tests/unit/workflow-engine/variable-resolver.test.ts` — 9 tests 🟢
 - `tests/unit/workflow-engine/registry-converter.test.ts` — 13 tests 🟢
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — 14 tests 🟢 (incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection)
 - `tests/unit/workflow-engine/in-memory-terminal-result.test.ts` — 7 tests 🟢 (strict terminal-envelope preservation, owner-identity validation, and fail-closed malformed/falsy-result rejection)
 
-**integration** (13 files)
+**integration** (14 files)
 
+- `tests/integration/workflow-file-tokens.test.ts` — 13 tests 🟢 (upload/download lifecycle plus five-minute materialize TTL boundary, real SQLite grant-failure normalization, user/execution/node binding, and atomic one-use claim)
 - `tests/integration/agent-response-contract.test.ts` — 3 tests 🟢
 - `tests/integration/workflow-catalog-loader.test.ts` — 13 tests 🟢 (owner/visibility mapping, version-aware idempotence, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior)
 - `tests/integration/database/workflow-privacy-defaults.test.ts` — 2 tests 🟡
@@ -807,7 +812,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/integration/workflow-outputs.test.ts` — 3 tests 🟡
 - `tests/integration/workflow-pagination.test.ts` — 7 tests 🟢
 
-**workflow** (27 files)
+**workflow** (28 files)
 
 - `tests/workflow/engine/agent-directive-validation.test.ts` — 9 tests 🟢
 - `tests/workflow/engine/catalog-validation.test.ts` — 11 tests 🟢 (incl. pinned 43-path/13-workflow End migration inventory, real four-scope terminal projections, workspace_path guard, numeric counter-pinning, and subgraph error routes)
@@ -820,6 +825,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/engine/max-nodes-validation.test.ts` — 4 tests 🟢
 - `tests/workflow/engine/node-handlers.test.ts` — 19 tests 🟢 (including strict empty/nested/missing End projection and runtime-input rejection)
 - `tests/workflow/engine/node-type-validation.test.ts` — 23 tests 🟢
+- `tests/workflow/engine/materialize-node.test.ts` — 10 tests 🟢 (materialize schema/source-default contract, handler directive summary, expected/unexpected preparation failures, isolated re-presentation that cannot traverse an error connection, shell encoding, current-registry rendering, tar output, path safety, collision detection, and exact resource boundaries)
 - `tests/workflow/engine/note-handlers.test.ts` — 34 tests 🟢
 - `tests/workflow/engine/note-node-validation.test.ts` — 15 tests 🟢
 - `tests/workflow/engine/path-resolver.test.ts` — 31 tests 🟢
@@ -876,7 +882,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/scenarios/content-creation.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/coverage.test.ts` — 11 tests 🟢
 - `tests/workflow/scenarios/data-analysis.test.ts` — 5 tests 🔴
-- `tests/workflow/scenarios/development-workflow.test.ts` — 6 tests 🟢 (source-grounded filesystem-first state/authority contract; operating-mode routing with an autonomous run that skips the requirements gate; local test-adequacy and architecture gates plus the delegated per-unit completeness review with its repair loop; the teleport replan entry returning through plan revision; conditional screenshot/HTML directives; representative baseline, planning, repair, replan, runtime, expensive, affected-documentation, accepted-unit checkpoint success/repository-failure/abort, final acceptance/reconciliation, rejection, and abort routes; 100% node/branch scenario coverage, the five addressed standards rendered only by the workspace owner, the flow-named workspace, and the reviewer contract living in one place; every per-unit gate naming the baseline the first iteration writes, with the four subject/staleness rules present in the review standard; the reach of a repair declared by the repairer with a required two-value enum, routed by the three reach conditions and never mentioned by a reviewer; and the observable difference between the two routes — a contained repair returns to its own gate with the cheap gate run once, a spreading one runs it twice)
+- `tests/workflow/scenarios/development-workflow.test.ts` — 7 tests 🟢 (source-grounded filesystem-first state/authority contract; operating-mode routing with an autonomous run that skips the requirements gate; local test-adequacy and architecture gates plus the delegated per-unit completeness review with its repair loop; the teleport replan entry returning through plan revision; conditional screenshot/HTML directives; representative baseline, planning, repair, replan, runtime, expensive, affected-documentation, accepted-unit checkpoint success/repository-failure/abort, final acceptance/reconciliation, rejection, and abort routes; 100% node/branch scenario coverage, the five addressed standards rendered only by the workspace owner, the flow-named workspace, and the reviewer contract living in one place; every per-unit gate naming the baseline the first iteration writes, with the four subject/staleness rules present in the review standard; the reach of a repair declared by the repairer with a required two-value enum, routed by the three reach conditions and never mentioned by a reviewer; and the observable difference between the two routes — a contained repair returns to its own gate with the cheap gate run once, a spreading one runs it twice; and the round counter owned by the engine — three expression writers, no agent schema carrying it, every repair naming the round record it writes, and a two-repair run ending on the third round)
 - `tests/workflow/scenarios/directive-validation.test.ts` — 4 tests 🟡
 - `tests/workflow/scenarios/iterative-research.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/marketing-campaign.test.ts` — 5 tests 🟡

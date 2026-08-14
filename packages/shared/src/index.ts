@@ -19,6 +19,7 @@ export {
   requestLogger,
   geoipLogger,
   requestContextMiddleware,
+  sanitizeRequestUrl,
 } from "./logging/express-middleware.js";
 export {
   getRequestContext,

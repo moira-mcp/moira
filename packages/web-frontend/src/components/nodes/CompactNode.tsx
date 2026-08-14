@@ -24,6 +24,7 @@ import {
   FileText,
   FileEdit,
   FilePlus,
+  ArchiveRestore,
   HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -121,6 +122,13 @@ const NODE_CONFIG: Record<
     bgColor: "bg-chart-5/10",
     textColor: "text-chart-5",
   },
+  materialize: {
+    icon: ArchiveRestore,
+    label: "MATERIALIZE",
+    borderColor: "border-primary",
+    bgColor: "bg-primary/10",
+    textColor: "text-primary",
+  },
   fallback: {
     icon: HelpCircle,
     label: "UNKNOWN",
@@ -196,10 +204,13 @@ function arePropsEqual(prevProps: CompactNodeProps, nextProps: CompactNodeProps)
     prevData.nodeId === nextData.nodeId &&
     prevData.nodeType === nextData.nodeType &&
     prevData.label === nextData.label &&
+    getTooltipDescription(prevData) === getTooltipDescription(nextData) &&
     prevData.validationStatus === nextData.validationStatus &&
+    prevData.validationErrors?.[0] === nextData.validationErrors?.[0] &&
     prevData.isCurrent === nextData.isCurrent &&
     prevData.isError === nextData.isError &&
-    prevData.layoutDirection === nextData.layoutDirection
+    prevData.layoutDirection === nextData.layoutDirection &&
+    prevData.onWorkflowNavigate === nextData.onWorkflowNavigate
   );
 }
 

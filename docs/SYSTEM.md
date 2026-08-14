@@ -5,7 +5,8 @@
 ### Graph Execution Engine
 
 - **UniversalGraphExecutor** - Main workflow processor
-- **Node Handlers** - Type-specific processors (start, end, agent-directive, condition, expression, subgraph, telegram-notification, teleport + automatic: read-note, write-note, upsert-note)
+- **Node Handlers** - Type-specific processors for the `GraphNode` union, including pausing,
+  branching, automatic, notification, locking, and materialization nodes
 - **AgentMessageQueue** - Agent communication system
 - **GraphTemplateProcessor** - `{{variable}}` interpolation
 - **ContextManager** - Variable and state management
@@ -472,7 +473,9 @@ type GraphNode =
   | ReadNoteNode
   | WriteNoteNode
   | UpsertNoteNode
-  | TeleportNode;
+  | LockNode
+  | TeleportNode
+  | MaterializeNode;
 
 interface StartNode {
   type: "start";
@@ -630,7 +633,9 @@ interface UnifiedValidationResult {
 - **Required nodes** — Exactly one start node, at least one end node
 - **Unique IDs** — All node IDs must be unique
 - **Connection targets** — All references must exist
-- **Node types** — 9 interactive types (start, end, agent-directive, condition, expression, subgraph, telegram-notification, teleport, lock) + 3 automatic types (read-note, write-note, upsert-note)
+- **Node types** — exactly the `GraphNode` union: start, end, agent-directive, condition,
+  expression, subgraph, telegram-notification, teleport, lock, materialize, read-note, write-note,
+  and upsert-note
 - **Unreachable nodes** — Warning for disconnected nodes
 - **Node limits** — Max 200 nodes per workflow
 - **Subgraph references** — Self-referencing circular dependencies rejected as error

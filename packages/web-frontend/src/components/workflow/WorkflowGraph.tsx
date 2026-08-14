@@ -66,6 +66,7 @@ const nodeTypes = {
   "read-note": CompactNode,
   "write-note": CompactNode,
   "upsert-note": CompactNode,
+  materialize: CompactNode,
   end: CompactNode,
   fallback: CompactNode,
 };

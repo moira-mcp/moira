@@ -27,6 +27,8 @@ import {
   Tag,
   Hash,
   BookOpen,
+  ArchiveRestore,
+  Files,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -58,6 +60,7 @@ const NODE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   subgraph: Workflow,
   end: Square,
   expression: Code,
+  materialize: ArchiveRestore,
 };
 
 // Type badge colors
@@ -69,6 +72,7 @@ const TYPE_COLORS: Record<string, string> = {
   subgraph: "bg-chart-3/10 text-chart-3",
   end: "bg-destructive/10 text-destructive",
   expression: "bg-chart-3/10 text-chart-3",
+  materialize: "bg-primary/10 text-primary",
 };
 
 /**
@@ -234,6 +238,8 @@ const NodeDetail: React.FC<{
   const message = data.message as string | undefined;
   const expressions = data.expressions as string[] | undefined;
   const graphId = data.graphId as string | undefined;
+  const basePath = data.basePath as string | undefined;
+  const filePaths = data.filePaths as string[] | undefined;
   const validationErrors = data.validationErrors as string[] | undefined;
   const validationWarnings = data.validationWarnings as string[] | undefined;
 
@@ -333,6 +339,28 @@ const NodeDetail: React.FC<{
       {graphId && (
         <Section title={t("components.workflowGraph.nodeDetails.subgraphId", "Subgraph ID")}>
           <code className="text-sm font-mono bg-muted px-2 py-1 rounded">{graphId}</code>
+        </Section>
+      )}
+
+      {/* Declaration-only summary: never expose rendered contents or one-use grants. */}
+      {basePath && filePaths && (
+        <Section title="Materialize" icon={ArchiveRestore}>
+          <div className="space-y-2 text-sm">
+            <code className="font-mono bg-muted px-2 py-1 rounded block overflow-x-auto">
+              {basePath}
+            </code>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Files className="w-3.5 h-3.5" />
+              <span>{filePaths.length === 1 ? "1 file" : `${filePaths.length} files`}</span>
+            </div>
+            <ul className="space-y-1">
+              {filePaths.map((path) => (
+                <li key={path} className="text-xs font-mono break-all">
+                  {path}
+                </li>
+              ))}
+            </ul>
+          </div>
         </Section>
       )}
 
