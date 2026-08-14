@@ -10,8 +10,8 @@ import { Aside } from "@astrojs/starlight/components";
 Static Workflow Configuration is the practice of declaring curated rules, standards, checklists, and instructions as global variables in the workflow `variableRegistry` with a `default` value. These are deliberately placed so the agent sees them on every relevant step, ensuring consistent behavior throughout the workflow.
 
 <Aside type="tip">
-  This is a **correct pattern** — do not confuse with [Anti-Pattern #7: Dynamic Data in
-  Variables](/docs/patterns/anti-patterns/#7-dynamic-data-in-workflow-variables). A curated
+  This is a **correct pattern** — do not confuse with [Dynamic Data in Workflow
+  Variables](/docs/patterns/anti-patterns/#dynamic-data-in-workflow-variables). A curated
   `variableRegistry` default is fundamentally different from dynamic data flowing between steps.
 </Aside>
 
@@ -39,7 +39,7 @@ Step directive: "Create plan following {{planning_standards}}"
 
 ## Why Not Files?
 
-Storing critical instructions in external files and asking the agent to read them creates [Anti-Pattern #12: Externalizing Critical Instructions](/docs/patterns/anti-patterns/#12-externalizing-critical-instructions-to-files):
+Storing critical instructions in external files and asking the agent to read them creates [Externalizing Critical Instructions to Files](/docs/patterns/anti-patterns/#externalizing-critical-instructions-to-files):
 
 | Approach                     | Delivery guarantee                    | I/O cost            | Hallucination risk                  |
 | ---------------------------- | ------------------------------------- | ------------------- | ----------------------------------- |
@@ -81,7 +81,7 @@ Directive references: `"Create development plan following {{planning_standards}}
 ### Not This Pattern: Dynamic Extraction Results
 
 ```json
-// ❌ This is Anti-Pattern #7, not static configuration
+// ❌ This is dynamic data in workflow variables, not static configuration
 {
   "inputSchema": {
     "extraction_results": { "type": "object" }
@@ -90,7 +90,7 @@ Directive references: `"Create development plan following {{planning_standards}}
 // Data generated during execution, grows unboundedly
 ```
 
-## Distinction from Anti-Pattern #7
+## Distinction from Dynamic Data
 
 | Characteristic     | Static Configuration (✅)    | Dynamic Data Abuse (❌)  |
 | ------------------ | ---------------------------- | ------------------------ |
@@ -100,6 +100,30 @@ Directive references: `"Create development plan following {{planning_standards}}
 | **Purpose**        | Guide agent behavior         | Pass data between steps  |
 | **Changes**        | Only when workflow is edited | Every execution          |
 
+## When the Text Needs an Address
+
+A registry default is the source of the text in every case. What changes with the size and role of
+the text is whether the run also writes it down.
+
+A short rule that one node applies whole belongs in that node's directive: giving it a path would add
+a read and an indirection for nothing. A body of criteria that outlives the step — planning rules,
+engineering principles, a review contract — is a document: readers navigate it by section, return to
+it across steps, and independent reviewers must read it themselves. That needs an address.
+
+The workspace owner writes it once, in the turn where it already creates the workspace, and later
+directives name the path:
+
+```json
+{
+  "directive": "Use the applicable sections of {{workspace_path}}/authoring-reference.md. The path is canonical; reread unchanged content only when it is absent, uncertain, or changed."
+}
+```
+
+Without an address the same body is rendered into every directive that obeys it, and a subagent — who
+never sees the parent's directive — cannot be given it at all, so the parent starts copying the text
+into a prompt. That failure is catalogued as
+[A Reference With No Address](/docs/patterns/anti-patterns/#a-reference-with-no-address).
+
 ## Size Guidance
 
 Static configuration is acceptable at any size if the content is:
@@ -108,4 +132,4 @@ Static configuration is acceptable at any size if the content is:
 - Stable across executions
 - Essential for agent behavior
 
-Real-world examples: `planning_requirements` (6.7KB), `code_quality_principles` (4.4KB), `anti_pattern_catalog` (3.2KB) — all legitimate static configuration in production workflows.
+The bundled workflows use this for their largest instruction sets: `moira/workflow-management-flow` carries its complete authoring reference as a `workflow_authoring_reference` default, and `moira/software-development-flow` carries its planning requirements the same way.

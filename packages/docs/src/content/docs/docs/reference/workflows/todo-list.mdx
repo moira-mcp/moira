@@ -32,6 +32,30 @@ Todo List owns a one-based cursor. It projects the current task, tells the agent
 
 If the task is incomplete or blocked, the agent must not call `step()`. It reports the verified blocker to the user, so the cursor stays on the current task. A schema-valid acknowledgement advances the cursor exactly once. Exhausting the ordered array completes the workflow.
 
+## Revising the checklist mid-run
+
+When the checklist itself turns out wrong — remaining tasks are obsolete, missing, or in the wrong order — the agent jumps to the revision node instead of finishing a list it knows is wrong:
+
+```js
+mcp__moira__step({ processId, teleportTo: "teleport-revise-tasks" })
+```
+
+This is a jump target: no step leads into it, so a revision is always a deliberate decision. It is not an escape from a task that is merely hard, blocked, or failing — that case stays with the rule above.
+
+The revision step asks for the complete corrected checklist and the position to continue from:
+
+```json
+{
+  "tasks": [
+    { "action": "…already executed, unchanged…", "expected_result": "…" },
+    { "action": "Repair the configuration the first task revealed as wrong", "expected_result": "The service starts with the corrected configuration" }
+  ],
+  "resume_from_task": 2
+}
+```
+
+Already executed tasks keep their original positions, because position is task identity and the run resumes by position. Everything before `resume_from_task` is treated as done and is not executed again. The workflow recomputes the total from the submitted array — the agent never supplies counts or cursor arithmetic — and continues through the ordinary cursor check, so a position past the end of the new list simply completes the run.
+
 ## Supplying an existing checklist
 
 A caller starts Todo as a child workflow and includes its schema-valid ready task array in the
