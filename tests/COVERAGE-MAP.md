@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **267 files**, **3369 tests**
+- **40 domains**, **267 files**, **3372 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -32,7 +32,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | help-system         | 1     | 26    | unit:1                                                          |
 | http-infrastructure | 5     | 62    | api:2, unit:3                                                   |
 | i18n                | 11    | 100   | e2e:10, unit:1                                                  |
-| infrastructure      | 4     | 87    | unit:4                                                          |
+| infrastructure      | 4     | 88    | unit:4                                                          |
 | input-parsing       | 4     | 60    | functional:1, integration:1, mcp-tools:1, unit:1                |
 | inspector           | 1     | 1     | e2e:1                                                           |
 | mcp-clients         | 2     | 50    | e2e:1, unit:1                                                   |
@@ -55,7 +55,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | user-management     | 3     | 34    | api:1, e2e:2                                                    |
 | validation          | 4     | 90    | api:1, integration:1, unit:2                                    |
 | web-ui              | 7     | 41    | e2e:5, unit:2                                                   |
-| workflow-engine     | 69    | 924   | api:4, e2e:7, integration:14, mcp-tools:5, unit:11, workflow:28 |
+| workflow-engine     | 69    | 926   | api:4, e2e:7, integration:14, mcp-tools:5, unit:11, workflow:28 |
 | workflow-scenarios  | 25    | 167   | workflow:25                                                     |
 
 ## Domain Details
@@ -413,7 +413,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/unit/scripts/detect-test-env.test.ts` — 8 tests 🟢
 - `tests/unit/scripts/remigrate-registry-schemas.test.ts` — 31 tests 🟢 (registry schema restoration: strengthen type-guard, mergeOldSchemas safe merge/union/absence-unbounded/items-properties-reconcile/required-intersection, gate-enum inference, collectExpressionTargets counter-guard, bumpMinor)
-- `tests/unit/shared/version-utils.test.ts` — 32 tests 🟢
+- `tests/unit/shared/version-utils.test.ts` — 33 tests 🟢 (including root-only catalog metadata normalization without masking nested graph content)
 
 ### input-parsing
 
@@ -788,7 +788,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/unit/web-backend/execution-materialize.test.ts` — 5 tests 🟢 (current-definition fetch, execution binding, tar response, one-use endpoint behavior, non-consumption on render overflow, and expected-4xx versus unexpected-boundary error mapping)
 - `tests/unit/logging/compute-changes.test.ts` — 11 tests 🟢
 - `tests/unit/shared/workflow-query-service.test.ts` — 45 tests 🟢 (incl. setWorkflowVariable preserves rich schema)
-- `tests/unit/shared/workflow-catalog.test.ts` — 18 tests 🟢 (+ readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; + getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop)
+- `tests/unit/shared/workflow-catalog.test.ts` — 19 tests 🟢 (catalog identity/ownership metadata is excluded from the executable graph; readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop)
 - `tests/unit/web-frontend/workflow-transformer.test.ts` — 20 tests 🟢 (including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning)
 - `tests/unit/workflow-engine/variable-resolver.test.ts` — 9 tests 🟢
 - `tests/unit/workflow-engine/registry-converter.test.ts` — 13 tests 🟢
@@ -799,7 +799,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/integration/workflow-file-tokens.test.ts` — 13 tests 🟢 (upload/download lifecycle plus five-minute materialize TTL boundary, real SQLite grant-failure normalization, user/execution/node binding, and atomic one-use claim)
 - `tests/integration/agent-response-contract.test.ts` — 3 tests 🟢
-- `tests/integration/workflow-catalog-loader.test.ts` — 13 tests 🟢 (owner/visibility mapping, version-aware idempotence, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior)
+- `tests/integration/workflow-catalog-loader.test.ts` — 14 tests 🟢 (owner/visibility mapping, version-aware idempotence including persisted legacy root catalog metadata, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior)
 - `tests/integration/database/workflow-privacy-defaults.test.ts` — 2 tests 🟡
 - `tests/integration/manage-workflow-actions.test.ts` — 32 tests 🟢
 - `tests/integration/manage-workflow-new-actions.test.ts` — 29 tests 🟢

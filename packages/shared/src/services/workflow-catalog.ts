@@ -89,7 +89,13 @@ export function readCatalogEntry(filePath: string): CatalogEntry {
   }
 
   // The graph body excludes the catalog-only metadata keys.
-  const { owner: _owner, visibility: _visibility, previousSlugs: _previousSlugs, ...graph } = raw;
+  const {
+    slug: _slug,
+    owner: _owner,
+    visibility: _visibility,
+    previousSlugs: _previousSlugs,
+    ...graph
+  } = raw;
 
   return {
     id: typeof raw.id === "string" ? raw.id : path.basename(filePath, ".json"),

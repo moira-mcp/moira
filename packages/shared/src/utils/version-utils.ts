@@ -97,13 +97,15 @@ export function normalizeWorkflowForComparison(workflow: unknown): string {
     return "undefined";
   }
 
-  const normalize = (obj: unknown): unknown => {
+  const catalogMetadataKeys = new Set(["slug", "owner", "visibility", "previousSlugs"]);
+
+  const normalize = (obj: unknown, depth = 0): unknown => {
     if (obj === null || obj === undefined) {
       return obj;
     }
 
     if (Array.isArray(obj)) {
-      return obj.map(normalize);
+      return obj.map((value) => normalize(value, depth + 1));
     }
 
     if (typeof obj === "object") {
@@ -112,6 +114,13 @@ export function normalizeWorkflowForComparison(workflow: unknown): string {
       const normalized: Record<string, unknown> = {};
 
       for (const key of sortedKeys) {
+        // Catalog identity and ownership live in dedicated database columns. Legacy uploads may
+        // also contain these fields at the graph root, so they must not create a false content
+        // mismatch during an idempotent catalog load. Same-named nested graph data remains
+        // significant.
+        if (depth === 0 && catalogMetadataKeys.has(key)) {
+          continue;
+        }
         // Skip version field in metadata
         if (key === "version") {
           continue;
@@ -124,7 +133,7 @@ export function normalizeWorkflowForComparison(workflow: unknown): string {
         if (key === "createdAt" || key === "updatedAt") {
           continue;
         }
-        normalized[key] = normalize(record[key]);
+        normalized[key] = normalize(record[key], depth + 1);
       }
 
       return normalized;
