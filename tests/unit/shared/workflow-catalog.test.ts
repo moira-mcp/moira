@@ -74,6 +74,7 @@ describe("Workflow Catalog Reader", () => {
       expect(entry.visibility).toBe("public");
       expect(entry.isSystemOwner).toBe(true);
       // Graph body excludes catalog-only metadata.
+      expect("slug" in entry.graph).toBe(false);
       expect("owner" in entry.graph).toBe(false);
       expect("visibility" in entry.graph).toBe(false);
       expect("nodes" in entry.graph).toBe(true);

@@ -239,6 +239,29 @@ describe("Version Utilities", () => {
 
       expect(hasWorkflowContentChanged(workflow1, workflow2)).toBe(true);
     });
+
+    it("ignores catalog metadata at the graph root but preserves nested fields", () => {
+      const persistedLegacyGraph = {
+        slug: "demo-flow",
+        owner: "system-moira",
+        visibility: "public",
+        previousSlugs: ["old-demo-flow"],
+        metadata: { name: "test", version: "1.0.0" },
+        nodes: [{ id: "1", config: { owner: "runtime-owner" } }],
+      };
+      const catalogGraph = {
+        metadata: { name: "test", version: "1.0.0" },
+        nodes: [{ id: "1", config: { owner: "runtime-owner" } }],
+      };
+
+      expect(hasWorkflowContentChanged(persistedLegacyGraph, catalogGraph)).toBe(false);
+      expect(
+        hasWorkflowContentChanged(persistedLegacyGraph, {
+          ...catalogGraph,
+          nodes: [{ id: "1", config: { owner: "different-runtime-owner" } }],
+        }),
+      ).toBe(true);
+    });
   });
 
   describe("Migration scenario: same version, different content", () => {

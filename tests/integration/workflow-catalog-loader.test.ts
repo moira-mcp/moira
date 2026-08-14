@@ -128,6 +128,30 @@ describe("Workflow Catalog Loader Integration", () => {
     expect(second.outcomes[0].outcome).toBe("skipped-unchanged");
   });
 
+  test("treats legacy root catalog metadata in a persisted graph as unchanged", async () => {
+    const slug = `loader-legacy-metadata-${Date.now()}`;
+    const catalogEntry = entry(OWNER_A, slug, "1.0.0");
+
+    await deps.mutationService.save({
+      graph: {
+        ...catalogEntry.graph,
+        slug,
+        owner: OWNER_A,
+        visibility: "public",
+      },
+      userId: OWNER_A,
+      slug,
+      visibility: "public",
+      skipAudit: true,
+    });
+
+    const result = await installCatalogEntries([catalogEntry], deps);
+    expect(result.installed).toBe(0);
+    expect(result.updated).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.outcomes[0].outcome).toBe("skipped-unchanged");
+  });
+
   test("skips and reports a flow whose owner does not exist, never reassigning to a system owner", async () => {
     const slug = `loader-missing-owner-${Date.now()}`;
     const result = await installCatalogEntries([entry(MISSING_OWNER, slug, "1.0.0")], deps);
