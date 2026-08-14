@@ -27,7 +27,7 @@ Graph structure is analyzed for correctness:
 - **Node connectivity** - All connections point to valid nodes
 - **Required nodes** - Start node must exist
 - **Circular dependencies** - Loops are detected and flagged
-- **Unreachable nodes** - Nodes not connected from start
+- **Unreachable nodes** - Nodes no entry point leads to. Entry points are the start node and every `teleport`: a teleport has no ordinary incoming connections, so whatever it routes to is reachable through `step({ teleportTo })` and is not reported
 - **Registry entries** - Each `variableRegistry` entry must be a valid JSON Schema (a malformed `items`/`pattern`/etc. is a blocking error) with a non-empty description
 
 ### 3. Input Validation

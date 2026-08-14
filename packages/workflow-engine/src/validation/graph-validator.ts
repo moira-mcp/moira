@@ -1127,10 +1127,14 @@ export class GraphValidator {
     const reachable = new Set<string>();
     const visited = new Set<string>();
 
-    // Get all start nodes
-    const startNodes = workflow.nodes.filter((node) => node.type === "start");
+    // Entry points: the start node, plus every teleport. A teleport has no ordinary incoming
+    // connections by design — an agent enters it with step({ teleportTo }) — so whatever it leads
+    // to is reachable at runtime and must not be reported as orphaned.
+    const entryNodes = workflow.nodes.filter(
+      (node) => node.type === "start" || node.type === "teleport",
+    );
 
-    // DFS from each start node
+    // DFS from each entry node
     const visit = (nodeId: string) => {
       if (visited.has(nodeId)) return;
       visited.add(nodeId);
@@ -1144,8 +1148,8 @@ export class GraphValidator {
       }
     };
 
-    for (const startNode of startNodes) {
-      visit(startNode.id);
+    for (const entryNode of entryNodes) {
+      visit(entryNode.id);
     }
 
     return reachable;
