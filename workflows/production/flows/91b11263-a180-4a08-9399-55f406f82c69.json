@@ -2,7 +2,7 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "12.2.0",
+    "version": "12.7.0",
     "description": "Task-first software development with source-grounded planning, independent semantic review, impact-based validation, conditional visual reports, accepted-unit VCS checkpoints, and repository-grounded final coverage.",
     "author": "mcp-moira-team",
     "tags": [
@@ -28,20 +28,22 @@
     {
       "id": "capture-task-and-context",
       "type": "agent-directive",
-      "directive": "Capture the user's development task and authority before task-specific discovery or repository mutation. Read all standing project instructions. Create ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/ and treat it as the new workspace throughout this directive; do not use workspace_path before returning it. Inside that workspace, write this execution ID to process-id.txt and keep task-requirements.md as the single canonical requirements source. Resolve every explicitly assigned ticket, pull request, issue, specification, or document through available project-native mechanisms; preserve its identity, retrieval location, and complete current content in durable source files without preliminary relevance filtering, then separately incorporate all authoritative requirements without reducing them to a lossy summary. If a source cannot be obtained, expose that blocker instead of planning without it. Before mutation, inspect project-native VCS read-only and record VCS kind, branch or bookmark, status, relevant diff/baseline, unrelated changes to preserve, and already authorized side effects in vcs-baseline.md without assuming Git or requiring a clean tree. Discover task-relevant entry points, interfaces and data flow, implementations, dependencies and consumers, tests and fixtures, coverage policy/maps, documentation, configuration and schemas, generated artifacts, project-native commands, build/environment/health, runtime/integration surfaces, UI/browser architecture, CI/review/checklists, ownership boundaries, and applicable security/performance constraints. Record exact locations/evidence or a justified N/A in project-context.md. Use additional project-native searches when one search is insufficient; never conclude that an artifact or dependency does not exist from one superficial search. Ask only for a material fact that cannot be discovered. Do not create permanent guides merely because one is absent, and do not mutate the repository here. Return the new workspace path as workspace_path.",
+      "directive": "Capture the user's development task and authority before task-specific discovery or repository mutation. Read all standing project instructions. Create ./moira-ws/software-development-flow-{task-name}-{YYYYMMDD}-{HHMM}/ and treat it as the new workspace throughout this directive; do not use workspace_path before returning it. In this same turn write the standards this flow works to into standards/ inside that workspace — planning.md from {{planning_standards}}, engineering.md from {{engineering_standards}}, tests.md from {{test_standards}}, documentation.md from {{documentation_standards}} and review.md from {{review_standards}} — so every later responsibility, including a delegated reviewer, reads them there. Inside that workspace, write this execution ID to process-id.txt and keep task-requirements.md as the single canonical requirements source. Resolve every explicitly assigned ticket, pull request, issue, specification, or document through available project-native mechanisms; preserve its identity, retrieval location, and complete current content in durable source files without preliminary relevance filtering, then separately incorporate all authoritative requirements without reducing them to a lossy summary. If a source cannot be obtained, expose that blocker instead of planning without it. Before mutation, inspect project-native VCS read-only and record VCS kind, branch or bookmark, status, relevant diff/baseline, unrelated changes to preserve, and already authorized side effects in vcs-baseline.md without assuming Git or requiring a clean tree. Discover task-relevant entry points, interfaces and data flow, implementations, dependencies and consumers, tests and fixtures, coverage policy/maps, documentation, configuration and schemas, generated artifacts, project-native commands, build/environment/health, runtime/integration surfaces, UI/browser architecture, CI/review/checklists, ownership boundaries, and applicable security/performance constraints. Record exact locations/evidence or a justified N/A in project-context.md. Use additional project-native searches when one search is insufficient; never conclude that an artifact or dependency does not exist from one superficial search. Ask only for a material fact that cannot be discovered. Do not create permanent guides merely because one is absent, and do not mutate the repository here. Return the new workspace path as workspace_path.\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there are no intermediate approvals of requirements, plan, units, or result, only the final report, while `interactive` keeps every current approval. The mode holds for the whole run and is never asked again.",
       "completionCondition": "Task, authority, assigned sources, canonical requirements, read-only VCS baseline, correlated workspace, and relevant project context are durably captured before mutation",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": [
-          "workspace_path"
+          "workspace_path",
+          "operating_mode"
         ],
         "globalInputs": [
-          "workspace_path"
+          "workspace_path",
+          "operating_mode"
         ]
       },
       "connections": {
-        "success": "confirm-requirements"
+        "success": "route-operating-mode-requirements"
       }
     },
     {
@@ -118,7 +120,7 @@
         "required": []
       },
       "connections": {
-        "success": "confirm-requirements"
+        "success": "route-operating-mode-requirements"
       }
     },
     {
@@ -193,7 +195,7 @@
     {
       "id": "wait-for-health-state-change",
       "type": "agent-directive",
-      "directive": "Present the external blocker from {{workspace_path}}/project-health.md. Ask the user to confirm that external state changed before retrying, or to abort. Do not retry on an unchanged environment. If aborting, ensure the health report contains the current blocker and partial-work facts.",
+      "directive": "Present the external blocker from {{workspace_path}}/project-health.md. Ask the user to confirm that external state changed before retrying, or to abort. Do not retry on an unchanged environment. If aborting, ensure the health report contains the current blocker and partial-work facts.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker and partial-work facts recorded.",
       "completionCondition": "The user confirmed changed external state or chose to abort",
       "inputSchema": {
         "type": "object",
@@ -232,7 +234,7 @@
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Create the current material plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md from the canonical requirements, resolved assigned sources, task-relevant project evidence, VCS baseline, and actual repository contracts. Define independently completable outcome-oriented units with affected responsibilities and boundaries, dependencies and ordering, contracts and invariants, observable acceptance evidence, expected task-owned files, applicable tests and coverage-map updates, permanent documentation, security/performance/runtime/UI obligations, risks, and unresolved decisions. Map every affected or at-risk behavior to automated evidence or a justified manual check. Explicitly mark each unit that requires screenshot capture, actual visual inspection, and a self-contained step-report.html; do not infer or add that obligation later merely because a UI file changed. Record the requested project-native authority for checkpoint commits after accepted units and final reconciliation. Preserve executor freedom over exploration, decomposition details, tools, edit order, and repair tactics unless a real external contract constrains them.",
+      "directive": "Create the current material plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md from the canonical requirements, resolved assigned sources, task-relevant project evidence, VCS baseline, and actual repository contracts. Define independently completable outcome-oriented units with affected responsibilities and boundaries, dependencies and ordering, contracts and invariants, observable acceptance evidence, expected task-owned files, applicable tests and coverage-map updates, permanent documentation, security/performance/runtime/UI obligations, risks, and unresolved decisions. Map every affected or at-risk behavior to automated evidence or a justified manual check. Explicitly mark each unit that requires screenshot capture, actual visual inspection, and a self-contained step-report.html; do not infer or add that obligation later merely because a UI file changed. Record the requested project-native authority for checkpoint commits after accepted units and final reconciliation. Preserve executor freedom over exploration, decomposition details, tools, edit order, and repair tactics unless a real external contract constrains them.\n\nFollow `{{workspace_path}}/standards/planning.md`; the path is canonical and unchanged content need not be reread when already present and certain.",
       "completionCondition": "A complete outcome-oriented current plan revision exists with observable evidence, conditional visual-report obligations, and requested VCS authority",
       "inputSchema": {
         "type": "object",
@@ -246,7 +248,7 @@
     {
       "id": "review-plan",
       "type": "agent-directive",
-      "directive": "Review {{workspace_path}}/plans/{{plan_revision}}/plan.md independently against the complete canonical requirements, every assigned primary source, standing project instructions, relevant repository architecture and behavior, VCS/side-effect boundaries, and prior completed work. Use a separate reviewer context or subagent when the host supports it; otherwise perform a fresh self-review and disclose that fallback in the report. Read primary artifacts directly when they are not already available or may have changed. Verify requirements coverage, dependencies, writer/reader contracts, executable routes, test and documentation obligations, task-file ownership, checkpoint authority, and observable evidence. Reject an unjustified omission of screenshot/visual/HTML evidence when the outcome cannot be adequately accepted without it. Overwrite {{workspace_path}}/plans/{{plan_revision}}/review.md with the complete set of reproducible blocking defects detectable at the earliest sufficient review tier. For every blocker give the exact location, violated contract, observable consequence, and concrete correction. Do not stop after the first finding and do not block on formatting taste, fixed step counts, or speculative redesign. Return only the count of all current blocking findings; zero is valid.",
+      "directive": "Review {{workspace_path}}/plans/{{plan_revision}}/plan.md independently against the complete canonical requirements, every assigned primary source, standing project instructions, relevant repository architecture and behavior, VCS/side-effect boundaries, and prior completed work. Use a separate reviewer context or subagent when the host supports it; otherwise perform a fresh self-review and disclose that fallback in the report. Read primary artifacts directly when they are not already available or may have changed. Verify requirements coverage, dependencies, writer/reader contracts, executable routes, test and documentation obligations, task-file ownership, checkpoint authority, and observable evidence. Reject an unjustified omission of screenshot/visual/HTML evidence when the outcome cannot be adequately accepted without it. Overwrite {{workspace_path}}/plans/{{plan_revision}}/review.md with the findings, as the review standard requires. Do not block on formatting taste, fixed step counts, or speculative redesign. Return only the count of all current blocking findings; zero is valid.\n\nJudge the plan by `{{workspace_path}}/standards/planning.md` and conduct the review by `{{workspace_path}}/standards/review.md`; both paths are canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met.",
       "completionCondition": "The complete current independent plan review exists, discloses reviewer independence or fallback, and its count matches all blocking findings",
       "inputSchema": {
         "type": "object",
@@ -282,7 +284,7 @@
     {
       "id": "repair-plan",
       "type": "agent-directive",
-      "directive": "Repair the current plan revision using {{workspace_path}}/plans/{{plan_revision}}/review.md. Reproduce each blocking defect, correct the root cause in the plan, preserve still-valid decisions and executor freedom, and update the same plan artifact. Do not implement style suggestions or create review bookkeeping.",
+      "directive": "Repair the current plan revision using {{workspace_path}}/plans/{{plan_revision}}/review.md. Reproduce each blocking defect, correct the root cause in the plan, preserve still-valid decisions and executor freedom, and update the same plan artifact. Do not implement style suggestions or create review bookkeeping.\n\nRepair against `{{workspace_path}}/standards/planning.md` and `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "The current plan revision changed to address every reproduced blocking defect",
       "inputSchema": {
         "type": "object",
@@ -296,7 +298,7 @@
     {
       "id": "approve-plan",
       "type": "agent-directive",
-      "directive": "Present the complete reviewed plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md with its architecture, outcomes, dependencies, evidence obligations, conditional visual-report units, risks, and side effects. Ask for explicit plan approval and one explicit project-native VCS authority that covers both checkpoint commits after accepted units and final reconciliation. Write {{workspace_path}}/plans/{{plan_revision}}/approval.md with the decision and, on approval, the exact approved cursor, bound, and commit authority. On approval, derive the next uncompleted 1-based plan-unit index and total unit count from this exact revision and return them with vcs_commits_authorized. On rejection, also save verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/user-feedback.md. Do not edit the plan or mutate VCS here.",
+      "directive": "Present the complete reviewed plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md with its architecture, outcomes, dependencies, evidence obligations, conditional visual-report units, risks, and side effects. Ask for explicit plan approval and one explicit project-native VCS authority that covers both checkpoint commits after accepted units and final reconciliation. On approval, derive the next uncompleted 1-based plan-unit index and total unit count from this exact revision and return them with vcs_commits_authorized. On rejection, also save verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/user-feedback.md. Do not edit the plan or mutate VCS here.\n\nIn `autonomous` mode do not ask for approval: acceptance follows from the independent plan review that already passed. Derive the cursor and unit bound from this exact revision and set VCS authority strictly from the authority captured at task start in {{workspace_path}}/vcs-baseline.md — never grant authority the task did not give.",
       "completionCondition": "The user decision, approved cursor and bound, conditional evidence obligations, and checkpoint/final VCS authority or rejection feedback are durable",
       "inputSchema": {
         "type": "object",
@@ -384,7 +386,7 @@
     {
       "id": "revise-plan-after-rejection",
       "type": "agent-directive",
-      "directive": "Create the next material plan revision from {{workspace_path}}/plans/{{plan_revision}}/plan.md and the verbatim rejection at {{workspace_path}}/plans/{{plan_revision}}/user-feedback.md. Increment plan_revision, preserve the rejected revision, carry forward unaffected requirements and completed work, and write the new plan under the new revision directory. Do not create a summary relay.",
+      "directive": "Create the next material plan revision from {{workspace_path}}/plans/{{plan_revision}}/plan.md and the verbatim rejection at {{workspace_path}}/plans/{{plan_revision}}/user-feedback.md. Increment plan_revision, preserve the rejected revision, carry forward unaffected requirements and completed work, and write the new plan under the new revision directory. Do not create a summary relay.\n\nFollow `{{workspace_path}}/standards/planning.md`.",
       "completionCondition": "A new material plan revision incorporates the user's rejection feedback",
       "inputSchema": {
         "type": "object",
@@ -413,7 +415,7 @@
     {
       "id": "implement-plan-unit",
       "type": "agent-directive",
-      "directive": "Implement approved plan unit {{current_step_index}} of {{total_steps}} from {{workspace_path}}/plans/{{plan_revision}}/plan.md. Use the complete current plan when not already available or when it may have changed. Own the complete approved outcome: inspect real dependencies and surrounding contracts, change the repository, preserve unrelated work, add or update necessary tests and coverage artifacts, update applicable permanent documentation, and run useful focused checks. Inventory every changed or at-risk behavior and contract and map it to concrete automated evidence or an explicit manual verification reason. Write one concise reproducible report to {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/implementation.md in this turn with task-owned changed files, commands and outcomes, behavior/evidence mappings, documentation impact, unresolved facts, and unrelated changes that must remain excluded. Do not commit or publish here.",
+      "directive": "Implement approved plan unit {{current_step_index}} of {{total_steps}} from {{workspace_path}}/plans/{{plan_revision}}/plan.md. Use the complete current plan when not already available or when it may have changed. Own the complete approved outcome: inspect real dependencies and surrounding contracts, change the repository, preserve unrelated work, add or update necessary tests and coverage artifacts, update applicable permanent documentation, and run useful focused checks. Inventory every changed or at-risk behavior and contract and map it to concrete automated evidence or an explicit manual verification reason. Write one concise reproducible report to {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/implementation.md in this turn: what this round changed — task-owned files, commands and outcomes, behavior/evidence mappings, documentation impact — which earlier behaviour of this unit that change could have disturbed, unresolved facts, and unrelated changes that must remain excluded. Carry the decisive output itself instead of prose retelling it, and do not re-narrate the unit's cumulative state: that state is the difference from the baseline. In the unit's first iteration also record the unit's baseline in one line — the checkpoint of the previous unit where the project's version control provides one, the state in {{workspace_path}}/vcs-baseline.md for the first unit, otherwise the repository state as it stands at the start of this unit — because every later gate and repair of this unit judges against that line. Do not commit or publish here.\n\nWork to `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/tests.md`; the paths are canonical and unchanged content need not be reread when already present and certain. Where the surrounding code is wrong, implement correctly, say where you diverged, and report the defect rather than repairing unrelated areas.",
       "completionCondition": "The complete approved unit, dependencies, task-owned changes, tests, docs, behavior inventory, focused evidence, and reproducible implementation report are current",
       "inputSchema": {
         "type": "object",
@@ -427,7 +429,7 @@
     {
       "id": "validate-cheap",
       "type": "agent-directive",
-      "directive": "Inspect the actual repository changes for plan unit {{current_step_index}}, standing project instructions, the approved outcome, current implementation report, and affected behavior inventory. Run the smallest project-native deterministic checks that diagnose the affected scope; this mechanical gate does not require a separate reviewer context. Explicitly consider formatting, lint, static analysis, scoped type checking or compilation, targeted/unit tests, need for new or changed tests and coverage-map updates, permanent documentation, public contracts, shared schemas/configuration, migrations, concurrency, generated artifacts, infrastructure, and project checklists. For every applicable area provide exact evidence; for every materially plausible omitted area give a concrete N/A reason. Overwrite {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/cheap-validation.md with commands/outcomes and every reproducible repository defect. Do not rerun broad checks whose evidence is current, and do not treat unrelated or external failures as success. Return only the blocking issue count.",
+      "directive": "Inspect the actual repository changes for plan unit {{current_step_index}}, standing project instructions, the approved outcome, current implementation report, and affected behavior inventory. Run the smallest project-native deterministic checks that diagnose the affected scope; this mechanical gate does not require a separate reviewer context. Explicitly consider formatting, lint, static analysis, scoped type checking or compilation, targeted/unit tests, need for new or changed tests and coverage-map updates, permanent documentation, public contracts, shared schemas/configuration, migrations, concurrency, generated artifacts, infrastructure, and project checklists. For every applicable area provide exact evidence; for every materially plausible omitted area give a concrete N/A reason. Overwrite {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/cheap-validation.md with commands/outcomes and every reproducible repository defect. Do not rerun broad checks whose evidence is current, and do not treat unrelated or external failures as success. Return only the blocking issue count.\n\nThe subject is the unit as it now stands against its baseline — the line recorded in {{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md — not the diff of the latest repair. Rerun what the latest change could have invalidated, leave current the evidence it could not reach, and say which is which.\n\nThe linter, the type system and the compiler are what run here; tests are not a substitute for them, and a test that asserts what those tools already guarantee adds maintenance without protection.",
       "completionCondition": "Current independent cheap-validation evidence covers every materially applicable affected area and its issue count matches reproducible repository defects",
       "inputSchema": {
         "type": "object",
@@ -463,7 +465,7 @@
     {
       "id": "repair-cheap-validation",
       "type": "agent-directive",
-      "directive": "Use the current cheap-validation report to reproduce and repair every repository-caused blocking defect at its root. Preserve unrelated changes and do not absorb unrelated or external failures. Never obtain a pass by weakening tests, assertions, schemas, types, lint, coverage, or another quality gate; change a validator or test only with concrete proof that its expectation is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence and the updated implementation report there, return that new number as current_iteration, and run focused evidence before independent revalidation.",
+      "directive": "Use the current cheap-validation report to reproduce and repair every repository-caused blocking defect at its root. Preserve unrelated changes and do not absorb unrelated or external failures. Never obtain a pass by weakening tests, assertions, schemas, types, lint, coverage, or another quality gate; change a validator or test only with concrete proof that its expectation is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, and run focused evidence before independent revalidation.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Repository content changed to repair reproduced cheap-validation defects",
       "inputSchema": {
         "type": "object",
@@ -482,8 +484,8 @@
     {
       "id": "review-test-adequacy",
       "type": "agent-directive",
-      "directive": "In an independent reviewer context where supported, compare the actual changes for plan unit {{current_step_index}} with the approved behavior inventory, tests, project coverage maps and thresholds, standing test rules, and current validation evidence; disclose fallback self-review otherwise. Inspect changed and at-risk behavior, boundaries, contracts, schemas, configuration, integrations, regression risks, concurrency, migrations, and failure paths rather than using function or assertion counts. Verify that tests exercise observable production behavior, would fail on the relevant regression, and are not duplicated across levels without purpose. Overwrite {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/test-adequacy-review.md with the complete set of blockers detectable at this earliest sufficient tier. For every blocker give exact location, violated contract, observable consequence, and concrete correction; do not stop after the first. Return only the complete issue count; zero is valid.",
-      "completionCondition": "Independent test-adequacy review covers actual changed and at-risk behavior, discloses fallback when needed, and its count matches blocking findings",
+      "directive": "Judge test adequacy yourself from the primary sources, not from your own account of the work: read the actual diff for plan unit {{current_step_index}}, the approved unit, the behavior inventory, the tests themselves, project coverage maps and thresholds, standing test rules, and the current validation evidence. Inspect changed and at-risk behavior, boundaries, contracts, schemas, configuration, integrations, regression risks, concurrency, migrations, and failure paths rather than using function or assertion counts. Verify that tests exercise observable production behavior, would fail on the relevant regression, and are not duplicated across levels without purpose. Overwrite {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/test-adequacy-review.md with the findings, as the review standard requires. Return only the complete issue count; zero is valid.\n\nThe subject is the unit's tests as they now stand against the unit's baseline, the line recorded in {{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md — not the tests this round happened to touch, and not an earlier round's verdict carried forward.\n\nJudge the tests by `{{workspace_path}}/standards/tests.md` and take from `{{workspace_path}}/standards/review.md` only what applies to any review — the report file and its finding format, that zero findings is valid, and the bar for what blocks; both paths are canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met. Judge this gate here yourself: do not delegate it and do not obtain a separate reviewer, because the unit's one independent review is the completeness review that follows.",
+      "completionCondition": "The test-adequacy gate is judged here from the actual diff, tests and current evidence; it covers changed and at-risk behavior and its count matches the blocking findings in its report",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -518,27 +520,37 @@
     {
       "id": "repair-test-adequacy",
       "type": "agent-directive",
-      "directive": "Use the current test-adequacy report to reproduce every confirmed gap and repair the production behavior, necessary tests, implementation seams, and coverage maps at their root. Preserve unrelated changes. Never obtain a pass by weakening tests, assertions, schemas, types, lint, coverage, or another quality gate; change a validator or existing expectation only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated failures. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence and the updated implementation report there, return that new number as current_iteration, and run focused evidence before independent revalidation.",
+      "directive": "Use the current test-adequacy report to reproduce every confirmed gap and repair the production behavior, necessary tests, implementation seams, and coverage maps at their root. Preserve unrelated changes. Never obtain a pass by weakening tests, assertions, schemas, types, lint, coverage, or another quality gate; change a validator or existing expectation only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated failures. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, and run focused evidence before independent revalidation.\n\nRepair against `{{workspace_path}}/standards/tests.md` and `{{workspace_path}}/standards/review.md`.\n\nAfter the repair, state its reach as repair_reach: a description of what you actually changed, never of how important the finding was. It is `contained` when the change stayed in the tests, fixtures and coverage artifacts this gate judges, left production behaviour untouched, and the project's own deterministic checks over what you changed have been run and pass. It is `spreading` when it reached production code, contracts, schemas, configuration, dependencies or generated output, or when those checks could not be run or did not pass. A repair that turned out larger than it looked is `spreading` whatever it looked like when you started, because `contained` skips the validation chain and returns straight to this gate — the checks that change could have invalidated would never run.",
       "completionCondition": "Repository content changed to repair all reproduced test-adequacy defects",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "contained",
+              "spreading"
+            ],
+            "description": "Where the correction actually landed"
+          }
+        },
         "required": [
-          "current_iteration"
+          "current_iteration",
+          "repair_reach"
         ],
         "globalInputs": [
           "current_iteration"
         ]
       },
       "connections": {
-        "success": "validate-cheap"
+        "success": "route-test-adequacy-reach"
       }
     },
     {
       "id": "review-architecture",
       "type": "agent-directive",
-      "directive": "In an independent reviewer context where supported, review the actual implementation for plan unit {{current_step_index}} against canonical requirements, the approved plan, standing instructions, assigned architectural sources, surrounding project code, behavior evidence, and current test evidence; disclose fallback self-review otherwise. Check conformance with established project and broadly accepted patterns, responsibility separation, cohesion/coupling, dependency direction, contracts and invariants, justified abstractions, extensibility and evidenced scalability, deterministic test seams, maintainability, lifecycle and error handling, plus applicable security/performance/UI concerns. Overwrite {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/architecture-review.md with the complete set of blockers detectable at this earliest sufficient tier. For every blocker give exact location, violated contract, observable consequence, and concrete correction; do not stop after the first. Set requires_replan only when the approved plan itself cannot produce a correct result, including when newly proven visual acceptance is necessary but the unit lacks the approved screenshot/HTML obligation. Do not constrain implementation with speculative design or aesthetic preference; zero findings is valid.",
-      "completionCondition": "Independent architecture review is project-grounded, discloses fallback when needed, and has an accurate issue count and replan decision",
+      "directive": "Judge the architecture yourself from the primary sources, not from your own account of the work: read the actual implementation for plan unit {{current_step_index}}, canonical requirements, the approved plan, standing instructions, assigned architectural sources, the surrounding project code, and the current behavior and test evidence. Check conformance with established project and broadly accepted patterns, responsibility separation, cohesion/coupling, dependency direction, contracts and invariants, justified abstractions, extensibility and evidenced scalability, deterministic test seams, maintainability, lifecycle and error handling, plus applicable security/performance/UI concerns. Overwrite {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/architecture-review.md with the findings, as the review standard requires. Set requires_replan only when the approved plan itself cannot produce a correct result, including when newly proven visual acceptance is necessary but the unit lacks the approved screenshot/HTML obligation. Do not constrain implementation with speculative design or aesthetic preference; zero findings is valid.\n\nThe subject is the unit's design as it now stands against the unit's baseline, the line recorded in {{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md. A structure that decayed across repair rounds is this gate's finding even when the latest change was small.\n\nJudge the architecture by `{{workspace_path}}/standards/engineering.md` and take from `{{workspace_path}}/standards/review.md` only what applies to any review — the report file and its finding format, that zero findings is valid, and the bar for what blocks; both paths are canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met, and nothing need be produced to prove it inapplicable. Judge this gate here yourself: do not delegate it and do not obtain a separate reviewer, because the unit's one independent review is the completeness review that follows.",
+      "completionCondition": "The architecture gate is judged here from the actual implementation and surrounding project code; it is project-grounded and has an accurate issue count and replan decision",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -592,26 +604,36 @@
     {
       "id": "repair-architecture",
       "type": "agent-directive",
-      "directive": "Use the current architecture review and any current closure feedback to reproduce and repair every confirmed defect that can be resolved within the approved plan. Correct root causes in code, tests, or documentation; preserve valid project patterns and unrelated changes; do not implement speculative suggestions or absorb unrelated failures into task scope. Never obtain a pass by weakening tests, assertions, schemas, types, lint, architecture constraints, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence and the updated implementation report there, return that new number as current_iteration, and run focused evidence before independent revalidation.",
+      "directive": "Use the current architecture review and any current closure feedback to reproduce and repair every confirmed defect that can be resolved within the approved plan. Correct root causes in code, tests, or documentation; preserve valid project patterns and unrelated changes; do not implement speculative suggestions or absorb unrelated failures into task scope. Never obtain a pass by weakening tests, assertions, schemas, types, lint, architecture constraints, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, and run focused evidence before independent revalidation.\n\nRepair against `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/review.md`.\n\nAfter the repair, state its reach as repair_reach: a description of what you actually changed, never of how important the finding was. It is `contained` when the correction was structural with no behavioural difference — code moved, renamed or re-seamed while observable behaviour, contracts and schemas stay as they were — and the project's own deterministic checks over what you touched have been run and pass. It is `spreading` when behaviour, contracts, schemas, configuration, dependencies or generated output changed, or when those checks could not be run or did not pass. A repair that turned out larger than it looked is `spreading` whatever it looked like when you started, because `contained` skips the validation chain and returns straight to this gate — the checks that change could have invalidated would never run.",
       "completionCondition": "Repository content changed to repair reproduced architecture defects within the approved plan",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "contained",
+              "spreading"
+            ],
+            "description": "Where the correction actually landed"
+          }
+        },
         "required": [
-          "current_iteration"
+          "current_iteration",
+          "repair_reach"
         ],
         "globalInputs": [
           "current_iteration"
         ]
       },
       "connections": {
-        "success": "validate-cheap"
+        "success": "route-architecture-reach"
       }
     },
     {
       "id": "approve-current-unit-closure",
       "type": "agent-directive",
-      "directive": "The architecture review proves that the approved plan must change. Present what plan unit {{current_step_index}} completed, what remains, why the plan cannot be completed correctly, and how unfinished work would be carried forward. Ask whether the current unit may be closed for a new plan revision. Save the explicit decision and verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/closure-feedback.md. Do not revise the plan here.",
+      "directive": "The architecture review proves that the approved plan must change. Present what plan unit {{current_step_index}} completed, what remains, why the plan cannot be completed correctly, and how unfinished work would be carried forward. Ask whether the current unit may be closed for a new plan revision. Save the explicit decision and verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/closure-feedback.md. Do not revise the plan here.\n\nIn `autonomous` mode decide the closure yourself from the recorded architecture finding and the approved plan: close the current unit for a new revision only when the reviewed finding genuinely requires replanning rather than local repair. Do not ask the user.",
       "completionCondition": "The user explicitly approved or refused closure with durable feedback",
       "inputSchema": {
         "type": "object",
@@ -650,7 +672,7 @@
     {
       "id": "revise-plan-for-replan",
       "type": "agent-directive",
-      "directive": "Create the next material plan revision using the current approved plan, actual completed work, the architecture review, and {{workspace_path}}/plans/{{plan_revision}}/closure-feedback.md. Increment plan_revision, preserve prior revisions, close only the user-approved current unit, and carry every unfinished outcome into the next uncompleted units. Keep completed work immutable and executor tactics open.",
+      "directive": "Create the next material plan revision using the current approved plan, actual completed work, the architecture review when one drove this revision, and {{workspace_path}}/plans/{{plan_revision}}/closure-feedback.md when that file exists — a revision reached through the replan teleport has neither, and must not wait for them. Increment plan_revision, preserve prior revisions, close only the user-approved current unit, and carry every unfinished outcome into the next uncompleted units. Keep completed work immutable and executor tactics open.\n\nFollow `{{workspace_path}}/standards/planning.md`.",
       "completionCondition": "A new material plan revision correctly carries unfinished work after approved closure",
       "inputSchema": {
         "type": "object",
@@ -669,7 +691,7 @@
     {
       "id": "validate-runtime",
       "type": "agent-directive",
-      "directive": "Determine runtime, browser, checklist, security, and performance applicability from canonical requirements, the approved plan unit, project policy, actual diff, changed/at-risk behavior inventory, and current evidence. Screenshot validation is applicable only when this exact approved plan unit explicitly requires screenshot capture, actual visual inspection, and step-report.html; incidental UI impact cannot enable it here. Execute every applicable project checklist item and record PASS with evidence, N/A with reason, or FAIL with location and correction. For applicable UI behavior, cover representative affected states and dependent behavior with project-native browser evidence. When screenshots are required, capture every required state, open the actual images with available visual capability, compare expected and observed behavior, and record the assessment; file existence alone is not evidence and unfinished capture/inspection means this directive is not complete. Write {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md with behavior-to-evidence mappings. Classify reproducible application or permanent project-native capture/tooling defects as repository_failure and unavailable external browser/vision infrastructure as external_blocker. Do not repeat deterministic checks that cannot diagnose runtime behavior.",
+      "directive": "Determine runtime, browser, checklist, security, and performance applicability from canonical requirements, the approved plan unit, project policy, actual diff, changed/at-risk behavior inventory, and current evidence. Screenshot validation is applicable only when this exact approved plan unit explicitly requires screenshot capture, actual visual inspection, and step-report.html; incidental UI impact cannot enable it here. Execute every applicable project checklist item and record PASS with evidence, N/A with reason, or FAIL with location and correction. For applicable UI behavior, cover representative affected states and dependent behavior with project-native browser evidence. When screenshots are required, capture every required state, open the actual images with available visual capability, compare expected and observed behavior, and record the assessment; file existence alone is not evidence and unfinished capture/inspection means this directive is not complete. Write {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md with behavior-to-evidence mappings. Classify reproducible application or permanent project-native capture/tooling defects as repository_failure and unavailable external browser/vision infrastructure as external_blocker. Do not repeat deterministic checks that cannot diagnose runtime behavior.\n\nApplicability and evidence belong to the unit as it now stands against its baseline, the line recorded in {{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md, not to the latest repair alone: re-establish the behaviour that change could have altered and keep the evidence it could not reach.",
       "completionCondition": "All applicable runtime and checklist work is complete; any required screenshots were captured, opened, and visually assessed; evidence and classification are truthful",
       "inputSchema": {
         "type": "object",
@@ -725,7 +747,7 @@
     {
       "id": "repair-runtime",
       "type": "agent-directive",
-      "directive": "Use the current runtime-validation report to reproduce and repair repository-caused runtime or specialized-check failures at their root. Change production code, tests, capture tooling, or documentation only as justified and preserve unrelated work. Never obtain a pass by weakening tests, assertions, schemas, types, lint, visual expectations, security/performance gates, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated or external failures. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence and the updated implementation report there, return that new number as current_iteration, and run focused evidence before independent revalidation.",
+      "directive": "Use the current runtime-validation report to reproduce and repair repository-caused runtime or specialized-check failures at their root. Change production code, tests, capture tooling, or documentation only as justified and preserve unrelated work. Never obtain a pass by weakening tests, assertions, schemas, types, lint, visual expectations, security/performance gates, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated or external failures. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, and run focused evidence before independent revalidation.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Repository content changed to repair reproduced runtime defects",
       "inputSchema": {
         "type": "object",
@@ -744,7 +766,7 @@
     {
       "id": "wait-for-runtime-state-change",
       "type": "agent-directive",
-      "directive": "Present the concrete external blocker from the current runtime-validation report. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.",
+      "directive": "Present the concrete external blocker from the current runtime-validation report. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker recorded.",
       "completionCondition": "The user confirmed changed state or chose abort",
       "inputSchema": {
         "type": "object",
@@ -783,7 +805,7 @@
     {
       "id": "validate-expensive",
       "type": "agent-directive",
-      "directive": "After cheaper mutating and semantic gates have converged, decide whether a broad or expensive build, test, integration, runtime, or packaging check is required by project policy, affected contracts, or actual risk for plan unit {{current_step_index}}. Reuse equivalent current evidence when no later mutation can affect it; do not repeat a full suite mechanically on every iteration. Run applicable project-native checks and write {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/expensive-validation.md with exact commands and outcomes, evidence scope, or a concrete inapplicability reason. Classify reproducible repository failures separately from external blockers and never hide partial or failed results as pass.",
+      "directive": "After cheaper mutating and semantic gates have converged, decide whether a broad or expensive build, test, integration, runtime, or packaging check is required by project policy, affected contracts, or actual risk for plan unit {{current_step_index}}. The scope is the unit against its baseline, the line recorded in {{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md. Reuse equivalent current evidence when no later mutation can affect it; do not repeat a full suite mechanically on every iteration. Run applicable project-native checks and write {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/expensive-validation.md with exact commands and outcomes, evidence scope, or a concrete inapplicability reason. Classify reproducible repository failures separately from external blockers and never hide partial or failed results as pass.",
       "completionCondition": "Applicable non-stale expensive evidence or justified inapplicability exists with truthful classification",
       "inputSchema": {
         "type": "object",
@@ -833,13 +855,13 @@
       },
       "connections": {
         "true": "repair-expensive",
-        "false": "review-plan-unit-with-user"
+        "false": "review-unit-completeness"
       }
     },
     {
       "id": "repair-expensive",
       "type": "agent-directive",
-      "directive": "Use the current expensive-validation report to reproduce and repair every repository-caused failure at its root. Preserve unrelated work and do not broaden to unrelated or external failures. Never obtain a pass by weakening tests, assertions, schemas, types, lint, build/integration gates, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence and the updated implementation report there, return that new number as current_iteration, and run focused evidence before returning through all stale cheaper and semantic gates.",
+      "directive": "Use the current expensive-validation report to reproduce and repair every repository-caused failure at its root. Preserve unrelated work and do not broaden to unrelated or external failures. Never obtain a pass by weakening tests, assertions, schemas, types, lint, build/integration gates, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for plan unit {{current_step_index}}, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, and run focused evidence before returning through all stale cheaper and semantic gates.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Repository content changed to repair reproduced expensive-validation failures",
       "inputSchema": {
         "type": "object",
@@ -858,7 +880,7 @@
     {
       "id": "wait-for-expensive-state-change",
       "type": "agent-directive",
-      "directive": "Present the concrete external blocker from the current expensive-validation report. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.",
+      "directive": "Present the concrete external blocker from the current expensive-validation report. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker recorded.",
       "completionCondition": "The user confirmed changed state or chose abort",
       "inputSchema": {
         "type": "object",
@@ -897,7 +919,7 @@
     {
       "id": "review-plan-unit-with-user",
       "type": "agent-directive",
-      "directive": "Determine from the approved plan, task authority, and material impact whether plan unit {{current_step_index}} requires user acceptance. If this exact approved unit requires screenshots and step-report.html, create or regenerate {{workspace_path}}/step-{{current_step_index}}/step-report.html from the current stabilized implementation, runtime, screenshot, review, and expensive-validation evidence. Make it a portable self-contained HTML document with embedded styling and no external runtime dependency, responsive readability, explicit PASS/FAIL/warning states, factual language without marketing claims, and embedded images or reliable relative paths that remain valid from the documented location. State outcome, affected behavior, scenarios, commands/tests/reviews, limitations, expected versus observed screenshot assessments with honest baseline handling, and concise manual-verification instructions. Open or otherwise verify the final document and its image references, then present or link that exact report and request approval in the same substantive turn. For such a unit, skip is forbidden. If no visual-report obligation exists, do not create screenshot HTML; present concise behavior and exact verification evidence when user acceptance is materially required, otherwise use skip. Write the decision and cited evidence to {{workspace_path}}/step-{{current_step_index}}/acceptance.md. On rejection, also save verbatim feedback to {{workspace_path}}/step-{{current_step_index}}/user-feedback.md. Do not repair here.",
+      "directive": "Determine from the approved plan, task authority, and material impact whether plan unit {{current_step_index}} requires user acceptance. If this exact approved unit requires screenshots and step-report.html, create or regenerate {{workspace_path}}/step-{{current_step_index}}/step-report.html from the current stabilized implementation, runtime, screenshot, review, and expensive-validation evidence. Make it a portable self-contained HTML document with embedded styling and no external runtime dependency, responsive readability, explicit PASS/FAIL/warning states, factual language without marketing claims, and embedded images or reliable relative paths that remain valid from the documented location. State outcome, affected behavior, scenarios, commands/tests/reviews, limitations, expected versus observed screenshot assessments with honest baseline handling, and concise manual-verification instructions. Open or otherwise verify the final document and its image references, then present or link that exact report and request approval in the same substantive turn. For such a unit, skip is forbidden. If no visual-report obligation exists, do not create screenshot HTML; present concise behavior and exact verification evidence when user acceptance is materially required, otherwise use skip. On rejection, also save verbatim feedback to {{workspace_path}}/step-{{current_step_index}}/user-feedback.md. Do not repair here.\n\nIn `autonomous` mode do not wait for user acceptance: still create or regenerate the required step-report.html for units that carry a visual-report obligation, still record the evidence, and conclude the unit yourself with the non-blocking outcome so the run continues to the checkpoint decision. Reserve rejection for interactive runs.",
       "completionCondition": "The applicable acceptance decision and evidence are durable; required current HTML is presented and accepted or rejected without skip; verbatim rejection feedback exists when needed",
       "inputSchema": {
         "type": "object",
@@ -961,7 +983,7 @@
     {
       "id": "repair-user-feedback",
       "type": "agent-directive",
-      "directive": "Use the verbatim plan-unit feedback at {{workspace_path}}/step-{{current_step_index}}/user-feedback.md and the current approved plan to resolve the rejection at its correct authority boundary. If feedback identifies an in-plan defect, reproduce and repair its root cause while preserving unrelated changes and without absorbing unrelated failures into task scope. Never obtain acceptance by weakening tests, assertions, schemas, types, lint, visual evidence, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Run the smallest project-native check that proves the in-plan repair, create the next numeric evidence iteration, write that focused evidence and the updated implementation report there, and return resolution=in_plan with the new current_iteration. If feedback materially changes requirements, architecture, or approved outcomes, do not implement the unapproved change: update canonical requirements, create the next material plan revision, increment plan_revision, preserve prior revisions and completed work, and return resolution=replan with the new plan_revision. Perform the chosen substantive action in this turn; do not add an analyzer or relay.",
+      "directive": "Use the verbatim plan-unit feedback at {{workspace_path}}/step-{{current_step_index}}/user-feedback.md and the current approved plan to resolve the rejection at its correct authority boundary. If feedback identifies an in-plan defect, reproduce and repair its root cause while preserving unrelated changes and without absorbing unrelated failures into task scope. Never obtain acceptance by weakening tests, assertions, schemas, types, lint, visual evidence, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Run the smallest project-native check that proves the in-plan repair, create the next numeric evidence iteration, write that focused evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, and return resolution=in_plan with the new current_iteration. If feedback materially changes requirements, architecture, or approved outcomes, do not implement the unapproved change: update canonical requirements, create the next material plan revision, increment plan_revision, preserve prior revisions and completed work, and return resolution=replan with the new plan_revision. Perform the chosen substantive action in this turn; do not add an analyzer or relay.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "The rejection was resolved by a changed in-plan implementation or a new material plan revision",
       "inputSchema": {
         "type": "object",
@@ -1055,7 +1077,7 @@
     {
       "id": "resolve-finalization-blocker",
       "type": "agent-directive",
-      "directive": "Present the concrete external finalization blocker from {{workspace_path}}/finalization.md. Ask whether external state has changed and now permits retry, whether to skip the already-authorized finalization without altering verified repository content, or whether to abort. Do not rerun unrelated validation and do not retry unchanged state.",
+      "directive": "Present the concrete external finalization blocker from {{workspace_path}}/finalization.md. Ask whether external state has changed and now permits retry, whether to skip the already-authorized finalization without altering verified repository content, or whether to abort. Do not rerun unrelated validation and do not retry unchanged state.\n\nIn `autonomous` mode do not ask: decide on evidence. Retry only when the external state actually changed, skip only the finalization that was already authorized without altering verified repository content, and otherwise abort.",
       "completionCondition": "The user chose retry after changed external state, skip, or abort",
       "inputSchema": {
         "type": "object",
@@ -1138,7 +1160,7 @@
     {
       "id": "reconcile-documentation",
       "type": "agent-directive",
-      "directive": "Reconcile permanent project documentation against the complete requirements, assigned sources, approved plan revisions, actual repository behavior, project documentation rules, and documentation already changed by implementation units. Determine whether documentation is affected even when it is already current and no new edit is needed. Change only genuinely stale affected sections; keep content factual and current-state, omit marketing claims and development history unless explicitly required, do not add unsupported claims, and do not create a new long-lived document without a durable reader need. Include required commands, examples, contracts, generated output, links, rendering, language parity, and coverage-map updates. Write {{workspace_path}}/documentation-reconciliation.md with exact evidence. Return change_scope=not_applicable only with a concrete reason, documentation_affected whenever any task documentation exists or changed (whether or not this turn edits it), or executable when executable/generated documentation changes repository behavior. For executable mutation, create the next numeric evidence iteration for the current plan unit and return it as current_iteration; otherwise do not change current_iteration.",
+      "directive": "Reconcile permanent project documentation against the complete requirements, assigned sources, approved plan revisions, actual repository behavior, project documentation rules, and documentation already changed by implementation units. Determine whether documentation is affected even when it is already current and no new edit is needed. Change only genuinely stale affected sections; keep content factual and current-state, omit marketing claims and development history unless explicitly required, do not add unsupported claims, and do not create a new long-lived document without a durable reader need. Include required commands, examples, contracts, generated output, links, rendering, language parity, and coverage-map updates. Write {{workspace_path}}/documentation-reconciliation.md with exact evidence. Return change_scope=not_applicable only with a concrete reason, documentation_affected whenever any task documentation exists or changed (whether or not this turn edits it), or executable when executable/generated documentation changes repository behavior. For executable mutation, create the next numeric evidence iteration for the current plan unit and return it as current_iteration; otherwise do not change current_iteration.\n\nFollow `{{workspace_path}}/standards/documentation.md`; the path is canonical and unchanged content need not be reread when already present and certain.",
       "completionCondition": "Documentation applicability and current affected state are factual; every affected state is routed to independent review and executable mutations re-enter code gates",
       "inputSchema": {
         "type": "object",
@@ -1216,7 +1238,7 @@
     {
       "id": "validate-documentation",
       "type": "agent-directive",
-      "directive": "In an independent reviewer context where supported, validate every task-affected permanent documentation state against actual repository behavior, canonical requirements, assigned sources, project documentation rules, affected-section scope, links, examples, commands, rendering, generated output, required language parity, and coverage-map obligations; disclose fallback self-review otherwise. Reject marketing language, development history not explicitly requested, unsupported claims, stale or duplicated content, and a new long-lived document without a durable reader need. Overwrite {{workspace_path}}/documentation-review.md with the complete set of blockers detectable at this earliest sufficient tier. For every blocker give exact location, violated contract, observable consequence, and concrete correction; do not stop after the first. Return only the complete issue count; zero is valid and unrelated product-wide checks are not required.",
+      "directive": "In an independent reviewer context where supported, validate every task-affected permanent documentation state against actual repository behavior, canonical requirements, assigned sources, project documentation rules, affected-section scope, links, examples, commands, rendering, generated output, required language parity, and coverage-map obligations; disclose fallback self-review otherwise. Reject marketing language, development history not explicitly requested, unsupported claims, stale or duplicated content, and a new long-lived document without a durable reader need. Overwrite {{workspace_path}}/documentation-review.md with the findings, as the review standard requires. Return only the complete issue count; zero is valid and unrelated product-wide checks are not required.\n\nJudge the documentation by `{{workspace_path}}/standards/documentation.md` and conduct the review by `{{workspace_path}}/standards/review.md`; both paths are canonical. A standard that does not apply to this change is met.",
       "completionCondition": "Every affected documentation state has complete independent current evidence and the issue count matches all reproducible blockers",
       "inputSchema": {
         "type": "object",
@@ -1252,7 +1274,7 @@
     {
       "id": "repair-documentation",
       "type": "agent-directive",
-      "directive": "Use {{workspace_path}}/documentation-review.md to reproduce and repair every confirmed documentation defect at its root. Keep changes factual, current-state, scoped to affected sections, and consistent with actual behavior; preserve unrelated work and do not create a new long-lived document without durable need. Run project-native documentation checks and update the reconciliation evidence. Never obtain a pass by weakening tests, assertions, schemas, types, lint, links, rendering, parity, or another quality gate; change a validator or test only with concrete proof that its expectation is obsolete. Do not use sleeps, force, blind retry, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated failures.",
+      "directive": "Use {{workspace_path}}/documentation-review.md to reproduce and repair every confirmed documentation defect at its root. Keep changes factual, current-state, scoped to affected sections, and consistent with actual behavior; preserve unrelated work and do not create a new long-lived document without durable need. Run project-native documentation checks and update the reconciliation evidence. Never obtain a pass by weakening tests, assertions, schemas, types, lint, links, rendering, parity, or another quality gate; change a validator or test only with concrete proof that its expectation is obsolete. Do not use sleeps, force, blind retry, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated failures.\n\nRepair against `{{workspace_path}}/standards/documentation.md` and `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Documentation changed to repair every reproduced defect",
       "inputSchema": {
         "type": "object",
@@ -1322,7 +1344,7 @@
     {
       "id": "repair-feature-validation",
       "type": "agent-directive",
-      "directive": "Use {{workspace_path}}/feature-validation.md to reproduce and repair repository-caused feature-wide failures at their root. Preserve unrelated changes and do not absorb external or unrelated failures. Never obtain a pass by weakening tests, assertions, schemas, types, lint, build/integration gates, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for the current plan unit, write repair evidence and the updated implementation report there, return that new number as current_iteration, run focused evidence, and return through every stale unit gate.",
+      "directive": "Use {{workspace_path}}/feature-validation.md to reproduce and repair repository-caused feature-wide failures at their root. Preserve unrelated changes and do not absorb external or unrelated failures. Never obtain a pass by weakening tests, assertions, schemas, types, lint, build/integration gates, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for the current plan unit, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, run focused evidence, and return through every stale unit gate.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Repository content changed to repair reproduced feature-wide failures",
       "inputSchema": {
         "type": "object",
@@ -1341,7 +1363,7 @@
     {
       "id": "wait-for-feature-state-change",
       "type": "agent-directive",
-      "directive": "Present the concrete external blocker in {{workspace_path}}/feature-validation.md. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.",
+      "directive": "Present the concrete external blocker in {{workspace_path}}/feature-validation.md. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker recorded.",
       "completionCondition": "The user confirmed changed state or chose abort",
       "inputSchema": {
         "type": "object",
@@ -1380,7 +1402,7 @@
     {
       "id": "review-final-semantics",
       "type": "agent-directive",
-      "directive": "In an independent reviewer context where supported, review the complete final repository state against all confirmed requirements, assigned primary sources, approved plan revisions, standing project instructions, architecture decisions, tests, permanent documentation, coverage artifacts, unit checkpoints, and current validation evidence; disclose fallback self-review otherwise. Inspect actual code and surrounding project patterns. Verify cross-unit contracts, responsibility boundaries, maintainability, test adequacy, current documentation, preserved unrelated work, and that every conditional visual obligation has current inspected evidence and its accepted report. Overwrite {{workspace_path}}/final-semantic-review.md with the complete set of blockers detectable at this earliest sufficient tier. For every blocker give exact location, violated contract, observable consequence, and concrete correction; do not stop after the first. Return only the complete issue count; zero is valid and speculative redesign is not blocking.",
+      "directive": "In an independent reviewer context where supported, review the complete final repository state against all confirmed requirements, assigned primary sources, approved plan revisions, standing project instructions, architecture decisions, tests, permanent documentation, coverage artifacts, unit checkpoints, and current validation evidence; disclose fallback self-review otherwise. Inspect actual code and surrounding project patterns. Verify cross-unit contracts, responsibility boundaries, maintainability, test adequacy, current documentation, preserved unrelated work, and that every conditional visual obligation has current inspected evidence and its accepted report. Overwrite {{workspace_path}}/final-semantic-review.md with the findings, as the review standard requires. Return only the complete issue count; zero is valid and speculative redesign is not blocking.\n\nJudge by `{{workspace_path}}/standards/review.md`; the path is canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met.",
       "completionCondition": "Complete independent final semantic review exists, discloses fallback when needed, and its count matches all blocking findings",
       "inputSchema": {
         "type": "object",
@@ -1416,7 +1438,7 @@
     {
       "id": "repair-final-semantics",
       "type": "agent-directive",
-      "directive": "Use {{workspace_path}}/final-semantic-review.md to reproduce and repair every confirmed final defect at its root. Change code, tests, or documentation as required and preserve unrelated work. Never obtain a pass by weakening tests, assertions, schemas, types, lint, architecture/documentation rules, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated failures. Create the next numeric evidence iteration for the current plan unit, write repair evidence and the updated implementation report there, return that new number as current_iteration, run focused evidence, and return through every stale gate.",
+      "directive": "Use {{workspace_path}}/final-semantic-review.md to reproduce and repair every confirmed final defect at its root. Change code, tests, or documentation as required and preserve unrelated work. Never obtain a pass by weakening tests, assertions, schemas, types, lint, architecture/documentation rules, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation, and do not absorb unrelated failures. Create the next numeric evidence iteration for the current plan unit, write repair evidence there together with what this round changed and which earlier behaviour of the unit that could have disturbed, return that new number as current_iteration, run focused evidence, and return through every stale gate.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Repository content changed to repair every reproduced final semantic defect",
       "inputSchema": {
         "type": "object",
@@ -1471,7 +1493,7 @@
     {
       "id": "revise-plan-for-coverage",
       "type": "agent-directive",
-      "directive": "Create the next material plan revision from the current approved plan and {{workspace_path}}/requirements-coverage.md. Increment plan_revision, preserve prior revisions and completed work, and add only the outcomes required to close every concrete coverage gap with appropriate tests/docs/evidence. Keep executor tactics open.",
+      "directive": "Create the next material plan revision from the current approved plan and {{workspace_path}}/requirements-coverage.md. Increment plan_revision, preserve prior revisions and completed work, and add only the outcomes required to close every concrete coverage gap with appropriate tests/docs/evidence. Keep executor tactics open.\n\nFollow `{{workspace_path}}/standards/planning.md`.",
       "completionCondition": "A new material plan revision addresses every final coverage gap",
       "inputSchema": {
         "type": "object",
@@ -1490,7 +1512,7 @@
     {
       "id": "report-and-accept-feature",
       "type": "agent-directive",
-      "directive": "Create {{workspace_path}}/final-report.md from the exact current requirements, assigned sources, approved plan revisions, unit implementation reports, checkpoint reports, validation evidence, final semantic review, requirements coverage, documentation reconciliation, and user decisions. State implemented behavior, architecture-relevant outcomes, task-owned files, exact commands and outcomes, automated and manual verification, accepted visual reports where applicable, limitations, and every item that is not implemented, postponed, excluded, unrelated, or externally blocked. Do not copy large diagnostics. Present this current report and ask whether the complete repository result is accepted before any feature-level VCS reconciliation. On rejection, save verbatim feedback to {{workspace_path}}/final-user-feedback.md. Do not repair or mutate VCS here.",
+      "directive": "Create {{workspace_path}}/final-report.md from the exact current requirements, assigned sources, approved plan revisions, unit implementation reports, checkpoint reports, validation evidence, final semantic review, requirements coverage, documentation reconciliation, the accepted visual reports where a unit carried that obligation, and the verbatim rejection feedback any earlier round produced. State implemented behavior, architecture-relevant outcomes, task-owned files, exact commands and outcomes, automated and manual verification, accepted visual reports where applicable, limitations, and every item that is not implemented, postponed, excluded, unrelated, or externally blocked. Do not copy large diagnostics. Present this current report and ask whether the complete repository result is accepted before any feature-level VCS reconciliation. On rejection, save verbatim feedback to {{workspace_path}}/final-user-feedback.md. Do not repair or mutate VCS here.\n\nIn `autonomous` mode still create and present final-report.md — it is the final report of the run — and conclude the acceptance yourself without asking. Report honestly: unmet requirements, blockers, and excluded scope stay visible in the report rather than being silently accepted.",
       "completionCondition": "A current factual final report exists and the user accepted the repository result before VCS reconciliation or supplied actionable rejection feedback",
       "inputSchema": {
         "type": "object",
@@ -1553,7 +1575,7 @@
     {
       "id": "revise-plan-after-feedback",
       "type": "agent-directive",
-      "directive": "Update canonical requirements from {{workspace_path}}/final-user-feedback.md without duplicating or contradicting unaffected requirements. Create the next material plan revision, increment plan_revision, preserve prior revisions and completed work, and add outcomes needed to address the concrete dissatisfaction with tests/docs/evidence. Keep executor tactics open.",
+      "directive": "Update canonical requirements from {{workspace_path}}/final-user-feedback.md without duplicating or contradicting unaffected requirements. Create the next material plan revision, increment plan_revision, preserve prior revisions and completed work, and add outcomes needed to address the concrete dissatisfaction with tests/docs/evidence. Keep executor tactics open.\n\nFollow `{{workspace_path}}/standards/planning.md`.",
       "completionCondition": "Requirements and a new material plan revision incorporate the user's final rejection feedback",
       "inputSchema": {
         "type": "object",
@@ -1594,7 +1616,7 @@
     {
       "id": "finalize-feature",
       "type": "agent-directive",
-      "directive": "Reconcile the complete user-accepted repository state only within the project-native commit authority recorded in the current approved plan revision. Discover and follow native VCS and pre-commit conventions; do not assume Git, GitHub, gh, branch creation, or a clean tree. Preserve existing checkpoint history without squash, amend, rebase, or other automatic rewriting. Include only remaining task-owned changes created after or intentionally excluded from the last unit checkpoint, such as late documentation or rework; exclude unrelated changes and {{workspace_path}} artifacts. If checkpoints already cover the accepted state, record a truthful successful no-op. Write {{workspace_path}}/finalization.md with plan_revision={{plan_revision}}, current_step_index={{current_step_index}}, current_iteration={{current_iteration}}, the exact included scope, actual outcome, revision identifier when created, or concrete blocker. Classify pass, repository_failure requiring repository repair, or external_blocker requiring changed state or a user decision.",
+      "directive": "Reconcile the complete user-accepted repository state only within the project-native commit authority this run actually carries: the authority the task gave, recorded at task start in {{workspace_path}}/vcs-baseline.md and confirmed at plan approval. Never act beyond it. Discover and follow native VCS and pre-commit conventions; do not assume Git, GitHub, gh, branch creation, or a clean tree. Preserve existing checkpoint history without squash, amend, rebase, or other automatic rewriting. Include only remaining task-owned changes created after or intentionally excluded from the last unit checkpoint, such as late documentation or rework; exclude unrelated changes and {{workspace_path}} artifacts. If checkpoints already cover the accepted state, record a truthful successful no-op. Write {{workspace_path}}/finalization.md with plan_revision={{plan_revision}}, current_step_index={{current_step_index}}, current_iteration={{current_iteration}}, the exact included scope, actual outcome, revision identifier when created, or concrete blocker. Classify pass, repository_failure requiring repository repair, or external_blocker requiring changed state or a user decision.",
       "completionCondition": "Authorized final reconciliation succeeded or no-op, or a concrete current blocker with exact coordinates is durably classified",
       "inputSchema": {
         "type": "object",
@@ -1634,7 +1656,7 @@
     {
       "id": "repair-finalization-repository",
       "type": "agent-directive",
-      "directive": "Repair the current repository-caused VCS failure at its root. Select {{workspace_path}}/checkpoints/plan-{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/checkpoint.md only when it records repository_failure for exactly plan_revision={{plan_revision}}, current_step_index={{current_step_index}}, current_iteration={{current_iteration}}; otherwise select {{workspace_path}}/finalization.md only when it records the matching current repository_failure. Exactly one source must match: no match or multiple matches is a workflow contract defect and must not enter an unchanged repair loop. Reproduce the selected defect, preserve unrelated work, and do not absorb policy, external blockers, or unrelated repository failures into task scope. Never obtain a pass by weakening tests, assertions, schemas, types, lint, pre-commit checks, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for the current plan unit, write repair evidence naming the selected source and checkpoint/final scope plus the updated implementation report there without copying findings into workflow context, and return that new number as current_iteration. Run focused evidence, then return through every stale repository, semantic, runtime, acceptance, checkpoint, documentation, coverage, and finalization gate.",
+      "directive": "Repair the current repository-caused VCS failure at its root. Select {{workspace_path}}/checkpoints/plan-{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/checkpoint.md only when it records repository_failure for exactly plan_revision={{plan_revision}}, current_step_index={{current_step_index}}, current_iteration={{current_iteration}}; otherwise select {{workspace_path}}/finalization.md only when it records the matching current repository_failure. Exactly one source must match: no match or multiple matches is a workflow contract defect and must not enter an unchanged repair loop. Reproduce the selected defect, preserve unrelated work, and do not absorb policy, external blockers, or unrelated repository failures into task scope. Never obtain a pass by weakening tests, assertions, schemas, types, lint, pre-commit checks, or another quality gate; change a validator or test only with concrete proof that it is obsolete. Do not add sleeps, force, blind retries, swallowed errors, suppression, or timeout inflation. Create the next numeric evidence iteration for the current plan unit, write repair evidence there naming the selected source and checkpoint/final scope, together with what this round changed and which earlier behaviour it could have disturbed, without copying findings into workflow context, and return that new number as current_iteration. Run focused evidence, then return through every stale repository, semantic, runtime, acceptance, checkpoint, documentation, coverage, and finalization gate.\n\nRepair against `{{workspace_path}}/standards/review.md`.",
       "completionCondition": "Exactly one current VCS failure source was selected and repository content changed to repair the reproduced defect",
       "inputSchema": {
         "type": "object",
@@ -1668,7 +1690,7 @@
     {
       "id": "checkpoint-plan-unit",
       "type": "agent-directive",
-      "directive": "Create the authorized project-native checkpoint for completed plan unit {{current_step_index}} only after its implementation, all applicable validation, and conditional user acceptance are current. Inspect the VCS baseline, approved unit, actual diff, and current evidence. Follow native VCS and pre-commit conventions without assuming Git, GitHub, gh, branch changes, or a clean tree. Include only task-owned changes attributable to this unit; exclude unrelated changes and {{workspace_path}} artifacts. Do not stash, reset, clean, squash, amend, rebase, or rewrite history. If there is no task-owned change to record, succeed without an empty revision. Write {{workspace_path}}/checkpoints/plan-{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/checkpoint.md with plan_revision={{plan_revision}}, current_step_index={{current_step_index}}, current_iteration={{current_iteration}}, exact included scope, actual outcome, revision identifier when created, or the concrete defect/blocker. A repository or pre-commit defect returns repository_failure. For an external blocker, ask in this same responsibility to retry only after changed external state, explicitly skip this checkpoint, or abort; return pass after an explicit skip and abort after abort. Do not add retry counters or status globals.",
+      "directive": "Create the authorized project-native checkpoint for completed plan unit {{current_step_index}} only after its implementation, all applicable validation, and conditional user acceptance are current. Inspect the VCS baseline, approved unit, actual diff, and current evidence. Follow native VCS and pre-commit conventions without assuming Git, GitHub, gh, branch changes, or a clean tree. Include only task-owned changes attributable to this unit; exclude unrelated changes and {{workspace_path}} artifacts. Do not stash, reset, clean, squash, amend, rebase, or rewrite history. If there is no task-owned change to record, succeed without an empty revision. Write {{workspace_path}}/checkpoints/plan-{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/checkpoint.md with plan_revision={{plan_revision}}, current_step_index={{current_step_index}}, current_iteration={{current_iteration}}, exact included scope, actual outcome, revision identifier when created, or the concrete defect/blocker. A repository or pre-commit defect returns repository_failure. For an external blocker, ask in this same responsibility to retry only after changed external state, explicitly skip this checkpoint, or abort; return pass after an explicit skip and abort after abort. Do not add retry counters or status globals.\n\nIn `autonomous` mode do not ask on the external-blocker path either: re-check the blocking state yourself, retry only on evidence of a real change, and otherwise return the existing repository-failure or abort outcome. Never retry unchanged state.",
       "completionCondition": "The authorized unit checkpoint succeeded or no-op/explicit skip is durably recorded, or a concrete repository failure or abort is truthfully classified",
       "inputSchema": {
         "type": "object",
@@ -1720,6 +1742,141 @@
         "true": "end-aborted",
         "false": "repair-finalization-repository"
       }
+    },
+    {
+      "id": "route-operating-mode-requirements",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "assess-project-health",
+        "false": "confirm-requirements"
+      }
+    },
+    {
+      "id": "review-unit-completeness",
+      "type": "agent-directive",
+      "directive": "Delegate the completeness review of plan unit {{current_step_index}} to an independent reviewer — a subagent or child context where the host supports one; disclose a fallback self-review honestly otherwise. Do not review it yourself here and do not repair anything here.\n\nHand the reviewer the primary sources and exact paths without your interpretation: canonical requirements, the approved unit in {{workspace_path}}/plans/{{plan_revision}}/plan.md, the actual changed files, and the evidence the cheap, test-adequacy, architecture, runtime and expensive gates already produced. Do not tell it what you improved or fixed, and do not summarise the work in place of the sources. Require it to verify by reading the real artifacts. Scope it to this unit, judged in the context of the previous and following units. Give it the unit's baseline — the line recorded in {{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md — and require the judgement to be of the unit's current state against that baseline rather than of the latest iteration's changes.\n\nIts subject is completeness and quality of the delivered unit, not verification that machines already did. It must not run linters, type checks, test suites, builds, or any other mechanical check: that evidence exists and is current, and repeating it costs time without adding judgement. It must instead answer whether the approved outcome is genuinely and completely achieved: gaps against the approved outcome and canonical requirements; work that is stubbed, faked, hardcoded, silently narrowed, worked around, or left as a TODO while presented as done; required behaviour that no evidence covers; and anything that breaks the coherence of the surrounding units.\n\nThe reviewer overwrites {{workspace_path}}/step-{{current_step_index}}/completeness-review.md with the complete current set of confirmed findings, each with its location and the outcome required to resolve it, without severity tiers. Zero findings is a valid and expected result.\n\nPass its verdict through unchanged: return exactly the number of findings it reported. Your own opinion never lowers that count.\n\nHand the reviewer `{{workspace_path}}/standards/review.md` as its contract, together with the standard for what it is judging; it reads them itself.",
+      "completionCondition": "The completeness review of the current unit exists at its stable path and issues_count is exactly what the reviewer reported",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "route-unit-completeness"
+      }
+    },
+    {
+      "id": "route-unit-completeness",
+      "type": "condition",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "review-unit-completeness.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "repair-unit-completeness",
+        "false": "review-plan-unit-with-user"
+      }
+    },
+    {
+      "id": "repair-unit-completeness",
+      "type": "agent-directive",
+      "directive": "Use the current completeness review at {{workspace_path}}/step-{{current_step_index}}/completeness-review.md to reproduce and repair every confirmed finding at its root: finish what the approved unit actually requires, replace stubs, fakes and hardcoded results with real behaviour, restore silently narrowed scope, and add the evidence a required behaviour still lacks. Preserve unrelated changes and do not absorb unrelated or external failures into this unit.\n\nNever obtain a pass by weakening tests, assertions, schemas, types, lint, coverage, or another quality gate; change a validator or an existing expectation only with concrete proof that it is obsolete. Do not add sleeps, force flags, or blind retries. If a finding genuinely belongs to a different plan unit or requires changing the plan itself, say so with evidence instead of stretching this unit.\n\nRepair against `{{workspace_path}}/standards/review.md`.\n\nAfter the repair, state its reach as repair_reach: a description of what you actually changed, never of how important the finding was. It is `contained` when the correction supplied evidence or documentation the reviewer found missing for behaviour that already exists and works, without changing what the code does, and the project's own deterministic checks over what you changed have been run and pass. It is `spreading` when production behaviour changed — which is what most completeness findings require — or when those checks could not be run or did not pass. A repair that turned out larger than it looked is `spreading` whatever it looked like when you started, because `contained` skips the validation chain and returns straight to this gate — the checks that change could have invalidated would never run.",
+      "completionCondition": "Every confirmed completeness finding is repaired at its root or reported with evidence as belonging outside this unit",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "contained",
+              "spreading"
+            ],
+            "description": "Where the correction actually landed"
+          }
+        },
+        "required": [
+          "repair_reach"
+        ]
+      },
+      "connections": {
+        "success": "route-unit-completeness-reach"
+      }
+    },
+    {
+      "id": "teleport-replan",
+      "type": "teleport",
+      "hint": "Jump here when the plan itself is wrong: the approach is fundamentally mistaken, new facts or requirements invalidate the agreed plan, or units must be added, removed or reordered. Not for a failing check, a flaky test or an inconvenient review finding — those belong to their repair owners.",
+      "directive": "You jumped here because the current plan no longer fits reality. State plainly what changed or what was wrong, and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid. Do not repair code here and do not restate review findings that belong to a repair owner.\n\nThe next responsibility creates the new plan revision from the current approved plan and the actual completed work, so carry forward every unfinished obligation rather than dropping it.",
+      "completionCondition": "The reason for replanning and the required plan change are stated for the revision that follows",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "connections": {
+        "success": "revise-plan-for-replan"
+      }
+    },
+    {
+      "id": "route-test-adequacy-reach",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-test-adequacy.repair_reach"
+        },
+        "right": "contained"
+      },
+      "connections": {
+        "true": "review-test-adequacy",
+        "false": "validate-cheap"
+      }
+    },
+    {
+      "id": "route-architecture-reach",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-architecture.repair_reach"
+        },
+        "right": "contained"
+      },
+      "connections": {
+        "true": "review-architecture",
+        "false": "validate-cheap"
+      }
+    },
+    {
+      "id": "route-unit-completeness-reach",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-unit-completeness.repair_reach"
+        },
+        "right": "contained"
+      },
+      "connections": {
+        "true": "review-unit-completeness",
+        "false": "validate-cheap"
+      }
     }
   ],
   "variableRegistry": {
@@ -1755,6 +1912,39 @@
       "type": "boolean",
       "description": "Explicit authority for project-native per-unit checkpoint commits and final reconciliation",
       "default": false
+    },
+    "operating_mode": {
+      "type": "string",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "description": "How this run treats the user before the final report: autonomous skips intermediate approval gates, interactive keeps them"
+    },
+    "planning_standards": {
+      "type": "string",
+      "description": "Planning criteria this flow works to; written into the workspace by the workspace owner",
+      "default": "# Planning standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## A unit is a vertical slice\n\nEach unit changes observable behaviour and carries, inside itself, the tests and the verification\nthat prove it. It crosses whatever layers it needs to do that.\n\n*Why.* A unit whose proof lives in a later unit cannot be accepted on its own, and nothing can tell\nwhether it is finished. Splitting by layer instead — one unit for storage, one for the API, one for\nthe interface — produces work that is neither independent nor separately valuable. (INVEST; vertical\nvs horizontal slicing.)\n\n## No unit is only tests, only validation, only documentation, or only cleanup\n\nUnless that is what the task itself asks for.\n\n*Why.* Such a unit is an admission that the previous one was delivered unfinished, and it moves the\nproof away from the work it proves. The verification that ends up in a \"testing\" unit is the same\nverification the implementing unit needed to be acceptable.\n\n## The plan opens with the architecture it assumes\n\nComponents, how they interact, the decisions taken, and the consequences those decisions accept.\nDecisions deliberately deferred are named as deferred.\n\n*Why.* Without it the reviewer judges steps and never the shape, and the first unit silently fixes an\narchitecture nobody agreed to. Consequences are the part that makes the record useful later. (ADR:\ncontext, decision, consequences.)\n\n## Work moves from the core outward\n\nData and domain logic first, then integration and interfaces, then presentation — unless a real\ndependency runs the other way and the plan says which.\n\n*Why.* Building the outer layer first freezes a contract underneath it that nothing has exercised yet.\n\n## Each unit is readable by someone who never saw the conversation\n\nWhat it produces, what it depends on, and what evidence would show it done.\n\n*Why.* The reviewer, and often the executor, arrive without that history; anything they cannot\nreconstruct becomes an assumption nobody checks.\n\n## The plan does not enumerate files, symbols, line numbers, or pseudocode\n\nIt fixes outcomes, contracts, invariants, dependencies, acceptance evidence, and known risks.\n\n*Why.* Naming files before the code has been read chooses tactics blindly and substitutes a false\nsense of completeness for the analysis the executor still has to do. The executor has the repository\nin front of it; the planner does not. (INVEST — negotiable.)\n\n## Size follows the work\n\nOne unit is a complete plan when the task is small. A unit that needs sub-items is two units.\n\n*Why.* Padding a plan to look thorough adds review cycles without adding work, and sub-items hide a\nunit that was never independently completable.\n\n## Every unit names the evidence that would accept it\n\nIn observable terms: a behaviour to exercise, a state to inspect, an artifact to compare.\n\n*Why.* Acceptance criteria written as adjectives — robust, clean, complete — cannot be met or\nrefused, so they end up decided by whoever is more insistent.\n\n## Unresolved decisions are named as unresolved\n\n*Why.* An open question recorded as an assumption becomes a defect that surfaces after the work is\nbuilt on top of it.\n"
+    },
+    "engineering_standards": {
+      "type": "string",
+      "description": "Architecture and code criteria this flow works to; written into the workspace by the workspace owner",
+      "default": "# Engineering standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## A module hides a decision, and its interface is smaller than what it does\n\nThe interface is everything a caller must know: signatures, ordering constraints, error behaviour,\nguarantees. Judge a module by how much complexity it removes from everyone else, not by its size.\n\n*Why.* A module whose interface is nearly as complicated as its implementation has moved code\nwithout hiding anything. Making a unit slightly larger to hide a decision is usually the better\ntrade. (Deep modules; information hiding.)\n\n## The same design decision is not reflected in two places\n\nTwo modules that must both know a format, an ordering, or a schema are one decision leaked across a\nboundary, and the boundary is in the wrong place.\n\n*Why.* Leaked decisions change together and are found separately. The classic source is decomposing\nby the order things happen rather than by the knowledge each part holds. (Information leakage;\ntemporal decomposition.)\n\n## A published interface is extended or versioned, never quietly changed\n\nWhere callers exist outside the change, the old behaviour keeps working while the new one is\nintroduced, and the removal window is stated. Where callers are all inside the change, they are\nupdated in the same change.\n\n*Why.* Consumers depend on every observable behaviour, documented or not, so \"nobody uses that\" is a\nclaim to verify, not to assume — and a version number alone communicates nothing to them. (Hyrum's\nLaw; empirical studies find breaking changes as often in minor releases as in major ones.)\n\n## Dependencies point inward, and there are no cycles\n\nDomain logic does not know about transport, storage, or presentation; the outer layers depend on it.\n\n*Why.* When the core knows about the edge, the edge cannot be replaced or tested, and a cycle makes\nboth ends impossible to reason about alone.\n\n## Abstraction appears after repetition, not before it\n\nA second similar case is evidence; an anticipated third is not.\n\n*Why.* An abstraction built for imagined cases fits none of them well, and its cost — the indirection\nevery reader now traverses — is paid immediately while the benefit stays hypothetical.\n\n## Effects and state live at the edges\n\nThe core is deterministic and reachable by tests without infrastructure.\n\n*Why.* Logic entangled with I/O can only be exercised through the slowest path available, so it stops\nbeing exercised.\n\n## Errors are handled where there is a decision to make\n\nContext is preserved on the way up; failures are not swallowed, and are not converted into a success\nvalue that a caller cannot distinguish.\n\n*Why.* A caught error with nowhere to go becomes an invisible wrong result later, and the place that\ncould have decided has lost the information it needed.\n\n## Data and schema changes carry a path forward and a path back\n\nMigration, and what happens to data written by the previous shape.\n\n*Why.* The failure appears in production, on data nobody has in development.\n\n## Security and performance are stated with the contract they constrain\n\nNot appended afterwards as a review topic.\n\n*Why.* A constraint discovered after the interface exists is either ignored or forces the interface\nto be rebuilt.\n\n## Follow the project's patterns by analogy — and do not replicate a defect\n\nFind the places that already solve this kind of problem and follow them. Where the surrounding code\nis wrong, implement correctly, say plainly where you diverged and why, and report the defect you\nfound rather than silently repairing unrelated areas.\n\n*Why.* Consistency is what makes a codebase readable, but consistency with a defect multiplies it,\nand an unannounced divergence looks like an accident to the next reader. Repairing what the task did\nnot ask for hides the actual change inside unrelated diffs.\n\n## What you touch does not get worse\n\nDead code, debug leftovers, and TODOs standing in for delivery are removed from what the change\ntouches.\n\n*Why.* Each is a claim about the code that is no longer true, and the cost of verifying it falls on\nevery later reader.\n"
+    },
+    "test_standards": {
+      "type": "string",
+      "description": "Test criteria this flow works to; written into the workspace by the workspace owner",
+      "default": "# Test standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## A test names the behaviour it protects and fails when that behaviour regresses\n\nIf no realistic defect makes it fail, it is not protecting anything.\n\n*Why.* This is the property every other one serves: a suite that cannot fail for a behavioural reason\nreports churn instead of regressions. (Test Desiderata — behavioural.)\n\n## Tests exercise the public surface and assert state, not interactions\n\nReach the behaviour the way a caller reaches it. Assert what the system ends up being or returning,\nnot which internal calls happened in which order.\n\n*Why.* Asserting interactions couples the test to the current implementation, so it fails on every\nrefactor that changes nothing observable — the change-detector test — and, worse, keeps passing when\na collaborator's real behaviour changes underneath. (Google: change-detector tests; test state, not\ninteractions.)\n\n## A test does not assert what the compiler, type system, or linter already guarantees\n\nThat a field exists, that an argument has a type, that formatting holds.\n\n*Why.* Such an assertion cannot fail for a behavioural reason — the earlier tool fails first — so it\nadds maintenance without adding protection, and it makes the suite look stronger than it is. This\none is reasoning from the properties above rather than a citation; the literature names the adjacent\ncase, a test that re-implements the production algorithm to compare it with itself.\n\n## No assertion that cannot fail, and none that might not run\n\nAn assertion inside a conditional the run may skip, a test with no assertion at all, or an expectation\nthat restates its input.\n\n*Why.* All three report success without having checked anything, and they are indistinguishable from\nreal coverage in every report the project produces.\n\n## Each level asserts its own responsibility\n\nUnit for logic and boundaries, integration for the contract between components, end-to-end for the\nuser-visible path. The same behaviour is not asserted at three levels.\n\n*Why.* Duplicated assertions multiply the cost of every change to that behaviour, and when they\ndisagree nobody knows which one states the intent.\n\n## Tests are deterministic and independent of order\n\nNo dependence on wall-clock time, network, shared mutable state, or on another test having run first.\n\n*Why.* A test that fails intermittently trains everyone to rerun rather than investigate, and it\ntakes real failures down with it. (Test Desiderata — isolated, deterministic.)\n\n## A performance assertion carries a threshold that can fail\n\n*Why.* A measurement without a bound records a number; it never reports a regression.\n\n## The name states the condition and the expected outcome\n\nNot the method under test.\n\n*Why.* When it fails, the name is the whole diagnosis a reader gets before opening anything.\n\n## Fixtures and helpers come from the project\n\nUse the existing helpers, factories, and auth or setup utilities rather than building a parallel set.\n\n*Why.* Parallel infrastructure drifts from the real setup, and its tests then pass against a world\nthe application does not live in.\n\n## A defect is closed by a test that failed before the fix\n\n*Why.* Otherwise nothing proves the fix addressed the reported behaviour, and the same defect can\nreturn unnoticed.\n\n## Coverage artifacts the project maintains are updated with the change\n\n*Why.* A coverage map nobody updates stops describing the suite and starts misleading the next\nauthor. Coverage percentage itself is not a quality criterion: it records that lines executed, not\nthat behaviour was checked. (SWE at Google, testing overview.)\n"
+    },
+    "documentation_standards": {
+      "type": "string",
+      "description": "Documentation criteria this flow works to; written into the workspace by the workspace owner",
+      "default": "# Documentation standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## Documentation describes the current state\n\nNo change history, no \"previously\", no announcements of what is new, no promises about what will\ncome.\n\n*Why.* A reader arrives to learn how the system behaves now. History in a reference page makes them\nreconstruct which sentence is still true, and the version control system already holds the history\nproperly.\n\n## Every claim is checkable against the code, the configuration, or a command that runs\n\nExamples work as written; commands are the ones the project actually has.\n\n*Why.* One example that fails costs more trust than ten missing pages, and readers cannot tell a\nstale example from a mistake of their own.\n\n## Each page has one job\n\nTeaching a newcomer, guiding someone through a task, stating facts to look up, or explaining why the\ndesign is what it is. Knowing which one a page is tells you what belongs in it and what belongs\nelsewhere.\n\n*Why.* A page that mixes them serves nobody: the learner drowns in reference detail and the person\nlooking up a fact wades through narrative. This is a discipline for the author, not a required\ndirectory layout — projects adopt it incrementally. (Diátaxis.)\n\n## What is documented is the contract and the behaviour\n\nInternal detail appears only where a reader must act on it.\n\n*Why.* Documented internals become promises: readers depend on them, and changing them then breaks\npeople who followed the documentation.\n\n## Placement and form follow the project\n\nMatch the structure, depth, and voice of the documentation that already exists; project style comes\nfirst, house style second.\n\n*Why.* Documentation is read as a set, not as pages; a page in a foreign format reads as an\nafterthought regardless of its content. Style guides are guidance and yield to project style.\n(Google developer documentation style guide.)\n\n## Translations stay in parity where the project keeps more than one language\n\nThe same pages, the same structure, the same claims; a change lands in all of them or in none.\n\n*Why.* A partially updated translation is worse than an untranslated one, because it states outdated\nfacts with the same authority as current ones.\n\n## No new long-lived document without a durable reader\n\nUpdate the page that already owns the subject.\n\n*Why.* Documents accumulate faster than they are read; each new one splits the subject and makes the\nnext author guess which is authoritative.\n\n## No numbers that drift\n\nCounts of tests, tools, node types, or packages.\n\n*Why.* They are wrong within weeks and nothing fails when they are, so they teach readers to distrust\nthe rest of the page.\n"
+    },
+    "review_standards": {
+      "type": "string",
+      "description": "Independent review, repair and evidence contract; written into the workspace by the workspace owner",
+      "default": "# Review, repair, and evidence\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## Review\n\n### Independence is required where the flow marks a review independent\n\nWhere a review is declared independent, whoever produced the artifact does not review it: a subagent\nor a separate context is the usual way to obtain that, and where no such context is available, say so\nplainly in the report rather than pretending the review was independent.\n\nWhere a flow judges a gate locally — the same agent, in the ordinary run — the obligation is\ndifferent and just as binding: judge from the primary sources rather than from your own account of\nthe work, and do not lower the bar because you wrote the thing. Do not manufacture independence a\nlocal gate did not ask for; delegation costs a turn and a context, and the flow decides where to\nspend it.\n\n*Why.* The producer knows what they meant, so they read the intent instead of the artifact — which is\nexactly the failure the review exists to catch. Reading the diff, the tests and the evidence instead\nof your memory is what recovers most of that at a local gate; a flow buys a genuinely separate reader\nwhere the risk justifies the cost.\n\n### The reviewer reads the primary sources\n\nThe actual artifact, the requirements it answers to, the surrounding code — not the producer's\naccount of what it does.\n\n*Why.* A summary carries the producer's assumptions forward, including the one that caused the defect.\n\n### The subject is the unit's current state, not the round's increment\n\nA gate judges what the unit is now, measured against the state the unit started from — not the diff\nof the latest repair. A defect the current round did not introduce is still a defect of the unit.\n\n*Why.* By the fifth round the latest diff is three lines, and judging those three lines passes a unit\nwhose rounds broke each other's work. Judging the increment also leaves a regression homeless: the\nround that caused it is over, so no later gate owns it.\n\n### The baseline the unit is judged against is stated once and reused\n\nIt is the previous unit's checkpoint where the project's version control provides one, otherwise the\nstate recorded when the unit began. Whichever it is, the unit's first iteration writes it down in a\nline, and everything afterwards refers to that line.\n\n*Why.* With no written baseline each reviewer picks its own, and the ones that pick the last\niteration are judging the increment while believing they judge the unit.\n\n### Each round is judged on its own\n\nRe-read the artifact instead of inheriting a conclusion from the previous round, including your own.\n\"This was fine last time\" is not evidence that it is fine now.\n\n*Why.* Carried-forward conclusions accumulate: what was checked in the first round is an assumption\nby the fourth, and the repair that invalidated it is exactly the change nobody re-examined.\n\n### The report holds the complete current set of confirmed findings\n\nOne known file, overwritten each time. Each finding gives its location, the contract it violates, the\nconsequence that follows, and what would resolve it. Outward, only the count the routing needs.\n\n*Why.* Findings revealed one per round turn a repair into a queue of surprises, and findings copied\ninto workflow context drift from the file that holds them.\n\n### Zero findings is a valid and expected outcome\n\nA reviewer that must produce something will find a naming preference.\n\n*Why.* The reviewer's job is to decide whether the artifact is acceptable, and a search that continues\nuntil something is found makes the loop about the reviewer rather than the work. (Google's reviewer\nstandard.)\n\n### Blocking requires an observable consequence\n\nSomething must break, be lost, be unverifiable, or violate a stated requirement. Style, naming,\nspeculative robustness, and hypothetical future needs are worth saying and are not blocking; say so\nwhen you raise them.\n\n*Why.* The standard is that the change definitely improves the state of the system, not that it is\nperfect — nothing worsens the system's health, and nothing waits for polish. Technical facts overrule\npreferences, and where no rule exists, existing code wins over taste. (Google: improvement, not\nperfection; the \"Nit:\" convention.)\n\n### The reviewer diagnoses; it does not repair and does not design machinery\n\nNo new fields, protocols, or layers proposed for robustness nobody asked for.\n\n*Why.* A reviewer that rewrites the artifact is no longer independent of it, and a reviewer that\ndesigns is proposing work instead of proving a defect.\n\n### A delegated reviewer does not repeat mechanical checks whose evidence is current\n\nLinters, type checks, test suites, and builds have already run.\n\n*Why.* Rerunning them consumes the review turn on evidence that already exists and displaces the\njudgement only a reviewer can supply.\n\n## Repair\n\n### The repair owner reproduces the defect before changing anything\n\n*Why.* A fix aimed at a finding nobody reproduced usually changes something adjacent and leaves the\ndefect in place.\n\n### A finding that cannot be reproduced is reported as such\n\nWith what was tried. It is not silently closed, and it does not start another identical round.\n\n*Why.* An unchanged repeat costs a full cycle and produces the same report; the disagreement between\nreviewer and repair owner is the actual finding at that point.\n\n### The changed artifact returns to the same reviewer\n\n*Why.* A second reviewer re-derives the context and finds a different set, so nothing ever converges.\n\n## Evidence\n\n### Evidence is what another person can reproduce\n\nA command and its output, an inspected artifact, an observed state. Not a claim that something works.\n\n*Why.* \"Verified\" without a trace is indistinguishable from unverified, and the run that has to be\nresumed later cannot tell them apart either.\n\n### A change makes stale the evidence covering what it could have touched\n\nThat surface is re-established; evidence the change could not reach stays current, and which is which\nis said rather than assumed. Deliberate before-and-after comparison keeps the earlier evidence on\npurpose — that is not staleness.\n\n*Why.* Treating every repair as invalidating everything makes each round cost a full revalidation,\nwhich is how gates start being skipped wholesale; treating nothing as invalidated ships a unit whose\nlast change was never checked.\n\n### An artifact's existence is not evidence it was inspected\n\nWhere visual acceptance matters, the images are opened and compared against expected behaviour; a\nfile on disk proves only that a file was produced.\n\n*Why.* Capture that nobody looked at reliably passes while showing the wrong screen.\n\n### An inapplicable check is recorded as inapplicable, with the reason\n\nIt is neither silently skipped nor reported as passed.\n\n*Why.* A skipped check that reads as green is the one nobody revisits when the situation changes.\n\n### Partial and failed results are reported as partial and failed\n\n*Why.* A run reported as green on partial evidence moves the discovery of the failure to whoever\ndepends on it next, with less context than you have now.\n"
     }
   },
   "slug": "software-development-flow",

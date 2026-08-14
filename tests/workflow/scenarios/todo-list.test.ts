@@ -42,7 +42,7 @@ describe("todo-list minimal sequential checklist", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("3.1.1");
+    expect(workflow.metadata.version).toBe("3.3.0");
 
     expect(new Set(workflow.nodes.map((node) => node.id))).toEqual(
       new Set([
@@ -54,6 +54,8 @@ describe("todo-list minimal sequential checklist", () => {
         "execute-task",
         "advance-task-cursor",
         "end",
+        "teleport-revise-tasks",
+        "derive-revised-plan-state",
       ]),
     );
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
@@ -63,6 +65,7 @@ describe("todo-list minimal sequential checklist", () => {
       "projection_index",
       "current_task_action",
       "current_task_expected_result",
+      "resume_from_task",
     ]);
 
     expect(workflow.variableRegistry?.tasks).toMatchObject({
@@ -102,12 +105,55 @@ describe("todo-list minimal sequential checklist", () => {
     expect(execute.inputSchema).not.toHaveProperty("globalInputs");
     expect(execute.directive).toContain("If the task is incomplete or blocked, do not call step()");
 
+    // The checklist may be replaced mid-run, but only through a jump target: no node routes into
+    // it, so a revision is always a deliberate agent decision, never a step the flow walks into.
+    const revise = workflow.nodes.find((node) => node.id === "teleport-revise-tasks");
+    expect(revise?.type).toBe("teleport");
+    if (revise?.type !== "teleport") throw new Error("teleport-revise-tasks missing");
+    expect(
+      workflow.nodes.some((node) =>
+        Object.values(
+          (node as { connections?: Record<string, string> }).connections ?? {},
+        ).includes("teleport-revise-tasks"),
+      ),
+    ).toBe(false);
+    expect(revise.hint).toContain("Not for a task that is merely hard, blocked, or failing");
+    expect(revise.directive).toContain("original position");
+    expect(revise.inputSchema).toEqual({
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+      required: ["tasks", "resume_from_task"],
+      globalInputs: ["tasks", "resume_from_task"],
+    });
+    expect(revise.connections).toEqual({ success: "derive-revised-plan-state" });
+
+    // Length and cursor stay engine-derived after a revision: the agent returns the list and the
+    // position, never the arithmetic, and re-entry is the existing cursor check.
+    const deriveRevised = workflow.nodes.find((node) => node.id === "derive-revised-plan-state");
+    expect(deriveRevised?.type).toBe("expression");
+    if (deriveRevised?.type !== "expression") throw new Error("derive-revised-plan-state missing");
+    expect(deriveRevised.expressions).toEqual([
+      "total_tasks = tasks.length",
+      "current_task = resume_from_task",
+    ]);
+    expect(deriveRevised.connections).toEqual({ default: "check-tasks-remaining" });
+    expect(workflow.variableRegistry?.resume_from_task).toMatchObject({
+      type: "integer",
+      minimum: 1,
+      maximum: 101,
+    });
+
     const end = workflow.nodes.find((node) => node.id === "end");
     expect(end?.type).toBe("end");
     if (end?.type !== "end") throw new Error("end missing");
     expect(end.finalOutput).toEqual([]);
-    expect(workflow.systemReminder).not.toContain("report results at the end");
-    expect(workflow.systemReminder).toContain("do not advance");
+    // The flow carries no reminder of its own: a per-workflow reminder replaces the global chain
+    // (model, agent, global) instead of adding to it, so the two rules that used to live only there
+    // now belong to the node that owns per-task behaviour.
+    expect(workflow.systemReminder).toBeUndefined();
+    expect(execute.directive).toContain("Do not ask the user to approve tasks between steps");
+    expect(execute.directive).toContain("without inventing a separate summary or result report");
 
     const serialized = JSON.stringify(workflow);
     for (const removedContract of [
@@ -233,6 +279,55 @@ describe("todo-list minimal sequential checklist", () => {
 
     expect(result.inputSubmissionCounts["execute-task"]).toBe(2);
     expect(result.finalContext).not.toHaveProperty("status");
+  });
+
+  test("replaces the checklist mid-run and resumes at the stated position", async () => {
+    const revisedTasks = [
+      suppliedTasks[0],
+      {
+        action: "Repair the configuration the first task revealed as wrong",
+        expected_result: "The service starts with the corrected configuration",
+      },
+      {
+        action: "Re-run the affected suite",
+        expected_result: "The suite passes against the corrected configuration",
+      },
+    ];
+    const executedActions: unknown[] = [];
+
+    const result = await runScenario(workflow, {
+      name: "checklist revision through the teleport",
+      mockInputs: {
+        "obtain-tasks": { tasks: suppliedTasks },
+        "execute-task": ({ variables }) => {
+          executedActions.push(variables.current_task_action);
+          return { evidence: `Verified task ${String(variables.current_task)}` };
+        },
+        "teleport-revise-tasks": { tasks: revisedTasks, resume_from_task: 2 },
+      },
+      // Jump at the second arrival: the first task is really executed, then the checklist is
+      // found to be wrong before the second one starts.
+      teleportAfter: {
+        afterNode: "execute-task",
+        visitNumber: 2,
+        teleportTo: "teleport-revise-tasks",
+      },
+      expect: {
+        status: "completed",
+        reaches: ["teleport-revise-tasks", "derive-revised-plan-state", "check-tasks-remaining"],
+        contextContains: { total_tasks: 3, current_task: 4 },
+      },
+    });
+
+    // The completed first task is not executed again, and execution continues with the revised
+    // tail rather than restarting at position one.
+    expect(executedActions).toEqual([
+      suppliedTasks[0].action,
+      revisedTasks[1].action,
+      revisedTasks[2].action,
+    ]);
+    expect(result.finalContext.tasks).toEqual(revisedTasks);
+    expect(result.inputSubmissionCounts["teleport-revise-tasks"]).toBe(1);
   });
 
   test("covers every reachable node and both process decisions", () => {

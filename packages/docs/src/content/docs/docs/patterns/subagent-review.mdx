@@ -24,6 +24,11 @@ When an agent reviews its own work:
 
 ## Solution
 
+What the workflow requires is independence, not delegation as such: the reviewer must not be the
+participant that produced the artifact. Delegating to a subagent through the Task tool is the usual
+way to obtain that independence, and a child workflow or a genuinely separate reviewing role
+satisfies the same requirement.
+
 Delegate review to a separate subagent using the Task tool:
 
 1. Agent completes work
@@ -31,6 +36,28 @@ Delegate review to a separate subagent using the Task tool:
 3. Review node delegates to subagent via Task tool
 4. Subagent returns objective assessment
 5. Workflow routes based on findings
+
+## Review and Repair Contract
+
+The loop around an independent review is always the same shape, whoever performs the review:
+
+```mermaid
+flowchart LR
+    A[Produce or change] --> B[Independent review]
+    B -->|issues_count = 0| C[Next]
+    B -->|issues_count > 0| D[Repair the same artifact]
+    D --> B
+```
+
+The reviewer overwrites one known report file with the complete current set of reproducible blocking
+findings and returns only the count the condition uses. Zero findings is a valid, expected outcome.
+The repair owner reads that file, reproduces each defect, changes the artifact, and returns it to the
+same reviewer; if it cannot reproduce a defect or cannot change the artifact, it reports that cause
+instead of starting an unchanged iteration. A reviewer diagnoses and never repairs, so the report
+always describes an artifact someone else produced.
+
+Findings stay in the file. Copying them into workflow context creates a second copy that drifts from
+the report and inflates every later directive.
 
 ## Issue Contract
 
@@ -238,3 +265,4 @@ Combine with numeric validation for objective criteria:
 - [Validation Loop](/docs/patterns/validation-loop/) - Retry on failure
 - [Step Verification](/docs/patterns/step-verification/) - Verify specific steps
 - [Escalation](/docs/patterns/escalation/) - Handle repeated failures
+- [Anti-Patterns](/docs/patterns/anti-patterns/) - Review-loop machinery to avoid

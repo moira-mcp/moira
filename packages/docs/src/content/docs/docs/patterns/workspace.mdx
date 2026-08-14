@@ -49,31 +49,41 @@ Examples:
 
 ## Implementation
 
-### Onboarding Node
+### The workspace owner
 
-Collect workspace path at workflow start:
+The first responsibility that has real work to do also creates the workspace: the directory,
+`process-id.txt` correlating it with the execution, and the durable sources it owns, all in the same
+turn. A node whose only job is creating a directory adds a turn without adding judgment.
 
 ```json
 {
   "type": "agent-directive",
-  "id": "create-workspace",
-  "directive": "Create workspace for this workflow execution.\n\n1. Generate workspace name: {task-short-name}-{YYYYMMDD}-{HHMM}\n2. Create directory: ./moira-ws/{workspace-name}/\n3. Create process-id.txt with execution ID: {{executionId}}\n4. Return workspace path",
+  "id": "get-task",
+  "directive": "Establish the complete task contract from the triggering conversation. Create ./moira-ws/{task-short-name}-{YYYYMMDD}-{HHMM}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for the evidence entries that follow. Return the exact workspace and task file paths.",
+  "completionCondition": "The workspace, process correlation, and complete task contract exist at the returned paths",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_path": {
         "type": "string",
         "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
-        "description": "Path to created workspace"
+        "description": "Path to the created workspace"
+      },
+      "task_file": {
+        "type": "string",
+        "description": "Complete task contract written in the same turn"
       }
     },
-    "required": ["workspace_path"]
+    "required": ["workspace_path", "task_file"]
   },
-  "connections": { "success": "next-step" }
+  "connections": { "success": "create-plan" }
 }
 ```
 
-### Using Workspace Path
+A returned path proves nothing by itself: the completion condition is what requires the files to
+exist and be complete, and the pattern in the schema only constrains the shape of the string.
+
+### Using the workspace path
 
 Reference `{{workspace_path}}` in subsequent directives:
 
@@ -133,24 +143,23 @@ When workflow is interrupted, agent can:
 
 ## Real Example
 
-From `workflow-management-flow`:
+`moira/quick-task` gives the workspace to its intake step, which writes the task contract and the
+evidence journal in the same turn and returns both paths:
 
-```json
-{
-  "type": "agent-directive",
-  "id": "setup-workspace",
-  "directive": "Create workspace for workflow editing.\n\nFormat: ./moira-ws/{{workflow_id}}-edit-{YYYYMMDD}-{HHMM}/\nExample: ./moira-ws/development-flow-edit-20251211-2200/\n\n1. Create the directory\n2. Save process-id.txt with: {{executionId}}\n3. Return the workspace path",
-  "inputSchema": {
-    "properties": {
-      "workspace_path": { "type": "string" }
-    },
-    "required": ["workspace_path"]
-  }
-}
+```text
+./moira-ws/quick-task-<executionId>/
+├── process-id.txt
+├── task.md
+├── execution.md
+├── plans/<iteration>/{plan.md, review.md, decision.md, change.md}
+└── result-reviews/<iteration>/{review.md, decision.md, change.md}
 ```
+
+Numeric iteration directories are published only when their record is complete, so a resumed run can
+tell a finished iteration from an abandoned one.
 
 ## Related Patterns
 
-- [Information Collection](/docs/patterns/information-collection/) - Collect workspace path in onboarding
+- [Minimal Graph](/docs/patterns/minimal-graph/) - what earns a separate agent turn
 - [Dynamic Files](/docs/patterns/dynamic-files/) - Use `{{workspace_path}}` in file paths
 - [Step Verification](/docs/patterns/step-verification/) - Store verification results in workspace

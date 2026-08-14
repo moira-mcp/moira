@@ -71,6 +71,12 @@ An independent peer reviews the complete current plan against the frozen require
 
 The automatic plan-review cycle is bounded by `max_review_rounds` (default `5`). At the bound, the user explicitly chooses whether to continue repair or accept the reviewed plan for the separate approval gate. Execution starts only after the user unconditionally approves the exact plan. Rejection creates another plan version and returns it to review.
 
+## Operating mode
+
+The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
+
+In `interactive` mode everything above is unchanged. In `autonomous` mode the plan-approval gate is bypassed and every bounded decision is made by the agent on evidence: another repair pass only for findings that are reproducible and repairable now, a retry only when something material changed, a replan when the failure invalidates the plan rather than the attempt, and otherwise recorded incompleteness. The independent reviews, the retry and review bounds, the replan routes and the durable records are identical in both modes, and accepted gaps stay visible in the delivery — autonomy removes the waiting, not the honesty.
+
 ## Step execution and review
 
 The engine owns the one-based `current_step` cursor. For each plan step:

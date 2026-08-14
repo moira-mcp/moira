@@ -25,6 +25,8 @@ export interface CatalogEntry {
   id: string;
   /** Human-readable slug; unique only per owner. */
   slug: string;
+  /** Previous slugs that this bundled entry replaces under the same owner. */
+  previousSlugs?: string[];
   /** Owner the flow must be installed under (system id or a real user id). */
   owner: string;
   /** Visibility the flow is installed with. */
@@ -56,6 +58,7 @@ export function readCatalogEntry(filePath: string): CatalogEntry {
   const owner = raw.owner;
   const visibility = raw.visibility;
   const slug = raw.slug ?? path.basename(filePath, ".json");
+  const previousSlugs = raw.previousSlugs;
 
   if (typeof owner !== "string" || owner.length === 0) {
     throw new Error(`Catalog file ${filePath} is missing a non-empty 'owner' field`);
@@ -68,13 +71,30 @@ export function readCatalogEntry(filePath: string): CatalogEntry {
   if (typeof slug !== "string" || slug.length === 0) {
     throw new Error(`Catalog file ${filePath} is missing a non-empty 'slug' field`);
   }
+  if (
+    previousSlugs !== undefined &&
+    (!Array.isArray(previousSlugs) ||
+      previousSlugs.length === 0 ||
+      previousSlugs.some((previousSlug) => typeof previousSlug !== "string" || !previousSlug))
+  ) {
+    throw new Error(
+      `Catalog file ${filePath} has invalid 'previousSlugs' (expected a non-empty string array)`,
+    );
+  }
+  if (Array.isArray(previousSlugs) && new Set(previousSlugs).size !== previousSlugs.length) {
+    throw new Error(`Catalog file ${filePath} has duplicate entries in 'previousSlugs'`);
+  }
+  if (Array.isArray(previousSlugs) && previousSlugs.includes(slug)) {
+    throw new Error(`Catalog file ${filePath} lists its current slug in 'previousSlugs'`);
+  }
 
   // The graph body excludes the catalog-only metadata keys.
-  const { owner: _owner, visibility: _visibility, ...graph } = raw;
+  const { owner: _owner, visibility: _visibility, previousSlugs: _previousSlugs, ...graph } = raw;
 
   return {
     id: typeof raw.id === "string" ? raw.id : path.basename(filePath, ".json"),
     slug,
+    previousSlugs: previousSlugs as string[] | undefined,
     owner,
     visibility,
     isSystemOwner: isSystemOwner(owner),

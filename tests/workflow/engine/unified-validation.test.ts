@@ -413,5 +413,84 @@ describe("Unified Validation Architecture", () => {
       const unreachableWarning = warnings.find((w) => w.message.includes("Unreachable"));
       expect(unreachableWarning).toBeUndefined();
     });
+
+    test("should not report a node reachable only through a teleport as unreachable", async () => {
+      const validator = new GraphValidator();
+      // The replan shape used across the catalog: the teleport is the only way into the revision
+      // node, which then rejoins the ordinary loop. Walking the graph from the start node alone
+      // would miss that node even though an agent reaches it with step({ teleportTo }).
+      const workflow = {
+        id: "test-teleport-only-successor",
+        metadata: { name: "Test", version: "1.0.0", description: "Teleport successor test" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "step" } },
+          {
+            id: "step",
+            type: "agent-directive",
+            directive: "Work",
+            completionCondition: "Done",
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end" },
+          {
+            id: "teleport-replan",
+            type: "teleport",
+            directive: "Explain what changed",
+            completionCondition: "Reason stated",
+            hint: "Use when the plan no longer fits",
+            connections: { success: "revise" },
+          },
+          {
+            id: "revise",
+            type: "agent-directive",
+            directive: "Publish the new plan",
+            completionCondition: "New plan published",
+            connections: { success: "step" },
+          },
+        ],
+      };
+
+      const result = await validator.validateUnified(workflow);
+      expect(getErrors(result)).toHaveLength(0);
+      expect(getWarnings(result).find((w) => w.message.includes("Unreachable"))).toBeUndefined();
+    });
+
+    test("should still report a node that no start node and no teleport can reach", async () => {
+      const validator = new GraphValidator();
+      const workflow = {
+        id: "test-genuinely-orphaned",
+        metadata: { name: "Test", version: "1.0.0", description: "Orphan test" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "step" } },
+          {
+            id: "step",
+            type: "agent-directive",
+            directive: "Work",
+            completionCondition: "Done",
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end" },
+          {
+            id: "teleport-replan",
+            type: "teleport",
+            directive: "Explain what changed",
+            completionCondition: "Reason stated",
+            hint: "Use when the plan no longer fits",
+            connections: { success: "step" },
+          },
+          {
+            id: "orphan",
+            type: "agent-directive",
+            directive: "Nobody routes here",
+            completionCondition: "Never",
+            connections: { success: "end" },
+          },
+        ],
+      };
+
+      const result = await validator.validateUnified(workflow);
+      const unreachableWarning = getWarnings(result).find((w) => w.message.includes("Unreachable"));
+      expect(unreachableWarning?.message).toContain("orphan");
+    });
   });
 });

@@ -38,11 +38,13 @@ flowchart LR
 | Durable artifacts | Requirements, plan revisions, implementation evidence, reviews, feedback, and final coverage stay in one correlated workspace |
 | Source-grounded planning | Assigned tickets, PRs, specifications, and documents are preserved before requirements are extracted; initial VCS and discovery evidence protects unrelated work |
 | Complete implementation units | Each approved unit owns dependencies, tests, applicable permanent docs, and focused evidence |
-| Independent quality gates | Test adequacy and project-grounded architecture are reviewed separately from test execution |
+| Layered review | Test adequacy and project-grounded architecture are judged from the diff and primary sources by the implementing agent; a single delegated reviewer then judges the completed unit for completeness and quality, and never re-runs linters, type checks or suites |
+| Agent-triggered replan | A teleport entry lets the agent restart planning the moment the plan itself is wrong, instead of waiting for a gate to notice |
 | Impact-based validation | Runtime, browser, security, performance, broad builds, and full suites run only when project policy or actual risk makes them applicable |
 | Conditional visual evidence | A plan unit explicitly opts into screenshot inspection and a portable self-contained HTML report; incidental UI changes do not enable it automatically |
 | Incremental history | With approved VCS authority, each accepted unit checkpoints only its own changes before the next unit starts; unrelated work and workflow artifacts are excluded |
 | Explicit authority | Checkpoints and final project-native VCS reconciliation are conditional; final user acceptance occurs before reconciliation, and tool availability never authorizes a side effect |
+| Operating mode | The first step resolves `autonomous` or `interactive`. Autonomous runs skip the requirements, plan, unit, and feature approvals and deliver the final report instead; independent reviews, validation gates, and VCS authority are unchanged, and external blockers are decided on re-checked evidence rather than by waiting for a person |
 
 **Use for:** Feature development, bug fixes, code tasks requiring structured planning and validation.
 

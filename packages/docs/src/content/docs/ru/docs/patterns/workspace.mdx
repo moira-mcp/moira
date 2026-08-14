@@ -49,29 +49,40 @@ import { Aside } from "@astrojs/starlight/components";
 
 ## Реализация
 
-### Нода инициализации
+### Владелец рабочего пространства
 
-Сбор пути рабочего пространства при запуске workflow:
+Рабочее пространство создаёт первая ответственность, у которой есть настоящая работа: директорию,
+`process-id.txt`, связывающий её с запуском, и долговечные источники, которыми она владеет, — всё в
+одном ходе. Нода, единственная задача которой создать директорию, добавляет ход, но не добавляет
+суждения.
 
 ```json
 {
   "type": "agent-directive",
-  "id": "create-workspace",
-  "directive": "Create workspace for this workflow execution.\n\n1. Generate workspace name: {task-short-name}-{YYYYMMDD}-{HHMM}\n2. Create directory: ./moira-ws/{workspace-name}/\n3. Create process-id.txt with execution ID: {{executionId}}\n4. Return workspace path",
+  "id": "get-task",
+  "directive": "Establish the complete task contract from the triggering conversation. Create ./moira-ws/{task-short-name}-{YYYYMMDD}-{HHMM}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for the evidence entries that follow. Return the exact workspace and task file paths.",
+  "completionCondition": "The workspace, process correlation, and complete task contract exist at the returned paths",
   "inputSchema": {
     "type": "object",
     "properties": {
       "workspace_path": {
         "type": "string",
         "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
-        "description": "Path to created workspace"
+        "description": "Path to the created workspace"
+      },
+      "task_file": {
+        "type": "string",
+        "description": "Complete task contract written in the same turn"
       }
     },
-    "required": ["workspace_path"]
+    "required": ["workspace_path", "task_file"]
   },
-  "connections": { "success": "next-step" }
+  "connections": { "success": "create-plan" }
 }
 ```
+
+Возвращённый путь сам по себе ничего не доказывает: существования и полноты файлов требует completion
+condition, а `pattern` в схеме ограничивает лишь форму строки.
 
 ### Использование пути рабочего пространства
 
@@ -133,24 +144,23 @@ moira-ws/
 
 ## Реальный пример
 
-Из `workflow-management-flow`:
+`moira/quick-task` отдаёт рабочее пространство своему первому шагу: он в том же ходе пишет контракт
+задачи и журнал доказательств и возвращает оба пути:
 
-```json
-{
-  "type": "agent-directive",
-  "id": "setup-workspace",
-  "directive": "Create workspace for workflow editing.\n\nFormat: ./moira-ws/{{workflow_id}}-edit-{YYYYMMDD}-{HHMM}/\nExample: ./moira-ws/development-flow-edit-20251211-2200/\n\n1. Create the directory\n2. Save process-id.txt with: {{executionId}}\n3. Return the workspace path",
-  "inputSchema": {
-    "properties": {
-      "workspace_path": { "type": "string" }
-    },
-    "required": ["workspace_path"]
-  }
-}
+```text
+./moira-ws/quick-task-<executionId>/
+├── process-id.txt
+├── task.md
+├── execution.md
+├── plans/<iteration>/{plan.md, review.md, decision.md, change.md}
+└── result-reviews/<iteration>/{review.md, decision.md, change.md}
 ```
+
+Числовые директории итераций публикуются только когда запись полна, поэтому возобновлённый запуск
+отличает завершённую итерацию от брошенной.
 
 ## Связанные паттерны
 
-- [Сбор информации](/ru/docs/patterns/information-collection/) - Сбор пути рабочего пространства при инициализации
+- [Минимальный граф](/ru/docs/patterns/minimal-graph/) - что оправдывает отдельный ход агента
 - [Динамические файлы](/ru/docs/patterns/dynamic-files/) - Использование `{{workspace_path}}` в путях файлов
 - [Верификация шагов](/ru/docs/patterns/step-verification/) - Хранение результатов верификации в рабочем пространстве

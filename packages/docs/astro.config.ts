@@ -89,12 +89,14 @@ export default defineConfig({
           label: "Patterns",
           items: [
             { label: "Overview", slug: "docs/patterns" },
+            { label: "Minimal Graph", slug: "docs/patterns/minimal-graph" },
             {
               label: "Information Collection",
               slug: "docs/patterns/information-collection",
             },
             { label: "Skip Pattern", slug: "docs/patterns/skip" },
             { label: "Validation Loop", slug: "docs/patterns/validation-loop" },
+            { label: "Repair Reach", slug: "docs/patterns/repair-reach" },
             { label: "Branching", slug: "docs/patterns/branching" },
             { label: "Dynamic Files", slug: "docs/patterns/dynamic-files" },
             {
@@ -103,7 +105,12 @@ export default defineConfig({
             },
             { label: "Escalation", slug: "docs/patterns/escalation" },
             { label: "Subagent Review", slug: "docs/patterns/subagent-review" },
+            {
+              label: "Process Revision",
+              slug: "docs/patterns/process-revision",
+            },
             { label: "Replan", slug: "docs/patterns/replan" },
+            { label: "Operating Mode", slug: "docs/patterns/operating-mode" },
             { label: "Self Review", slug: "docs/patterns/self-review" },
             { label: "Workspace", slug: "docs/patterns/workspace" },
             {

@@ -26,6 +26,8 @@
  *   get-variable <name>              Get declared global from variableRegistry
  *   set-variable <name> <value>      Set declared global in variableRegistry
  *   list-variables                   List declared globals from variableRegistry
+ *   set-name <text>                  Set workflow display name
+ *   set-slug <slug>                  Set workflow catalog slug (kebab-case)
  *   set-description <text>           Set workflow description
  *   set-version <version>            Set workflow version
  */
@@ -788,6 +790,43 @@ function setVersion(workflow: WorkflowGraph, version: string): WorkflowGraph {
   return workflow;
 }
 
+function setSlug(workflow: WorkflowGraph, slug: string): WorkflowGraph {
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
+    console.error(c("red", `ERROR: Slug must be kebab-case: ${slug}`));
+    process.exit(1);
+  }
+  const record = workflow as unknown as Record<string, unknown>;
+  const oldSlug = record.slug as string | undefined;
+  record.slug = slug;
+
+  console.log(c("green", "✓ Workflow slug updated"));
+  if (oldSlug) {
+    console.log(c("dim", `Old slug: ${oldSlug}`));
+  }
+  console.log(c("bright", `New slug: ${slug}`));
+  console.log(
+    c(
+      "yellow",
+      "Catalog identity is (owner, slug): uploading this file creates a NEW catalog entry; the entry under the old slug stays until it is removed.",
+    ),
+  );
+
+  return workflow;
+}
+
+function setName(workflow: WorkflowGraph, name: string): WorkflowGraph {
+  const oldName = workflow.metadata.name;
+  workflow.metadata.name = name;
+
+  console.log(c("green", "✓ Workflow name updated"));
+  if (oldName) {
+    console.log(c("dim", `Old name: ${oldName}`));
+  }
+  console.log(c("bright", `New name: ${name}`));
+
+  return workflow;
+}
+
 function setDescription(workflow: WorkflowGraph, description: string): WorkflowGraph {
   const oldDescription = workflow.metadata.description;
   workflow.metadata.description = description;
@@ -1230,6 +1269,8 @@ ${c("cyan", "Commands:")}
   set-variable-schema <name> <json> Replace a declared global's complete JSON Schema
   delete-variable <name>           Delete declared global from variableRegistry
   list-variables                   List declared globals from variableRegistry
+  set-name <text>                  Set workflow display name
+  set-slug <slug>                  Set workflow catalog slug (kebab-case)
   set-description <text>           Set workflow description
   set-version <version>            Set workflow version
   diff <other-file>                Compare with another workflow file
@@ -1552,6 +1593,36 @@ async function main(): Promise<void> {
         saveOptions,
       );
       break;
+
+    case "set-slug": {
+      const slug = args
+        .slice(2)
+        .filter((argument) => argument !== "--force")
+        .join(" ")
+        .trim();
+      if (!slug) {
+        console.error(c("red", "Usage: set-slug <kebab-case-slug>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, setSlug(workflow, slug), originalWorkflow, saveOptions);
+      break;
+    }
+
+    case "set-name": {
+      const name = args
+        .slice(2)
+        .filter((argument) => argument !== "--force")
+        .join(" ")
+        .trim();
+      if (!name) {
+        console.error(c("red", "Usage: set-name <text>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, setName(workflow, name), originalWorkflow, saveOptions);
+      break;
+    }
 
     case "set-description": {
       const description = args

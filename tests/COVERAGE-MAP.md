@@ -449,6 +449,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 **unit** (2 files)
 
+- `tests/unit/scripts/workflow-tool-identity.test.ts` — 6 tests 🟢 (set-name and set-slug: exact replacement, kebab-case validation, catalog-entry warning, version bump, and no collateral change to slug/owner/description/nodes)
 - `tests/unit/scripts/workflow-tool-variables.test.ts` — 22 tests 🟢 (incl. registry-backed globals, metadata, replace/sync, End projection/path qualification, and inert-retry migration)
 - `tests/unit/services/mcp-text-service.test.ts` — 37 tests 🟢
 
@@ -777,7 +778,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-engine
 
-**63 files, 883 tests**
+**63 files, 884 tests**
 
 **unit** (7 files)
 
@@ -793,7 +794,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 **integration** (13 files)
 
 - `tests/integration/agent-response-contract.test.ts` — 3 tests 🟢
-- `tests/integration/workflow-catalog-loader.test.ts` — 10 tests 🟢 (+ multi-directory → install end-to-end: merged catalog from two dirs installs incl. real-user-owned flow from the 2nd dir + idempotent; later-dir-wins override before install; WORKFLOWS_DIRS-unset → single bundled default)
+- `tests/integration/workflow-catalog-loader.test.ts` — 13 tests 🟢 (owner/visibility mapping, version-aware idempotence, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior)
 - `tests/integration/database/workflow-privacy-defaults.test.ts` — 2 tests 🟡
 - `tests/integration/manage-workflow-actions.test.ts` — 32 tests 🟢
 - `tests/integration/manage-workflow-new-actions.test.ts` — 29 tests 🟢
@@ -834,7 +835,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/engine/telegram-services.test.ts` — 36 tests 🟢
 - `tests/workflow/engine/template-processor.test.ts` — 127 tests 🟢
 - `tests/workflow/engine/template-validation.test.ts` — 17 tests 🟢
-- `tests/workflow/engine/unified-validation.test.ts` — 16 tests 🟢
+- `tests/workflow/engine/unified-validation.test.ts` — 18 tests 🟢 (includes teleport reachability: a node reachable only through a teleport is not reported, a genuinely orphaned node still is)
 - `tests/workflow/engine/validation-error-messages.test.ts` — 15 tests 🟢
 
 **api** (4 files)
@@ -875,24 +876,25 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/scenarios/content-creation.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/coverage.test.ts` — 11 tests 🟢
 - `tests/workflow/scenarios/data-analysis.test.ts` — 5 tests 🔴
-- `tests/workflow/scenarios/development-workflow.test.ts` — 3 tests 🟢 (source-grounded filesystem-first state/authority contract; conditional screenshot/HTML directives; representative baseline, planning, repair, replan, runtime, expensive, affected-documentation, accepted-unit checkpoint success/repository-failure/abort, final acceptance/reconciliation, rejection, and abort routes; 100% node/branch scenario coverage)
+- `tests/workflow/scenarios/development-workflow.test.ts` — 6 tests 🟢 (source-grounded filesystem-first state/authority contract; operating-mode routing with an autonomous run that skips the requirements gate; local test-adequacy and architecture gates plus the delegated per-unit completeness review with its repair loop; the teleport replan entry returning through plan revision; conditional screenshot/HTML directives; representative baseline, planning, repair, replan, runtime, expensive, affected-documentation, accepted-unit checkpoint success/repository-failure/abort, final acceptance/reconciliation, rejection, and abort routes; 100% node/branch scenario coverage, the five addressed standards rendered only by the workspace owner, the flow-named workspace, and the reviewer contract living in one place; every per-unit gate naming the baseline the first iteration writes, with the four subject/staleness rules present in the review standard; the reach of a repair declared by the repairer with a required two-value enum, routed by the three reach conditions and never mentioned by a reviewer; and the observable difference between the two routes — a contained repair returns to its own gate with the cheap gate run once, a spreading one runs it twice)
 - `tests/workflow/scenarios/directive-validation.test.ts` — 4 tests 🟡
 - `tests/workflow/scenarios/iterative-research.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/marketing-campaign.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/notes-demo-metrics-collector.test.ts` — 10 tests 🟢
 - `tests/workflow/scenarios/notes-demo-metrics-reporter.test.ts` — 13 tests 🟢
 - `tests/workflow/scenarios/prd-creation.test.ts` — 5 tests 🟡
-- `tests/workflow/scenarios/quick-task.test.ts` — 7 tests 🟢 (2 behavioral runs: filesystem workspace and immutable iteration paths, bounded typed path outputs, disk-only feedback/findings/evidence, minimal global state, clean execution, plan repair and user revision, result repair and rework, empty End output, and 100% node/branch coverage)
-- `tests/workflow/scenarios/robust-task.test.ts` — 3 tests 🟢 (filesystem-only durable state and native-routing contract; complete, plan repair/rejection, ordinary retry, verifier and teleport replanning, retry-exhaustion retry/replan/incomplete delivery, criteria/final repair and explicit loop-bound decisions; 100% node/branch scenario coverage)
+- `tests/workflow/scenarios/quick-task.test.ts` — 8 tests 🟢 (4 behavioral runs including an autonomous run that skips the plan-approval gate and a mid-execution replan jump: filesystem workspace and immutable iteration paths, bounded typed path outputs, disk-only feedback/findings/evidence, minimal global state, clean execution, plan repair and user revision, the jump-only replan entry with its abuse boundary and route-independent revise-plan directive, resumption at the preserved cursor, result repair and rework, empty End output, and 100% node/branch coverage)
+- `tests/workflow/scenarios/deep-corpus-research.test.ts` — 6 tests 🟢 (catalog identity that cannot be confused with Robust Task, cost and consent markers in name/description, the consent gate enforced in the entry node in both modes, operating-mode routing with both notification outcomes, evidence-based bounded gates)
+- `tests/workflow/scenarios/robust-task.test.ts` — 3 tests 🟢 (filesystem-only durable state and native-routing contract; complete, plan repair/rejection, ordinary retry, verifier and teleport replanning, retry-exhaustion retry/replan/incomplete delivery, criteria/final repair and explicit loop-bound decisions; 100% node/branch scenario coverage; operating-mode routing with an autonomous run that skips the plan-approval gate)
 - `tests/workflow/scenarios/smart-purchase-assistant.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/telegram-setup.test.ts` — 5 tests 🟢
 - `tests/workflow/scenarios/test-generation.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/test-planning.test.ts` — 5 tests 🟡
-- `tests/workflow/scenarios/todo-list.test.ts` — minimal registry and graph contract, unified planning/supplied-task intake, unchanged typed supplied tasks, one-based projection, local evidence bounds and malformed-input retry, empty End output, and reachable node/branch coverage 🟢
+- `tests/workflow/scenarios/todo-list.test.ts` — minimal registry and graph contract, absence of a per-workflow system reminder with its rules carried by the execute node, unified planning/supplied-task intake, unchanged typed supplied tasks, one-based projection, local evidence bounds and malformed-input retry, empty End output, the mid-run revision teleport (jump-only entry, engine-derived total and cursor, resume without re-executing completed tasks), and reachable node/branch coverage 🟢
 - `tests/workflow/scenarios/user-onboarding.test.ts` — 5 tests 🟢
 - `tests/workflow/scenarios/ux-design.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/verified-research.test.ts` — 5 tests 🟡
-- `tests/workflow/scenarios/workflow-management-flow.test.ts` — 2 tests 🟢 (embedded authoring policy and minimal state contract; create/edit/audit/review/publication/error/local-sync routes with 100% node/branch scenario coverage)
+- `tests/workflow/scenarios/workflow-management-flow.test.ts` — 2 tests 🟢 (embedded authoring policy, minimal state contract and the operating-mode routing contract; create/edit/audit/review/publication/error/local-sync routes plus both autonomous paths and the process-revision teleport, and the embedded reference sections including the addressed-reference pattern and its antipattern, with 100% node/branch scenario coverage)
 
 ## Agent Instructions
 

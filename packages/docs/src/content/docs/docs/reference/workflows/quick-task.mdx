@@ -29,6 +29,7 @@ flowchart LR
     E -->|Revision requested| F[Write revised plan iteration]
     F --> C
     E -->|Approved| G[Execute units in order]
+    G -->|Plan no longer fits| F
     G --> H[Independent result review]
     H -->|Findings| I[Fix result and record change]
     I --> H
@@ -74,11 +75,29 @@ The user's exact decision and feedback are written to `decision.md`. Context rec
 
 The plan length becomes authoritative for execution only after the current plan has a clean review and explicit user approval.
 
+## Operating mode
+
+The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
+
+In `interactive` mode nothing changes. In `autonomous` mode the plan-approval gate is bypassed and the final step presents the result without asking for acceptance. Both independent reviews and their repair loops are identical in either mode, and the delivery stays honest: unfinished or unverified work is reported as such rather than silently accepted.
+
 ## Execution and evidence
 
 The engine owns a zero-based cursor. For each position, the agent reads the approved `plan.md`, executes only that work unit, applies technical judgment, and verifies the actual result. Before advancing, it writes exactly one concise evidence entry of at most 500 characters for that position to `execution.md`.
 
 Evidence is not returned through workflow context. If work is incomplete or blocked, the agent reports the verified reason and remains at the current directive; the workflow does not convert failure into a status code or advance the cursor. Quick Task has no automatic retry counter or skip-as-success route.
+
+### Replanning during execution
+
+When the approved plan itself stops fitting reality — new facts appear, scope was missed, or an executed unit's outcome invalidates the remaining plan — the agent jumps to the replan entry instead of finishing a plan it knows is wrong:
+
+```js
+mcp__moira__step({ processId, teleportTo: "teleport-replan" })
+```
+
+No step leads into that node, so a replan is always a deliberate decision, and it is not a way around the other owners: a blocking plan-review finding belongs to the plan repair loop, a defect in the produced result to the result fix loop, a plan you reject at the approval gate to the ordinary revision route, and a unit that is merely hard or blocked to the rule above.
+
+The jump states why the plan no longer fits; the same plan revision responsibility then publishes the next immutable plan iteration with its `change.md`. Units already executed keep their positions — the cursor is preserved, so finished work is not repeated and its evidence entries stay as written. The new plan goes back through the independent plan review and, in `interactive` mode, through your approval, before execution continues.
 
 ## Result review and acceptance
 

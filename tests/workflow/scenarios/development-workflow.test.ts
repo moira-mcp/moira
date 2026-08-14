@@ -19,7 +19,10 @@ function loadWorkflow(): WorkflowGraph {
 
 function ordinaryInputs(): Record<string, MockInput> {
   return {
-    "capture-task-and-context": { workspace_path: "./moira-ws/example" },
+    "capture-task-and-context": {
+      workspace_path: "./moira-ws/example",
+      operating_mode: "interactive",
+    },
     "confirm-requirements": { requirements_approval: "yes" },
     "revise-requirements": {},
     "assess-project-health": { health_outcome: "pass" },
@@ -38,9 +41,11 @@ function ordinaryInputs(): Record<string, MockInput> {
     "validate-cheap": { issues_count: 0 },
     "repair-cheap-validation": { current_iteration: 2 },
     "review-test-adequacy": { issues_count: 0 },
-    "repair-test-adequacy": { current_iteration: 2 },
+    "repair-test-adequacy": { current_iteration: 2, repair_reach: "spreading" },
     "review-architecture": { issues_count: 0, requires_replan: false },
-    "repair-architecture": { current_iteration: 2 },
+    "review-unit-completeness": { issues_count: 0 },
+    "repair-unit-completeness": { repair_reach: "spreading" },
+    "repair-architecture": { current_iteration: 2, repair_reach: "spreading" },
     "approve-current-unit-closure": { closure_decision: "approved" },
     "revise-plan-for-replan": { plan_revision: 2 },
     "validate-runtime": { validation_outcome: "not_applicable" },
@@ -75,15 +80,71 @@ function flow(
   overrides: Record<string, MockInput>,
   reaches: string[],
   avoids: string[] = [],
+  options: Pick<TestScenario, "teleportAfter"> = {},
 ): TestScenario {
   return {
     name,
     mockInputs: { ...ordinaryInputs(), ...overrides },
     expect: { status: "completed", reaches, avoids, maxSteps: 220 },
+    ...options,
+  };
+}
+
+/** Same run with the mode that routes around the requirements gate. */
+function autonomousInputs(overrides: Record<string, MockInput> = {}): Record<string, MockInput> {
+  return {
+    "capture-task-and-context": {
+      workspace_path: "./moira-ws/example",
+      operating_mode: "autonomous",
+    },
+    ...overrides,
   };
 }
 
 const scenarios: TestScenario[] = [
+  flow(
+    "autonomous run reaches the final report without a requirements gate",
+    autonomousInputs(),
+    [
+      "route-operating-mode-requirements",
+      "assess-project-health",
+      "approve-plan",
+      "review-plan-unit-with-user",
+      "report-and-accept-feature",
+      "end",
+    ],
+    ["confirm-requirements", "revise-requirements"],
+  ),
+  flow(
+    "delegated completeness review sends an incomplete unit back through the cheap gate",
+    {
+      "review-unit-completeness": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+    },
+    ["review-unit-completeness", "repair-unit-completeness", "validate-cheap", "end"],
+  ),
+  flow(
+    "teleport replan rebuilds the plan and returns to implementation",
+    {
+      "approve-plan": [
+        {
+          plan_approval: "yes",
+          current_step_index: 1,
+          total_steps: 1,
+          vcs_commits_authorized: false,
+        },
+        {
+          plan_approval: "yes",
+          current_step_index: 1,
+          total_steps: 1,
+          vcs_commits_authorized: false,
+        },
+      ],
+      "revise-plan-for-replan": { plan_revision: 2 },
+    },
+    ["teleport-replan", "revise-plan-for-replan", "review-plan", "implement-plan-unit", "end"],
+    [],
+    { teleportAfter: { afterNode: "implement-plan-unit", teleportTo: "teleport-replan" } },
+  ),
   flow(
     "ordinary code task without VCS side effects",
     {},
@@ -142,14 +203,53 @@ const scenarios: TestScenario[] = [
       ],
       "repair-cheap-validation": { current_iteration: 2 },
       "review-test-adequacy": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
-      "repair-test-adequacy": { current_iteration: 3 },
+      "repair-test-adequacy": { current_iteration: 3, repair_reach: "spreading" },
       "review-architecture": [
         { issues_count: 1, requires_replan: false },
         { issues_count: 0, requires_replan: false },
       ],
-      "repair-architecture": { current_iteration: 4 },
+      "repair-architecture": { current_iteration: 4, repair_reach: "spreading" },
     },
-    ["repair-cheap-validation", "repair-test-adequacy", "repair-architecture", "end"],
+    [
+      "repair-cheap-validation",
+      "repair-test-adequacy",
+      "route-test-adequacy-reach",
+      "repair-architecture",
+      "route-architecture-reach",
+      "end",
+    ],
+  ),
+  flow(
+    "a contained test repair goes back to the gate that raised it",
+    {
+      "review-test-adequacy": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+      "repair-test-adequacy": { current_iteration: 2, repair_reach: "contained" },
+    },
+    ["repair-test-adequacy", "route-test-adequacy-reach", "review-test-adequacy", "end"],
+  ),
+  flow(
+    "a contained architecture repair goes back to the architecture gate",
+    {
+      "review-architecture": [
+        { issues_count: 1, requires_replan: false },
+        { issues_count: 0, requires_replan: false },
+      ],
+      "repair-architecture": { current_iteration: 2, repair_reach: "contained" },
+    },
+    ["repair-architecture", "route-architecture-reach", "review-architecture", "end"],
+  ),
+  flow(
+    "a contained completeness repair goes back to the same reviewer",
+    {
+      "review-unit-completeness": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+      "repair-unit-completeness": { repair_reach: "contained" },
+    },
+    [
+      "repair-unit-completeness",
+      "route-unit-completeness-reach",
+      "review-unit-completeness",
+      "end",
+    ],
   ),
   flow(
     "architecture replan requires approved closure and a new reviewed plan",
@@ -484,7 +584,7 @@ describe("software-development-flow v12", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("12.2.0");
+    expect(workflow.metadata.version).toBe("12.7.0");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -493,7 +593,82 @@ describe("software-development-flow v12", () => {
       "total_steps",
       "current_iteration",
       "vcs_commits_authorized",
+      "operating_mode",
+      "planning_standards",
+      "engineering_standards",
+      "test_standards",
+      "documentation_standards",
+      "review_standards",
     ]);
+    expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
+
+    // The standards are a document the run consults: the workspace owner renders them once and
+    // writes them down, and every other reader — including a delegated reviewer — is given the path.
+    const standardsVars = [
+      "planning_standards",
+      "engineering_standards",
+      "test_standards",
+      "documentation_standards",
+      "review_standards",
+    ];
+    for (const name of standardsVars) {
+      expect(String(workflow.variableRegistry?.[name]?.default ?? "")).toContain("*Why.*");
+      const rendering = workflow.nodes.filter((node) =>
+        JSON.stringify(node).includes(`{{${name}}}`),
+      );
+      expect(rendering.map((node) => node.id)).toEqual(["capture-task-and-context"]);
+    }
+    const owner = workflow.nodes.find((node) => node.id === "capture-task-and-context");
+    expect(owner?.directive).toContain("./moira-ws/software-development-flow-{task-name}");
+    for (const file of [
+      "planning.md",
+      "engineering.md",
+      "tests.md",
+      "documentation.md",
+      "review.md",
+    ]) {
+      expect(owner?.directive).toContain(file);
+    }
+
+    // The reviewer contract has one home: the finding format no longer repeats across directives.
+    expect(JSON.stringify(workflow)).not.toContain("do not stop after the first");
+    for (const id of [
+      "review-plan",
+      "review-architecture",
+      "review-test-adequacy",
+      "validate-documentation",
+      "review-final-semantics",
+      "review-unit-completeness",
+    ]) {
+      expect(
+        (workflow.nodes.find((node) => node.id === id) as { directive: string }).directive,
+      ).toContain("standards/review.md");
+    }
+    expect(
+      (workflow.nodes.find((node) => node.id === "validate-cheap") as { directive: string })
+        .directive,
+    ).toContain("tests are not a substitute for them");
+
+    // Exactly one delegated review per plan unit: the per-unit gates judge locally, and only the
+    // completeness review obtains independence.
+    for (const id of ["review-test-adequacy", "review-architecture"]) {
+      const gate = workflow.nodes.find((node) => node.id === id) as {
+        directive: string;
+        completionCondition: string;
+      };
+      expect(gate.directive).toContain("do not delegate it");
+      expect(gate.completionCondition).not.toContain("Independent");
+      expect(`${gate.directive} ${gate.completionCondition}`).not.toContain("fallback");
+      // Still a gate: report path and routing count survive.
+      expect(gate.directive).toContain("{{workspace_path}}/step-{{current_step_index}}");
+    }
+    expect(
+      (
+        workflow.nodes.find((node) => node.id === "review-unit-completeness") as {
+          directive: string;
+        }
+      ).directive,
+    ).toContain("Delegate the completeness review");
 
     const start = workflow.nodes.find((node) => node.id === "start");
     expect(start).not.toHaveProperty("initialData");
@@ -536,6 +711,9 @@ describe("software-development-flow v12", () => {
 
     const serialized = JSON.stringify(workflow);
     for (const removed of [
+      "approval.md",
+      "acceptance.md",
+      "updated implementation report",
       "telegram-notification",
       "maxRetries",
       "retryMessage",
@@ -549,6 +727,105 @@ describe("software-development-flow v12", () => {
     ]) {
       expect(serialized).not.toContain(removed);
     }
+  });
+
+  test("every per-unit gate judges the unit against a baseline the run actually writes", () => {
+    // The baseline is a line in the unit's first iteration report, and both entries into a unit set
+    // current_iteration to 1, so the path the gates name always exists.
+    const BASELINE = "{{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md";
+    for (const id of [
+      "validate-cheap",
+      "review-test-adequacy",
+      "review-architecture",
+      "validate-runtime",
+      "validate-expensive",
+      "review-unit-completeness",
+    ]) {
+      const gate = workflow.nodes.find((node) => node.id === id) as { directive: string };
+      expect(gate.directive).toContain(BASELINE);
+    }
+    const writer = workflow.nodes.find((node) => node.id === "implement-plan-unit") as {
+      directive: string;
+    };
+    expect(writer.directive).toContain("record the unit's baseline in one line");
+    for (const id of ["initialize-implementation-iteration", "advance-plan-unit"]) {
+      const node = workflow.nodes.find((item) => item.id === id) as { expressions: string[] };
+      expect(node.expressions).toContain("current_iteration = 1");
+    }
+
+    // The rules the gates lean on live once, in the standard the workspace owner writes down.
+    const standard = String(workflow.variableRegistry?.review_standards?.default ?? "");
+    expect(standard).toContain("not the round's increment");
+    expect(standard).toContain("stated once and reused");
+    expect(standard).toContain("Each round is judged on its own");
+    expect(standard).toContain("could have touched");
+  });
+
+  test("the reach of a repair is stated by the repairer and routes without a default", () => {
+    for (const [repair, gate] of [
+      ["repair-test-adequacy", "review-test-adequacy"],
+      ["repair-architecture", "review-architecture"],
+      ["repair-unit-completeness", "review-unit-completeness"],
+    ]) {
+      const owner = workflow.nodes.find((node) => node.id === repair) as {
+        directive: string;
+        inputSchema: { properties: Record<string, { enum?: string[] }>; required: string[] };
+        connections: Record<string, string>;
+      };
+      expect(owner.inputSchema.properties.repair_reach?.enum).toEqual(["contained", "spreading"]);
+      expect(owner.inputSchema.required).toContain("repair_reach");
+      expect(owner.directive).toContain("state its reach as repair_reach");
+
+      const route = workflow.nodes.find(
+        (node) => node.id === owner.connections.success,
+      ) as (typeof workflow.nodes)[number] & { connections: Record<string, string> };
+      expect(route.type).toBe("condition");
+      // Contained returns to the gate that raised the finding; anything else takes the full chain.
+      expect(route.connections).toEqual({ true: gate, false: "validate-cheap" });
+    }
+
+    // No reviewer classifies reach: the repairer describes what it actually changed, after the fact.
+    for (const id of ["review-test-adequacy", "review-architecture", "review-unit-completeness"]) {
+      expect(JSON.stringify(workflow.nodes.find((node) => node.id === id))).not.toContain(
+        "repair_reach",
+      );
+    }
+  });
+
+  test("a contained repair skips the validation chain a spreading one runs", async () => {
+    const contained = await runScenario(workflow, {
+      name: "contained test-adequacy repair",
+      mockInputs: {
+        ...ordinaryInputs(),
+        "review-test-adequacy": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+        "repair-test-adequacy": { current_iteration: 2, repair_reach: "contained" },
+      },
+      expect: { status: "completed", maxSteps: 220 },
+    });
+    expect(contained.passed).toBe(true);
+    // A paused node is recorded on the pause and again on the resume; the route is the distinct path.
+    const route = (result: { visitedNodes: string[] }): string[] =>
+      result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+    const containedRoute = route(contained);
+    const repairAt = containedRoute.indexOf("repair-test-adequacy");
+    expect(containedRoute.slice(repairAt, repairAt + 3)).toEqual([
+      "repair-test-adequacy",
+      "route-test-adequacy-reach",
+      "review-test-adequacy",
+    ]);
+    expect(containedRoute.filter((id) => id === "validate-cheap")).toHaveLength(1);
+
+    const spreading = await runScenario(workflow, {
+      name: "spreading test-adequacy repair",
+      mockInputs: {
+        ...ordinaryInputs(),
+        "review-test-adequacy": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+        "repair-test-adequacy": { current_iteration: 2, repair_reach: "spreading" },
+      },
+      expect: { status: "completed", maxSteps: 220 },
+    });
+    expect(spreading.passed).toBe(true);
+    expect(route(spreading).filter((id) => id === "validate-cheap")).toHaveLength(2);
   });
 
   test("all representative routes complete and cover every node and branch", async () => {
