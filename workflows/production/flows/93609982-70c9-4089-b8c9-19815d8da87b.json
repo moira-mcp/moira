@@ -5,10 +5,9 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.1.1",
-    "description": "Autonomous sequential checklist with optional supplied tasks, an engine-owned one-based cursor, and one concise local evidence acknowledgement per completed task."
+    "version": "3.3.0",
+    "description": "Autonomous sequential checklist with optional supplied tasks, an engine-owned one-based cursor, one concise local evidence acknowledgement per completed task, and a mid-run jump that replaces the checklist while keeping completed tasks and resuming at a stated position."
   },
-  "systemReminder": "Execute this autonomous checklist sequentially without asking the user to approve each task. Complete and verify the current task before calling step(). If the task is incomplete or blocked, do not advance; report the verified blocker to the user. After the last completed task, let the workflow end without inventing a separate summary or result report.",
   "nodes": [
     {
       "id": "start",
@@ -80,7 +79,7 @@
     {
       "id": "execute-task",
       "type": "agent-directive",
-      "directive": "Execute task {{current_task}} of {{total_tasks}}. Action: {{current_task_action}}. Expected result: {{current_task_expected_result}}. Perform the real work and verify the expected result before calling step(). If the task is incomplete or blocked, do not call step(); report the verified blocker to the user. After successful completion, return only one concise evidence string describing the concrete check that passed.",
+      "directive": "Execute task {{current_task}} of {{total_tasks}}. Action: {{current_task_action}}. Expected result: {{current_task_expected_result}}. Perform the real work and verify the expected result before calling step(). If the task is incomplete or blocked, do not call step(); report the verified blocker to the user. After successful completion, return only one concise evidence string describing the concrete check that passed. Do not ask the user to approve tasks between steps. After the last task, let the workflow end without inventing a separate summary or result report.",
       "completionCondition": "The current task is completed, its expected result is verified, and one concise evidence string is returned",
       "inputSchema": {
         "type": "object",
@@ -115,6 +114,40 @@
       "id": "end",
       "type": "end",
       "finalOutput": []
+    },
+    {
+      "id": "teleport-revise-tasks",
+      "type": "teleport",
+      "hint": "Jump here when the checklist itself no longer describes the work that must happen: remaining tasks turned out wrong, obsolete, missing, or in the wrong order. Not for a task that is merely hard, blocked, or failing — report that blocker to the user and stay on the task.",
+      "directive": "You jumped here because the checklist no longer matches the work that must happen. Return the complete corrected checklist and the position to continue from.\n\nKeep every task you have already executed at its original position and unchanged in meaning: position is task identity, and the run resumes by position. Change only what is still ahead — rewrite, drop, add, or reorder it — and keep each task self-contained, naming the concrete work, its constraints, and how it is verified.\n\nReturn resume_from_task as the position of the first task to execute now. Everything before that position is treated as already done and will not be executed again. Do not add ids, statuses, result codes, counters, or reporting fields, and do not use this jump to escape a task that is simply hard or blocked.",
+      "completionCondition": "The complete corrected checklist preserves already executed tasks in their original positions, and the position to continue from is returned",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "tasks",
+          "resume_from_task"
+        ],
+        "globalInputs": [
+          "tasks",
+          "resume_from_task"
+        ]
+      },
+      "connections": {
+        "success": "derive-revised-plan-state"
+      }
+    },
+    {
+      "id": "derive-revised-plan-state",
+      "type": "expression",
+      "expressions": [
+        "total_tasks = tasks.length",
+        "current_task = resume_from_task"
+      ],
+      "connections": {
+        "default": "check-tasks-remaining"
+      }
     }
   ],
   "variableRegistry": {
@@ -175,6 +208,12 @@
       "description": "Projected expected result for the current task",
       "minLength": 1,
       "maxLength": 1000
+    },
+    "resume_from_task": {
+      "type": "integer",
+      "description": "Position to continue from after a checklist revision",
+      "minimum": 1,
+      "maximum": 101
     }
   }
 }

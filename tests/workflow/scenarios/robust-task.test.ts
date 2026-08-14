@@ -17,7 +17,10 @@ function node(workflow: WorkflowGraph, id: string): any {
 
 function ordinaryInputs(): Record<string, MockInput> {
   return {
-    "initialize-workspace": { workspace_path: "./moira-ws/example-20260802-0700/" },
+    "initialize-workspace": {
+      workspace_path: "./moira-ws/robust-task-example-20260802-0700/",
+      operating_mode: "interactive",
+    },
     "create-plan": { current_plan_file: "plans/001/plan.md", total_steps: 1 },
     "review-plan": { issues_count: 0 },
     "ask-plan-review-limit": { decision: "accept" },
@@ -66,6 +69,22 @@ function scenario(
 }
 
 const scenarios: TestScenario[] = [
+  scenario(
+    "autonomous run completes without the plan approval gate",
+    {
+      "initialize-workspace": {
+        workspace_path: "./moira-ws/robust-task-example-20260802-0700/",
+        operating_mode: "autonomous",
+      },
+    },
+    [
+      "route-operating-mode-plan-approval",
+      "execute-step",
+      "verify-criteria",
+      "final-review",
+      "end",
+    ],
+  ),
   scenario("ordinary complete execution", {}, [
     "execute-step",
     "verify-criteria",
@@ -321,6 +340,25 @@ describe("Robust Task filesystem-only contract", () => {
     }
 
     expect(node(workflow, "initialize-workspace").directive).toContain("process-id.txt");
+    // Autonomous mode is routed, not schema-driven: the plan-approval gate is entered through its
+    // mode condition, and both notification routes lead to that condition.
+    expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
+    expect(node(workflow, "route-operating-mode-plan-approval").connections).toEqual({
+      true: "check-all-steps-done",
+      false: "approve-plan",
+    });
+    expect(node(workflow, "notify-plan-ready").connections).toEqual({
+      default: "route-operating-mode-plan-approval",
+      error: "route-operating-mode-plan-approval",
+    });
+    for (const bounded of [
+      "ask-plan-review-limit",
+      "ask-retry-decision",
+      "ask-criteria-review-limit",
+      "ask-final-review-limit",
+    ]) {
+      expect(node(workflow, bounded).directive).toContain("`autonomous` mode decide this yourself");
+    }
     expect(node(workflow, "execute-step").directive).toContain("next unused numeric attempt");
     expect(node(workflow, "review-step").directive).toContain("independent peer review");
     expect(node(workflow, "ask-retry-decision").inputSchema.properties.decision.enum).toEqual([

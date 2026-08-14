@@ -5,7 +5,7 @@
   "id": "be95cedc-35ec-4314-87ce-331ac3d11579",
   "metadata": {
     "name": "Robust Task",
-    "version": "8.0.3",
+    "version": "8.2.0",
     "description": "Filesystem-only reliable execution for complex tasks with durable plans and evidence, independent reviews, bounded retry and escalation, replanning, and truthful delivery."
   },
   "nodes": [
@@ -32,17 +32,19 @@
     {
       "id": "initialize-workspace",
       "type": "agent-directive",
-      "directive": "Establish the durable workspace for this Robust Task. Read the user's complete request and applicable local instructions. Resolve only ambiguity that materially changes the result; otherwise proceed autonomously. Create or resume exactly one ./moira-ws/<task-name>-<YYYYMMDD>-<HHMM>/ workspace, correlated by process-id.txt containing {{executionId}}. Write the authoritative task-requirements.md directly from the confirmed request and write a concise workflow-guide.md covering filesystem authority, recovery, plan quality, evidence, independent review, and the rule that mechanical checks prove only what they measure. Do not first return or relay either file body through workflow context. Read the files back and verify that they completely and accurately represent the task and guidance. Return only the trailing-slash workspace_path.",
+      "directive": "Establish the durable workspace for this Robust Task. Read the user's complete request and applicable local instructions. Resolve only ambiguity that materially changes the result; otherwise proceed autonomously. Create or resume exactly one ./moira-ws/robust-task-<task-name>-<YYYYMMDD>-<HHMM>/ workspace, correlated by process-id.txt containing {{executionId}}. Write the authoritative task-requirements.md directly from the confirmed request and write a concise workflow-guide.md covering filesystem authority, recovery, plan quality, evidence, independent review, and the rule that mechanical checks prove only what they measure. Do not first return or relay either file body through workflow context. Read the files back and verify that they completely and accurately represent the task and guidance. Return only the trailing-slash workspace_path.\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there is no plan approval and no bounded-gate question, only the delivery, while `interactive` keeps every current decision point. The mode holds for the whole run and is never asked again.",
       "completionCondition": "One recoverable workspace contains the exact process ID, complete frozen requirements, and sufficient workflow guidance; workspace_path resolves to it.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "workspace_path"
+          "workspace_path",
+          "operating_mode"
         ],
         "globalInputs": [
-          "workspace_path"
+          "workspace_path",
+          "operating_mode"
         ]
       },
       "connections": {
@@ -140,7 +142,7 @@
     {
       "id": "ask-plan-review-limit",
       "type": "agent-directive",
-      "directive": "Plan review reached the configured bound after changed plan versions. Show the user the current plan and its review.md by reading them from {{workspace_path}}{{current_plan_file}}. Ask whether to continue repairing confirmed findings or explicitly accept the current reviewed plan for the separate approval gate. Record the exact decision and reason in review-limit-decision.md beside the plan. Return only the decision.",
+      "directive": "Plan review reached the configured bound after changed plan versions. Show the user the current plan and its review.md by reading them from {{workspace_path}}{{current_plan_file}}. Ask whether to continue repairing confirmed findings or explicitly accept the current reviewed plan for the separate approval gate. Record the exact decision and reason in review-limit-decision.md beside the plan. Return only the decision.\n\nIn `autonomous` mode decide this yourself, without asking: choose `repair` only while the remaining findings are reproducible and the plan can still change, otherwise `accept` the reviewed plan. Record the decision and its reason in the same durable location as an interactive decision.",
       "completionCondition": "The user explicitly chose repair or accept and the exact decision is durable beside the current plan.",
       "inputSchema": {
         "type": "object",
@@ -226,8 +228,8 @@
       "message": "Robust Task plan is ready for approval.\n\nPlan: {{current_plan_file}}\nSteps: {{total_steps}}",
       "parseMode": "Markdown",
       "connections": {
-        "default": "approve-plan",
-        "error": "approve-plan"
+        "default": "route-operating-mode-plan-approval",
+        "error": "route-operating-mode-plan-approval"
       }
     },
     {
@@ -473,7 +475,7 @@
     {
       "id": "ask-retry-decision",
       "type": "agent-directive",
-      "directive": "Read the current step, every plan- and attempt-qualified evidence/verdict pair, and the frozen requirements. Ask the user to choose exactly retry, replan, or finish_incomplete and provide the exact information that outcome needs. Retry requires changed input, a new hypothesis, changed external state, or concrete work/evidence already supplied by the user. Replan requires instructions for the unfinished work and may change requirements only when the user explicitly names and authorizes the exact change and reason. Finish_incomplete requires the exact unresolved scope and reason and means stop remaining execution and automatic repair. Write the complete response and current plan reference to the next unused steps/{{current_step}}/decisions/NNN.md. Return only the decision enum and exact decision_file consumed by the selected route.",
+      "directive": "Read the current step, every plan- and attempt-qualified evidence/verdict pair, and the frozen requirements. Ask the user to choose exactly retry, replan, or finish_incomplete and provide the exact information that outcome needs. Retry requires changed input, a new hypothesis, changed external state, or concrete work/evidence already supplied by the user. Replan requires instructions for the unfinished work and may change requirements only when the user explicitly names and authorizes the exact change and reason. Finish_incomplete requires the exact unresolved scope and reason and means stop remaining execution and automatic repair. Write the complete response and current plan reference to the next unused steps/{{current_step}}/decisions/NNN.md. Return only the decision enum and exact decision_file consumed by the selected route.\n\nIn `autonomous` mode decide this yourself, without asking: `retry` only when something material changed since the last attempt, `replan` when the failure invalidates the plan rather than the attempt, and `finish_incomplete` when neither holds. Write the decision file at its exact path exactly as in interactive mode.",
       "completionCondition": "One explicit retry, replan, or finish_incomplete decision is durably recorded at an immutable path with all changed input, authorization, or unresolved scope its route requires.",
       "inputSchema": {
         "type": "object",
@@ -658,7 +660,7 @@
     {
       "id": "ask-criteria-review-limit",
       "type": "agent-directive",
-      "directive": "Criteria review reached the configured bound after changed repair attempts. Show the user the complete current report at {{workspace_path}}{{verify-criteria.review_file}}. Ask whether to authorize another repair pass or explicitly accept the reported gaps as incomplete. Record the exact decision, scope, and reason in final/criteria/acceptance.md when accepting, or in a continuation record beside the review when authorizing repair. Return only the decision.",
+      "directive": "Criteria review reached the configured bound after changed repair attempts. Show the user the complete current report at {{workspace_path}}{{verify-criteria.review_file}}. Ask whether to authorize another repair pass or explicitly accept the reported gaps as incomplete. Record the exact decision, scope, and reason in final/criteria/acceptance.md when accepting, or in a continuation record beside the review when authorizing repair. Return only the decision.\n\nIn `autonomous` mode decide this yourself, without asking: authorize another pass only for findings that are reproducible and repairable now, otherwise accept them as incomplete. Record the exact accepted scope and reason; accepted gaps stay visible in the delivery and are never silently closed.",
       "completionCondition": "At the configured review bound, the user explicitly authorized another repair pass or accepted the exact reported gaps as incomplete, and the scoped decision is durable.",
       "inputSchema": {
         "type": "object",
@@ -796,7 +798,7 @@
     {
       "id": "ask-final-review-limit",
       "type": "agent-directive",
-      "directive": "Independent final review reached the configured bound after changed repairs. Show the complete report at {{workspace_path}}{{final-review.review_file}}. Ask whether to continue repair or explicitly accept the unresolved findings as incomplete. Record the exact decision and reason in final/reviews/acceptance.md when accepting, or beside the current review when continuing. Return only the decision.",
+      "directive": "Independent final review reached the configured bound after changed repairs. Show the complete report at {{workspace_path}}{{final-review.review_file}}. Ask whether to continue repair or explicitly accept the unresolved findings as incomplete. Record the exact decision and reason in final/reviews/acceptance.md when accepting, or beside the current review when continuing. Return only the decision.\n\nIn `autonomous` mode decide this yourself, without asking: continue repair only for findings that are reproducible and repairable now, otherwise accept them as incomplete. Record the exact decision and reason; accepted findings stay visible in the delivery.",
       "completionCondition": "The user explicitly chose repair or accept_incomplete and the exact decision is durable.",
       "inputSchema": {
         "type": "object",
@@ -931,6 +933,21 @@
         "true": "replan-from-decision",
         "false": "deliver-result"
       }
+    },
+    {
+      "id": "route-operating-mode-plan-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "check-all-steps-done",
+        "false": "approve-plan"
+      }
     }
   ],
   "variableRegistry": {
@@ -1024,6 +1041,14 @@
       "minLength": 1,
       "maxLength": 240,
       "pattern": "^steps/[0-9]+/plans/[0-9]{3}/attempts/[0-9]+/evidence\\.md$"
+    },
+    "operating_mode": {
+      "type": "string",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "description": "How this run treats the user before the delivery: autonomous skips intermediate approval and decision gates, interactive keeps them"
     }
   }
 }

@@ -1,12 +1,12 @@
 {
-  "slug": "robust-research-task",
+  "slug": "deep-corpus-research",
   "owner": "system-moira",
   "visibility": "public",
-  "id": "ca62711c-2b62-426e-be27-bfaf2d56a2dc",
+  "id": "58794ccb-3794-441f-8671-9491a408c53a",
   "metadata": {
-    "name": "Robust Research Task",
-    "version": "5.3.1",
-    "description": "Исследовательский вариант robust-task: планирование, исполнение каждого шага и все гейты выполняются субагентами, которые ОБЯЗАНЫ сначала прочитать весь корпус исследования ЦЕЛИКОМ и судить как пир по существу (чтением+рассуждением, а не grep/подсчётом). Замороженный-но-расширяемый corpus-manifest, retry/эскалация, Telegram, восстановление контекста. Процесс: UNDERSTAND → BUILD-CORPUS → PLAN(subagent) → VALIDATE → APPROVE → (EXECUTE(subagent) → GATE)×N → VERIFY → FINAL-REVIEW → DELIVER."
+    "name": "Deep Corpus Research (expensive — ask the user first)",
+    "version": "6.2.0",
+    "description": "ДОРОГОЙ И ДОЛГИЙ флоу глубокого исследования по корпусу источников: субагенты читают весь корпус ЦЕЛИКОМ на планировании, каждом шаге и каждом гейте, поэтому запуск стоит многих агентских ходов и большого объёма чтения. ЗАПУСКАТЬ ТОЛЬКО ПОСЛЕ ЯВНОГО СОГЛАСИЯ ПОЛЬЗОВАТЕЛЯ — сначала оцени задачу и предложи этот флоу, не запускай его по своей инициативе. Это НЕ Robust Task: Robust Task — обычная многошаговая работа, здесь же предмет — исследование корпуса с проверкой источников. Процесс: UNDERSTAND → BUILD-CORPUS → PLAN(subagent) → VALIDATE → APPROVE → (EXECUTE(subagent) → GATE)xN → VERIFY → FINAL-REVIEW → DELIVER; корпус-манифест, retry/эскалация, Telegram, восстановление контекста."
   },
   "nodes": [
     {
@@ -19,8 +19,8 @@
     {
       "id": "understand-task",
       "type": "agent-directive",
-      "directive": "Gather a real, deep understanding of the task and its GOAL from the user — this is a conversation to understand, NOT a form to fill.\n\nEstablish, by talking with the user (ask what you genuinely need, in your own words):\n1. What needs to be done and WHY — the real end goal for its consumer/reader.\n2. What an EXCELLENT result looks like for that consumer, and what DEPTH is required (depth over breadth).\n3. The GOAL'S FACETS — the distinct things the result must deliver (derive them for THIS task, whatever it is: e.g. correctness, understandability, coherent narrative, navigation, a working artifact…).\n4. Constraints (time, resources, dependencies).\n5. How we will know it is genuinely done — success criteria that cover the GOAL (including the usefulness/quality/depth axis when the task is research/writing/design/etc.), not only mechanical correctness. Criteria MAY be qualitative when that is what matters — for each such criterion, state HOW it will be judged (by reading against a rubric).\n6. The RESEARCH SCOPE — which sources / files / areas / codebases the result must be grounded in. This feeds the next step (setup-corpus), which enumerates the full corpus every subagent will be required to read in full. Capture it broadly: name the artifacts, docs, code, prior research and data that ground this task.\n\nDo NOT transcribe these fields back at the user mechanically. Understand first. The task may be ANYTHING (code, research, architecture design, an essay, a 3D model, data analysis, …) — use judgement; do not force it into a template.\n\nPlanning standards (context for what a good plan and good criteria need):\n{{planning_standards}}\n\nFold the goal, its FACETS, and the required DEPTH into expected_deliverable and success_criteria (there is no separate facet field — capture them there in words; the plan will trace items to these facets).\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until the user explicitly responds\n- Record in user_response_text exactly what the user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate a short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking",
-      "completionCondition": "User EXPLICITLY answered questions (response text exists in user_response_text)",
+      "directive": "Gather a real, deep understanding of the task and its GOAL from the user — this is a conversation to understand, NOT a form to fill.\n\nEstablish, by talking with the user (ask what you genuinely need, in your own words):\n1. What needs to be done and WHY — the real end goal for its consumer/reader.\n2. What an EXCELLENT result looks like for that consumer, and what DEPTH is required (depth over breadth).\n3. The GOAL'S FACETS — the distinct things the result must deliver (derive them for THIS task, whatever it is: e.g. correctness, understandability, coherent narrative, navigation, a working artifact…).\n4. Constraints (time, resources, dependencies).\n5. How we will know it is genuinely done — success criteria that cover the GOAL (including the usefulness/quality/depth axis when the task is research/writing/design/etc.), not only mechanical correctness. Criteria MAY be qualitative when that is what matters — for each such criterion, state HOW it will be judged (by reading against a rubric).\n6. The RESEARCH SCOPE — which sources / files / areas / codebases the result must be grounded in. This feeds the next step (setup-corpus), which enumerates the full corpus every subagent will be required to read in full. Capture it broadly: name the artifacts, docs, code, prior research and data that ground this task.\n\nDo NOT transcribe these fields back at the user mechanically. Understand first. The task may be ANYTHING (code, research, architecture design, an essay, a 3D model, data analysis, …) — use judgement; do not force it into a template.\n\nPlanning standards (context for what a good plan and good criteria need):\n{{planning_standards}}\n\nFold the goal, its FACETS, and the required DEPTH into expected_deliverable and success_criteria (there is no separate facet field — capture them there in words; the plan will trace items to these facets).\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until the user explicitly responds\n- Record in user_response_text exactly what the user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate a short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there is no plan approval and no bounded-gate question, only the delivery, while `interactive` keeps every current decision point. The mode holds for the whole run and is never asked again.\n\nЦЕНА ЗАПУСКА И СОГЛАСИЕ. Этот флоу дорогой: субагенты читают весь корпус целиком на планировании, на каждом шаге и на каждом гейте, поэтому запуск стоит многих агентских ходов и большого объёма чтения. Прежде чем продолжать, убедись, что пользователь явно согласился запустить именно этот дорогой исследовательский флоу — согласие на саму задачу таким согласием не является. Если явного согласия нет, назови ожидаемую цену и более дешёвую альтернативу, получи ответ и только после согласия иди дальше. Это требование действует в обоих режимах: `autonomous` его не снимает, потому что это гейт стоимости, а не согласование промежуточного результата.",
+      "completionCondition": "Задача, цель, грани, глубина и критерии успеха поняты, режим работы определён, и получено явное согласие пользователя на запуск этого дорогого исследовательского флоу",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -55,11 +55,13 @@
           "task_short_name",
           "expected_deliverable",
           "success_criteria",
-          "user_response_text"
+          "user_response_text",
+          "operating_mode"
         ],
         "globalInputs": [
           "task_short_name",
-          "user_response_text"
+          "user_response_text",
+          "operating_mode"
         ]
       },
       "connections": {
@@ -88,7 +90,7 @@
     {
       "id": "setup-workspace",
       "type": "agent-directive",
-      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/  (must end with a trailing slash)\nExample: ./moira-ws/auth-fix-20251212-1030/\n\n1) Create the workspace folder with the current date and time\n2) Save the current workflow process ID to {workspace}process-id.txt for recovery after archival\n3) Create {workspace}task-requirements.md with:\n   - Task description: {{understand-task.task_description}}\n   - Expected result: {{understand-task.expected_deliverable}}\n   - Success criteria: {{understand-task.success_criteria}}\n   - Constraints: {{understand-task.constraints}}\n4) Create {workspace}planning-standards.md with:\n   {{planning_standards}}\n\nReturn workspace_path ending with a trailing slash. Confirm workspace creation.",
+      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/deep-corpus-research-{task-name}-{YYYYMMDD}-{HHMM}/  (must end with a trailing slash)\nExample: ./moira-ws/deep-corpus-research-auth-fix-20251212-1030/\n\n1) Create the workspace folder with the current date and time\n2) Save the current workflow process ID to {workspace}process-id.txt for recovery after archival\n3) Create {workspace}task-requirements.md with:\n   - Task description: {{understand-task.task_description}}\n   - Expected result: {{understand-task.expected_deliverable}}\n   - Success criteria: {{understand-task.success_criteria}}\n   - Constraints: {{understand-task.constraints}}\n4) Create {workspace}planning-standards.md with:\n   {{planning_standards}}\n\nReturn workspace_path ending with a trailing slash. Confirm workspace creation.",
       "completionCondition": "Workspace created, process ID and requirements saved",
       "inputSchema": {
         "type": "object",
@@ -213,8 +215,8 @@
       "message": "Plan ready for review\n\nTask: {{task_short_name}}\nSteps: {{total_steps}}\n\nPlease confirm the plan to continue.",
       "parseMode": "Markdown",
       "connections": {
-        "default": "present-plan",
-        "error": "present-plan"
+        "default": "route-operating-mode-plan-approval",
+        "error": "route-operating-mode-plan-approval"
       }
     },
     {
@@ -451,7 +453,7 @@
     {
       "id": "ask-user-skip-or-escalate",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\nRead step information from file {{workspace_path}}/plan.md\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problem\n  4. reset - reset retry counter and try again'\n- STOP and wait until the user writes a response\n- DO NOT fill user_decision until the user explicitly responds\n- Record in user_response_text exactly what the user answered\n\nDO NOT fix anything yourself — the workflow routes to the chosen branch.",
+      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\nRead step information from file {{workspace_path}}/plan.md\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problem\n  4. reset - reset retry counter and try again'\n- STOP and wait until the user writes a response\n- DO NOT fill user_decision until the user explicitly responds\n- Record in user_response_text exactly what the user answered\n\nDO NOT fix anything yourself — the workflow routes to the chosen branch.\n\nIn `autonomous` mode decide this yourself, without asking: `revise_plan` when the failure invalidates the plan rather than the attempt, `reset` only when something material changed and another attempt can differ, and `skip` with an honest recorded reason when the step cannot be completed and the research can proceed without it. `escalate` stays available for a step that genuinely needs a human; choosing it is a real blocker to report, never a way to avoid work.",
       "completionCondition": "User EXPLICITLY chose action (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -751,7 +753,7 @@
     {
       "id": "ask-user-validation-limit-reached",
       "type": "agent-directive",
-      "directive": "Plan validation has run {{validation_round}} rounds (limit {{max_validation_rounds}}) and the plan may still have unresolved issues.\n\n⚠️ This is the BOUND on the normal re-validation loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — present the plan as-is and proceed (any remaining issues are accepted)\n  2. reset — zero the round counter and keep fixing the plan\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
+      "directive": "Plan validation has run {{validation_round}} rounds (limit {{max_validation_rounds}}) and the plan may still have unresolved issues.\n\n⚠️ This is the BOUND on the normal re-validation loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — present the plan as-is and proceed (any remaining issues are accepted)\n  2. reset — zero the round counter and keep fixing the plan\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.\n\nIn `autonomous` mode decide this yourself, without asking: `reset` only for findings that are reproducible and closable now, otherwise `continue` and record the accepted remaining scope so it stays visible in the delivery.",
       "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -832,7 +834,7 @@
     {
       "id": "ask-user-criteria-limit-reached",
       "type": "agent-directive",
-      "directive": "The success-criteria gap-fixing loop has run {{criteria_round}} rounds (limit {{max_criteria_rounds}}) and some criteria may still be unmet.\n\n⚠️ This is the BOUND on the normal re-verification loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — deliver the result as-is (any remaining gaps are explicitly accepted)\n  2. reset — zero the round counter and keep closing the gaps\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
+      "directive": "The success-criteria gap-fixing loop has run {{criteria_round}} rounds (limit {{max_criteria_rounds}}) and some criteria may still be unmet.\n\n⚠️ This is the BOUND on the normal re-verification loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — deliver the result as-is (any remaining gaps are explicitly accepted)\n  2. reset — zero the round counter and keep closing the gaps\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.\n\nIn `autonomous` mode decide this yourself, without asking: `reset` only for gaps that are reproducible and closable now, otherwise `continue` and record the accepted remaining gaps so they stay visible in the delivery.",
       "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
       "inputSchema": {
         "type": "object",
@@ -1013,6 +1015,21 @@
       },
       "connections": {
         "success": "decompose-into-steps"
+      }
+    },
+    {
+      "id": "route-operating-mode-plan-approval",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "check-all-steps-done",
+        "false": "present-plan"
       }
     }
   ],
@@ -1264,6 +1281,14 @@
       "type": "number",
       "description": "Number of source rows in the corpus manifest",
       "default": 0
+    },
+    "operating_mode": {
+      "type": "string",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "description": "How this run treats the user before the delivery: autonomous skips intermediate approval and decision gates, interactive keeps them"
     }
   }
 }

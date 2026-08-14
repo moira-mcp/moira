@@ -35,7 +35,11 @@ const resultDecisionFile = (iteration: number) =>
 
 function successfulInputs(stepCount = 1) {
   return {
-    "get-task": { task_file: taskFile, execution_file: executionFile },
+    "get-task": {
+      task_file: taskFile,
+      execution_file: executionFile,
+      operating_mode: "interactive",
+    },
     "create-plan": { current_plan_file: planFile(1), total_steps: stepCount },
     "plan-review": { review_file: planReviewFile(1), issues_count: 0 },
     "present-plan": { approval: "yes", decision_file: planDecisionFile(1) },
@@ -63,7 +67,7 @@ describe("quick-task scenarios", () => {
     expect(validation.errors).toHaveLength(0);
   });
 
-  it("keeps only the plan reference, approved length, and execution cursor global", () => {
+  it("keeps only the plan reference, approved length, execution cursor, and operating mode globals", () => {
     expect(workflow.variableRegistry).toEqual({
       current_plan_file: {
         type: "string",
@@ -87,6 +91,12 @@ describe("quick-task scenarios", () => {
         multipleOf: 1,
         default: 0,
       },
+      operating_mode: {
+        type: "string",
+        description:
+          "How this run treats the user before the final result: autonomous skips the plan approval and the acceptance question, interactive keeps them",
+        enum: ["autonomous", "interactive"],
+      },
     });
 
     const cycles = detectCycles(workflow);
@@ -98,15 +108,44 @@ describe("quick-task scenarios", () => {
 
   it("uses bounded typed paths and minimal routing outputs", () => {
     const ajv = new Ajv({ allErrors: true, strict: false });
+    // The engine inlines declared registry globals into the agent-visible schema, so a raw node
+    // schema alone is not what an agent is validated against; mirror that inlining here.
     const schema = (nodeId: string) => {
       const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
       expect(node?.type).toBe("agent-directive");
-      return (node as { inputSchema: object }).inputSchema;
+      const raw = (node as { inputSchema: Record<string, any> }).inputSchema;
+      const globals: string[] = raw.globalInputs ?? [];
+      if (globals.length === 0) return raw;
+      return {
+        ...raw,
+        properties: {
+          ...raw.properties,
+          ...Object.fromEntries(
+            globals.map((name) => [name, workflow.variableRegistry![name] as object]),
+          ),
+        },
+      };
     };
 
     const validateIntake = ajv.compile(schema("get-task"));
-    expect(validateIntake({ task_file: taskFile, execution_file: executionFile })).toBe(true);
-    expect(validateIntake({ task_file: "../task.md", execution_file: executionFile })).toBe(false);
+    expect(
+      validateIntake({
+        task_file: taskFile,
+        execution_file: executionFile,
+        operating_mode: "interactive",
+      }),
+    ).toBe(true);
+    expect(
+      validateIntake({
+        task_file: "../task.md",
+        execution_file: executionFile,
+        operating_mode: "interactive",
+      }),
+    ).toBe(false);
+    // The mode is a bounded routing value, not free text.
+    expect(
+      validateIntake({ task_file: taskFile, execution_file: executionFile, operating_mode: "off" }),
+    ).toBe(false);
 
     const validatePlanReview = ajv.compile(schema("plan-review"));
     expect(validatePlanReview({ review_file: planReviewFile(1), issues_count: 0 })).toBe(true);
@@ -166,7 +205,13 @@ describe("quick-task scenarios", () => {
     expect(directive("create-plan")).toContain("{{get-task.task_file}}");
     expect(directive("plan-review")).toContain("{{current_plan_file}}");
     expect(directive("repair-plan")).toContain("{{plan-review.review_file}}");
-    expect(directive("revise-plan")).toContain("{{present-plan.decision_file}}");
+    // revise-plan is reached both from a user rejection and from the mid-execution replan jump, so
+    // it must not template an artifact that exists on only one of those routes: an undefined
+    // variable renders as a placeholder into the directive the agent is given.
+    expect(directive("revise-plan")).not.toContain("{{present-plan.decision_file}}");
+    expect(directive("revise-plan")).toContain("{{current_plan_file}}");
+    expect(directive("revise-plan")).toContain("decision record");
+    expect(directive("revise-plan")).toContain("mid-execution replan");
     expect(directive("execute-step")).toContain("{{get-task.execution_file}}");
     expect(directive("fix-issues")).toContain("{{final-review.review_file}}");
     expect(directive("rework")).toContain("{{present-to-user.decision_file}}");
@@ -207,6 +252,27 @@ describe("quick-task scenarios", () => {
     }
   });
 
+  it("offers exactly one jump-only replan entry that lands on the existing plan revision", () => {
+    const teleports = workflow.nodes.filter((node) => node.type === "teleport");
+    expect(teleports.map((node) => node.id)).toEqual(["teleport-replan"]);
+
+    const replan = teleports[0] as { hint: string; directive: string; connections: any };
+    expect(
+      workflow.nodes.some((node) =>
+        Object.values(node.connections ?? {}).includes("teleport-replan"),
+      ),
+    ).toBe(false);
+    expect(replan.connections).toEqual({ success: "revise-plan" });
+
+    // The hint is appended to every step, so it carries the abuse boundary: each misrouted case
+    // names the owner it actually belongs to.
+    expect(replan.hint).toContain("repair-plan");
+    expect(replan.hint).toContain("fix-issues");
+    expect(replan.hint).toContain("merely hard or blocked");
+    // Executed units keep their positions, which is what keeps the zero-based cursor meaningful.
+    expect(replan.directive).toContain("at its position");
+  });
+
   it("exports no internal file-backed payload at End", () => {
     const end = workflow.nodes.find((node) => node.id === "end");
     expect(end?.type).toBe("end");
@@ -215,6 +281,28 @@ describe("quick-task scenarios", () => {
 
   it("covers clean execution, plan repair and revision, result repair, and user rework", async () => {
     const scenarios: TestScenario[] = [
+      {
+        name: "autonomous run skips the plan approval and still delivers the result",
+        mockInputs: {
+          ...successfulInputs(1),
+          "get-task": {
+            task_file: taskFile,
+            execution_file: executionFile,
+            operating_mode: "autonomous",
+          },
+        },
+        expect: {
+          status: "completed",
+          reaches: [
+            "route-operating-mode-plan-approval",
+            "execute-step",
+            "final-review",
+            "present-to-user",
+            "end",
+          ],
+          avoids: ["present-plan", "revise-plan"],
+        },
+      },
       {
         name: "clean two-unit filesystem-backed execution",
         mockInputs: successfulInputs(2),
@@ -242,7 +330,11 @@ describe("quick-task scenarios", () => {
       {
         name: "all review and user-feedback branches use immutable file references",
         mockInputs: {
-          "get-task": { task_file: taskFile, execution_file: executionFile },
+          "get-task": {
+            task_file: taskFile,
+            execution_file: executionFile,
+            operating_mode: "interactive",
+          },
           "create-plan": { current_plan_file: planFile(1), total_steps: 2 },
           "plan-review": [
             { review_file: planReviewFile(1), issues_count: 1 },
@@ -287,6 +379,43 @@ describe("quick-task scenarios", () => {
           },
         },
       },
+      {
+        // The plan is found to be wrong after the first unit is executed: the jump publishes a new
+        // plan iteration, that iteration goes back through review and approval, and execution
+        // resumes at the preserved cursor instead of restarting.
+        name: "mid-execution replan re-enters review and resumes at the preserved cursor",
+        mockInputs: {
+          "get-task": {
+            task_file: taskFile,
+            execution_file: executionFile,
+            operating_mode: "interactive",
+          },
+          "create-plan": { current_plan_file: planFile(1), total_steps: 2 },
+          "plan-review": [
+            { review_file: planReviewFile(1), issues_count: 0 },
+            { review_file: planReviewFile(2), issues_count: 0 },
+          ],
+          "present-plan": [
+            { approval: "yes", decision_file: planDecisionFile(1) },
+            { approval: "yes", decision_file: planDecisionFile(2) },
+          ],
+          "revise-plan": { current_plan_file: planFile(2), total_steps: 2 },
+          "execute-step": [{}, {}],
+          "final-review": { review_file: resultReviewFile(1), issues_count: 0 },
+          "present-to-user": { decision: "accept", decision_file: resultDecisionFile(1) },
+        },
+        teleportAfter: { afterNode: "execute-step", visitNumber: 2, teleportTo: "teleport-replan" },
+        expect: {
+          status: "completed",
+          reaches: ["teleport-replan", "revise-plan", "plan-review", "present-plan", "end"],
+          avoids: ["repair-plan", "fix-issues", "rework"],
+          contextContains: {
+            current_plan_file: planFile(2),
+            total_steps: 2,
+            current_step: 2,
+          },
+        },
+      },
     ];
 
     const results: ScenarioResult[] = [];
@@ -306,6 +435,12 @@ describe("quick-task scenarios", () => {
       );
     }
     expect(failed).toHaveLength(0);
+
+    // The replan run closed exactly two units in total: the unit finished before the jump was not
+    // executed again after the plan was republished.
+    const replanRun = results[results.length - 1];
+    expect(replanRun.visitedNodes.filter((id) => id === "close-completed-step")).toHaveLength(2);
+    expect(replanRun.inputSubmissionCounts["revise-plan"]).toBe(1);
 
     const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
     console.log(formatCoverageReport(coverage));
