@@ -1,6 +1,5 @@
 /**
- * Complete node type definitions for Graph Workflow Engine
- * All 6 node types with architectural improvements
+ * Complete node type definitions for Graph Workflow Engine.
  */
 
 import { BaseNode } from "./base-types.js";

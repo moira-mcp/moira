@@ -225,9 +225,10 @@ shapes, and `packages/mcp-server/src/server.ts` for the registrations.
 
 ## Node Types
 
-`start`, `end`, `agent-directive`, `condition`, `expression`,
-`telegram-notification`, `teleport`, `subgraph`, `lock`. Definitions and schemas:
-`packages/workflow-engine/src/types/graph-nodes.ts` and `docs/WORKFLOW.md`.
+`start`, `end`, `agent-directive`, `condition`, `expression`, `telegram-notification`,
+`teleport`, `subgraph`, `lock`, `materialize`, `read-note`, `write-note`, and `upsert-note`.
+Definitions and schemas: `packages/workflow-engine/src/types/graph-nodes.ts` and
+`docs/WORKFLOW.md`.
 
 ## Condition System
 

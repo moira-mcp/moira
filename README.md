@@ -195,9 +195,13 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 > Replace `localhost:8080` with your own host/port (`MOIRA_HOST`) if you serve Moira
 > on a different address.
 
-## Node Types
+## Representative Node Examples
 
-### 1. Start Node
+The examples below show common graph patterns; they are not the complete node-type inventory. See
+the [Nodes reference](packages/docs/src/content/docs/docs/concepts/nodes.mdx) for every supported
+type and its current contract, including automatic note operations and file materialization.
+
+### Start Node
 
 ```json
 {
@@ -207,7 +211,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 2. Agent Directive Node
+### Agent Directive Node
 
 ```json
 {
@@ -222,7 +226,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 3. Condition Node
+### Condition Node
 
 ```json
 {
@@ -240,7 +244,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 4. Telegram Notification Node
+### Telegram Notification Node
 
 ```json
 {
@@ -252,7 +256,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 5. End Node
+### End Node
 
 ```json
 {
@@ -262,7 +266,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 6. Expression Node
+### Expression Node
 
 ```json
 {
@@ -273,7 +277,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 7. Teleport Node
+### Teleport Node
 
 ```json
 {
@@ -286,7 +290,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 8. Subgraph Node
+### Subgraph Node
 
 ```json
 {
@@ -299,7 +303,7 @@ Point your MCP client (e.g. Claude Code) at your running instance:
 }
 ```
 
-### 9. Lock Node
+### Lock Node
 
 ```json
 {
