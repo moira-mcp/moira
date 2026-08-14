@@ -412,7 +412,7 @@ export async function getSessionInfo(
           };
         }
 
-        const formattedText = await MCPEngine.getInstance().executeStep(executionId, undefined);
+        const formattedText = await MCPEngine.getInstance().getCurrentStep(executionId);
 
         // Audit log for current step read
         await logAuditEventDirect(repository as DatabaseRepository, {

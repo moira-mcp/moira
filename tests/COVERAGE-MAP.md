@@ -457,7 +457,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 - `tests/integration/cli-mcp-parity.test.ts` — 16 tests 🟢
 - `tests/integration/essential-cases-split.test.ts` — 2 tests 🟢
-- `tests/integration/get-current-step-enhanced.test.ts` — 2 tests 🟢
+- `tests/integration/get-current-step-enhanced.test.ts` — 3 tests 🟢 (including read-only materialize re-presentation versus empty public `step()` completion)
 - `tests/integration/mcp-text-service.test.ts` — 12 tests 🟢
 - `tests/integration/step-response-child-info.test.ts` — 4 tests 🟡
 
@@ -820,6 +820,11 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/engine/max-nodes-validation.test.ts` — 4 tests 🟢
 - `tests/workflow/engine/node-handlers.test.ts` — 19 tests 🟢 (including strict empty/nested/missing End projection and runtime-input rejection)
 - `tests/workflow/engine/node-type-validation.test.ts` — 23 tests 🟢
+- `tests/workflow/engine/materialize-node.test.ts` — materialize schema/source-default contract, handler directive summary, expected/unexpected preparation failures, isolated re-presentation that cannot traverse an error connection, shell encoding, current-registry rendering, tar output, path safety, collision detection, and exact resource boundaries
+- `tests/integration/workflow-file-tokens.test.ts` — upload/download lifecycle plus five-minute materialize TTL boundary, real SQLite grant-failure normalization, user/execution/node binding, and atomic one-use claim
+- `tests/unit/web-backend/execution-materialize.test.ts` — current-definition fetch, execution binding, tar response, one-use endpoint behavior, non-consumption on render overflow, and expected-4xx versus unexpected-boundary error mapping
+- `tests/unit/shared/logging/express-middleware.test.ts` — materialize grant redaction from HTTP request URLs
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — materialize grant exclusion from nginx access logs in both deployment modes
 - `tests/workflow/engine/note-handlers.test.ts` — 34 tests 🟢
 - `tests/workflow/engine/note-node-validation.test.ts` — 15 tests 🟢
 - `tests/workflow/engine/path-resolver.test.ts` — 31 tests 🟢

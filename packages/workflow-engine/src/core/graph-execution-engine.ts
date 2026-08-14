@@ -38,6 +38,7 @@ import { WriteNoteHandler } from "../handlers/write-note-handler.js";
 import { UpsertNoteHandler } from "../handlers/upsert-note-handler.js";
 import { LockHandler } from "../handlers/lock-handler.js";
 import { TeleportHandler } from "../handlers/teleport-handler.js";
+import { MaterializeHandler } from "../handlers/materialize-handler.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
 
@@ -81,10 +82,80 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
     this.nodeHandlers.set("upsert-note", new UpsertNoteHandler());
     this.nodeHandlers.set("lock", new LockHandler());
     this.nodeHandlers.set("teleport", new TeleportHandler());
+    this.nodeHandlers.set("materialize", new MaterializeHandler());
 
     this.logger.info("All handlers initialized inside engine", {
       handlerCount: this.nodeHandlers.size,
     });
+  }
+
+  /**
+   * Re-present a materialize node in isolation. This deliberately does not use executeGraph():
+   * a preparation failure may select the node's error output, and a read-only presentation must
+   * never follow that connection or execute a successor.
+   */
+  async presentMaterializeNode(
+    graph: WorkflowGraph,
+    context: ExecutionContext,
+    messageQueue: AgentMessageQueue,
+    nodeId: string,
+  ): Promise<void> {
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) {
+      throw new ConfigurationError(`Node '${nodeId}' not found in workflow`, {
+        executionId: context.executionId,
+        workflowId: context.workflowId,
+        nodeId,
+      });
+    }
+    if (node.type !== "materialize") {
+      throw new ConfigurationError(`Node '${nodeId}' does not support safe re-presentation`, {
+        executionId: context.executionId,
+        workflowId: context.workflowId,
+        nodeId,
+        nodeType: node.type,
+      });
+    }
+
+    const handler = this.nodeHandlers.get("materialize");
+    if (!handler) {
+      throw new ConfigurationError("No handler for node type: materialize", {
+        executionId: context.executionId,
+        workflowId: context.workflowId,
+        nodeId,
+      });
+    }
+
+    const presentationContext: ExecutionContext = {
+      ...context,
+      variables: { ...context.variables },
+      nodeStates: { ...context.nodeStates },
+      _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(graph.variableRegistry),
+    };
+    const result = await handler.execute(
+      node,
+      presentationContext,
+      messageQueue,
+      this.repository,
+      this,
+      undefined,
+      graph.variableRegistry,
+    );
+
+    if (result.action !== "pause") {
+      const preparationError =
+        typeof result.data?.error === "string" ? `: ${result.data.error}` : "";
+      throw new ValidationError(
+        `Materialize node '${nodeId}' could not be presented${preparationError}`,
+        {
+          executionId: context.executionId,
+          workflowId: context.workflowId,
+          nodeId,
+          resultAction: result.action,
+          outputPath: result.outputPath,
+        },
+      );
+    }
   }
 
   /**

@@ -268,6 +268,24 @@ export interface TeleportNode extends BaseNode {
   };
 }
 
+export interface MaterializeFile {
+  path: string;
+  from?: string;
+  /** Reserved skeleton field. Materialize content must come from `from`. */
+  content?: "";
+}
+
+// 13. Materialize Node - securely exposes registry-backed files as a one-use tar archive
+export interface MaterializeNode extends BaseNode {
+  type: "materialize";
+  basePath: string;
+  files: MaterializeFile[];
+  connections: {
+    success: string;
+    error?: string;
+  };
+}
+
 // Union type for all node types
 export type GraphNode =
   | StartNode
@@ -281,7 +299,8 @@ export type GraphNode =
   | WriteNoteNode
   | UpsertNoteNode
   | LockNode
-  | TeleportNode;
+  | TeleportNode
+  | MaterializeNode;
 
 // Type guards for node types
 export function isStartNode(node: GraphNode): node is StartNode {
@@ -330,6 +349,10 @@ export function isLockNode(node: GraphNode): node is LockNode {
 
 export function isTeleportNode(node: GraphNode): node is TeleportNode {
   return node.type === "teleport";
+}
+
+export function isMaterializeNode(node: GraphNode): node is MaterializeNode {
+  return node.type === "materialize";
 }
 
 /**
@@ -509,6 +532,18 @@ export function validateNodeConnections(node: GraphNode): { valid: boolean; erro
       }
       if (!(node as TeleportNode).hint) {
         errors.push("Teleport node must have hint describing when to use it");
+      }
+      break;
+
+    case "materialize":
+      if (!node.connections?.success) {
+        errors.push('Materialize node must have "success" connection');
+      }
+      if (!node.basePath) {
+        errors.push("Materialize node must have basePath");
+      }
+      if (!Array.isArray(node.files) || node.files.length === 0) {
+        errors.push("Materialize node must have at least one file");
       }
       break;
 

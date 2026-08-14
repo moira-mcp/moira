@@ -93,6 +93,13 @@ export interface IGraphExecutor {
   executeStep(executionId: string, userInput?: unknown, teleportTo?: string): Promise<string>;
 
   /**
+   * Re-present the persisted waiting node without advancing or saving the execution.
+   * Returns null before handler execution when the current node does not support safe
+   * re-presentation. Used by read-only session inspection for nodes whose empty input is meaningful.
+   */
+  presentCurrentStep(executionId: string): Promise<string | null>;
+
+  /**
    * Get current execution state
    */
   getExecutionState(executionId: string): Promise<WorkflowExecution | null>;

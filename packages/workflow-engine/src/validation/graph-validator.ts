@@ -18,6 +18,7 @@ import type {
   AgentDirectiveNode,
   ExpressionNode,
   TeleportNode,
+  MaterializeNode,
 } from "../types/graph-nodes.js";
 import type { ConditionOperator, StructuredCondition } from "../types/structured-condition.js";
 // Import directly to avoid auth side effects from shared index
@@ -212,6 +213,7 @@ export class GraphValidator {
         "upsert-note": "upsertNoteNode",
         lock: "lockNode",
         teleport: "teleportNode",
+        materialize: "materializeNode",
       };
 
       const expectedDef = schemaDefMap[nodeType as GraphNode["type"]];
@@ -729,6 +731,9 @@ export class GraphValidator {
       case "upsert-note":
       case "lock":
         break;
+      case "materialize":
+        issues.push(...this.validateMaterializeNode(node, graph));
+        break;
       case "teleport":
         issues.push(...this.validateTeleportNode(node, graph));
         issues.push(
@@ -914,6 +919,80 @@ export class GraphValidator {
           field: "inputSchema",
           message: `Node ${node.id}: invalid JSON Schema in inputSchema: ${error instanceof Error ? error.message : String(error)}`,
         });
+      }
+    }
+
+    return issues;
+  }
+
+  private validateMaterializeNode(
+    node: MaterializeNode,
+    workflow: WorkflowGraph,
+  ): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const rawPaths = new Set<string>();
+    const registry = workflow.variableRegistry ?? {};
+    if (!Array.isArray(node.files)) return issues;
+
+    for (const [index, file] of node.files.entries()) {
+      const field = `files[${index}]`;
+      if (!file || typeof file.path !== "string") continue;
+      const normalized = file.path.replaceAll("\\", "/");
+      const segments = normalized.split("/");
+      if (
+        file.path.startsWith("/") ||
+        file.path.startsWith("\\") ||
+        file.path.includes("\0") ||
+        segments.some((segment) => segment === ".." || segment === "." || segment === "")
+      ) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId: node.id,
+          field: `${field}.path`,
+          message: `Node ${node.id}: materialize path '${file.path}' must be a safe relative path`,
+        });
+      }
+      if (rawPaths.has(normalized)) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId: node.id,
+          field: `${field}.path`,
+          message: `Node ${node.id}: duplicate materialize path '${file.path}'`,
+        });
+      }
+      rawPaths.add(normalized);
+
+      const hasFrom = typeof file.from === "string" && file.from.length > 0;
+      const hasContent = Object.prototype.hasOwnProperty.call(file, "content");
+      if (hasFrom === hasContent || (hasContent && file.content !== "")) {
+        issues.push({
+          type: "node",
+          severity: "error",
+          nodeId: node.id,
+          field,
+          message: `Node ${node.id}: ${field} must declare exactly one of from or empty content`,
+        });
+      } else if (hasFrom) {
+        const declaration = registry[file.from!];
+        if (!declaration) {
+          issues.push({
+            type: "node",
+            severity: "error",
+            nodeId: node.id,
+            field: `${field}.from`,
+            message: `Node ${node.id}: materialize source '${file.from}' is not declared in variableRegistry`,
+          });
+        } else if (declaration.type !== "string" || typeof declaration.default !== "string") {
+          issues.push({
+            type: "node",
+            severity: "error",
+            nodeId: node.id,
+            field: `${field}.from`,
+            message: `Node ${node.id}: materialize source '${file.from}' must declare type string with a string default in variableRegistry`,
+          });
+        }
       }
     }
 
@@ -1457,6 +1536,28 @@ export class GraphValidator {
               definedVariables,
             ),
           );
+        }
+      }
+
+      if (node.type === "materialize") {
+        if (typeof node.basePath === "string") {
+          issues.push(
+            ...this.validateTemplateField(node.basePath, node.id, "basePath", definedVariables),
+          );
+        }
+        if (Array.isArray(node.files)) {
+          for (let index = 0; index < node.files.length; index++) {
+            if (typeof node.files[index]?.path === "string") {
+              issues.push(
+                ...this.validateTemplateField(
+                  node.files[index].path,
+                  node.id,
+                  `files[${index}].path`,
+                  definedVariables,
+                ),
+              );
+            }
+          }
         }
       }
 

@@ -3,8 +3,12 @@
  * Tests idempotency and JSON schema formatting
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, afterEach } from "@jest/globals";
 import { DatabaseRepository, WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { MCPEngine } from "../../packages/mcp-server/src/core/mcp-engine.js";
+import { requestContext } from "../../packages/mcp-server/src/core/request-context.js";
+import { executeStep } from "../../packages/mcp-server/src/tools/execute-step.js";
+import { getSessionInfo } from "../../packages/mcp-server/src/tools/get-session-info.js";
 
 const TEST_USER_ID = "test-user-enhanced-step";
 
@@ -37,7 +41,11 @@ describe("get_current_step Enhanced", () => {
     }
   });
 
-  test("executeStep without input returns formatted directive identical to first call", async () => {
+  afterEach(() => {
+    MCPEngine.resetInstance();
+  });
+
+  test("unsupported presentation leaves agent-directive execution on its established path", async () => {
     // Create simple test workflow
     const workflow: WorkflowGraph = {
       id: `test-idempotent-${Date.now()}`,
@@ -106,9 +114,104 @@ describe("get_current_step Enhanced", () => {
     expect(firstCall).toContain("Input Schema:");
     expect(firstCall).toContain("```json");
 
+    const graphEngine = (
+      universalExecutor as unknown as {
+        graphEngine: {
+          nodeHandlers: Map<string, { getNodeType: () => string; execute: () => Promise<never> }>;
+        };
+      }
+    ).graphEngine;
+    graphEngine.nodeHandlers.set("agent-directive", {
+      getNodeType: () => "agent-directive",
+      execute: async () => {
+        throw new Error("unsupported waiting handler was executed");
+      },
+    });
+    const beforeUnsupportedPresentation = await repository.getExecution(executionId);
+    await expect(universalExecutor.presentCurrentStep(executionId)).resolves.toBeNull();
+    await expect(repository.getExecution(executionId)).resolves.toEqual(
+      beforeUnsupportedPresentation,
+    );
+
     // Cleanup
     await repository.deleteExecution(executionId);
     await repository.deleteWorkflow(savedWorkflowId, TEST_USER_ID);
+  });
+
+  test("current_step re-presents materialize without advancing, while step completes it", async () => {
+    const workflow: WorkflowGraph = {
+      id: `test-materialize-current-step-${Date.now()}`,
+      metadata: {
+        name: "Materialize current-step test",
+        version: "1.0.0",
+        description: "Read-only current-step behavior",
+      },
+      variableRegistry: {
+        readme: {
+          type: "string",
+          description: "README source",
+          default: "# Materialized",
+        },
+      },
+      nodes: [
+        { type: "start", id: "start", connections: { default: "materialize" } },
+        {
+          type: "materialize",
+          id: "materialize",
+          basePath: "./runtime-output",
+          files: [{ path: "README.md", from: "readme" }],
+          connections: { success: "end" },
+        },
+        { type: "end", id: "end" },
+      ],
+    };
+
+    const saveResult = await getWorkflowService().save({
+      graph: workflow,
+      userId: TEST_USER_ID,
+      visibility: "private",
+    });
+    const savedWorkflowId = saveResult.id;
+    const savedWorkflow = await repository.getWorkflowGraph(savedWorkflowId, TEST_USER_ID);
+    const engine = MCPEngine.getInstance(repository);
+    const executionId = await engine.executor.startWorkflow(
+      savedWorkflow!,
+      undefined,
+      TEST_USER_ID,
+    );
+
+    try {
+      const firstDirective = await engine.executor.executeStep(executionId);
+      expect(firstDirective).toContain("Materialize 1 file into");
+      const beforeRead = await repository.getExecution(executionId);
+      expect(beforeRead).toMatchObject({
+        status: "running",
+        currentNodeId: "materialize",
+        waitingForInputNodeId: "materialize",
+      });
+
+      const sessionResult = await requestContext.run({ userId: TEST_USER_ID }, () =>
+        getSessionInfo({ action: "current_step", executionId }),
+      );
+      expect(sessionResult.success).toBe(true);
+      expect(sessionResult.data).toEqual(expect.stringContaining("Materialize 1 file into"));
+      expect(sessionResult.data).toEqual(expect.stringContaining("README.md"));
+      const afterRead = await repository.getExecution(executionId);
+      expect(afterRead).toEqual(beforeRead);
+
+      const completion = await requestContext.run({ userId: TEST_USER_ID }, () =>
+        executeStep({ processId: executionId }),
+      );
+      expect(completion.success).toBe(true);
+      expect(completion.data).toContain("Workflow completed successfully");
+      await expect(repository.getExecution(executionId)).resolves.toMatchObject({
+        status: "completed",
+        currentNodeId: null,
+      });
+    } finally {
+      await repository.deleteExecution(executionId);
+      await repository.deleteWorkflow(savedWorkflowId, TEST_USER_ID);
+    }
   });
 
   test("JSON schema formatting shows all details for complex schemas", async () => {

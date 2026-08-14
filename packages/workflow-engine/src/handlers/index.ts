@@ -15,3 +15,4 @@ export { WriteNoteHandler } from "./write-note-handler.js";
 export { UpsertNoteHandler } from "./upsert-note-handler.js";
 export { LockHandler } from "./lock-handler.js";
 export { TeleportHandler } from "./teleport-handler.js";
+export { MaterializeHandler } from "./materialize-handler.js";

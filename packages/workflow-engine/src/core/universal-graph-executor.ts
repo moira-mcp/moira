@@ -185,6 +185,20 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       throw new Error(`Workflow ${execution.workflowId} not found or access denied`);
     }
 
+    // Materialize uses undefined as its first-entry signal, while MCP step() without a payload
+    // also arrives as undefined. The persisted waiting marker disambiguates the latter: normalize
+    // an omitted completion to JSON null. A later traversal reaches the node without that marker
+    // and therefore issues a fresh grant as intended.
+    const currentNode = graph.nodes.find((node) => node.id === execution.currentNodeId);
+    if (
+      !teleportTo &&
+      currentNode?.type === "materialize" &&
+      execution.waitingForInputNodeId === currentNode.id &&
+      userInput === undefined
+    ) {
+      userInput = null;
+    }
+
     // Handle teleportTo: validate target node and jump execution there
     let startNodeId = execution.currentNodeId!;
     if (teleportTo) {
@@ -276,6 +290,51 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           `Unknown execution result action: ${(executionResult as { action: unknown }).action}`,
         );
     }
+  }
+
+  /**
+   * Re-render an already-paused step without applying the result to persisted execution state.
+   * Some pausing nodes accept an empty completion, so routing a read through executeStep() would
+   * otherwise be indistinguishable from the user intentionally completing that node. Unsupported
+   * current nodes return null before their handler is invoked so the caller can use its established
+   * fallback behavior.
+   */
+  async presentCurrentStep(executionId: string): Promise<string | null> {
+    updateContext({
+      operation: "step:present",
+      resourceIds: { executionId },
+    });
+
+    const execution = await this.repository.getExecution(executionId);
+    if (!execution) {
+      throw new Error(`Execution ${executionId} not found`);
+    }
+    if (
+      execution.status !== "running" ||
+      !execution.currentNodeId ||
+      execution.waitingForInputNodeId !== execution.currentNodeId
+    ) {
+      return null;
+    }
+
+    const graph = await this.repository.getWorkflowGraph(execution.workflowId, execution.userId);
+    if (!graph) {
+      throw new Error(`Workflow ${execution.workflowId} not found or access denied`);
+    }
+    const currentNode = graph.nodes.find((node) => node.id === execution.currentNodeId);
+    if (currentNode?.type !== "materialize") {
+      return null;
+    }
+
+    const messageQueue = new AgentMessageQueue();
+    await this.graphEngine.presentMaterializeNode(
+      graph,
+      execution.globalContext,
+      messageQueue,
+      execution.currentNodeId,
+    );
+
+    return await this.formatQueueResponse(execution.executionId, messageQueue, graph);
   }
 
   /**
