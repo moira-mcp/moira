@@ -51,37 +51,35 @@ Examples:
 
 ### The workspace owner
 
-The first responsibility that has real work to do also creates the workspace: the directory,
-`process-id.txt` correlating it with the execution, and the durable sources it owns, all in the same
-turn. A node whose only job is creating a directory adds a turn without adding judgment.
+An existing early responsibility resolves the canonical workspace path and returns it as the global
+`workspace_path`. A node whose only job is choosing or creating a directory adds a turn without
+adding judgment.
+
+When stable files come from workflow registry defaults, place a `materialize` node immediately after
+that owner. It creates the destination and extracts all declared files through one bounded archive,
+without putting their bodies in the agent context:
 
 ```json
 {
-  "type": "agent-directive",
-  "id": "get-task",
-  "directive": "Establish the complete task contract from the triggering conversation. Create ./moira-ws/{task-short-name}-{YYYYMMDD}-{HHMM}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for the evidence entries that follow. Return the exact workspace and task file paths.",
-  "completionCondition": "The workspace, process correlation, and complete task contract exist at the returned paths",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "workspace_path": {
-        "type": "string",
-        "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
-        "description": "Path to the created workspace"
-      },
-      "task_file": {
-        "type": "string",
-        "description": "Complete task contract written in the same turn"
-      }
-    },
-    "required": ["workspace_path", "task_file"]
-  },
+  "id": "materialize-workspace-bootstrap",
+  "type": "materialize",
+  "basePath": "{{workspace_path}}",
+  "files": [
+    { "path": "process-id.txt", "from": "workspace_process_id_file" },
+    { "path": "workflow-reference.md", "from": "workflow_reference" },
+    { "path": "plans/.keep", "content": "" }
+  ],
   "connections": { "success": "create-plan" }
 }
 ```
 
-A returned path proves nothing by itself: the completion condition is what requires the files to
-exist and be complete, and the pattern in the schema only constrains the shape of the string.
+The referenced registry entries are the source of truth for stable workflow-authored content. The
+substantive owner still writes dynamic task contracts, analyses, plans, and reports in the same turn
+that determines their content. A returned path proves nothing by itself: the completion condition of
+the first consumer must require any files it depends on to exist and be complete.
+
+See [Materialize Files](/docs/reference/materialize/) for the complete declaration, archive, path,
+security, and failure contract.
 
 ### Using the workspace path
 
@@ -141,25 +139,32 @@ When workflow is interrupted, agent can:
 }
 ```
 
-## Real Example
+## Workflow Management Flow Example
 
-`moira/quick-task` gives the workspace to its intake step, which writes the task contract and the
-evidence journal in the same turn and returns both paths:
+Workflow Management Flow resolves `workspace_path`, materializes the two stable files shared by both
+branches, and then routes to create or edit work:
 
 ```text
-./moira-ws/quick-task-<executionId>/
-├── process-id.txt
-├── task.md
-├── execution.md
-├── plans/<iteration>/{plan.md, review.md, decision.md, change.md}
-└── result-reviews/<iteration>/{review.md, decision.md, change.md}
+get-action-type
+  -> materialize-workspace-bootstrap
+  -> route-action-type
+       | create -> gather-workflow-requirements
+       | edit   -> prepare-edit-workflow
 ```
 
-Numeric iteration directories are published only when their record is complete, so a resumed run can
-tell a finished iteration from an abandoned one.
+The archive writes `process-id.txt` and `workflow-authoring-reference.md`. The create and edit owners
+then write their branch-specific requirements and provenance; they do not duplicate the stable files.
+
+## Converting a Manual Bootstrap
+
+Move stable workflow-authored bodies to string registry defaults and deliver them through one
+`materialize` node. Remove only the matching static write instructions from agent directives. Keep
+dynamic files with the responsibility that judges their contents, and have its completion condition
+verify the required files on disk.
 
 ## Related Patterns
 
 - [Minimal Graph](/docs/patterns/minimal-graph/) - what earns a separate agent turn
 - [Dynamic Files](/docs/patterns/dynamic-files/) - Use `{{workspace_path}}` in file paths
+- [Materialize Files](/docs/reference/materialize/) - Deliver stable registry-backed workspace files
 - [Step Verification](/docs/patterns/step-verification/) - Store verification results in workspace

@@ -51,38 +51,35 @@ import { Aside } from "@astrojs/starlight/components";
 
 ### Владелец рабочего пространства
 
-Рабочее пространство создаёт первая ответственность, у которой есть настоящая работа: директорию,
-`process-id.txt`, связывающий её с запуском, и долговечные источники, которыми она владеет, — всё в
-одном ходе. Нода, единственная задача которой создать директорию, добавляет ход, но не добавляет
-суждения.
+Существующая ранняя ответственность определяет канонический путь рабочего пространства и возвращает
+его как глобальный `workspace_path`. Нода, единственная задача которой выбрать или создать
+директорию, добавляет ход, но не добавляет суждения.
+
+Если стабильные файлы берутся из default-значений реестра workflow, сразу после этого владельца
+разместите ноду `materialize`. Она создаёт директорию назначения и распаковывает все объявленные
+файлы из одного ограниченного архива, не помещая их тела в контекст агента:
 
 ```json
 {
-  "type": "agent-directive",
-  "id": "get-task",
-  "directive": "Establish the complete task contract from the triggering conversation. Create ./moira-ws/{task-short-name}-{YYYYMMDD}-{HHMM}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for the evidence entries that follow. Return the exact workspace and task file paths.",
-  "completionCondition": "The workspace, process correlation, and complete task contract exist at the returned paths",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "workspace_path": {
-        "type": "string",
-        "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/$",
-        "description": "Path to the created workspace"
-      },
-      "task_file": {
-        "type": "string",
-        "description": "Complete task contract written in the same turn"
-      }
-    },
-    "required": ["workspace_path", "task_file"]
-  },
+  "id": "materialize-workspace-bootstrap",
+  "type": "materialize",
+  "basePath": "{{workspace_path}}",
+  "files": [
+    { "path": "process-id.txt", "from": "workspace_process_id_file" },
+    { "path": "workflow-reference.md", "from": "workflow_reference" },
+    { "path": "plans/.keep", "content": "" }
+  ],
   "connections": { "success": "create-plan" }
 }
 ```
 
-Возвращённый путь сам по себе ничего не доказывает: существования и полноты файлов требует completion
-condition, а `pattern` в схеме ограничивает лишь форму строки.
+Указанные записи реестра служат источником истины для стабильного содержимого workflow. Владелец
+содержательной работы по-прежнему записывает динамические контракты задачи, анализ, планы и отчёты в
+том же ходе, где определяет их содержание. Возвращённый путь сам по себе ничего не доказывает:
+completion condition первого потребителя должна требовать существования и полноты нужных файлов.
+
+Полный контракт объявления, архива, путей, безопасности и ошибок описан в разделе
+[Материализация файлов](/ru/docs/reference/materialize/).
 
 ### Использование пути рабочего пространства
 
@@ -142,25 +139,32 @@ moira-ws/
 }
 ```
 
-## Реальный пример
+## Пример Workflow Management Flow
 
-`moira/quick-task` отдаёт рабочее пространство своему первому шагу: он в том же ходе пишет контракт
-задачи и журнал доказательств и возвращает оба пути:
+Workflow Management Flow определяет `workspace_path`, материализует два стабильных файла для обеих
+веток и затем выбирает создание или редактирование:
 
 ```text
-./moira-ws/quick-task-<executionId>/
-├── process-id.txt
-├── task.md
-├── execution.md
-├── plans/<iteration>/{plan.md, review.md, decision.md, change.md}
-└── result-reviews/<iteration>/{review.md, decision.md, change.md}
+get-action-type
+  -> materialize-workspace-bootstrap
+  -> route-action-type
+       | create -> gather-workflow-requirements
+       | edit   -> prepare-edit-workflow
 ```
 
-Числовые директории итераций публикуются только когда запись полна, поэтому возобновлённый запуск
-отличает завершённую итерацию от брошенной.
+Архив записывает `process-id.txt` и `workflow-authoring-reference.md`. Владельцы веток create и edit
+затем записывают свои требования и provenance, не дублируя стабильные файлы.
+
+## Перевод ручного bootstrap
+
+Перенесите стабильные тела workflow в default-значения строковых записей реестра и доставляйте их
+одной нодой `materialize`. Удалите из директив агента только соответствующие инструкции записи
+статических файлов. Динамические файлы оставьте ответственности, определяющей их содержание, а её
+completion condition должна проверять необходимые файлы на диске.
 
 ## Связанные паттерны
 
 - [Минимальный граф](/ru/docs/patterns/minimal-graph/) - что оправдывает отдельный ход агента
 - [Динамические файлы](/ru/docs/patterns/dynamic-files/) - Использование `{{workspace_path}}` в путях файлов
+- [Материализация файлов](/ru/docs/reference/materialize/) - Доставка стабильных файлов из реестра
 - [Верификация шагов](/ru/docs/patterns/step-verification/) - Хранение результатов верификации в рабочем пространстве
