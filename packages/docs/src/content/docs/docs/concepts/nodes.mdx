@@ -406,7 +406,7 @@ the generated directive and then completes the step with `null` or `{}`.
 
 | Property              | Required | Description                                                         |
 | --------------------- | -------- | ------------------------------------------------------------------- |
-| `basePath`            | Yes      | Templated destination directory on the agent filesystem             |
+| `basePath`            | Yes      | Rendered destination must be non-empty and contain no NUL character |
 | `files`               | Yes      | 1–100 archive entries                                               |
 | `files[].path`        | Yes      | Templated safe path relative to `basePath`                          |
 | `files[].from`        | One of   | `variableRegistry` string entry whose current default is the source |
@@ -438,6 +438,9 @@ The URL expires after five minutes, is bound to the current user, execution, and
 only once. Calling `session({ action: "current_step" })` while paused issues a new one-use URL without
 advancing the graph. There is intentionally no textual content fallback: if the command cannot be
 run or the download fails, report the blocker instead of copying file contents through chat.
+
+See [Materialize Files](/docs/reference/materialize/) for the complete archive, path, grant, error,
+and Workflow Management Flow contracts.
 
 ## Input Schema
 

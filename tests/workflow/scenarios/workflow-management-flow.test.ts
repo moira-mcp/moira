@@ -1,7 +1,13 @@
 /** Behavioral scenarios for workflow-management-flow v5. */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
-import { GraphValidator, detectCycles, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  detectCycles,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
@@ -11,11 +17,27 @@ function loadWorkflow(): WorkflowGraph {
   ) as WorkflowGraph;
 }
 
+function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> })
+    .nodeHandlers;
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "scenario-token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
 function createInputs(name: string): Record<string, MockInput> {
   const workspace = `./moira-ws/workflow-management-flow-${name}-create`;
   return {
-    "get-action-type": { action_type: "create", operating_mode: "interactive" },
-    "gather-workflow-requirements": { workspace_path: workspace },
+    "get-action-type": {
+      action_type: "create",
+      operating_mode: "interactive",
+      workspace_path: workspace,
+    },
+    "gather-workflow-requirements": {},
     "design-workflow-structure": {},
     "approve-structure": { structure_approved: "yes" },
     "refine-structure": {},
@@ -39,9 +61,9 @@ function editInputs(name: string, localPath = `workflows/${name}.json`): Record<
       workflow_identity: name,
       offline_mode: false,
       operating_mode: "interactive",
+      workspace_path: workspace,
     },
     "prepare-edit-workflow": {
-      workspace_path: workspace,
       local_workflow_path: localPath,
       workflow_artifact_path: `${workspace}/workflow.json`,
     },
@@ -250,8 +272,8 @@ describe("workflow-management-flow v5", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("5.6.0");
-    expect(workflow.nodes).toHaveLength(47);
+    expect(workflow.metadata.version).toBe("5.7.0");
+    expect(workflow.nodes).toHaveLength(48);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
 
@@ -263,6 +285,7 @@ describe("workflow-management-flow v5", () => {
       "workflow_artifact_path",
       "workflow_authoring_reference",
       "operating_mode",
+      "workspace_process_id_file",
     ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     const reference = String(workflow.variableRegistry?.workflow_authoring_reference?.default);
@@ -297,6 +320,16 @@ describe("workflow-management-flow v5", () => {
     expect(nodes["ask-full-antipattern-audit"].connections.success).toBe(
       "route-full-antipattern-audit",
     );
+    expect(nodes["get-action-type"].connections.success).toBe("materialize-workspace-bootstrap");
+    expect(nodes["materialize-workspace-bootstrap"]).toMatchObject({
+      type: "materialize",
+      basePath: "{{workspace_path}}",
+      files: [
+        { path: "process-id.txt", from: "workspace_process_id_file" },
+        { path: "workflow-authoring-reference.md", from: "workflow_authoring_reference" },
+      ],
+      connections: { success: "route-action-type" },
+    });
 
     // Autonomous mode is routed, not schema-driven: every approval gate is entered through its
     // own mode condition, and the autonomous branch continues where approval would have led.
@@ -331,9 +364,10 @@ describe("workflow-management-flow v5", () => {
     expect(nodes["ask-upload"].directive).toContain("`autonomous` mode do not ask");
     expect(nodes["audit-complete-workflow"].directive).toContain("select the scope yourself");
     expect(nodes["prepare-edit-workflow"].directive).toContain("decide on evidence");
-    // A workspace under ./moira-ws/ says which flow produced it.
+    // Intake resolves the canonical path once; both branch owners consume that global path.
+    expect(nodes["get-action-type"].directive).toContain("./moira-ws/workflow-management-flow-");
     for (const id of ["gather-workflow-requirements", "prepare-edit-workflow"]) {
-      expect(nodes[id].directive).toContain("./moira-ws/workflow-management-flow-");
+      expect(nodes[id].directive).toContain("{{workspace_path}}");
     }
 
     const serialized = JSON.stringify(workflow);
@@ -351,7 +385,9 @@ describe("workflow-management-flow v5", () => {
 
   test("all create edit audit publication and recovery routes are covered", async () => {
     const results = [];
-    for (const item of scenarios) results.push(await runScenario(workflow, item));
+    for (const item of scenarios) {
+      results.push(await runScenario(workflow, item, { engineSetup: useScenarioMaterializeGrant }));
+    }
     const failed = results.filter((result) => !result.passed);
     if (failed.length > 0) {
       throw new Error(

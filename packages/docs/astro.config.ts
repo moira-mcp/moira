@@ -176,6 +176,10 @@ export default defineConfig({
               slug: "docs/reference/magic-variables",
             },
             {
+              label: "Materialize Files",
+              slug: "docs/reference/materialize",
+            },
+            {
               label: "Workflow Templates",
               slug: "docs/reference/workflow-templates",
             },
