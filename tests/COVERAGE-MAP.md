@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **267 files**, **3372 tests**
+- **40 domains**, **268 files**, **3376 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -56,7 +56,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | validation          | 4     | 90    | api:1, integration:1, unit:2                                    |
 | web-ui              | 7     | 41    | e2e:5, unit:2                                                   |
 | workflow-engine     | 69    | 926   | api:4, e2e:7, integration:14, mcp-tools:5, unit:11, workflow:28 |
-| workflow-scenarios  | 25    | 167   | workflow:25                                                     |
+| workflow-scenarios  | 26    | 171   | workflow:26                                                     |
 
 ## Domain Details
 
@@ -871,9 +871,9 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### workflow-scenarios
 
-**25 files, 160 tests**
+**26 files, 164 tests**
 
-**workflow** (25 files)
+**workflow** (26 files)
 
 - `tests/workflow/scenarios/artifacts-demo-dashboard-builder.test.ts` — 5 tests 🟢
 - `tests/workflow/scenarios/artifacts-demo-report-publisher.test.ts` — 5 tests 🟢
@@ -883,6 +883,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/workflow/scenarios/coverage.test.ts` — 11 tests 🟢
 - `tests/workflow/scenarios/data-analysis.test.ts` — 5 tests 🔴
 - `tests/workflow/scenarios/development-workflow.test.ts` — 7 tests 🟢 (source-grounded filesystem-first state/authority contract; operating-mode routing with an autonomous run that skips the requirements gate; local test-adequacy and architecture gates plus the delegated per-unit completeness review with its repair loop; the teleport replan entry returning through plan revision; conditional screenshot/HTML directives; representative baseline, planning, repair, replan, runtime, expensive, affected-documentation, accepted-unit checkpoint success/repository-failure/abort, final acceptance/reconciliation, rejection, and abort routes; 100% node/branch scenario coverage, the five addressed standards rendered only by the workspace owner, the flow-named workspace, and the reviewer contract living in one place; every per-unit gate naming the baseline the first iteration writes, with the four subject/staleness rules present in the review standard; the reach of a repair declared by the repairer with a required two-value enum, routed by the three reach conditions and never mentioned by a reviewer; and the observable difference between the two routes — a contained repair returns to its own gate with the cheap gate run once, a spreading one runs it twice; and the round counter owned by the engine — three expression writers, no agent schema carrying it, every repair naming the round record it writes, and a two-repair run ending on the third round)
+- `tests/workflow/scenarios/execution-retrospective.test.ts` — 4 tests 🟢 (catalog identity/version, exact archive materialization, sufficient/partial/unavailable semantic fixtures, independent analysis/final review oracles, proposal-only authority, all nodes/branches and contained/spreading repair routes)
 - `tests/workflow/scenarios/directive-validation.test.ts` — 4 tests 🟡
 - `tests/workflow/scenarios/iterative-research.test.ts` — 5 tests 🟡
 - `tests/workflow/scenarios/marketing-campaign.test.ts` — 5 tests 🟡
