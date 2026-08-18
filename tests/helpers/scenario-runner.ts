@@ -76,6 +76,8 @@ export interface MockInputContext {
   variables: Record<string, unknown>;
   visitCount: number; // How many times this node has been visited
   nodeId: string;
+  /** Rendered directive presented when this node paused on the preceding engine cycle. */
+  directive?: string;
 }
 
 /**
@@ -216,6 +218,7 @@ export async function runScenario(
 
   // Track how many times each node has been visited (for dynamic mock inputs)
   const nodeVisitCounts: Record<string, number> = {};
+  const renderedDirectives = new Map<string, string>();
 
   try {
     let stepCount = 0;
@@ -233,6 +236,7 @@ export async function runScenario(
         currentNodeId,
         context.variables as Record<string, unknown>,
         nodeVisitCounts,
+        renderedDirectives.get(currentNodeId),
       );
       if (currentNodeId === startNode.id && scenario.initialVariables) {
         mockInput = { ...scenario.initialVariables, ...mockInput };
@@ -260,6 +264,17 @@ export async function runScenario(
 
       // Validate rendered directives - check for unrendered templates
       validateRenderedDirectives(messageQueue, currentNodeId);
+      for (const message of (messageQueue as unknown as { messages?: unknown[] }).messages ?? []) {
+        if ((message as { type?: unknown }).type === AgentMessageType.DIRECTIVE) {
+          const directiveMessage = message as DirectiveMessage;
+          if (
+            !directiveMessage.directive.includes("EXPECTED INPUT FORMAT:") &&
+            !directiveMessage.directive.includes("Validation failed:")
+          ) {
+            renderedDirectives.set(directiveMessage.nodeId, directiveMessage.directive);
+          }
+        }
+      }
 
       // Track visited nodes - include ALL visits to capture branch transitions
       // Coverage calculator relies on consecutive node pairs to determine branches
@@ -374,6 +389,7 @@ function resolveMockInput(
   nodeId: string,
   variables: Record<string, unknown>,
   visitCounts: Record<string, number>,
+  directive?: string,
 ): Record<string, unknown> {
   // Default: empty object for nodes without mockInputs
   // Issue #369: nodes without inputSchema only accept null or {}
@@ -385,7 +401,7 @@ function resolveMockInput(
 
   // Function: call with context
   if (typeof mockInput === "function") {
-    return mockInput({ variables, visitCount, nodeId });
+    return mockInput({ variables, visitCount, nodeId, directive });
   }
 
   // Array: return element by visit count (cycle through array)

@@ -10,10 +10,10 @@
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 
+const catalogEntry = findSystemCatalogEntry("deep-corpus-research", "public")!;
+
 function loadWorkflow(): WorkflowGraph {
-  return structuredClone(
-    findSystemCatalogEntry("deep-corpus-research", "public")!.graph,
-  ) as WorkflowGraph;
+  return structuredClone(catalogEntry.graph) as WorkflowGraph;
 }
 
 function node(workflow: WorkflowGraph, id: string): any {
@@ -35,7 +35,7 @@ describe("deep-corpus-research", () => {
   });
 
   test("carries a catalog identity that cannot be confused with Robust Task", () => {
-    expect((workflow as unknown as { slug: string }).slug).toBe("deep-corpus-research");
+    expect(catalogEntry.slug).toBe("deep-corpus-research");
     expect(workflow.metadata.name).toContain("Deep Corpus Research");
     expect(workflow.metadata.name.toLowerCase()).not.toContain("robust");
     // The cost marker is in the name so it survives a list() that only shows names.
