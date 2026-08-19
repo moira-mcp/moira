@@ -35,6 +35,8 @@ describe("deep-corpus-research", () => {
   });
 
   test("carries a catalog identity that cannot be confused with Robust Task", () => {
+    // Catalog identity lives on the catalog entry, not in the executable graph: the reader strips
+    // slug/owner/visibility from the body, so asking the graph for a slug always answers undefined.
     expect(catalogEntry.slug).toBe("deep-corpus-research");
     expect(workflow.metadata.name).toContain("Deep Corpus Research");
     expect(workflow.metadata.name.toLowerCase()).not.toContain("robust");

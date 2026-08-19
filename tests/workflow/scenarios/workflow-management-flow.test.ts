@@ -272,7 +272,7 @@ describe("workflow-management-flow v5", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("5.7.0");
+    expect(workflow.metadata.version).toBe("5.8.0");
     expect(workflow.nodes).toHaveLength(48);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
@@ -301,6 +301,7 @@ describe("workflow-management-flow v5", () => {
       "### Revising the process while the work runs",
       "### The reference the run writes itself",
       "### Routing a repair by the reach of the correction",
+      "### Engine state computed by the agent",
       "### A reference with no address",
       "mechanical validation",
       "decorative flags",
