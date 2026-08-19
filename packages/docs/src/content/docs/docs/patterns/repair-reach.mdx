@@ -21,7 +21,8 @@ flowchart LR
     G[Gate] -->|findings| R[Repair owner]
     R --> C{reach}
     C -->|contained| G
-    C -->|spreading| V[First gate of the chain]
+    C -->|spreading| A[Advance the round]
+    A --> V[First gate of the chain]
     V --> G
 ```
 
@@ -47,8 +48,7 @@ condition after another gate's repair could route on a value that repair never p
         "description": "Where the correction actually landed"
       }
     },
-    "required": ["current_iteration", "repair_reach"],
-    "globalInputs": ["current_iteration"]
+    "required": ["repair_reach"]
   },
   "connections": { "success": "route-test-adequacy-reach" }
 }
@@ -70,13 +70,31 @@ picks a route deliberately.
   },
   "connections": {
     "true": "review-test-adequacy",
-    "false": "validate-cheap"
+    "false": "advance-evidence-iteration"
   }
 }
 ```
 
 Write the condition so the full chain is the branch anything other than `contained` takes. The
 conservative direction is then the default direction.
+
+The spreading branch does not enter the chain directly: it goes through the expression node that
+opens the next round, and the chain follows from there.
+
+```json
+{
+  "id": "advance-evidence-iteration",
+  "type": "expression",
+  "expressions": ["current_iteration = current_iteration + 1"],
+  "connections": { "default": "validate-cheap" }
+}
+```
+
+Keep that arithmetic in the engine. A repair owner asked to return the next number cannot render the
+directory it is about to create — on its turn the counter still holds the round being closed — so its
+directive ends up describing a path instead of naming one, and the agent invents a file name nobody
+reads. With the counter advanced by a node, the repair renders the round it closes and the chain
+renders the round it opens.
 
 ## What keeps the short route honest
 

@@ -21,7 +21,8 @@ flowchart LR
     G[Гейт] -->|замечания| R[Владелец починки]
     R --> C{охват}
     C -->|contained| G
-    C -->|spreading| V[Первый гейт цепочки]
+    C -->|spreading| A[Открыть следующий круг]
+    A --> V[Первый гейт цепочки]
     V --> G
 ```
 
@@ -48,8 +49,7 @@ flowchart LR
         "description": "Куда реально попала правка"
       }
     },
-    "required": ["current_iteration", "repair_reach"],
-    "globalInputs": ["current_iteration"]
+    "required": ["repair_reach"]
   },
   "connections": { "success": "route-test-adequacy-reach" }
 }
@@ -71,13 +71,31 @@ flowchart LR
   },
   "connections": {
     "true": "review-test-adequacy",
-    "false": "validate-cheap"
+    "false": "advance-evidence-iteration"
   }
 }
 ```
 
 Пишите условие так, чтобы полная цепочка была веткой любого ответа, кроме `contained`. Тогда
 консервативное направление совпадает с направлением по умолчанию.
+
+Ветка `spreading` попадает в цепочку не напрямую: сначала она проходит через expression-ноду,
+открывающую следующий круг, а цепочка идёт уже после неё.
+
+```json
+{
+  "id": "advance-evidence-iteration",
+  "type": "expression",
+  "expressions": ["current_iteration = current_iteration + 1"],
+  "connections": { "default": "validate-cheap" }
+}
+```
+
+Держите эту арифметику в движке. Владелец починки, которого просят вернуть следующий номер, не может
+отрендерить директорию, которую он же и создаёт: на его ходу счётчик ещё равен закрываемому кругу.
+Директива тогда описывает путь вместо того, чтобы его назвать, а агент придумывает имя файла, которое
+никто не читает. Когда номер двигает нода, починка рендерит круг, который закрывает, а цепочка —
+круг, который открывает.
 
 ## Что делает короткий маршрут честным
 

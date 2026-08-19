@@ -5,7 +5,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
-import { GraphValidator, detectCycles, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import {
+  GraphTemplateProcessor,
+  GraphValidator,
+  detectCycles,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
@@ -36,7 +41,7 @@ function ordinaryInputs(): Record<string, MockInput> {
       total_steps: 1,
       vcs_commits_authorized: false,
     },
-    "revise-plan-after-rejection": { plan_revision: 2 },
+    "revise-plan-after-rejection": {},
     "implement-plan-unit": {},
     "validate-cheap": { issues_count: 0 },
     "repair-cheap-validation": {},
@@ -47,31 +52,32 @@ function ordinaryInputs(): Record<string, MockInput> {
     "repair-unit-completeness": { repair_reach: "spreading" },
     "repair-architecture": { repair_reach: "spreading" },
     "approve-current-unit-closure": { closure_decision: "approved" },
-    "revise-plan-for-replan": { plan_revision: 2 },
+    "revise-plan-for-replan": {},
     "validate-runtime": { validation_outcome: "not_applicable" },
     "repair-runtime": {},
     "wait-for-runtime-state-change": { blocker_decision: "retry" },
     "validate-expensive": { validation_outcome: "not_applicable" },
     "repair-expensive": {},
     "wait-for-expensive-state-change": { blocker_decision: "retry" },
-    "review-plan-unit-with-user": { acceptance_decision: "skip" },
+    "review-plan-unit-with-user": { acceptance_decision: "accepted" },
     "checkpoint-plan-unit": { checkpoint_outcome: "pass" },
     "repair-user-feedback": { resolution: "in_plan" },
     "reconcile-documentation": { change_scope: "not_applicable" },
     "validate-documentation": { issues_count: 0 },
-    "repair-documentation": {},
+    "repair-documentation": { repair_reach: "contained" },
     "validate-feature-wide": { validation_outcome: "not_applicable" },
-    "repair-feature-validation": {},
+    "repair-feature-validation": { repair_reach: "spreading" },
     "wait-for-feature-state-change": { blocker_decision: "retry" },
     "review-final-semantics": { issues_count: 0 },
-    "repair-final-semantics": {},
+    "repair-final-semantics": { repair_reach: "spreading" },
     "validate-requirements-coverage": { gaps_count: 0 },
-    "revise-plan-for-coverage": { plan_revision: 2 },
+    "revise-plan-for-coverage": {},
     "finalize-feature": { finalization_outcome: "pass" },
-    "repair-finalization-repository": {},
+    "repair-finalization-repository": { repair_reach: "spreading" },
+    "repair-checkpoint-repository": { repair_reach: "spreading" },
     "resolve-finalization-blocker": { blocker_decision: "retry" },
     "report-and-accept-feature": { feature_decision: "accepted" },
-    "revise-plan-after-feedback": { plan_revision: 2 },
+    "revise-plan-after-feedback": {},
   };
 }
 
@@ -139,7 +145,7 @@ const scenarios: TestScenario[] = [
           vcs_commits_authorized: false,
         },
       ],
-      "revise-plan-for-replan": { plan_revision: 2 },
+      "revise-plan-for-replan": {},
     },
     ["teleport-replan", "revise-plan-for-replan", "review-plan", "implement-plan-unit", "end"],
     [],
@@ -247,6 +253,7 @@ const scenarios: TestScenario[] = [
     [
       "repair-unit-completeness",
       "route-unit-completeness-reach",
+      "mark-current-evidence-iteration",
       "review-unit-completeness",
       "end",
     ],
@@ -334,7 +341,7 @@ const scenarios: TestScenario[] = [
     {
       "review-plan-unit-with-user": [
         { acceptance_decision: "rejected", user_feedback: "The result is incorrect" },
-        { acceptance_decision: "approved" },
+        { acceptance_decision: "accepted" },
       ],
       "repair-user-feedback": { resolution: "in_plan" },
     },
@@ -345,9 +352,9 @@ const scenarios: TestScenario[] = [
     {
       "review-plan-unit-with-user": [
         { acceptance_decision: "rejected", user_feedback: "Add a new public contract" },
-        { acceptance_decision: "skip" },
+        { acceptance_decision: "accepted" },
       ],
-      "repair-user-feedback": { resolution: "replan", plan_revision: 2 },
+      "repair-user-feedback": { resolution: "replan" },
       "approve-plan": [
         {
           plan_approval: "yes",
@@ -386,6 +393,25 @@ const scenarios: TestScenario[] = [
     ["validate-documentation", "repair-documentation", "validate-feature-wide", "end"],
   ),
   flow(
+    "a documentation repair that reached executable artifacts returns through the code gates",
+    {
+      "reconcile-documentation": [
+        { change_scope: "documentation_affected" },
+        { change_scope: "not_applicable" },
+      ],
+      "validate-documentation": [{ issues_count: 1 }, { issues_count: 0 }],
+      "repair-documentation": { repair_reach: "spreading" },
+    },
+    [
+      "repair-documentation",
+      "route-documentation-reach",
+      "record-executable-documentation-change",
+      "advance-evidence-iteration",
+      "validate-cheap",
+      "end",
+    ],
+  ),
+  flow(
     "executable documentation returns through code and semantic gates",
     {
       "reconcile-documentation": [
@@ -393,7 +419,13 @@ const scenarios: TestScenario[] = [
         { change_scope: "not_applicable" },
       ],
     },
-    ["route-executable-documentation", "validate-cheap", "review-architecture", "end"],
+    [
+      "route-executable-documentation",
+      "record-executable-documentation-change",
+      "validate-cheap",
+      "review-architecture",
+      "end",
+    ],
   ),
   flow(
     "feature-wide and final semantic defects repair through stale gates",
@@ -403,8 +435,8 @@ const scenarios: TestScenario[] = [
         { validation_outcome: "pass" },
       ],
       "review-final-semantics": [{ issues_count: 1 }, { issues_count: 0 }],
-      "repair-feature-validation": {},
-      "repair-final-semantics": {},
+      "repair-feature-validation": { repair_reach: "spreading" },
+      "repair-final-semantics": { repair_reach: "spreading" },
     },
     ["repair-feature-validation", "repair-final-semantics", "end"],
   ),
@@ -547,15 +579,80 @@ const scenarios: TestScenario[] = [
         { checkpoint_outcome: "repository_failure" },
         { checkpoint_outcome: "pass" },
       ],
-      "repair-finalization-repository": {},
+      "repair-checkpoint-repository": { repair_reach: "spreading" },
     },
     [
       "checkpoint-plan-unit",
       "route-checkpoint-abort",
-      "repair-finalization-repository",
+      "repair-checkpoint-repository",
       "validate-cheap",
       "end",
     ],
+  ),
+  flow(
+    "a contained checkpoint repair returns to the checkpoint instead of the whole chain",
+    {
+      "approve-plan": {
+        plan_approval: "yes",
+        current_step_index: 1,
+        total_steps: 1,
+        vcs_commits_authorized: true,
+      },
+      "checkpoint-plan-unit": [
+        { checkpoint_outcome: "repository_failure" },
+        { checkpoint_outcome: "pass" },
+      ],
+      "repair-checkpoint-repository": { repair_reach: "contained" },
+    },
+    [
+      "repair-checkpoint-repository",
+      "route-checkpoint-repair-reach",
+      "checkpoint-plan-unit",
+      "end",
+    ],
+  ),
+  flow(
+    "a contained finalization repair returns to reconciliation instead of the whole chain",
+    {
+      "approve-plan": {
+        plan_approval: "yes",
+        current_step_index: 1,
+        total_steps: 1,
+        vcs_commits_authorized: true,
+      },
+      "finalize-feature": [
+        { finalization_outcome: "repository_failure" },
+        { finalization_outcome: "pass" },
+      ],
+      "repair-finalization-repository": { repair_reach: "contained" },
+    },
+    [
+      "repair-finalization-repository",
+      "route-finalization-repair-reach",
+      "finalize-feature",
+      "end",
+    ],
+    ["advance-evidence-iteration"],
+  ),
+  flow(
+    "contained feature-wide and final-semantic repairs return to their own gates",
+    {
+      "validate-feature-wide": [
+        { validation_outcome: "repository_failure" },
+        { validation_outcome: "pass" },
+      ],
+      "review-final-semantics": [{ issues_count: 1 }, { issues_count: 0 }],
+      "repair-feature-validation": { repair_reach: "contained" },
+      "repair-final-semantics": { repair_reach: "contained" },
+    },
+    [
+      "route-feature-validation-reach",
+      "validate-feature-wide",
+      "route-final-semantics-reach",
+      "review-final-semantics",
+      "end",
+    ],
+    ["advance-evidence-iteration"],
   ),
   flow(
     "authorized checkpoint aborts without cursor advance",
@@ -584,7 +681,7 @@ describe("software-development-flow v12", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("12.8.0");
+    expect(workflow.metadata.version).toBe("12.10.1");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -599,6 +696,8 @@ describe("software-development-flow v12", () => {
       "test_standards",
       "documentation_standards",
       "review_standards",
+      "previous_plan_revision",
+      "previous_iteration",
     ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
 
@@ -689,7 +788,7 @@ describe("software-development-flow v12", () => {
       workflow.nodes.find((node) => node.id === "route-feature-acceptance")?.connections,
     ).toEqual({
       true: "route-vcs-authority",
-      false: "revise-plan-after-feedback",
+      false: "advance-plan-revision-after-feedback",
     });
     expect(workflow.nodes.find((node) => node.id === "end")?.finalOutput).toEqual([
       "workspace_path",
@@ -707,7 +806,13 @@ describe("software-development-flow v12", () => {
     expect(runtime?.directive).toContain("open the actual images");
     const unitReview = workflow.nodes.find((node) => node.id === "review-plan-unit-with-user");
     expect(unitReview?.directive).toContain("portable self-contained");
-    expect(unitReview?.directive).toContain("skip is forbidden");
+    expect(unitReview?.directive).toContain("never concluded without presenting it");
+    // Both answers route somewhere observable, so a unit is never concluded with a value that means
+    // nothing to the engine.
+    expect(
+      (unitReview?.inputSchema as { properties: { acceptance_decision: { enum: string[] } } })
+        .properties.acceptance_decision.enum,
+    ).toEqual(["accepted", "rejected"]);
 
     const serialized = JSON.stringify(workflow);
     for (const removed of [
@@ -732,7 +837,7 @@ describe("software-development-flow v12", () => {
   test("every per-unit gate judges the unit against a baseline the run actually writes", () => {
     // The baseline is a line in the unit's first iteration report, and both entries into a unit set
     // current_iteration to 1, so the path the gates name always exists.
-    const BASELINE = "{{workspace_path}}/step-{{current_step_index}}/iteration-1/implementation.md";
+    const BASELINE = "{{workspace_path}}/step-{{current_step_index}}/unit-report.md";
     for (const id of [
       "validate-cheap",
       "review-test-adequacy",
@@ -747,7 +852,7 @@ describe("software-development-flow v12", () => {
     const writer = workflow.nodes.find((node) => node.id === "implement-plan-unit") as {
       directive: string;
     };
-    expect(writer.directive).toContain("record the unit's baseline in one line");
+    expect(writer.directive).toContain("Open it with the unit's baseline in one line");
     for (const id of ["initialize-implementation-iteration", "advance-plan-unit"]) {
       const node = workflow.nodes.find((item) => item.id === id) as { expressions: string[] };
       expect(node.expressions).toContain("current_iteration = 1");
@@ -758,7 +863,9 @@ describe("software-development-flow v12", () => {
     const writers = workflow.nodes.filter(
       (item) =>
         item.type === "expression" &&
-        JSON.stringify(item.expressions).includes("current_iteration"),
+        (item as { expressions: string[] }).expressions.some((expression) =>
+          expression.startsWith("current_iteration ="),
+        ),
     );
     expect(writers.map((item) => item.id)).toEqual([
       "initialize-implementation-iteration",
@@ -771,7 +878,10 @@ describe("software-development-flow v12", () => {
           expressions: string[];
         }
       ).expressions,
-    ).toEqual(["current_iteration = current_iteration + 1"]);
+    ).toEqual([
+      "previous_iteration = current_iteration",
+      "current_iteration = current_iteration + 1",
+    ]);
     for (const node of workflow.nodes) {
       expect(JSON.stringify(node.inputSchema ?? {})).not.toContain("current_iteration");
     }
@@ -790,6 +900,13 @@ describe("software-development-flow v12", () => {
     for (const owner of repairOwners) {
       expect((owner as { directive: string }).directive).toContain(REPAIR_RECORD);
     }
+    const executableDocumentationOwner = workflow.nodes.find(
+      (item) => item.id === "record-executable-documentation-change",
+    ) as { directive: string; connections: Record<string, string> };
+    expect(executableDocumentationOwner.directive).toContain(REPAIR_RECORD);
+    expect(executableDocumentationOwner.connections).toEqual({
+      success: "advance-evidence-iteration",
+    });
 
     // The rules the gates lean on live once, in the standard the workspace owner writes down.
     const standard = String(workflow.variableRegistry?.review_standards?.default ?? "");
@@ -800,10 +917,15 @@ describe("software-development-flow v12", () => {
   });
 
   test("the reach of a repair is stated by the repairer and routes without a default", () => {
-    for (const [repair, gate] of [
-      ["repair-test-adequacy", "review-test-adequacy"],
-      ["repair-architecture", "review-architecture"],
-      ["repair-unit-completeness", "review-unit-completeness"],
+    for (const [repair, containedTarget, spreadingTarget] of [
+      ["repair-test-adequacy", "review-test-adequacy", "advance-evidence-iteration"],
+      ["repair-architecture", "review-architecture", "advance-evidence-iteration"],
+      ["repair-unit-completeness", "mark-current-evidence-iteration", "advance-evidence-iteration"],
+      ["repair-documentation", "validate-documentation", "record-executable-documentation-change"],
+      ["repair-feature-validation", "validate-feature-wide", "advance-evidence-iteration"],
+      ["repair-final-semantics", "review-final-semantics", "advance-evidence-iteration"],
+      ["repair-finalization-repository", "finalize-feature", "advance-evidence-iteration"],
+      ["repair-checkpoint-repository", "checkpoint-plan-unit", "advance-evidence-iteration"],
     ]) {
       const owner = workflow.nodes.find((node) => node.id === repair) as {
         directive: string;
@@ -820,15 +942,185 @@ describe("software-development-flow v12", () => {
       expect(route.type).toBe("condition");
       // Contained returns to the gate that raised the finding and stays inside its round; anything
       // else opens the next round and takes the full chain.
-      expect(route.connections).toEqual({ true: gate, false: "advance-evidence-iteration" });
+      expect(route.connections).toEqual({ true: containedTarget, false: spreadingTarget });
     }
 
     // No reviewer classifies reach: the repairer describes what it actually changed, after the fact.
-    for (const id of ["review-test-adequacy", "review-architecture", "review-unit-completeness"]) {
+    for (const id of [
+      "review-test-adequacy",
+      "review-architecture",
+      "review-unit-completeness",
+      "validate-documentation",
+      "review-final-semantics",
+      "validate-feature-wide",
+    ]) {
       expect(JSON.stringify(workflow.nodes.find((node) => node.id === id))).not.toContain(
         "repair_reach",
       );
     }
+
+    // Each gate says what its own `contained` protects, so a broad gate cannot accept an
+    // unfalsifiable answer: the short route would then become the default one.
+    const insideOfItsOwnGate: Array<[string, string]> = [
+      ["repair-feature-validation", "no change to what a test asserts"],
+      ["repair-final-semantics", "the intent of every test exactly as they were"],
+      ["repair-finalization-repository", "the commit scope, the pre-commit and hook machinery"],
+      ["repair-checkpoint-repository", "left the verified content of the unit as it was"],
+    ];
+    for (const [id, phrase] of insideOfItsOwnGate) {
+      expect(
+        (workflow.nodes.find((node) => node.id === id) as { directive: string }).directive,
+      ).toContain(phrase);
+    }
+
+    // Each of the two VCS repair owners reads one report and answers to one gate, so neither needs a
+    // protocol for choosing between two sources.
+    expect(JSON.stringify(workflow.nodes)).not.toContain("Exactly one source must match");
+  });
+
+  test("a finding is about the delivered work and the run's own records are corrected in place", () => {
+    const standard = String(workflow.variableRegistry?.review_standards?.default ?? "");
+    expect(standard).toContain(
+      "A finding is about the delivered work, not about the run's bookkeeping",
+    );
+    // The rule is a decidable question, not a list of directories.
+    expect(standard).toContain("whether editing the record alone makes its statement true");
+    // A record claiming work that was never done stays a finding: the bar does not move.
+    expect(standard).toContain("hides work that was never done");
+    // The reviewer's own boundary keeps it independent of what it judges.
+    expect(standard).toContain("corrects records and never touches the repository");
+    // The rule that forbids a reviewer to repair now points at its single exception instead of
+    // contradicting it.
+    expect(standard).toContain("The reviewer diagnoses the work");
+
+    const delegation = workflow.nodes.find((node) => node.id === "review-unit-completeness") as {
+      directive: string;
+    };
+    expect(delegation.directive).toContain("The reviewer repairs nothing in the repository either");
+    expect(delegation.directive).toContain("instead of counting it as a finding");
+  });
+
+  test("documentation is reconciled again only when its subject moved", () => {
+    const reconcile = workflow.nodes.find((node) => node.id === "reconcile-documentation") as {
+      directive: string;
+      completionCondition: string;
+      inputSchema: { properties: { change_scope: { enum: string[] } } };
+    };
+    // No new value that would route where an existing one already routes.
+    expect(reconcile.inputSchema.properties.change_scope.enum).toEqual([
+      "not_applicable",
+      "documentation_affected",
+      "executable",
+    ]);
+    // The subject is documentation together with the behaviour it describes: a re-entry always
+    // follows a repository change, so a signal watching the documents alone would skip the gate.
+    expect(reconcile.directive).toContain(
+      "the repository behavior that documentation describes, is in a state no current independent review covers",
+    );
+    expect(reconcile.directive).toContain(
+      "neither the documentation nor the repository behavior it describes has changed since that review",
+    );
+    expect(reconcile.directive).toContain("never from memory of an earlier pass");
+    expect(reconcile.completionCondition).toContain("names which of its two reasons holds");
+  });
+
+  test("the unit's account has one address and every owner that changes the unit keeps it current", () => {
+    const ACCOUNT = "{{workspace_path}}/step-{{current_step_index}}/unit-report.md";
+    const writer = workflow.nodes.find((node) => node.id === "implement-plan-unit") as {
+      directive: string;
+    };
+    expect(writer.directive).toContain(`Write the unit's account to ${ACCOUNT}`);
+
+    // The account is the unit's, not the first round's: nothing addresses a per-round implementation
+    // report any more, so no reader can be handed a description frozen at iteration 1.
+    expect(JSON.stringify(workflow.nodes)).not.toContain("implementation.md");
+
+    // Whoever last changed the unit owns the account, and says so in the same turn it records its
+    // round — the round record itself stays where it was.
+    const unitRepairs = workflow.nodes.filter(
+      (item) =>
+        item.id.startsWith("repair-") &&
+        item.id !== "repair-plan" &&
+        item.id !== "repair-documentation",
+    );
+    expect(unitRepairs).toHaveLength(11);
+    for (const owner of unitRepairs) {
+      expect((owner as { directive: string }).directive).toContain(
+        `bring the unit's account at ${ACCOUNT}`,
+      );
+    }
+    const executableDocumentationOwner = workflow.nodes.find(
+      (item) => item.id === "record-executable-documentation-change",
+    ) as { directive: string };
+    expect(executableDocumentationOwner.directive).toContain(`durable unit account at ${ACCOUNT}`);
+
+    // What a report may assert lives once, in the standard every owner and reviewer is handed.
+    const standard = String(workflow.variableRegistry?.review_standards?.default ?? "");
+    expect(standard).toContain(
+      "A report states what the work delivers, not how much of it there was",
+    );
+    expect(standard).toContain("files touched, lines added or removed, share of comment");
+    expect(standard).toContain(
+      "The account of the work is kept current by whoever last changed the work",
+    );
+  });
+
+  test("the engine advances the plan revision and the directives name both revision paths", async () => {
+    // No responsibility answers with a number the registry already owns.
+    for (const node of workflow.nodes) {
+      expect((node.inputSchema as { globalInputs?: string[] })?.globalInputs ?? []).not.toContain(
+        "plan_revision",
+      );
+    }
+
+    const advancers = workflow.nodes.filter(
+      (item) =>
+        item.type === "expression" &&
+        JSON.stringify((item as { expressions: string[] }).expressions).includes(
+          "plan_revision = plan_revision + 1",
+        ),
+    );
+    expect(advancers.map((item) => item.id)).toEqual([
+      "advance-plan-revision-after-rejection",
+      "advance-plan-revision-for-replan",
+      "advance-plan-revision-for-coverage",
+      "advance-plan-revision-after-feedback",
+    ]);
+    for (const advancer of advancers) {
+      // The previous number survives the increment, so the revision owner can name its source.
+      expect((advancer as { expressions: string[] }).expressions[0]).toBe(
+        "previous_plan_revision = plan_revision",
+      );
+      const owner = workflow.nodes.find(
+        (node) =>
+          node.id === (advancer as { connections: Record<string, string> }).connections.default,
+      ) as { directive: string };
+      expect(owner.directive).toContain("{{workspace_path}}/plans/{{plan_revision}}/plan.md");
+      expect(owner.directive).toContain(
+        "{{workspace_path}}/plans/{{previous_plan_revision}}/plan.md",
+      );
+    }
+
+    // Behavioural: a rejected plan reaches revision 2 without any agent reporting the number.
+    const result = await runScenario(workflow, {
+      name: "plan rejection advances the revision",
+      mockInputs: {
+        ...ordinaryInputs(),
+        "approve-plan": [
+          { plan_approval: "no", user_feedback: "Split the unit" },
+          {
+            plan_approval: "yes",
+            current_step_index: 1,
+            total_steps: 1,
+            vcs_commits_authorized: false,
+          },
+        ],
+      },
+      expect: { status: "completed", maxSteps: 220 },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.finalContext.plan_revision).toBe(2);
+    expect(result.finalContext.previous_plan_revision).toBe(1);
   });
 
   test("the engine advances the round on every re-entry into the chain", async () => {
@@ -852,6 +1144,131 @@ describe("software-development-flow v12", () => {
     expect(result.finalContext.current_iteration).toBe(3);
     const distinct = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
     expect(distinct.filter((id) => id === "advance-evidence-iteration")).toHaveLength(2);
+  });
+
+  test("a contained completeness repair in a later round hands that exact repair record back", async () => {
+    const result = await runScenario(workflow, {
+      name: "later-round contained completeness repair",
+      mockInputs: {
+        ...ordinaryInputs(),
+        "validate-cheap": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+        "review-unit-completeness": [{ issues_count: 1 }, { issues_count: 0 }, { issues_count: 0 }],
+        "repair-unit-completeness": { repair_reach: "contained" },
+      },
+      expect: { status: "completed", maxSteps: 220 },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.finalContext.current_iteration).toBe(2);
+    expect(result.finalContext.previous_iteration).toBe(2);
+
+    const distinct = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+    const repairAt = distinct.indexOf("repair-unit-completeness");
+    expect(distinct.slice(repairAt, repairAt + 4)).toEqual([
+      "repair-unit-completeness",
+      "route-unit-completeness-reach",
+      "mark-current-evidence-iteration",
+      "review-unit-completeness",
+    ]);
+
+    const review = workflow.nodes.find((node) => node.id === "review-unit-completeness") as {
+      directive: string;
+    };
+    const rendered = new GraphTemplateProcessor().processDirective(review.directive, {
+      variables: result.finalContext,
+      nodeStates: {},
+      executionId: "later-round-contained-review",
+      workflowId: workflow.id,
+      userId: "workflow-test-user",
+    });
+    expect(rendered).toContain("./moira-ws/example/step-1/iteration-2/repair.md");
+    expect(rendered).not.toContain("./moira-ws/example/step-1/iteration-1/repair.md");
+  });
+
+  test("both executable documentation paths record the closed round before code gates", async () => {
+    const route = (visitedNodes: string[]): string[] =>
+      visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+    const executable = await runScenario(workflow, {
+      name: "initial executable documentation record",
+      mockInputs: {
+        ...ordinaryInputs(),
+        "reconcile-documentation": [
+          { change_scope: "executable" },
+          { change_scope: "not_applicable" },
+        ],
+      },
+      expect: { status: "completed", maxSteps: 220 },
+    });
+    expect(executable.passed).toBe(true);
+    expect(executable.finalContext).toMatchObject({ current_iteration: 2, previous_iteration: 1 });
+    const executableRoute = route(executable.visitedNodes);
+    const executableRouteAt = executableRoute.indexOf("route-executable-documentation");
+    expect(executableRoute.slice(executableRouteAt, executableRouteAt + 4)).toEqual([
+      "route-executable-documentation",
+      "record-executable-documentation-change",
+      "advance-evidence-iteration",
+      "validate-cheap",
+    ]);
+
+    const spreadingRepair = await runScenario(workflow, {
+      name: "spreading documentation repair record",
+      mockInputs: {
+        ...ordinaryInputs(),
+        "reconcile-documentation": [
+          { change_scope: "documentation_affected" },
+          { change_scope: "not_applicable" },
+        ],
+        "validate-documentation": [{ issues_count: 1 }, { issues_count: 0 }],
+        "repair-documentation": { repair_reach: "spreading" },
+      },
+      expect: { status: "completed", maxSteps: 220 },
+    });
+    expect(spreadingRepair.passed).toBe(true);
+    expect(spreadingRepair.finalContext).toMatchObject({
+      current_iteration: 2,
+      previous_iteration: 1,
+    });
+    const spreadingRoute = route(spreadingRepair.visitedNodes);
+    const spreadingRouteAt = spreadingRoute.indexOf("repair-documentation");
+    expect(spreadingRoute.slice(spreadingRouteAt, spreadingRouteAt + 5)).toEqual([
+      "repair-documentation",
+      "route-documentation-reach",
+      "record-executable-documentation-change",
+      "advance-evidence-iteration",
+      "validate-cheap",
+    ]);
+
+    const recordOwner = workflow.nodes.find(
+      (node) => node.id === "record-executable-documentation-change",
+    ) as { directive: string };
+    const validateCheap = workflow.nodes.find((node) => node.id === "validate-cheap") as {
+      directive: string;
+    };
+    const processor = new GraphTemplateProcessor();
+    const sharedContext = {
+      workspace_path: "./moira-ws/example",
+      current_step_index: 1,
+    };
+    const writerDirective = processor.processDirective(recordOwner.directive, {
+      variables: { ...sharedContext, current_iteration: 1, previous_iteration: 1 },
+      nodeStates: {},
+      executionId: "documentation-record-writer",
+      workflowId: workflow.id,
+      userId: "workflow-test-user",
+    });
+    const nextGateDirective = processor.processDirective(validateCheap.directive, {
+      variables: { ...sharedContext, current_iteration: 2, previous_iteration: 1 },
+      nodeStates: {},
+      executionId: "documentation-record-reader",
+      workflowId: workflow.id,
+      userId: "workflow-test-user",
+    });
+    const exactRepairRecord = "./moira-ws/example/step-1/iteration-1/repair.md";
+    const exactUnitAccount = "./moira-ws/example/step-1/unit-report.md";
+    expect(writerDirective).toContain(exactRepairRecord);
+    expect(writerDirective).toContain(exactUnitAccount);
+    expect(writerDirective).toContain("the validation evidence it invalidated");
+    expect(nextGateDirective).toContain(exactRepairRecord);
+    expect(nextGateDirective).toContain(exactUnitAccount);
   });
 
   test("a contained repair skips the validation chain a spreading one runs", async () => {
