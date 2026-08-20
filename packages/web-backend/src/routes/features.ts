@@ -18,11 +18,13 @@ const router = Router();
 /** All gated features, surfaced to the frontend. */
 const FEATURES: Feature[] = [
   "openRegistration",
+  "accountApproval",
   "emailVerificationGate",
   "verificationEmailOnSignup",
   "legalConsents",
   "betaNotices",
   "multiUserAdmin",
+  "userManagement",
   "socialLogin",
 ];
 

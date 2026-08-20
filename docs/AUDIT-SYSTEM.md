@@ -362,6 +362,9 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 
 ### Admin User Management
 
+- `ADMIN_APPROVE_USER` - admin approved a pending user. The
+  `AccountApprovalRepository` writes this event in the same SQLite transaction as
+  the conditional `approvedAt` transition, so retries create only one event.
 - `ADMIN_BLOCK_USER` - admin blocked a user
 - `ADMIN_UNBLOCK_USER` - admin unblocked a user
 - `ADMIN_VERIFY_EMAIL` - admin verified an email
@@ -371,7 +374,7 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 - `ADMIN_DELETE_USER` - admin deleted a user
 - `ADMIN_LOGOUT_ALL_USERS` - admin logged out all users
 
-**Logged via:** REST API (`/api/admin/users/*`)
+**Logged via:** REST API (`/api/admin/users/*`) and `AccountApprovalRepository`
 
 ### Admin Security Actions
 

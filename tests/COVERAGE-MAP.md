@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **268 files**, **3382 tests**
+- **40 domains**, **272 files**, **3395 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -19,7 +19,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | auth                | 16    | 112   | api:4, e2e:10, integration:2                                    |
 | chat                | 3     | 53    | integration:1, unit:2                                           |
 | context             | 7     | 73    | integration:2, mcp-tools:1, unit:4                              |
-| deployment-mode     | 8     | 49    | unit:4, integration:1, api:2, e2e:1                             |
+| deployment-mode     | 12    | 64    | unit:5, integration:3, api:3, e2e:1                             |
 | email               | 1     | 22    | unit:1                                                          |
 | self-host-limits    | 2     | 12    | unit:2                                                          |
 | pin-hash            | 1     | 7     | unit:1                                                          |
@@ -221,22 +221,26 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### deployment-mode
 
-**8 files, 49 tests**
+**12 files, 64 tests**
 
-**unit** (4 files)
+**unit** (5 files)
 
+- `tests/unit/shared/account-admission.test.ts` — 3 tests 🟢 (mode-independent approval state, fail-closed null/missing identity handling, and blocked/approval/email-verification denial precedence)
 - `tests/unit/shared/deployment-mode-config.test.ts` — 10 tests 🟢 (DEPLOYMENT_MODE resolution: default self-host, case/whitespace normalization, invalid-value throws, isSelfHost/isSaas predicates)
 - `tests/unit/shared/feature-resolver.test.ts` — 9 tests 🟢 (ModeFeatureResolver per-mode flags, unknown-feature safe default, singleton get/override/reset)
 - `tests/unit/shared/secrets-bootstrap.test.ts` — 8 tests 🟢 (self-host secret generation+persist, mask vs expose, no-regenerate-when-present, restart idempotency, saas no-op, loadPersistedSecrets no-override + absent-file)
 - `tests/unit/shared/deployment-mode-safeguard.test.ts` — 6 tests 🟢 (unset-DEPLOYMENT_MODE safeguard: production+public→error/refuse-boot, non-prod+public→warn, mode-set/localhost/127.x/empty-host→ok)
 
-**integration** (1 file)
+**integration** (3 files)
 
-- `tests/integration/auth-mode-gating.test.ts` — 5 tests 🟢 (auth gate contract per mode: legalConsents/emailVerificationGate/verificationEmailOnSignup/openRegistration OFF in self-host, ON in saas; MCP/token issuance without verification in self-host)
+- `tests/integration/account-approval.test.ts` — 4 tests 🟢 (legacy migration backfill and fresh-account persistence; downgrade preparation requires confirmation, blocks pending accounts through the legacy control, and revokes only their credentials; atomic concurrent approval with one timestamp and one audit event; missing-user no-op audit behavior)
+- `tests/integration/auth-mode-gating.test.ts` — 8 tests 🟢 (mode feature contract: self-host registration with account approval and no email/legal gate; SaaS behavior unchanged; MCP/token issuance without verification in self-host; only an explicitly enabled reserved-domain registration with an authenticated load-test header is auto-approved, while disabled, wrong-secret, and wrong-domain cases remain pending; an existing blocked SaaS session is denied at non-public Better Auth operations)
+- `tests/integration/create-admin-user.test.ts` — 2 tests 🟢 (recovery refuses a missing operator password without creating an identity; supplied credentials create an approved admin with a Better Auth-verifiable hash, never log the secret, and safely replace an existing credential)
 
-**api** (2 files)
+**api** (3 files)
 
-- `tests/api/auth/self-host-auth.test.ts` — 2 tests 🟢 (HTTP self-host auth branch: open registration closed (REGISTRATION_DISABLED) vs saas consent-enforced; admin token issuance on requireVerifiedAuth route; mode auto-detected from sign-up behavior)
+- `tests/api/auth/self-host-auth.test.ts` — 3 tests 🟢 (complete self-host HTTP/MCP lifecycle from pending registration through concurrent admin approval, one audit transition, and Better Auth/product/token/OAuth unlock; pending OAuth code, refresh-token, and bearer-introspection denial with admitted introspection success; default-denied session-authorized Better Auth capabilities; sign-in, real signed verification, and stored reset-token flows with a pending cookie; admin authorization, audit actor identity, self-block rejection, and missing-user contracts; blocked/approval/email independence; pending status/sign-out; bootstrap-admin token issuance)
+- `tests/api/auth/saas-auth-invariants.test.ts` — 1 test 🟢 (explicit SaaS mode, consent enforcement, verification-email capability, no account-approval gate including profile mutation, blocked-first/email-verification gates for persistent tokens, OAuth code/refresh exchange, direct MCP bearer access, and bearer introspection, plus successful verified/unblocked code, refresh, MCP, and introspection paths)
 - `tests/api/features-api.test.ts` — 4 tests 🟢 (public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host)
 
 **e2e** (1 file)

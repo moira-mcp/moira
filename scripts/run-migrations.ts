@@ -368,8 +368,9 @@ if (adminPassword) {
     sqlite
       .prepare(
         `
-      INSERT INTO user (id, email, name, handle, emailVerified, isAdmin, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO user
+        (id, email, name, handle, emailVerified, isAdmin, approvedAt, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now'), datetime('now'))
     `,
       )
       .run(adminId, adminEmail, "Admin User", adminHandle, 1, 1);
@@ -377,7 +378,11 @@ if (adminPassword) {
     console.log("  ✅ Admin user created with admin flag");
   } else {
     // Update existing admin user to set isAdmin flag
-    sqlite.prepare("UPDATE user SET isAdmin = 1 WHERE id = ?").run(adminId);
+    sqlite
+      .prepare(
+        "UPDATE user SET isAdmin = 1, approvedAt = COALESCE(approvedAt, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) WHERE id = ?",
+      )
+      .run(adminId);
     console.log("  ✅ Admin user updated with admin flag");
   }
 
@@ -426,8 +431,8 @@ if (!existingMoiraUser) {
   sqlite
     .prepare(
       `
-    INSERT INTO user (id, email, name, handle, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
+    INSERT INTO user (id, email, name, handle, approvedAt, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now'), datetime('now'))
   `,
     )
     .run(moiraUserId, moiraEmail, "Moira", moiraHandle);

@@ -5,7 +5,15 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "@jest/globals";
-import { getDatabase, user, UserRepository, AuditRepository, UserService } from "@mcp-moira/shared";
+import {
+  getDatabase,
+  getSqliteInstance,
+  user,
+  UserRepository,
+  AuditRepository,
+  AccountApprovalRepository,
+  UserService,
+} from "@mcp-moira/shared";
 import { inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
@@ -14,7 +22,11 @@ const db = getDatabase();
 
 describe("Admin user resolution (getAdminUserIds)", () => {
   const repo = new UserRepository(db);
-  const service = new UserService(repo, new AuditRepository(db));
+  const service = new UserService(
+    repo,
+    new AuditRepository(db),
+    new AccountApprovalRepository(getSqliteInstance()),
+  );
 
   let activeAdminId: string;
   let blockedAdminId: string;

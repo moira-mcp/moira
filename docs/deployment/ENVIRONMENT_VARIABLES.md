@@ -65,22 +65,36 @@ The mode sets the default behavior of SaaS-specific features through the `Featur
 import { getFeatureResolver } from "@mcp-moira/shared";
 
 const resolver = getFeatureResolver(); // default: ModeFeatureResolver (driven by DEPLOYMENT_MODE)
-resolver.isEnabled("openRegistration"); // self-host → false, saas → true
+resolver.isEnabled("openRegistration"); // self-host → true, saas → true
+resolver.isEnabled("accountApproval"); // self-host → true, saas → false
 ```
 
-`Feature`: `openRegistration` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `socialLogin`. In `self-host` all are off; in `saas` all are on. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud).
+`Feature`: `openRegistration` | `accountApproval` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `userManagement` | `socialLogin`. Self-host opens registration behind administrator approval and exposes user management without enabling the broader multi-user admin surface. SaaS keeps its existing registration, verification, and admin behavior. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud).
 
 **Auth behavior by mode** (`better-auth-config.ts`, `web-backend/.../auth-middleware.ts`):
 
-| Feature                     | self-host                                             | saas                            |
-| --------------------------- | ----------------------------------------------------- | ------------------------------- |
-| `openRegistration`          | `/sign-up/email` closed (`REGISTRATION_DISABLED` 403) | open registration               |
-| `legalConsents`             | terms/residency consents not required                 | required (otherwise 400)        |
-| `emailVerificationGate`     | email verification NOT needed to issue tokens/MCP     | required (otherwise 403)        |
-| `verificationEmailOnSignup` | no email sent on registration                         | sent                            |
-| `socialLogin`               | GitHub/Google OAuth login hidden                      | OAuth login offered (if config) |
+| Feature                     | self-host                                         | saas                            |
+| --------------------------- | ------------------------------------------------- | ------------------------------- |
+| `openRegistration`          | open registration                                 | open registration               |
+| `accountApproval`           | required before product/API/MCP access            | disabled                        |
+| `legalConsents`             | terms/residency consents not required             | required (otherwise 400)        |
+| `emailVerificationGate`     | email verification NOT needed to issue tokens/MCP | required (otherwise 403)        |
+| `verificationEmailOnSignup` | no email sent on registration                     | sent                            |
+| `socialLogin`               | GitHub/Google OAuth login hidden                  | OAuth login offered (if config) |
+| `userManagement`            | enabled                                           | enabled                         |
+| `multiUserAdmin`            | disabled                                          | enabled                         |
 
-In `self-host`, the admin user is created during migration (open registration is closed), and the MCP client connects with an API token without email verification.
+In `self-host`, migration creates an already-approved recovery administrator and backfills existing users as approved. New registrations start pending: they can read `GET /api/user/me` and sign out, while product routes, persistent tokens, OAuth authorization and token issuance, and MCP access return `ACCOUNT_APPROVAL_REQUIRED` until an administrator calls `POST /api/admin/users/:id/approve`. Email verification remains a separate, disabled self-host gate.
+
+Operator recovery uses `npx tsx scripts/create-admin-user.ts` inside the running
+container. It requires `ADMIN_PASSWORD`; `ADMIN_EMAIL`, `ADMIN_ID`, and `DB_PATH`
+are optional. The command repairs approval/admin/email state, clears any block,
+and replaces the credential without printing the password. Before rolling back to a version that
+does not enforce `approvedAt`, back up the database and run
+`npm run prepare:account-approval-downgrade -- --confirm-block-pending-users` on
+the current image. It blocks pending users through the legacy `blocked` field and
+revokes their active credentials. The complete procedures are in
+`docs/AUTHENTICATION.md`.
 
 **Production safeguard:** if `NODE_ENV=production` AND `MOIRA_HOST` is a public (non-localhost) host AND `DEPLOYMENT_MODE` is unset → startup is **rejected** (`evaluateUnsetModeSafeguard` in `env.ts`), so a hosted deploy does not silently start in `self-host` with the SaaS gates turned off. In non-production this is a warning. A hosted deploy must set `DEPLOYMENT_MODE=saas`; a public self-host must set it explicitly to `=self-host`.
 

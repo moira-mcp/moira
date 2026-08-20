@@ -18,11 +18,13 @@ type FeatureFlags = Record<FeatureFlag, boolean>;
 
 const ALL_OFF: FeatureFlags = {
   openRegistration: false,
+  accountApproval: false,
   emailVerificationGate: false,
   verificationEmailOnSignup: false,
   legalConsents: false,
   betaNotices: false,
   multiUserAdmin: false,
+  userManagement: false,
   socialLogin: false,
 };
 

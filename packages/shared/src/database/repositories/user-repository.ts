@@ -582,6 +582,7 @@ export class UserRepository {
       name: string | null;
       isAdmin: boolean;
       emailVerified: boolean;
+      approvedAt: string | null;
       blocked: boolean;
       createdAt: string;
       workflowsCount: number;
@@ -611,6 +612,7 @@ export class UserRepository {
         name: user.name,
         isAdmin: user.isAdmin,
         emailVerified: user.emailVerified,
+        approvedAt: user.approvedAt,
         blocked: user.blocked,
         createdAt: user.createdAt,
       },
@@ -648,6 +650,7 @@ export class UserRepository {
         name: r.name as string | null,
         isAdmin: r.isAdmin as boolean,
         emailVerified: r.emailVerified as boolean,
+        approvedAt: r.approvedAt as string | null,
         blocked: r.blocked as boolean,
         createdAt: r.createdAt as string,
         workflowsCount: workflowCounts[r.id as string] || 0,

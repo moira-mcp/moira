@@ -7,8 +7,9 @@ import { Router, Request, Response } from "express";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { requireAdmin } from "../middleware/admin-middleware.js";
+import type { AuthenticatedRequest } from "../types/express-types.js";
+import { auth } from "../auth.js";
 import {
-  sendEmail,
   isEmailConfigured,
   logAuditEvent,
   AuditAction,
@@ -19,6 +20,7 @@ import {
   getArtifactService,
   getArtifactUrl,
   getLockService,
+  getUserService,
   MCP_TEXT_KEYS,
   MCP_AGENT_CATEGORY,
   MCP_MODEL_CATEGORY,
@@ -77,8 +79,7 @@ router.post(
     });
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_SETTINGS_CREATE_DEFINITION,
@@ -127,8 +128,7 @@ router.put(
     });
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_SETTINGS_UPDATE_DEFINITION,
@@ -158,8 +158,7 @@ router.delete(
     await repository.deleteSettingDefinition(key);
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_SETTINGS_DELETE_DEFINITION,
@@ -185,8 +184,7 @@ router.get(
     const definitions = await repository.getSettingDefinitions();
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_SETTINGS_EXPORT_SCHEMA,
@@ -317,6 +315,7 @@ router.get(
           name: userData.name,
           isAdmin: userData.isAdmin,
           emailVerified: userData.emailVerified,
+          approvedAt: userData.approvedAt,
           blocked: userData.blocked,
           blockedAt: userData.blockedAt,
           blockedReason: userData.blockedReason,
@@ -342,6 +341,35 @@ router.get(
 );
 
 /**
+ * POST /api/admin/users/:id/approve - Approve a pending account.
+ * The service performs the conditional transition and audit insert in one
+ * transaction, making retries and overlapping requests idempotent.
+ */
+router.post(
+  "/users/:id/approve",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const currentUserId = (req as AuthenticatedRequest).userId;
+    const result = await getUserService().approveAccount(currentUserId, id);
+
+    if (result.status === "not-found") {
+      throw createApiError.notFound(`User not found: ${id}`, { userId: id });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id,
+        approvedAt: result.approvedAt,
+        approved: true,
+        alreadyApproved: result.status === "already-approved",
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+/**
  * POST /api/admin/users/:id/block - Block user and revoke all sessions
  */
 router.post(
@@ -351,8 +379,7 @@ router.post(
     const { reason } = req.body;
 
     // Prevent admin from blocking themselves
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     if (id === currentUserId) {
       throw createApiError.badRequest("Cannot block your own account");
     }
@@ -448,8 +475,7 @@ router.post(
       .where(eq(user.id, id));
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_UNBLOCK_USER,
@@ -493,8 +519,7 @@ router.post(
       .where(eq(user.id, id));
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_VERIFY_EMAIL,
@@ -532,37 +557,16 @@ router.post(
       throw createApiError.notFound(`User not found: ${id}`, { userId: id });
     }
 
-    // Generate verification token and URL
-    const token = crypto.randomUUID();
-    const url = `${getBaseUrl()}/api/auth/verify-email?token=${token}`;
-
-    // Store verification token
-    const { verification } = await import("@mcp-moira/shared");
-    await db.insert(verification).values({
-      id: crypto.randomUUID(),
-      identifier: userData.email,
-      value: token,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 hours
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-
-    // Send email
-    await sendEmail(id, "verification", {
-      to: userData.email,
-      subject: "Verify your email - MCP Moira",
-      text: `Click the link to verify your email: ${url}`,
-      html: `
-      <h2>Verify Your Email</h2>
-      <p>Click the button below to verify your email address:</p>
-      <p><a href="${url}" style="display:inline-block;padding:12px 24px;background:#10b981;color:white;text-decoration:none;border-radius:6px;">Verify Email</a></p>
-      <p>Or copy this link: ${url}</p>
-    `,
+    // Reuse Better Auth's signed verification token and configured email
+    // delivery. A hand-written verification row is not compatible with its
+    // JWT-based /verify-email endpoint.
+    await auth.api.sendVerificationEmail({
+      body: { email: userData.email, callbackURL: `${getBaseUrl()}/app` },
+      headers: new Headers(),
     });
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_SEND_VERIFICATION,
@@ -600,38 +604,16 @@ router.post(
       throw createApiError.notFound(`User not found: ${id}`, { userId: id });
     }
 
-    // Generate reset token and URL
-    const token = crypto.randomUUID();
-    const url = `${getBaseUrl()}/reset-password?token=${token}`;
-
-    // Store reset token
-    const { verification } = await import("@mcp-moira/shared");
-    await db.insert(verification).values({
-      id: crypto.randomUUID(),
-      identifier: userData.email,
-      value: token,
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1 hour
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-
-    // Send email
-    await sendEmail(id, "password_reset", {
-      to: userData.email,
-      subject: "Reset your password - MCP Moira",
-      text: `Click the link to reset your password: ${url}\n\nThis link will expire in 1 hour.`,
-      html: `
-      <h2>Reset Your Password</h2>
-      <p>Click the button below to reset your password:</p>
-      <p><a href="${url}" style="display:inline-block;padding:12px 24px;background:#3b82f6;color:white;text-decoration:none;border-radius:6px;">Reset Password</a></p>
-      <p>Or copy this link: ${url}</p>
-      <p><small>This link will expire in 1 hour.</small></p>
-    `,
+    // Reuse Better Auth's reset-password record shape and configured delivery.
+    // The token is stored under reset-password:<token>, exactly as its callback
+    // and password mutation endpoints consume it.
+    await auth.api.requestPasswordReset({
+      body: { email: userData.email, redirectTo: `${getBaseUrl()}/reset-password` },
+      headers: new Headers(),
     });
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_SEND_RESET,
@@ -793,8 +775,7 @@ router.put(
     }
 
     // Prevent admin from removing their own admin status
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     if (id === currentUserId && isAdmin === false) {
       throw createApiError.badRequest("Cannot remove your own admin status");
     }
@@ -846,8 +827,7 @@ router.delete(
     const { id } = req.params;
 
     // Prevent admin from deleting themselves
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     if (id === currentUserId) {
       throw createApiError.badRequest("Cannot delete your own account");
     }
@@ -977,8 +957,7 @@ router.post(
   "/workflows/:id/restore",
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId || "system-admin";
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     await repository.restoreWorkflow(id, currentUserId);
 
@@ -1005,8 +984,7 @@ router.delete(
   "/workflows/:id/hard-delete",
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId || "system-admin";
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     // Hard delete = permanent deletion
     await repository.deleteWorkflow(id, currentUserId);
@@ -1103,8 +1081,7 @@ router.put(
     await repository.saveExecution(execution);
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_UPDATE_EXECUTION_CONTEXT,
@@ -1134,8 +1111,7 @@ router.post(
     await repository.vacuum();
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_VACUUM_DB,
@@ -1175,8 +1151,7 @@ router.post(
       await repository.backup(tempBackupPath);
 
       // Audit logging
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const currentUserId = (req as any).user?.userId;
+      const currentUserId = (req as AuthenticatedRequest).userId;
       await logAuditEvent(repository, req, {
         userId: currentUserId,
         action: AuditAction.ADMIN_BACKUP_DB,
@@ -1260,8 +1235,7 @@ router.put(
     const { key } = req.params;
     const { value } = req.body;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const globalSettingsService = getGlobalSettingsService();
 
@@ -1291,8 +1265,7 @@ router.delete(
   asyncHandler(async (req: Request, res: Response) => {
     const { key } = req.params;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const globalSettingsService = getGlobalSettingsService();
 
@@ -1449,8 +1422,7 @@ router.post(
       );
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const globalSettingsService = getGlobalSettingsService();
 
@@ -1718,8 +1690,7 @@ router.get(
     const settings = await globalSettingsService.getAll();
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_GLOBAL_SETTINGS_EXPORT,
@@ -2073,8 +2044,7 @@ router.get(
 router.delete(
   "/sessions/all",
   asyncHandler(async (req: Request, res: Response) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const currentSessionToken = (req as any).session?.token;
 
@@ -2128,8 +2098,7 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { userId, limit = "50", offset = "0", includeExpired, includeDeleted } = req.query;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const artifactService = getArtifactService();
 
@@ -2185,8 +2154,7 @@ router.get(
 router.get(
   "/artifacts/stats",
   asyncHandler(async (req: Request, res: Response) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const artifactService = getArtifactService();
     const stats = await artifactService.adminGetSystemStats(currentUserId);
@@ -2207,8 +2175,7 @@ router.delete(
   asyncHandler(async (req: Request, res: Response) => {
     const { uuid } = req.params;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const artifactService = getArtifactService();
 
@@ -2229,8 +2196,7 @@ router.delete(
 router.get(
   "/artifacts/reported",
   asyncHandler(async (req: Request, res: Response) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     const { limit, offset, includeTakenDown } = req.query;
 
     const artifactService = getArtifactService();
@@ -2262,8 +2228,7 @@ router.post(
       throw createApiError.validationFailed("Missing required field: reason");
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const artifactService = getArtifactService();
     await artifactService.adminTakedown(currentUserId, uuid, reason.trim());
@@ -2290,8 +2255,7 @@ router.post(
       throw createApiError.validationFailed("Missing required field: reason");
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     const artifactService = getArtifactService();
     const count = await artifactService.adminTakedownAllForUser(currentUserId, id, reason.trim());
@@ -2315,8 +2279,7 @@ router.put(
     const { id } = req.params;
     const { quotaMb, maxFiles } = req.body;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     // Validate input
     if (quotaMb !== undefined && quotaMb !== null && (typeof quotaMb !== "number" || quotaMb < 0)) {
@@ -2500,8 +2463,7 @@ router.post(
       throw createApiError.badRequest(`Lock is already '${lock.status}', cannot unlock`);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const adminUserId = (req as any).user?.userId;
+    const adminUserId = (req as AuthenticatedRequest).userId;
     await lockService.adminUnlock(lockId, adminUserId);
 
     res.json({

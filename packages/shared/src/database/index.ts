@@ -18,6 +18,8 @@ export { SettingsRepository } from "./repositories/settings-repository.js";
 export { AuditRepository } from "./repositories/audit-repository.js";
 export { GlobalSettingsRepository } from "./repositories/global-settings-repository.js";
 export { UserRepository } from "./repositories/user-repository.js";
+export { AccountApprovalRepository } from "./repositories/account-approval-repository.js";
+export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {
   NoteRepository,
   MAX_VERSIONS_PER_NOTE,

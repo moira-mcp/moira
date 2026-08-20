@@ -4,6 +4,15 @@
 
 // Auth
 export { createAuth } from "./auth/better-auth-config.js";
+export {
+  ACCOUNT_APPROVAL_REQUIRED_CODE,
+  getAccountAccessDenial,
+  getAccountAdmission,
+  type AccountAccessDenial,
+  type AccountAccessOptions,
+  type AccountAccessState,
+  type AccountAdmission,
+} from "./auth/account-admission.js";
 
 // Logging
 export {

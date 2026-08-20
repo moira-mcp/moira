@@ -78,11 +78,14 @@ Response:
     deploymentMode: "self-host" | "saas";
     features: {
       openRegistration: boolean;
+      accountApproval: boolean;
       emailVerificationGate: boolean;
       verificationEmailOnSignup: boolean;
       legalConsents: boolean;
       betaNotices: boolean;
       multiUserAdmin: boolean;
+      userManagement: boolean;
+      socialLogin: boolean;
     }
     mcpUrl: string;
   }
@@ -91,7 +94,9 @@ Response:
 ```
 
 Flags are resolved via `getFeatureResolver()` (`ModeFeatureResolver` by
-`DEPLOYMENT_MODE`): all off in `self-host`, all on in `saas`.
+`DEPLOYMENT_MODE`). Self-host enables `openRegistration`, `accountApproval`, and
+`userManagement`; SaaS enables its existing registration/email/legal/admin flags
+and leaves `accountApproval` disabled.
 
 `mcpUrl` is `getMcpUrl()` — `<protocol>://<MOIRA_HOST>/mcp`, resolved from the
 server's host configuration at request time. The frontend uses it as the MCP
@@ -785,6 +790,33 @@ Authentication: Via token (no session required)
 ## User Profile API
 
 User profile and password management.
+
+### GET /api/user/me
+
+Get the current session's identity and admission status. This is the only app API
+available to a self-host account that is still pending approval.
+
+```typescript
+{
+  success: true;
+  data: {
+    id: string;
+    email: string;
+    handle: string | null;
+    isAdmin: boolean;
+    passwordResetRequired: boolean;
+    blocked: boolean;
+    emailVerified: boolean;
+    approvedAt: string | null;
+    accountApproved: boolean;
+    accountApprovalRequired: boolean;
+  }
+  timestamp: string;
+}
+```
+
+Authentication: Valid session required. Blocked accounts are denied. Pending
+approval is allowed for this status endpoint only.
 
 ### GET /api/user/profile
 
@@ -1781,26 +1813,97 @@ Authentication: Required (admin role)
 
 ### GET /api/admin/users
 
-List all users with workflow counts.
+List users. Optional query parameters are `search`, `sort` (`email`, `name`, or
+`createdAt`), `sortOrder` (`asc` or `desc`), `limit`, and `offset`.
 
 Response:
 
 ```typescript
 {
   success: boolean;
-  data: Array<{
-    id: string;
-    email: string;
-    name: string | null;
-    isAdmin: boolean;
-    createdAt: string;
-    workflowsCount: number;
-  }>;
+  data: {
+    users: Array<{
+      id: string;
+      email: string;
+      name: string | null;
+      isAdmin: boolean;
+      emailVerified: boolean;
+      approvedAt: string | null;
+      blocked: boolean;
+      createdAt: string;
+      workflowsCount: number;
+    }>;
+    total: number;
+    limit: number;
+    offset: number;
+  }
   timestamp: string;
 }
 ```
 
 Authentication: Required (admin role)
+
+### GET /api/admin/users/:id
+
+Return one user with workflow, active-session, and email-history counts plus the
+session and email records used by the administrator detail view.
+
+```typescript
+{
+  success: true;
+  data: {
+    user: {
+      id: string;
+      email: string;
+      name: string | null;
+      isAdmin: boolean;
+      emailVerified: boolean;
+      approvedAt: string | null;
+      blocked: boolean;
+      blockedAt: string | null;
+      blockedReason: string | null;
+      blockedBy: string | null;
+      blockedByName: string | null;
+      passwordResetRequired: boolean;
+      passwordResetRequestedAt: string | null;
+      passwordResetRequestedBy: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }
+    stats: {
+      workflowsCount: number;
+      sessionsCount: number;
+      emailsCount: number;
+    }
+    sessions: Array<Record<string, unknown>>;
+    emails: Array<Record<string, unknown>>;
+  }
+  timestamp: string;
+}
+```
+
+Errors: 404 if the user does not exist. Authentication: Required (admin role).
+
+### POST /api/admin/users/:id/approve
+
+Approve a pending user account. The transition from null `approvedAt` to an ISO
+timestamp and its `admin:approve_user` audit event are committed together.
+Repeated or overlapping calls are idempotent and return the stored timestamp.
+
+```typescript
+{
+  success: true;
+  data: {
+    id: string;
+    approvedAt: string;
+    approved: true;
+    alreadyApproved: boolean;
+  }
+  timestamp: string;
+}
+```
+
+Errors: 404 if the user does not exist. Authentication: Required (admin role).
 
 ### POST /api/admin/users/:id/force-password-reset
 
@@ -3174,13 +3277,16 @@ Validation:
 
 - Checks session validity
 - Checks user `blocked` flag
-- Checks user `passwordResetRequired` flag
+- Checks required account approval before product access
 
 Returns:
 
 - 401 if not authenticated
 - 403 if user blocked (with session invalidation)
-- 403 if password reset required (redirect to password change)
+- 403 with `ACCOUNT_APPROVAL_REQUIRED` if a self-host account is pending
+
+`requireSessionAuth` is used only by `GET /api/user/me`; it applies session and
+blocked checks but permits a pending account to read its admission status.
 
 ### requireAdmin
 

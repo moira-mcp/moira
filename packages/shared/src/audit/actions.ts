@@ -40,6 +40,7 @@ export enum AuditAction {
   ADMIN_BLOCK_USER = "admin:block_user",
   ADMIN_UNBLOCK_USER = "admin:unblock_user",
   ADMIN_VERIFY_EMAIL = "admin:verify_email",
+  ADMIN_APPROVE_USER = "admin:approve_user",
   ADMIN_SEND_VERIFICATION = "admin:send_verification",
   ADMIN_SEND_RESET = "admin:send_reset",
   ADMIN_UPDATE_USER = "admin:update_user",

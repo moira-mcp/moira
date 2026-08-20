@@ -21,11 +21,13 @@ const BASE_URL = getTestBaseUrl();
 
 const ALL_FLAGS = [
   "openRegistration",
+  "accountApproval",
   "emailVerificationGate",
   "verificationEmailOnSignup",
   "legalConsents",
   "betaNotices",
   "multiUserAdmin",
+  "userManagement",
 ] as const;
 
 function featuresPayload(mode: "self-host" | "saas") {

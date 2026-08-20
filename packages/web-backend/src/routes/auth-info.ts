@@ -5,8 +5,7 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { requireAuth } from "../middleware/auth-middleware.js";
-import { checkAdminRole } from "../utils/admin-utils.js";
+import { requireAuth, requireSessionAuth } from "../middleware/auth-middleware.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import { toHeaders } from "../utils/headers.js";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
@@ -19,31 +18,25 @@ const router = Router();
  */
 router.get(
   "/me",
-  requireAuth,
+  requireSessionAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
     const userEmail = (req as AuthenticatedRequest).userEmail;
-
-    const { user, getDatabase } = await import("@mcp-moira/shared");
-    const { eq } = await import("drizzle-orm");
-    const db = getDatabase();
-
-    // Get user data including passwordResetRequired flag
-    const [userData] = await db.select().from(user).where(eq(user.id, userId)).limit(1);
-
-    // Check admin status
-    const isAdmin = await checkAdminRole(userId);
+    const authRequest = req as AuthenticatedRequest;
 
     res.json({
       success: true,
       data: {
         id: userId,
         email: userEmail,
-        handle: userData?.handle || null,
-        isAdmin,
-        passwordResetRequired: userData?.passwordResetRequired || false,
-        blocked: userData?.blocked || false,
-        emailVerified: !!userData?.emailVerified,
+        handle: authRequest.userInfo?.handle || null,
+        isAdmin: authRequest.userInfo?.isAdmin || false,
+        passwordResetRequired: authRequest.userInfo?.passwordResetRequired || false,
+        blocked: authRequest.userInfo?.blocked || false,
+        emailVerified: !!authRequest.emailVerified,
+        approvedAt: authRequest.approvedAt ?? null,
+        accountApproved: !!authRequest.accountApproved,
+        accountApprovalRequired: !!authRequest.accountApprovalRequired,
       },
       timestamp: new Date().toISOString(),
     });
