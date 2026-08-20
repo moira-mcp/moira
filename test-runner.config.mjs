@@ -1,7 +1,7 @@
-/* eslint-disable no-restricted-syntax */
 import { defineConfig } from "testfold";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
+import process from "node:process";
 import { config as dotenvConfig } from "dotenv";
 
 // Load .env.test for all suites (test-specific environment, separate from .env.local)
@@ -10,7 +10,7 @@ dotenvConfig({ path: ".env.test" });
 // ---------------------------------------------------------------------------
 // Helper: parse KEY=VALUE from env file content
 // ---------------------------------------------------------------------------
-function parseEnvVar(content: string, key: string): string | undefined {
+function parseEnvVar(content, key) {
   const match = content.match(new RegExp(`^${key}=(.+)$`, "m"));
   return match?.[1]?.trim().replace(/^["']|["']$/g, "");
 }
@@ -18,7 +18,7 @@ function parseEnvVar(content: string, key: string): string | undefined {
 // ---------------------------------------------------------------------------
 // Helper: load env file and return raw content
 // ---------------------------------------------------------------------------
-function readEnv(filename: string): string {
+function readEnv(filename) {
   const p = resolve(process.cwd(), filename);
   if (!existsSync(p)) throw new Error(`Env file not found: ${filename}`);
   return readFileSync(p, "utf-8");
@@ -32,7 +32,7 @@ function readEnv(filename: string): string {
 const apiEnvironments = {
   local: {
     envFile: ".env.local",
-    urlExtractor: (content: string) => {
+    urlExtractor: (content) => {
       const port = parseEnvVar(content, "DOCKER_PORT");
       return port ? `http://localhost:${port}` : undefined;
     },
@@ -46,7 +46,7 @@ const apiEnvironments = {
   },
   remote: {
     envFile: ".env.remote",
-    urlExtractor: (content: string) => {
+    urlExtractor: (content) => {
       const localContent = readEnv(".env.local");
       const port = parseEnvVar(localContent, "DOCKER_PORT");
       const host = parseEnvVar(content, "REMOTE_HOST");
@@ -60,7 +60,7 @@ const e2eEnvironments = {
   ...apiEnvironments,
   remote: {
     envFile: ".env.remote",
-    urlExtractor: (_content: string) => {
+    urlExtractor: () => {
       const localContent = readEnv(".env.local");
       const port = parseEnvVar(localContent, "DOCKER_PORT");
       return port ? `http://localhost:${port}` : undefined;
