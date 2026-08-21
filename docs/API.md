@@ -1889,6 +1889,9 @@ Errors: 404 if the user does not exist. Authentication: Required (admin role).
 Approve a pending user account. The transition from null `approvedAt` to an ISO
 timestamp and its `admin:approve_user` audit event are committed together.
 Repeated or overlapping calls are idempotent and return the stored timestamp.
+The endpoint is available only when the `accountApproval` deployment capability
+is enabled, which is the default for self-host deployments. Default SaaS
+deployments disable this capability.
 
 ```typescript
 {
@@ -1903,7 +1906,13 @@ Repeated or overlapping calls are idempotent and return the stored timestamp.
 }
 ```
 
-Errors: 404 if the user does not exist. Authentication: Required (admin role).
+Errors:
+
+- 403 if `accountApproval` is disabled for the deployment. No approval transition
+  or approval audit event is written.
+- 404 if the user does not exist.
+
+Authentication: Required (admin role).
 
 ### POST /api/admin/users/:id/force-password-reset
 
