@@ -69,6 +69,7 @@ export interface NavRoute {
   icon: string;
   adminOnly?: boolean;
   multiUserAdmin?: boolean; // Hidden when the multiUserAdmin feature is off (self-host)
+  userManagement?: boolean; // Narrow Users capability, enabled in self-host and SaaS
   external?: boolean;
   sameWindow?: boolean; // For external links that should open in same window (e.g., Back to App)
 }
@@ -77,6 +78,19 @@ interface AppSidebarProps {
   routes: NavRoute[];
   isAdmin?: boolean;
   title?: string;
+}
+
+export function filterNavRoutes(
+  routes: NavRoute[],
+  isAdmin: boolean,
+  capabilities: { multiUserAdmin: boolean; userManagement: boolean },
+): NavRoute[] {
+  return routes.filter(
+    (route) =>
+      (!route.adminOnly || isAdmin) &&
+      (!route.multiUserAdmin || capabilities.multiUserAdmin) &&
+      (!route.userManagement || capabilities.userManagement),
+  );
 }
 
 export const AppSidebar: React.FC<AppSidebarProps> = ({
@@ -89,10 +103,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   const isCollapsed = state === "collapsed";
   const { isEnabled: isFeatureEnabled } = useFeatures();
   const multiUserAdmin = isFeatureEnabled("multiUserAdmin");
+  const userManagement = isFeatureEnabled("userManagement");
 
-  const filteredRoutes = routes.filter(
-    (route) => (!route.adminOnly || isAdmin) && (!route.multiUserAdmin || multiUserAdmin),
-  );
+  const filteredRoutes = filterNavRoutes(routes, isAdmin, { multiUserAdmin, userManagement });
 
   const isRouteActive = (path: string) => {
     // Exact match for index routes (dashboard and admin root)

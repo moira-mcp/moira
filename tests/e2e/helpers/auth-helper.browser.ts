@@ -6,6 +6,7 @@
 import { Page } from "@playwright/test";
 import { getTestBaseUrl, getTestFetchUrl } from "../../utils/test-config.js";
 import { TEST_USERS } from "../fixtures/test-constants.js";
+import { approveTestUserIfRequired } from "./approve-test-user.js";
 
 const BASE_URL = getTestBaseUrl();
 const FETCH_URL = getTestFetchUrl();
@@ -204,26 +205,12 @@ export async function createTestUser(
 
       // Get userId after verification
       const adminSessionCookie = await getAdminSessionCookie();
-      const usersResponse = await fetch(
-        `${FETCH_URL}/api/admin/users?search=${encodeURIComponent(email)}&limit=10`,
-        {
-          headers: {
-            Cookie: formatSessionCookie(FETCH_URL, adminSessionCookie),
-          },
-        },
+      const userId = await approveTestUserIfRequired(
+        FETCH_URL,
+        email,
+        formatSessionCookie(FETCH_URL, adminSessionCookie),
       );
-
-      if (usersResponse.ok) {
-        const usersData = (await usersResponse.json()) as {
-          data: { users: Array<{ id: string; email: string }> };
-        };
-        const user = usersData.data?.users?.find((u) => u.email === email);
-        if (user) {
-          return { success: true, userId: user.id };
-        }
-      }
-
-      return { success: true }; // Verified but couldn't get userId
+      return { success: true, userId };
     } catch (error) {
       return { success: false, error: `Email verification failed: ${error}` };
     }

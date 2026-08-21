@@ -56,8 +56,16 @@ in self-host mode. Missing secrets are generated on first start.
 
 ### Approve new accounts
 
-An authenticated administrator approves a pending user with
-`POST /api/admin/users/:id/approve`; `GET /api/admin/users` lists the approval timestamp.
+In the Web UI, sign in as an administrator, open **Admin Panel → Users**, and select an
+account marked **Pending approval**. Choose **Approve account** and confirm the dialog.
+The action shows progress while it is running and changes the account badge to **Approved**;
+the registrant's waiting page detects that transition and opens Moira without another login.
+On a narrow screen, open the Admin Panel navigation with the menu button first.
+
+The equivalent API operation is `POST /api/admin/users/:id/approve`;
+`GET /api/admin/users` lists the approval timestamp. Approval is idempotent, so retrying a
+request after an uncertain response does not replace the first approval time or create a second
+transition.
 Existing users are marked approved during the database migration; the bootstrap administrator
 is always created as approved. Blocking and email verification remain independent controls:
 a blocked account is denied even when approved.

@@ -5,7 +5,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ## Summary
 
-- **40 domains**, **272 files**, **3395 tests**
+- **40 domains**, **275 files**, **3406 tests**
 - Levels: unit, integration, workflow, api, mcp-tools, e2e, functional
 
 ## Domain Overview
@@ -19,7 +19,7 @@ Agents MUST update this file when adding, moving, or deleting tests.
 | auth                | 16    | 112   | api:4, e2e:10, integration:2                                    |
 | chat                | 3     | 53    | integration:1, unit:2                                           |
 | context             | 7     | 73    | integration:2, mcp-tools:1, unit:4                              |
-| deployment-mode     | 12    | 64    | unit:5, integration:3, api:3, e2e:1                             |
+| deployment-mode     | 15    | 75    | unit:7, integration:3, api:3, e2e:2                             |
 | email               | 1     | 22    | unit:1                                                          |
 | self-host-limits    | 2     | 12    | unit:2                                                          |
 | pin-hash            | 1     | 7     | unit:1                                                          |
@@ -221,10 +221,12 @@ Agents MUST update this file when adding, moving, or deleting tests.
 
 ### deployment-mode
 
-**12 files, 64 tests**
+**15 files, 75 tests**
 
-**unit** (5 files)
+**unit** (7 files)
 
+- `tests/unit/web-frontend/account-admission-ui.test.ts` — 6 tests 🟢 (independent approval/email route decisions and deployment-capability selection for the registration completion page)
+- `tests/unit/web-frontend/admin-navigation-capabilities.test.ts` — 3 tests 🟢 (narrow Users capability remains independent of broader multi-user administration in self-host and SaaS navigation)
 - `tests/unit/shared/account-admission.test.ts` — 3 tests 🟢 (mode-independent approval state, fail-closed null/missing identity handling, and blocked/approval/email-verification denial precedence)
 - `tests/unit/shared/deployment-mode-config.test.ts` — 10 tests 🟢 (DEPLOYMENT_MODE resolution: default self-host, case/whitespace normalization, invalid-value throws, isSelfHost/isSaas predicates)
 - `tests/unit/shared/feature-resolver.test.ts` — 9 tests 🟢 (ModeFeatureResolver per-mode flags, unknown-feature safe default, singleton get/override/reset)
@@ -243,9 +245,10 @@ Agents MUST update this file when adding, moving, or deleting tests.
 - `tests/api/auth/saas-auth-invariants.test.ts` — 1 test 🟢 (explicit SaaS mode, consent enforcement, verification-email capability, no account-approval gate including profile mutation, blocked-first/email-verification gates for persistent tokens, OAuth code/refresh exchange, direct MCP bearer access, and bearer introspection, plus successful verified/unblocked code, refresh, MCP, and introspection paths)
 - `tests/api/features-api.test.ts` — 4 tests 🟢 (public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host)
 
-**e2e** (1 file)
+**e2e** (2 files)
 
-- `tests/e2e/feature-mode-ui.spec.ts` — 6 tests 🟢 (UI gating via mocked GET /api/features: self-host hides registration legal-consent checkboxes / saas shows them; self-host hides multi-user admin sidebar nav / saas shows; direct nav to multi-user admin page redirects to dashboard; beta modal absent in self-host)
+- `tests/e2e/feature-mode-ui.spec.ts` — 6 tests 🟢 (UI gating via the exact mocked mode capability sets: self-host exposes Users in the sidebar/dashboard while hiding broader multi-user administration and legal consent; SaaS retains both; direct navigation is guarded independently by the narrow and broad capabilities; beta modal is absent in self-host)
+- `tests/e2e/self-host-account-approval.spec.ts` — 2 tests 🟢 (failed-then-recovered deployment-capability loading selects neither the wrong self-host nor SaaS admission flow and cannot open a protected SaaS route before retry; explicit self-host registration → pending status/sign-out → protected-route denial and transient status retry → administrator list/detail confirmation with loading/error/retry/live-region/keyboard/focus recovery and Russian localized failure behavior → automatic rendered product access; explicit mocked SaaS legal-consent and email-verification completion UI)
 
 ### self-host-limits
 

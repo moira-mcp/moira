@@ -11,12 +11,16 @@ import { apiClient } from "../services/api-client";
 import { ROUTES, APP_PREFIX } from "../constants/routes";
 import { buildLoginUrlWithReturn } from "../utils/return-url";
 import { useFeatures } from "../hooks/useFeatures";
+import { decideAdmissionRoute } from "../auth/admission-routing";
+import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireAdmin?: boolean;
   requireEmailVerified?: boolean;
   requireMultiUserAdmin?: boolean;
+  requireUserManagement?: boolean;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
@@ -24,16 +28,27 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   requireAdmin = false,
   requireEmailVerified = true,
   requireMultiUserAdmin = false,
+  requireUserManagement = false,
 }) => {
-  const { isEnabled: isFeatureEnabled, loaded: featuresLoaded } = useFeatures();
+  const {
+    isEnabled: isFeatureEnabled,
+    loaded: featuresLoaded,
+    error: featuresError,
+    retry: retryFeatures,
+  } = useFeatures();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const { data: session, isPending } = useSession();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [passwordResetRequired, setPasswordResetRequired] = useState<boolean | null>(null);
   const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
+  const [accountApproved, setAccountApproved] = useState<boolean | null>(null);
+  const [accountApprovalRequired, setAccountApprovalRequired] = useState<boolean | null>(null);
   const [_blocked, setBlocked] = useState<boolean | null>(null);
   const [checkingUser, setCheckingUser] = useState(false);
+  const [userInfoError, setUserInfoError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   // Track session to detect re-login (session token changes on signIn)
   const fetchedSessionRef = useRef<string | null>(null);
@@ -47,6 +62,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     if (session && !isPending && fetchedSessionRef.current !== sessionKey) {
       fetchedSessionRef.current = sessionKey;
       setCheckingUser(true);
+      setUserInfoError(false);
 
       apiClient
         .getUserInfo()
@@ -54,8 +70,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           setIsAdmin(userInfo.isAdmin);
           setPasswordResetRequired(userInfo.passwordResetRequired);
           setEmailVerified(userInfo.emailVerified);
+          setAccountApproved(userInfo.accountApproved);
+          setAccountApprovalRequired(userInfo.accountApprovalRequired);
           setBlocked(userInfo.blocked);
           setCheckingUser(false);
+          setUserInfoError(false);
 
           // Check if user is blocked
           if (userInfo.blocked) {
@@ -78,8 +97,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
           setIsAdmin(false);
           setPasswordResetRequired(false);
           setEmailVerified(false);
+          setAccountApproved(null);
+          setAccountApprovalRequired(null);
           setBlocked(false);
           setCheckingUser(false);
+          setUserInfoError(true);
           fetchedSessionRef.current = null; // Allow retry on error
         });
     } else if (!session) {
@@ -87,11 +109,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       setIsAdmin(null);
       setPasswordResetRequired(null);
       setEmailVerified(null);
+      setAccountApproved(null);
+      setAccountApprovalRequired(null);
       setBlocked(null);
       setCheckingUser(false);
+      setUserInfoError(false);
       fetchedSessionRef.current = null;
     }
-  }, [session, isPending, navigate]);
+  }, [session, isPending, navigate, retryKey]);
 
   // Show loading while checking auth or user info
   if (isPending || checkingUser) {
@@ -109,16 +134,48 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to={loginUrl} replace />;
   }
 
+  if (userInfoError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3" role="alert">
+        <p className="text-sm text-destructive">{t("pages.registrationSuccess.statusLoadError")}</p>
+        <Button variant="outline" onClick={() => setRetryKey((current) => current + 1)}>
+          {t("pages.registrationSuccess.retryStatus")}
+        </Button>
+      </div>
+    );
+  }
+
+  if (featuresError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3" role="alert">
+        <p className="text-sm text-destructive">
+          {t("pages.registrationSuccess.featuresLoadError")}
+        </p>
+        <Button variant="outline" onClick={retryFeatures}>
+          {t("pages.registrationSuccess.retryFeatures")}
+        </Button>
+      </div>
+    );
+  }
+
   // Password reset required - redirect to forced password reset page
   // ONLY redirect after we have loaded user info (passwordResetRequired is not null)
   if (passwordResetRequired === true && window.location.pathname !== ROUTES.FORCED_PASSWORD_RESET) {
     return <Navigate to={ROUTES.FORCED_PASSWORD_RESET} replace />;
   }
 
-  // Email verification required - redirect to registration success page
-  // ONLY redirect after we have loaded user info (emailVerified is not null)
-  if (requireEmailVerified && emailVerified === false) {
-    return <Navigate to={`${APP_PREFIX}/registration-success`} replace />;
+  const admissionStateLoaded =
+    accountApproved !== null && accountApprovalRequired !== null && emailVerified !== null;
+  if (admissionStateLoaded && featuresLoaded) {
+    const admissionDecision = decideAdmissionRoute({
+      accountApprovalRequired,
+      accountApproved,
+      emailVerificationGate: requireEmailVerified && isFeatureEnabled("emailVerificationGate"),
+      emailVerified,
+    });
+    if (admissionDecision !== "allow") {
+      return <Navigate to={`${APP_PREFIX}/registration-success`} replace />;
+    }
   }
 
   // Require admin but user is not admin - redirect to workflows
@@ -126,8 +183,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to={ROUTES.WORKFLOWS} replace />;
   }
 
-  // Still checking email verification status - show loading
-  if (requireEmailVerified && emailVerified === null) {
+  // Wait until both deployment capabilities and independent admission facts are known.
+  if (!featuresLoaded || !admissionStateLoaded) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-muted-foreground">Loading...</div>
@@ -158,6 +215,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     if (!isFeatureEnabled("multiUserAdmin")) {
       return <Navigate to={ROUTES.ADMIN} replace />;
     }
+  }
+
+  if (requireUserManagement && !isFeatureEnabled("userManagement")) {
+    return <Navigate to={ROUTES.ADMIN} replace />;
   }
 
   return <>{children}</>;

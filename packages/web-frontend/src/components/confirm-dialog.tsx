@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +22,8 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   variant?: "default" | "destructive";
   onConfirm: () => void | Promise<void>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  onReturnFocus?: () => void;
 }
 
 export function ConfirmDialog({
@@ -33,14 +35,28 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   variant = "default",
   onConfirm,
+  returnFocusRef,
+  onReturnFocus,
 }: ConfirmDialogProps) {
   const [loading, setLoading] = useState(false);
+  const wasOpen = useRef(open);
+
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      if (onReturnFocus) onReturnFocus();
+      else returnFocusRef?.current?.focus();
+    }
+    wasOpen.current = open;
+  }, [open, onReturnFocus, returnFocusRef]);
 
   const handleConfirm = async () => {
     setLoading(true);
     try {
       await onConfirm();
       onOpenChange(false);
+    } catch {
+      // The owning action reports a localized error. Keep the dialog open so
+      // the user can retry without losing context.
     } finally {
       setLoading(false);
     }

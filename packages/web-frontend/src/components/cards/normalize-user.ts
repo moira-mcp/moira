@@ -11,6 +11,7 @@ export interface NormalizedUser {
   createdAt: string;
   workflowsCount: number;
   emailVerified?: boolean;
+  approvedAt?: string | null;
   blocked?: boolean;
 }
 
@@ -20,6 +21,7 @@ interface UserManagementUser {
   name: string | null;
   isAdmin: boolean;
   emailVerified: boolean;
+  approvedAt: string | null;
   blocked: boolean;
   createdAt: string;
   workflowsCount: number;
@@ -45,6 +47,7 @@ export function normalizeUser(user: AnyUser): NormalizedUser {
     createdAt: user.createdAt,
     workflowsCount: user.workflowsCount,
     emailVerified: "emailVerified" in user ? user.emailVerified : undefined,
+    approvedAt: "approvedAt" in user ? user.approvedAt : undefined,
     blocked: "blocked" in user ? user.blocked : undefined,
   };
 }

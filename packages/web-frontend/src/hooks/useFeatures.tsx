@@ -6,8 +6,8 @@
  * can be hidden in self-host installs.
  *
  * Default while loading / on error: every flag is `false` (self-host baseline).
- * This is fail-safe — SaaS scaffolding stays hidden until the server confirms it
- * is enabled, so a self-host install never flashes SaaS UI.
+ * Consumers that must choose between deployment-specific security or admission
+ * flows also receive the distinct error state and an explicit retry action.
  */
 
 import { createContext, useContext, useEffect, useState } from "react";
@@ -39,6 +39,8 @@ interface FeaturesContextType {
    */
   mcpUrl: string | null;
   loaded: boolean;
+  error: boolean;
+  retry: () => void;
   isEnabled: (feature: FeatureFlag) => boolean;
 }
 
@@ -49,9 +51,13 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
   const [features, setFeatures] = useState<FeatureFlags>(ALL_OFF);
   const [mcpUrl, setMcpUrl] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoaded(false);
+    setError(false);
     apiClient
       .getFeatures()
       .then((res: FeaturesResponse) => {
@@ -59,9 +65,14 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
         setDeploymentMode(res.deploymentMode);
         setFeatures({ ...ALL_OFF, ...res.features });
         setMcpUrl(res.mcpUrl ?? null);
+        setError(false);
       })
       .catch(() => {
-        // Keep the fail-safe ALL_OFF defaults on error.
+        if (cancelled) return;
+        setDeploymentMode(null);
+        setFeatures(ALL_OFF);
+        setMcpUrl(null);
+        setError(true);
       })
       .finally(() => {
         if (!cancelled) setLoaded(true);
@@ -69,12 +80,22 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [retryKey]);
 
   const isEnabled = (feature: FeatureFlag) => features[feature] ?? false;
 
   return (
-    <FeaturesContext.Provider value={{ deploymentMode, features, mcpUrl, loaded, isEnabled }}>
+    <FeaturesContext.Provider
+      value={{
+        deploymentMode,
+        features,
+        mcpUrl,
+        loaded,
+        error,
+        retry: () => setRetryKey((current) => current + 1),
+        isEnabled,
+      }}
+    >
       {children}
     </FeaturesContext.Provider>
   );
