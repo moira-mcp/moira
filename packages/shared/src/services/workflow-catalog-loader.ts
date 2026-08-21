@@ -1,275 +1,610 @@
-/**
- * Workflow Catalog Loader
- *
- * Installs catalog flows into the database under their declared owner + visibility. Pure logic with
- * injectable dependencies so it is testable in isolation (the Docker CLI wrapper in
- * scripts/migrate-workflows-in-docker.ts supplies the real repositories/services).
- *
- * Guarantees:
- *  - Owner-aware: each flow is installed under its catalog `owner` with its `visibility`.
- *  - Missing owner: a flow whose owner does not exist on the target is SKIPPED and reported — never
- *    reassigned to a system owner.
- *  - Version-aware idempotent: an existing flow is skipped when the local version ≤ server version;
- *    a same-version content mismatch throws CatalogContentMismatchError (unless force).
- *  - Non-destructive: only the (owner, slug) flow is touched; other owners' flows are never affected.
- */
+/** Plan and atomically apply the bundled workflow catalog. */
 
+import type Database from "better-sqlite3";
+import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import type { CatalogEntry } from "./workflow-catalog.js";
-import { compareSemver, isValidSemver, hasWorkflowContentChanged } from "../utils/version-utils.js";
+import { ownerSlugKey } from "./workflow-catalog.js";
+import { compareSemver, isValidSemver } from "../utils/version-utils.js";
+import {
+  reconcileManagedResource,
+  type ReconciliationClassification,
+} from "./managed-resource-reconciler.js";
+import {
+  WorkflowReconciliationRepository,
+  getWorkflowReconciliationStatusSummary,
+  managedWorkflowStatesEqual,
+  type ManagedWorkflowBaselineRecord,
+  type ManagedWorkflowState,
+  type WorkflowReconciliationApplyPlan,
+} from "../database/repositories/workflow-reconciliation-repository.js";
+import { getSqliteInstance } from "../database/connection.js";
+import { MAX_WORKFLOW_SIZE_BYTES } from "../database/repositories/workflow-repository.js";
+import { validateSlug } from "../validation/slug-handle.js";
 
-/** Thrown when an existing flow has the same version but different content (and force is off). */
-export class CatalogContentMismatchError extends Error {
+export class CatalogReconciliationError extends Error {
   constructor(
-    public readonly owner: string,
-    public readonly slug: string,
-    public readonly version: string,
+    public readonly conflicts: Array<{
+      owner: string;
+      slug: string;
+      classification: string;
+    }>,
   ) {
     super(
-      `${owner}/${slug} has the same version ${version} but different content. ` +
-        `Bump the version or load with force=true.`,
+      `Bundled workflow reconciliation requires attention for: ${conflicts
+        .map((conflict) => `${conflict.owner}/${conflict.slug} (${conflict.classification})`)
+        .join(", ")}`,
     );
-    this.name = "CatalogContentMismatchError";
+    this.name = "CatalogReconciliationError";
   }
 }
 
-/** Per-flow outcome, used for reporting and tests. */
+export class CatalogPreflightError extends Error {
+  constructor(public readonly result: CatalogLoadResult) {
+    super(
+      `Bundled workflow catalog preflight found ${result.invalid} invalid entr${result.invalid === 1 ? "y" : "ies"}`,
+    );
+    this.name = "CatalogPreflightError";
+  }
+}
+
 export type EntryOutcome =
   | "installed"
   | "updated"
+  | "removed"
+  | "adopted"
+  | "preserved-user-change"
   | "skipped-unchanged"
   | "skipped-older"
-  | "skipped-exists"
   | "skipped-missing-owner"
+  | "conflict"
+  | "invalid-workflow"
   | "invalid-version";
 
 export interface CatalogLoadResult {
   installed: number;
   updated: number;
+  removed: number;
+  adopted: number;
+  preserved: number;
+  conflicts: number;
   skipped: number;
   skippedMissingOwner: number;
   invalid: number;
-  /** Per-entry outcomes keyed by `${owner}/${slug}` for assertions and reporting. */
-  outcomes: Array<{ owner: string; slug: string; outcome: EntryOutcome }>;
+  outcomes: Array<{
+    owner: string;
+    slug: string;
+    outcome: EntryOutcome;
+    classification?: ReconciliationClassification;
+  }>;
 }
 
-/** Minimal repository surface the loader needs (satisfied by WorkflowRepository). */
-export interface CatalogWorkflowRepo {
-  resolveSlug(slug: string, ownerUserId: string): Promise<string | null>;
-  /** Resolve including soft-deleted rows — they still occupy the (owner, slug) uniqueness slot. */
-  resolveSlugIncludingDeleted(slug: string, ownerUserId: string): Promise<string | null>;
-  /** Un-delete a soft-deleted flow so the install can update it instead of colliding on INSERT. */
-  restore(workflowId: string, ownerUserId: string): Promise<boolean>;
-  /** Change an existing flow's slug while preserving its database identity. */
-  updateSlug(workflowId: string, ownerUserId: string, newSlug: string): Promise<boolean>;
-  get(
-    workflowId: string,
-    userId: string,
-  ): Promise<{ metadata?: { version?: string } } | null | undefined>;
-}
-
-/** Minimal user-existence surface the loader needs (satisfied by UserRepository.getProfile). */
 export interface CatalogUserRepo {
   getProfile(userId: string): Promise<unknown | null>;
 }
 
-/** Minimal save surface the loader needs (satisfied by WorkflowMutationService). */
 export interface CatalogMutationService {
-  save(options: {
-    graph: Record<string, unknown>;
-    userId: string;
-    slug: string;
-    visibility: "public" | "private";
-    skipAudit?: boolean;
-  }): Promise<unknown>;
+  validate(graph: WorkflowGraph): Promise<{
+    status: "valid" | "invalid" | "unknown";
+    errors: string[];
+  }>;
 }
 
 export interface CatalogLoadDeps {
-  workflowRepo: CatalogWorkflowRepo;
   userRepo: CatalogUserRepo;
   mutationService: CatalogMutationService;
+  sqlite?: Database.Database;
   force?: boolean;
-  /** Optional progress sink (defaults to no-op so tests are quiet). */
+  fatalConflicts?: boolean;
+  /** Internal compatibility switch; complete startup reconciliation keeps this true. */
+  reconcileRemovals?: boolean;
   log?: (message: string) => void;
 }
 
-function emptyResult(): CatalogLoadResult {
-  return { installed: 0, updated: 0, skipped: 0, skippedMissingOwner: 0, invalid: 0, outcomes: [] };
+interface PlannedIdentity {
+  owner: string;
+  slug: string;
+  previousSlug?: string;
+  entry: CatalogEntry | null;
+  baseline: ManagedWorkflowBaselineRecord | null;
 }
 
-/**
- * Install a single catalog entry. Returns the outcome; throws CatalogContentMismatchError on a
- * same-version content mismatch (unless force). The graph saved excludes nothing extra — the entry's
- * graph body is already free of the catalog metadata (owner/visibility) by readCatalogEntry.
- */
-export async function installCatalogEntry(
-  entry: CatalogEntry,
-  deps: CatalogLoadDeps,
-): Promise<EntryOutcome> {
-  const { workflowRepo, userRepo, mutationService, force = false } = deps;
-  const log = deps.log ?? (() => {});
-  const { slug, owner, visibility } = entry;
-  const graph = entry.graph as Record<string, unknown> & { metadata?: { version?: string } };
-  const localVersion = graph.metadata?.version;
+function emptyResult(): CatalogLoadResult {
+  return {
+    installed: 0,
+    updated: 0,
+    removed: 0,
+    adopted: 0,
+    preserved: 0,
+    conflicts: 0,
+    skipped: 0,
+    skippedMissingOwner: 0,
+    invalid: 0,
+    outcomes: [],
+  };
+}
 
-  // Missing owner → skip and report; never reassign to a system owner.
-  if ((await userRepo.getProfile(owner)) === null) {
-    log(`  ⏭️  ${owner}/${slug} (owner missing on target — skipped)`);
-    return "skipped-missing-owner";
-  }
+function workflowStatesEqual(left: ManagedWorkflowState, right: ManagedWorkflowState): boolean {
+  return managedWorkflowStatesEqual(left, right);
+}
 
-  if (localVersion && !isValidSemver(localVersion)) {
-    log(`  ❌ ${owner}/${slug}: invalid semver version "${localVersion}"`);
-    return "invalid-version";
-  }
+function incomingState(entry: CatalogEntry): ManagedWorkflowState {
+  return {
+    lifecycle: "present",
+    content: { graph: entry.graph, visibility: entry.visibility },
+  };
+}
 
-  let existingWorkflowId = await workflowRepo.resolveSlug(slug, owner);
-  let workflowExists = !!existingWorkflowId;
-  let previousSlugToReplace: string | undefined;
+function versionOf(state: ManagedWorkflowState | null): string | null {
+  if (!state || state.lifecycle === "absent") return null;
+  const metadata = state.content.graph.metadata as { version?: unknown } | undefined;
+  return typeof metadata?.version === "string" ? metadata.version : null;
+}
 
-  if (!workflowExists && entry.previousSlugs?.length) {
-    const legacyMatches: Array<{ slug: string; id: string; deleted: boolean }> = [];
-    for (const previousSlug of entry.previousSlugs) {
-      const activeId = await workflowRepo.resolveSlug(previousSlug, owner);
-      if (activeId) {
-        legacyMatches.push({ slug: previousSlug, id: activeId, deleted: false });
-        continue;
+function removalState(previous: ManagedWorkflowState): ManagedWorkflowState {
+  if (previous.lifecycle === "absent") return previous;
+  return { lifecycle: "deleted", content: previous.content };
+}
+
+function conflictInstruction(owner: string, slug: string): string {
+  const base = `database:workflow-reconciliation:${encodeURIComponent(owner)}/${encodeURIComponent(slug)}`;
+  return (
+    `Run Workflow Management Flow (WMF) for ${owner}/${slug}. Semantically merge the full ` +
+    `previous managed, current user, and incoming bundled candidates at ${base}#previous, ` +
+    `${base}#current, and ${base}#incoming. Preserve intentional user edits. Save the selected or ` +
+    `merged lifecycle and graph, then explicitly acknowledge the resolution: ` +
+    `use the MCP reconciliation tool for ${owner}/${slug} with the merged graph, ` +
+    `or run migrate-workflows-in-docker.ts --resolve ${owner}/${slug}:current.`
+  );
+}
+
+function buildIdentities(
+  entries: CatalogEntry[],
+  baselines: ManagedWorkflowBaselineRecord[],
+  reconcileRemovals: boolean,
+): PlannedIdentity[] {
+  const baselineMap = new Map(baselines.map((item) => [ownerSlugKey(item.owner, item.slug), item]));
+  const claimed = new Set<string>();
+  const identities: PlannedIdentity[] = [];
+  const incomingKeys = new Set<string>();
+  const claimedAliases = new Map<string, string>();
+
+  for (const entry of entries) {
+    const key = ownerSlugKey(entry.owner, entry.slug);
+    if (incomingKeys.has(key))
+      throw new Error(`Duplicate catalog identity ${entry.owner}/${entry.slug}`);
+    incomingKeys.add(key);
+    for (const alias of [entry.slug, ...(entry.previousSlugs ?? [])]) {
+      const aliasKey = ownerSlugKey(entry.owner, alias);
+      const existingTarget = claimedAliases.get(aliasKey);
+      if (existingTarget && existingTarget !== key) {
+        throw new Error(
+          `Duplicate catalog legacy identity ${entry.owner}/${alias} is claimed by ${existingTarget} and ${key}`,
+        );
       }
-      const deletedId = await workflowRepo.resolveSlugIncludingDeleted(previousSlug, owner);
-      if (deletedId) legacyMatches.push({ slug: previousSlug, id: deletedId, deleted: true });
+      claimedAliases.set(aliasKey, key);
     }
-
-    if (legacyMatches.length > 1) {
+    const candidates = [entry.slug, ...(entry.previousSlugs ?? [])]
+      .map((slug) => ({ slug, baseline: baselineMap.get(ownerSlugKey(entry.owner, slug)) }))
+      .filter(
+        (candidate): candidate is { slug: string; baseline: ManagedWorkflowBaselineRecord } =>
+          candidate.baseline !== undefined,
+      );
+    if (candidates.length > 1) {
       throw new Error(
-        `${owner}/${slug} matches more than one previous catalog identity: ${legacyMatches
-          .map((match) => match.slug)
+        `${entry.owner}/${entry.slug} matches more than one previous managed identity: ${candidates
+          .map((candidate) => candidate.slug)
           .join(", ")}`,
       );
     }
-    if (legacyMatches.length === 1) {
-      const [legacy] = legacyMatches;
-      if (legacy.deleted) await workflowRepo.restore(legacy.id, owner);
-      existingWorkflowId = legacy.id;
-      workflowExists = true;
-      previousSlugToReplace = legacy.slug;
-      log(`  ♻️  ${owner}/${legacy.slug} → ${slug} (catalog identity migration)`);
+    const match = candidates[0];
+    if (match) claimed.add(ownerSlugKey(entry.owner, match.slug));
+    identities.push({
+      owner: entry.owner,
+      slug: entry.slug,
+      previousSlug: match && match.slug !== entry.slug ? match.slug : undefined,
+      entry,
+      baseline: match?.baseline ?? null,
+    });
+  }
+
+  for (const baseline of reconcileRemovals ? baselines : []) {
+    const key = ownerSlugKey(baseline.owner, baseline.slug);
+    if (!claimed.has(key) && !incomingKeys.has(key)) {
+      identities.push({
+        owner: baseline.owner,
+        slug: baseline.slug,
+        entry: null,
+        baseline,
+      });
     }
   }
-
-  // A soft-deleted row still occupies the (owner, slug) uniqueness slot, so a plain INSERT would
-  // collide ("slug already exists for this user") — resolveSlug hides it, but slugExists and the
-  // unique index do not. Restore it and take the update path: catalog install is idempotent and a
-  // bundled flow is meant to exist on the target. The subsequent save() update un-deletes and
-  // overwrites it (version-gated below).
-  if (!workflowExists) {
-    const softDeletedId = await workflowRepo.resolveSlugIncludingDeleted(slug, owner);
-    if (softDeletedId) {
-      await workflowRepo.restore(softDeletedId, owner);
-      existingWorkflowId = softDeletedId;
-      workflowExists = true;
-      log(`  ♻️  ${owner}/${slug} (restored soft-deleted flow)`);
-    }
-  }
-
-  // Invariant past this point: workflowExists ⟺ existingWorkflowId !== null (set together above).
-  if (workflowExists && !force) {
-    const existing = await workflowRepo.get(existingWorkflowId!, owner);
-    const serverVersion = existing?.metadata?.version;
-
-    if (localVersion && serverVersion && isValidSemver(serverVersion)) {
-      const cmp = compareSemver(localVersion, serverVersion);
-      if (cmp < 0) {
-        log(`  ⏭️  ${owner}/${slug} (local ${localVersion} < server ${serverVersion})`);
-        return "skipped-older";
-      }
-      if (cmp === 0) {
-        if (hasWorkflowContentChanged(existing as Record<string, unknown>, graph)) {
-          throw new CatalogContentMismatchError(owner, slug, localVersion);
-        }
-        log(`  ⏭️  ${owner}/${slug} (v${localVersion}, unchanged)`);
-        return "skipped-unchanged";
-      }
-      log(`  📤 ${owner}/${slug} (${serverVersion} → ${localVersion})`);
-    } else {
-      log(`  ⏭️  ${owner}/${slug} (exists, skipped)`);
-      return "skipped-exists";
-    }
-  }
-
-  // New flow → no id so the server generates one; existing → set id for update.
-  const graphForSave: Record<string, unknown> = { ...graph };
-  if (!workflowExists) {
-    delete graphForSave.id;
-  } else {
-    graphForSave.id = existingWorkflowId!;
-  }
-
-  await mutationService.save({
-    graph: graphForSave,
-    userId: owner,
-    slug,
-    visibility,
-    skipAudit: true,
-  });
-
-  if (previousSlugToReplace) {
-    const renamed = await workflowRepo.updateSlug(existingWorkflowId!, owner, slug);
-    if (!renamed) {
-      throw new Error(
-        `Failed to migrate catalog identity ${owner}/${previousSlugToReplace} to ${owner}/${slug}`,
-      );
-    }
-  }
-
-  if (workflowExists) {
-    log(`  🔄 ${owner}/${slug} (updated)`);
-    return "updated";
-  }
-  log(`  ✓ ${owner}/${slug} (${visibility})`);
-  return "installed";
+  return identities;
 }
 
-/** Install every catalog entry, accumulating outcomes. Caches owner existence across entries. */
+function outcomeFor(
+  classification: ReconciliationClassification,
+  incoming: ManagedWorkflowState,
+): EntryOutcome {
+  if (classification === "first-install") return "installed";
+  if (classification === "first-adoption") return "adopted";
+  if (classification === "user-only") return "preserved-user-change";
+  if (classification === "unchanged") return "skipped-unchanged";
+  if (classification === "baseline-missing" || classification === "conflict") return "conflict";
+  if (incoming.lifecycle === "deleted") return "removed";
+  return "updated";
+}
+
+function addOutcome(
+  result: CatalogLoadResult,
+  owner: string,
+  slug: string,
+  outcome: EntryOutcome,
+  classification?: ReconciliationClassification,
+): void {
+  result.outcomes.push({ owner, slug, outcome, classification });
+  if (outcome === "installed") result.installed++;
+  else if (outcome === "updated") result.updated++;
+  else if (outcome === "removed") result.removed++;
+  else if (outcome === "adopted") result.adopted++;
+  else if (outcome === "preserved-user-change") result.preserved++;
+  else if (outcome === "conflict") result.conflicts++;
+  else if (outcome === "skipped-missing-owner") result.skippedMissingOwner++;
+  else if (outcome === "invalid-version" || outcome === "invalid-workflow") result.invalid++;
+  else result.skipped++;
+}
+
 export async function installCatalogEntries(
   entries: CatalogEntry[],
   deps: CatalogLoadDeps,
 ): Promise<CatalogLoadResult> {
+  const sqlite = deps.sqlite ?? getSqliteInstance();
+  const repository = new WorkflowReconciliationRepository(sqlite);
+  const baselines = repository.listBaselines();
+  const identities = buildIdentities(entries, baselines, deps.reconcileRemovals !== false);
   const result = emptyResult();
-
-  // Cache owner existence so the system owners are resolved once, not per flow.
-  const ownerExists = new Map<string, boolean>();
-  const cachingUserRepo: CatalogUserRepo = {
-    async getProfile(userId: string) {
-      let exists = ownerExists.get(userId);
-      if (exists === undefined) {
-        exists = (await deps.userRepo.getProfile(userId)) !== null;
-        ownerExists.set(userId, exists);
-      }
-      // installCatalogEntry only checks getProfile() === null, so return a sentinel object/null.
-      return exists ? {} : null;
-    },
+  const applyPlan: WorkflowReconciliationApplyPlan = {
+    preconditions: [],
+    conflictPreconditions: [],
+    baselinePreconditions: [],
+    workflows: [],
+    baselines: [],
+    conflicts: [],
+    clearConflicts: [],
   };
-  const entryDeps: CatalogLoadDeps = { ...deps, userRepo: cachingUserRepo };
+  const ownerExists = new Map<string, boolean>();
 
-  for (const entry of entries) {
-    const outcome = await installCatalogEntry(entry, entryDeps);
-    result.outcomes.push({ owner: entry.owner, slug: entry.slug, outcome });
-    switch (outcome) {
-      case "installed":
-        result.installed++;
-        break;
-      case "updated":
-        result.updated++;
-        break;
-      case "invalid-version":
-        result.invalid++;
-        break;
-      case "skipped-missing-owner":
-        result.skippedMissingOwner++;
-        break;
-      default:
-        result.skipped++;
+  // Complete preflight: all reads and graph validation happen before repository.apply().
+  for (const identity of identities) {
+    let exists = ownerExists.get(identity.owner);
+    if (exists === undefined) {
+      exists = (await deps.userRepo.getProfile(identity.owner)) !== null;
+      ownerExists.set(identity.owner, exists);
+    }
+    if (!exists) {
+      addOutcome(result, identity.owner, identity.slug, "skipped-missing-owner");
+      continue;
+    }
+
+    const invalidSlug = [identity.slug, ...(identity.entry?.previousSlugs ?? [])].find(
+      (slug) => !validateSlug(slug).valid,
+    );
+    if (invalidSlug) {
+      addOutcome(result, identity.owner, identity.slug, "invalid-workflow");
+      continue;
+    }
+
+    const localVersion = identity.entry ? versionOf(incomingState(identity.entry)) : null;
+    if (identity.entry && (!localVersion || !isValidSemver(localVersion))) {
+      addOutcome(result, identity.owner, identity.slug, "invalid-version");
+      continue;
+    }
+
+    let incomingValidation: { isValid: boolean; errors: string[] } | undefined;
+    if (identity.entry) {
+      if (
+        Buffer.byteLength(JSON.stringify(identity.entry.graph), "utf8") > MAX_WORKFLOW_SIZE_BYTES
+      ) {
+        addOutcome(result, identity.owner, identity.slug, "invalid-workflow");
+        continue;
+      }
+      const checked = await deps.mutationService.validate(
+        identity.entry.graph as unknown as WorkflowGraph,
+      );
+      incomingValidation = { isValid: checked.status === "valid", errors: checked.errors };
+      if (!incomingValidation.isValid) {
+        addOutcome(result, identity.owner, identity.slug, "invalid-workflow");
+        continue;
+      }
+    }
+
+    const lookupSlugs = [identity.slug, ...(identity.entry?.previousSlugs ?? [])];
+    const currentRow = repository.findWorkflow(identity.owner, lookupSlugs);
+    const current: ManagedWorkflowState = currentRow
+      ? {
+          lifecycle: currentRow.deleted ? "deleted" : "present",
+          content: { graph: currentRow.graph, visibility: currentRow.visibility },
+        }
+      : { lifecycle: "absent" };
+    const incoming = identity.entry
+      ? incomingState(identity.entry)
+      : removalState(identity.baseline!.state);
+
+    const previousVersion =
+      identity.baseline?.sourceVersion ?? versionOf(identity.baseline?.state ?? null);
+    if (
+      !deps.force &&
+      localVersion &&
+      previousVersion &&
+      isValidSemver(previousVersion) &&
+      compareSemver(localVersion, previousVersion) < 0
+    ) {
+      addOutcome(result, identity.owner, identity.slug, "skipped-older");
+      continue;
+    }
+
+    applyPlan.preconditions.push({
+      owner: identity.owner,
+      slug: identity.slug,
+      lookupSlugs,
+      workflowId: currentRow?.id,
+      expected: current,
+    });
+    applyPlan.baselinePreconditions.push({
+      owner: identity.owner,
+      slug: identity.slug,
+      lookupSlugs,
+      expected: identity.baseline,
+    });
+
+    const sameVersionSourceMismatch =
+      !deps.force &&
+      identity.baseline !== null &&
+      localVersion !== null &&
+      previousVersion === localVersion &&
+      !workflowStatesEqual(identity.baseline.state, incoming);
+    const decision = sameVersionSourceMismatch
+      ? {
+          classification: "conflict" as const,
+          previous: identity.baseline!.state,
+          current,
+          incoming,
+          selected: null,
+          advanceBaseline: false,
+          unresolved: true,
+        }
+      : deps.force
+        ? {
+            classification: (identity.baseline
+              ? "upstream-only"
+              : "first-install") as ReconciliationClassification,
+            previous: identity.baseline?.state ?? null,
+            current,
+            incoming,
+            selected: "incoming" as const,
+            advanceBaseline: true,
+            unresolved: false,
+          }
+        : reconcileManagedResource(
+            identity.baseline?.state ?? null,
+            current,
+            incoming,
+            workflowStatesEqual,
+          );
+    const outcome = outcomeFor(decision.classification, incoming);
+    addOutcome(result, identity.owner, identity.slug, outcome, decision.classification);
+
+    if (decision.unresolved) {
+      applyPlan.conflicts.push({
+        owner: identity.owner,
+        slug: identity.slug,
+        previousSlug: identity.previousSlug,
+        currentWorkflowId: currentRow?.id,
+        currentWorkflowSlug: currentRow?.slug,
+        classification: decision.classification,
+        previous: decision.previous,
+        current,
+        incoming,
+        instruction: conflictInstruction(identity.owner, identity.slug),
+      });
+      continue;
+    }
+
+    applyPlan.clearConflicts.push({
+      owner: identity.owner,
+      slug: identity.slug,
+      previousSlug: identity.previousSlug,
+    });
+    if (decision.selected === "incoming" && !workflowStatesEqual(current, incoming)) {
+      applyPlan.workflows.push({
+        owner: identity.owner,
+        slug: identity.slug,
+        workflowId: currentRow?.id,
+        state: incoming,
+        validation: incomingValidation,
+      });
+    }
+    if (decision.advanceBaseline) {
+      applyPlan.baselines.push({
+        owner: identity.owner,
+        slug: identity.slug,
+        previousSlug: identity.previousSlug,
+        state: incoming,
+        sourceVersion: versionOf(incoming),
+      });
     }
   }
 
+  if (result.invalid > 0) {
+    throw new CatalogPreflightError(result);
+  }
+  if (result.conflicts > 0 && !deps.force) {
+    // Persist complete conflict evidence, but do not partially advance any
+    // workflow or baseline while the catalog as a whole is unresolved.
+    repository.apply({
+      preconditions: applyPlan.preconditions,
+      conflictPreconditions: [],
+      baselinePreconditions: applyPlan.baselinePreconditions,
+      workflows: [],
+      baselines: [],
+      conflicts: applyPlan.conflicts,
+      clearConflicts: [],
+    });
+  } else {
+    repository.apply(applyPlan);
+  }
+  for (const outcome of result.outcomes) {
+    deps.log?.(`  ${outcome.owner}/${outcome.slug}: ${outcome.outcome}`);
+  }
+  if (deps.fatalConflicts && result.conflicts > 0) {
+    throw new CatalogReconciliationError(
+      result.outcomes
+        .filter((item) => item.outcome === "conflict")
+        .map((item) => ({
+          owner: item.owner,
+          slug: item.slug,
+          classification: item.classification ?? "conflict",
+        })),
+    );
+  }
   return result;
+}
+
+export async function installCatalogEntry(
+  entry: CatalogEntry,
+  deps: CatalogLoadDeps,
+): Promise<EntryOutcome> {
+  const result = await installCatalogEntries([entry], { ...deps, reconcileRemovals: false });
+  return result.outcomes[0]?.outcome ?? "skipped-unchanged";
+}
+
+export function formatWorkflowReconciliationNotice(sqlite: Database.Database): string | null {
+  const conflicts = getWorkflowReconciliationStatusSummary(sqlite).conflicts;
+  if (conflicts.length === 0) return null;
+  return [
+    "ERROR MANAGED_WORKFLOW_RECONCILIATION_REQUIRED: this instance is operable but degraded.",
+    ...conflicts.map(
+      (conflict) =>
+        `${conflict.owner}/${conflict.slug} (${conflict.classification}); ` +
+        `previous=${conflict.candidateRefs.previous ?? "absent"}; ` +
+        `current=${conflict.candidateRefs.current}; incoming=${conflict.candidateRefs.incoming}; ` +
+        `recovery=${conflict.recoveryLocation}. ${conflict.instruction}`,
+    ),
+  ].join("\n");
+}
+
+export async function resolveWorkflowReconciliation(
+  reference: string,
+  selection: "current" | "incoming" | "previous",
+  deps: Pick<CatalogLoadDeps, "sqlite" | "mutationService">,
+  merged?: ManagedWorkflowState,
+  resolutionContext: { actorId?: string; source?: string } = {},
+): Promise<void> {
+  const separator = reference.indexOf("/");
+  if (separator <= 0 || separator === reference.length - 1) {
+    throw new Error("Resolution reference must be owner/slug");
+  }
+  const owner = reference.slice(0, separator);
+  const slug = reference.slice(separator + 1);
+  if (!validateSlug(slug).valid) {
+    throw new Error(`Invalid workflow slug in resolution reference: ${slug}`);
+  }
+  const sqlite = deps.sqlite ?? getSqliteInstance();
+  const repository = new WorkflowReconciliationRepository(sqlite);
+  const conflict = repository.findConflict(owner, slug);
+  if (!conflict) throw new Error(`No unresolved workflow reconciliation for ${reference}`);
+  if (merged && selection !== "current") {
+    throw new Error("A merged state requires selection=current");
+  }
+
+  const selected =
+    merged ??
+    (selection === "incoming"
+      ? conflict.incoming
+      : selection === "previous"
+        ? conflict.previous
+        : conflict.current);
+  if (selection === "previous" && selected === null) {
+    throw new Error(`${reference} has no previous candidate to select`);
+  }
+
+  const validateResolutionState = async (
+    state: ManagedWorkflowState,
+  ): Promise<{ isValid: boolean; errors: string[] } | undefined> => {
+    if (state.lifecycle === "absent") return undefined;
+    if (Buffer.byteLength(JSON.stringify(state.content.graph), "utf8") > MAX_WORKFLOW_SIZE_BYTES) {
+      throw new Error(`Resolved workflow ${reference} exceeds the maximum workflow size`);
+    }
+    const checked = await deps.mutationService.validate(
+      state.content.graph as unknown as WorkflowGraph,
+    );
+    const validation = { isValid: checked.status === "valid", errors: checked.errors };
+    if (!validation.isValid) {
+      throw new Error(`Resolved workflow ${reference} is invalid: ${validation.errors.join("; ")}`);
+    }
+    return validation;
+  };
+
+  // The incoming state becomes the durable baseline for every resolution, so
+  // validate it even when the administrator elects to keep the current state.
+  const incomingValidation = await validateResolutionState(conflict.incoming);
+
+  const currentWorkflowId = conflict.currentWorkflowId ?? undefined;
+  const lookupSlugs = [
+    ...new Set([slug, conflict.currentWorkflowSlug, conflict.previousManagedSlug].filter(Boolean)),
+  ] as string[];
+
+  const workflows: WorkflowReconciliationApplyPlan["workflows"] = [];
+  const mustWriteSelected =
+    selected !== null &&
+    (selection !== "current" || merged !== undefined || conflict.currentWorkflowSlug !== slug);
+  if (selected && mustWriteSelected) {
+    const validation =
+      selected === conflict.incoming ? incomingValidation : await validateResolutionState(selected);
+    workflows.push({
+      owner,
+      slug,
+      workflowId: currentWorkflowId,
+      state: selected,
+      validation,
+    });
+  }
+
+  // The baseline records the accepted upstream candidate. Selecting/merging the
+  // current database graph therefore becomes an intentional user delta against
+  // that source and survives an unchanged image on the next startup.
+  repository.apply({
+    preconditions: [
+      {
+        owner,
+        slug,
+        lookupSlugs,
+        workflowId: currentWorkflowId,
+        expected: conflict.current,
+      },
+    ],
+    conflictPreconditions: [{ owner, slug, revision: conflict.revision }],
+    baselinePreconditions: [],
+    workflows,
+    baselines: [
+      {
+        owner,
+        slug,
+        previousSlug: conflict.previousManagedSlug ?? undefined,
+        state: conflict.incoming,
+        sourceVersion: versionOf(conflict.incoming),
+      },
+    ],
+    conflicts: [],
+    clearConflicts: [{ owner, slug }],
+    resolutionAudits: [
+      {
+        owner,
+        slug,
+        actorId: resolutionContext.actorId,
+        source: resolutionContext.source ?? "system",
+        selection,
+        merged: merged !== undefined,
+      },
+    ],
+  });
 }

@@ -5,6 +5,11 @@ import request from "supertest";
 const deployment = { accountApprovalEnabled: false };
 const approvalState: { approvedAt: string | null } = { approvedAt: null };
 const auditEvents: Array<{ action: string; adminId: string; userId: string }> = [];
+let reconciliationState: Record<string, unknown> = {
+  status: "ok",
+  code: "MANAGED_WORKFLOW_RECONCILIATION_REQUIRED",
+  conflicts: [],
+};
 const isEnabled = jest.fn(
   (feature: string) => feature === "accountApproval" && deployment.accountApprovalEnabled,
 );
@@ -16,7 +21,17 @@ const approveAccount = jest.fn(async (adminId: string, userId: string) => {
 });
 
 jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
-  DatabaseRepository: class {},
+  DatabaseRepository: class {
+    async listWorkflows() {
+      return [];
+    }
+    async listExecutions() {
+      return [];
+    }
+    async getSettingDefinitions() {
+      return [];
+    }
+  },
 }));
 
 jest.unstable_mockModule("@mcp-moira/shared", () => ({
@@ -27,12 +42,14 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   getArtifactService: jest.fn(),
   getArtifactUrl: jest.fn(),
   getBaseUrl: jest.fn(),
-  getDbPath: jest.fn(),
+  getDbPath: () => "/definitely-not-present/moira.db",
   getFeatureResolver: () => ({ isEnabled }),
   getGlobalSettingsService: jest.fn(),
   getLockService: jest.fn(),
   getMcpTextService: jest.fn(),
+  getSqliteInstance: jest.fn(),
   getUserService: () => ({ approveAccount }),
+  getWorkflowReconciliationStatusSummary: jest.fn(() => reconciliationState),
   isEmailConfigured: jest.fn(),
   logAuditEvent: jest.fn(),
 }));
@@ -73,6 +90,11 @@ describe("account approval route capability", () => {
     deployment.accountApprovalEnabled = false;
     approvalState.approvedAt = null;
     auditEvents.length = 0;
+    reconciliationState = {
+      status: "ok",
+      code: "MANAGED_WORKFLOW_RECONCILIATION_REQUIRED",
+      conflicts: [],
+    };
     isEnabled.mockClear();
     approveAccount.mockClear();
   });
@@ -127,5 +149,40 @@ describe("account approval route capability", () => {
     expect(auditEvents).toEqual([
       { action: "account.approved", adminId: "saas-admin", userId: "self-host-user" },
     ]);
+  });
+
+  it("returns graph-free reconciliation references and degraded admin health", async () => {
+    reconciliationState = {
+      status: "error",
+      code: "MANAGED_WORKFLOW_RECONCILIATION_REQUIRED",
+      conflicts: [
+        {
+          owner: "system-admin",
+          slug: "managed-flow",
+          classification: "conflict",
+          instruction: "Run Workflow Management Flow (WMF)",
+          candidateRefs: {
+            previous: "database:workflow-reconciliation:system-admin/managed-flow#previous",
+            current: "database:workflow-reconciliation:system-admin/managed-flow#current",
+            incoming: "database:workflow-reconciliation:system-admin/managed-flow#incoming",
+          },
+          recoveryLocation: "database:workflow-reconciliation:system-admin/managed-flow",
+        },
+      ],
+    };
+    const { adminRoutes } = await import("../../../packages/web-backend/src/routes/admin.js");
+    const app = express();
+    app.use("/api/admin", adminRoutes);
+
+    const response = await request(app).get("/api/admin/stats");
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.systemHealth).toMatchObject({
+      backendStatus: "degraded",
+      workflowReconciliation: reconciliationState,
+    });
+    expect(JSON.stringify(response.body.data.systemHealth.workflowReconciliation)).not.toContain(
+      '"graph"',
+    );
   });
 });

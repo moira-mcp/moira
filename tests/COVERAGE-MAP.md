@@ -166,7 +166,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/web-backend/account-approval-route-gating.test.ts` — disabled-mode administrator approval route returns before the mutation/audit service boundary
+- `tests/unit/web-backend/account-approval-route-gating.test.ts` — disabled-mode administrator approval route returns before the mutation/audit service boundary; protected admin stats expose graph-free managed-workflow reconciliation references and degraded health
 - `tests/unit/web-frontend/account-admission-ui.test.ts` — independent approval/email route decisions and deployment-capability selection for the registration completion page
 - `tests/unit/web-frontend/account-approval-admin-ui.test.tsx` — capability-aware account-approval status and actions in the administrator list and detail surfaces, including the SaaS null-timestamp regression
 - `tests/unit/web-frontend/admin-navigation-capabilities.test.ts` — narrow Users capability remains independent of broader multi-user administration in self-host and SaaS navigation
@@ -651,6 +651,8 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text, and subgraph navigation callback
+- `tests/unit/web-frontend/backend-health.test.ts` — a reconciliation-degraded backend remains operable/connected while a hard health error disconnects
+- `tests/unit/web-frontend/admin-reconciliation-status.test.tsx` — administrator dashboard renders the managed-workflow conflict identity, classification, all candidate references, WMF instruction, and clear state
 - `tests/unit/web-frontend/quick-start-card.test.ts` — i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked
 
 **e2e**
@@ -673,6 +675,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/logging/compute-changes.test.ts`
 - `tests/unit/shared/workflow-query-service.test.ts` — incl. setWorkflowVariable preserves rich schema
 - `tests/unit/shared/workflow-catalog.test.ts` — catalog identity/ownership metadata is excluded from the executable graph; readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop
+- `tests/unit/shared/managed-resource-reconciler.test.ts` — closed three-way classification for first install/adoption, unchanged, user-only, upstream-only, converged, conflict, soft/hard deletion, removal, and tombstone reintroduction
 - `tests/unit/web-frontend/workflow-transformer.test.ts` — including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning
 - `tests/unit/workflow-engine/variable-resolver.test.ts`
 - `tests/unit/workflow-engine/workflow-schema-keywords.test.ts` — ordered unique-reference plans, deep evidence-prefix correlation, protected plan prefixes, non-mutating blocked responses, global-input inlining, and GraphValidator keyword registration
@@ -686,7 +689,8 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/integration/workflow-file-tokens.test.ts` — upload/download lifecycle plus five-minute materialize TTL boundary, real SQLite grant-failure normalization, user/execution/node binding, and atomic one-use claim
 - `tests/integration/agent-response-contract.test.ts`
-- `tests/integration/workflow-catalog-loader.test.ts` — owner/visibility mapping, version-aware idempotence including persisted legacy root catalog metadata, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior
+- `tests/integration/workflow-catalog-loader.test.ts` — owner/visibility mapping and three-way visibility changes, baseline adoption/divergence, distinct previous/current/incoming candidate content, upstream/user/two-sided changes, semver regression and same-version source mismatch, catalog-wide preflight, user soft/hard deletion, upstream removal/tombstone/reintroduction and lifecycle resolution, conflict recovery across declared previous-slug migration for every selection route, lightweight summaries that do not parse malformed candidate bodies, multi-directory overlays, real SQLite rollback on a later apply failure, stale workflow/conflict/baseline guards across graph/visibility/lifecycle/alias changes, competing resolutions, real catalog evidence replacement, and baseline creation/update/rename races, malformed baseline failure, explicit recovery, structured MCP response, administrator resolution, and SaaS CLI failure on a copied database without source mutation
+- `tests/integration/mcp-reconciliation-notice.test.ts` — real in-memory MCP initialization and ordinary registered tool call both expose the graph-free managed-workflow reconciliation notice
 - `tests/integration/database/workflow-privacy-defaults.test.ts`
 - `tests/integration/manage-workflow-actions.test.ts`
 - `tests/integration/manage-workflow-new-actions.test.ts`

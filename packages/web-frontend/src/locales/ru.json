@@ -979,7 +979,9 @@
       "systemHealth": {
         "title": "Состояние системы",
         "backendStatus": "Статус бэкенда",
-        "databaseSize": "Размер базы данных"
+        "databaseSize": "Размер базы данных",
+        "workflowReconciliation": "Встроенные процессы",
+        "reconciliationOk": "Актуальны"
       },
       "logoutAll": {
         "title": "Управление сессиями",

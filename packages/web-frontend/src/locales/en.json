@@ -979,7 +979,9 @@
       "systemHealth": {
         "title": "System Health",
         "backendStatus": "Backend Status",
-        "databaseSize": "Database Size"
+        "databaseSize": "Database Size",
+        "workflowReconciliation": "Bundled workflows",
+        "reconciliationOk": "Up to date"
       },
       "logoutAll": {
         "title": "Session Management",

@@ -21,6 +21,7 @@ export enum AuditAction {
   WORKFLOW_DELETE = "workflow:delete",
   WORKFLOW_RESTORE = "workflow:restore",
   WORKFLOW_HARD_DELETE = "workflow:hard_delete",
+  WORKFLOW_RECONCILIATION_RESOLVE = "workflow:reconciliation_resolve",
 
   // Execution events
   EXECUTION_START = "execution:start",

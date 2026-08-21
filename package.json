@@ -1,6 +1,6 @@
 {
   "name": "mcp-moira",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Agent Workflow Engine for AI agents with professional Web UI dashboard",
   "main": "dist/server.js",
   "type": "module",

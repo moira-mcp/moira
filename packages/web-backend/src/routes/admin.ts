@@ -25,6 +25,8 @@ import {
   MCP_TEXT_KEYS,
   MCP_AGENT_CATEGORY,
   MCP_MODEL_CATEGORY,
+  getSqliteInstance,
+  getWorkflowReconciliationStatusSummary,
 } from "@mcp-moira/shared";
 
 const router = Router();
@@ -740,6 +742,7 @@ router.get(
         timestamp: e.createdAt,
         action: `Workflow execution ${e.status}`,
       }));
+    const workflowReconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
 
     res.json({
       success: true,
@@ -749,8 +752,9 @@ router.get(
         totalDefinitions: definitions.length,
         activeExecutions,
         systemHealth: {
-          backendStatus: "healthy",
+          backendStatus: workflowReconciliation.status === "ok" ? "healthy" : "degraded",
           databaseSize: databaseSize,
+          workflowReconciliation,
         },
         recentActivity,
       },

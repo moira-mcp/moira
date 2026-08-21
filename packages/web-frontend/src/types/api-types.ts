@@ -57,15 +57,54 @@ export const ApiErrorCode = {
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 
 export interface HealthCheckResponse {
-  status: "ok" | "error";
+  status: "ok" | "degraded" | "error";
   services: {
     fileSystem: boolean;
     validation: boolean;
     mcpEngine: boolean;
+    workflowReconciliation: boolean;
+  };
+  reconciliation: {
+    status: "ok" | "error";
+    code: string;
+    conflicts: unknown[];
   };
   uptime: number;
   timestamp: string;
   version: string;
+}
+
+export interface AdminStatsResponse {
+  totalWorkflows: number;
+  totalExecutions: number;
+  totalDefinitions: number;
+  activeExecutions: number;
+  systemHealth?: {
+    backendStatus: string;
+    databaseSize: number;
+    workflowReconciliation: {
+      status: "ok" | "error";
+      code: string;
+      conflicts: Array<{
+        owner: string;
+        slug: string;
+        classification: string;
+        instruction: string;
+        candidateRefs: {
+          previous: string | null;
+          current: string;
+          incoming: string;
+        };
+      }>;
+    };
+  };
+  recentActivity?: Array<{
+    id: string;
+    workflowId: string;
+    status: string;
+    timestamp: number;
+    action: string;
+  }>;
 }
 
 export interface WorkflowListRequest {

@@ -37,6 +37,9 @@ import {
   getAccountAccessDenial,
   ACCOUNT_APPROVAL_REQUIRED_CODE,
   type McpPromptContext,
+  getSqliteInstance,
+  getWorkflowReconciliationStatusSummary,
+  formatWorkflowReconciliationNotice,
 } from "@mcp-moira/shared";
 
 // Get monorepo version from root package.json (#196)
@@ -61,7 +64,12 @@ import { getSessionInfo } from "./tools/get-session-info.js";
 import { manageNotes, manageNotesSchema } from "./tools/manage-notes.js";
 import { manageArtifacts, manageArtifactsSchema } from "./tools/manage-artifacts.js";
 import { manageLocks, manageLocksSchema } from "./tools/manage-locks.js";
+import { manageReconciliation, manageReconciliationSchema } from "./tools/manage-reconciliation.js";
 import { wrapSchemaWithAutoparse } from "./utils/flexible-json-parser.js";
+import {
+  buildReconciliationAwareInstructions,
+  createReconciliationAwareRegisterTool,
+} from "./reconciliation-aware-server.js";
 
 // Centralized messages
 import {
@@ -128,7 +136,7 @@ async function createMcpServerWithTools(context?: McpPromptContext): Promise<Mcp
       capabilities: {
         tools: {},
       },
-      instructions: systemPrompt || undefined,
+      instructions: buildReconciliationAwareInstructions(systemPrompt),
     },
   );
 
@@ -143,8 +151,10 @@ function registerAllTools(
   mcpServer: McpServer,
   toolDescriptions: Record<McpToolName, string>,
 ): void {
+  const registerTool = createReconciliationAwareRegisterTool(mcpServer);
+
   // List workflows tool (direct import - no spawn)
-  mcpServer.registerTool(
+  registerTool(
     "list",
     {
       description: toolDescriptions.list,
@@ -179,8 +189,18 @@ function registerAllTools(
     },
   );
 
+  registerTool(
+    "reconciliation",
+    {
+      description:
+        "Inspect or resolve bundled-workflow reconciliation errors. Status returns candidate references to every agent and full candidate states to administrators. Get and resolve are administrator-only; use Workflow Management Flow to semantically merge candidates, then submit the merged graph.",
+      inputSchema: wrapSchemaWithAutoparse(manageReconciliationSchema.shape),
+    },
+    async (params) => manageReconciliation(params as z.infer<typeof manageReconciliationSchema>),
+  );
+
   // Start workflow tool (direct function call)
-  mcpServer.registerTool(
+  registerTool(
     "start",
     {
       description: toolDescriptions.start,
@@ -232,7 +252,7 @@ function registerAllTools(
   );
 
   // Execute step tool (enhanced with simplified schema)
-  mcpServer.registerTool(
+  registerTool(
     "step",
     {
       description: toolDescriptions.step,
@@ -321,7 +341,7 @@ function registerAllTools(
   // });
 
   // Manage workflow tool (direct function call) - consolidated create/edit/get + structure/node/search/validate/variables/diff/copy/clone/move
-  mcpServer.registerTool(
+  registerTool(
     "manage",
     {
       description: toolDescriptions.manage,
@@ -488,7 +508,7 @@ function registerAllTools(
   );
 
   // Get workflow documentation tool (direct function call)
-  mcpServer.registerTool(
+  registerTool(
     "help",
     {
       description: toolDescriptions.help,
@@ -525,7 +545,7 @@ function registerAllTools(
 
   // User Settings Management Tool
 
-  mcpServer.registerTool(
+  registerTool(
     "settings",
     {
       description: toolDescriptions.settings,
@@ -587,7 +607,7 @@ function registerAllTools(
 
   // === Large Workflow File Handling Tool ===
 
-  mcpServer.registerTool(
+  registerTool(
     "token",
     {
       description: toolDescriptions.token,
@@ -630,7 +650,7 @@ function registerAllTools(
   );
 
   // Consolidated session info tool
-  mcpServer.registerTool(
+  registerTool(
     "session",
     {
       description: toolDescriptions.session,
@@ -722,7 +742,7 @@ function registerAllTools(
   );
 
   // Notes management tool
-  mcpServer.registerTool(
+  registerTool(
     "notes",
     {
       description: toolDescriptions.notes,
@@ -777,7 +797,7 @@ function registerAllTools(
   );
 
   // Artifacts management tool
-  mcpServer.registerTool(
+  registerTool(
     "artifacts",
     {
       description: toolDescriptions.artifacts,
@@ -836,7 +856,7 @@ function registerAllTools(
   );
 
   // Lock management tool
-  mcpServer.registerTool(
+  registerTool(
     "lock",
     {
       description: toolDescriptions.lock,
@@ -1252,11 +1272,13 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
 
 // Health check endpoint
 app.get("/health", (req: Request, res: Response) => {
+  const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
   res.json({
-    status: "healthy",
+    status: reconciliation.status === "ok" ? "healthy" : "degraded",
     timestamp: new Date().toISOString(),
     mode: "stateless",
     version: MCP_SERVER_VERSION,
+    reconciliation,
   });
 });
 
@@ -1265,6 +1287,16 @@ async function main() {
   try {
     // Config is validated automatically on first access (lazy initialization)
     const port = getMcpPort();
+    const reconciliationNotice = formatWorkflowReconciliationNotice(getSqliteInstance());
+    if (reconciliationNotice) {
+      logger.error(
+        "Managed workflow reconciliation is required; MCP remains available for recovery",
+        {
+          code: "MANAGED_WORKFLOW_RECONCILIATION_REQUIRED",
+          notice: reconciliationNotice,
+        },
+      );
+    }
 
     // Verify tool descriptions can be loaded from DB at startup
     const descriptions = await loadToolDescriptions();

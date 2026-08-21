@@ -25,28 +25,9 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LogOut } from "lucide-react";
 import { StatCard } from "../components/stat-card";
 import { useFeatures } from "../hooks/useFeatures";
+import type { AdminStatsResponse } from "../types";
 
 type TimeRange = "today" | "week" | "month" | "year" | "all";
-
-interface ActivityItem {
-  id: string;
-  workflowId: string;
-  status: string;
-  timestamp: number;
-  action: string;
-}
-
-interface SystemStats {
-  totalWorkflows: number;
-  totalExecutions: number;
-  totalDefinitions: number;
-  activeExecutions: number;
-  systemHealth?: {
-    backendStatus: string;
-    databaseSize: number;
-  };
-  recentActivity?: ActivityItem[];
-}
 
 interface OverviewData {
   totalUsers: number;
@@ -91,7 +72,7 @@ const statusBadgeClass = (status: string): string => {
 export const AdminDashboard: React.FC = () => {
   const { t } = useTranslation();
   const { isEnabled: isFeatureEnabled } = useFeatures();
-  const [stats, setStats] = useState<SystemStats | null>(null);
+  const [stats, setStats] = useState<AdminStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logoutAllDialogOpen, setLogoutAllDialogOpen] = useState(false);
@@ -252,7 +233,7 @@ export const AdminDashboard: React.FC = () => {
 
       {/* System Health */}
       {stats.systemHealth && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">
@@ -261,11 +242,53 @@ export const AdminDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-success"></span>
+                <span
+                  className={`w-3 h-3 rounded-full ${
+                    stats.systemHealth.backendStatus === "healthy" ? "bg-success" : "bg-destructive"
+                  }`}
+                ></span>
                 <span className="text-muted-foreground capitalize">
                   {stats.systemHealth.backendStatus}
                 </span>
               </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">
+                {t("admin.dashboard.systemHealth.workflowReconciliation")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats.systemHealth.workflowReconciliation.status === "ok" ? (
+                <Badge variant="secondary">
+                  {t("admin.dashboard.systemHealth.reconciliationOk")}
+                </Badge>
+              ) : (
+                <div className="space-y-3 text-sm" data-testid="workflow-reconciliation-error">
+                  <Badge variant="destructive">
+                    {stats.systemHealth.workflowReconciliation.code}
+                  </Badge>
+                  {stats.systemHealth.workflowReconciliation.conflicts.map((conflict) => (
+                    <div key={`${conflict.owner}/${conflict.slug}`} className="space-y-1">
+                      <p className="font-medium">
+                        {conflict.owner}/{conflict.slug} ({conflict.classification})
+                      </p>
+                      <p className="text-muted-foreground whitespace-pre-wrap">
+                        {conflict.instruction}
+                      </p>
+                      <dl className="text-xs text-muted-foreground break-all">
+                        <dt>previous</dt>
+                        <dd>{conflict.candidateRefs.previous ?? "absent"}</dd>
+                        <dt>current</dt>
+                        <dd>{conflict.candidateRefs.current}</dd>
+                        <dt>incoming</dt>
+                        <dd>{conflict.candidateRefs.incoming}</dd>
+                      </dl>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>
