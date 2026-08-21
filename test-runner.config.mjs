@@ -44,7 +44,7 @@ const apiEnvironments = {
       REMOTE_DOCKER_CONTEXT: "",
     },
   },
-  "self-host-ci": {
+  ci: {
     envFile: ".env.ci",
     urlExtractor: () => "http://localhost:3031",
     env: {

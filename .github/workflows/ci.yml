@@ -220,7 +220,7 @@ jobs:
           exit 1
 
       - name: Run self-host admission API tests
-        run: npx testfold api -e self-host-ci -f tests/api/auth/self-host-auth.test.ts
+        run: npx testfold api -e ci -f tests/api/auth/self-host-auth.test.ts
         env:
           CI: true
 
