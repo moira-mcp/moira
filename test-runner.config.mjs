@@ -44,6 +44,15 @@ const apiEnvironments = {
       REMOTE_DOCKER_CONTEXT: "",
     },
   },
+  "self-host-ci": {
+    envFile: ".env.ci",
+    urlExtractor: () => "http://localhost:3031",
+    env: {
+      REMOTE_DOCKER_CONTEXT: "",
+      DOCKER_PORT: "3031",
+      DOCKER_CONTAINER_NAME: "mcp-moira-ci-self-host",
+    },
+  },
   remote: {
     envFile: ".env.remote",
     urlExtractor: (content) => {

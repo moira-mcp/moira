@@ -220,12 +220,9 @@ jobs:
           exit 1
 
       - name: Run self-host admission API tests
-        run: npx testfold api -e local -f tests/api/auth/self-host-auth.test.ts
+        run: npx testfold api -e self-host-ci -f tests/api/auth/self-host-auth.test.ts
         env:
           CI: true
-          TEST_BASE_URL: http://localhost:3031
-          DOCKER_PORT: 3031
-          DOCKER_CONTAINER_NAME: ${{ env.DOCKER_IMAGE }}-self-host
 
       # E2E (Playwright) tests are flaky on shared CI runners and are NOT run on PRs.
       # They run nightly + on-demand in .github/workflows/e2e.yml instead, so they
