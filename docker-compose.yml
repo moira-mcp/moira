@@ -1,7 +1,7 @@
 # MCP Moira — self-hosted local deploy
 #
 # Quickstart:
-#   cp .env.example .env       # then edit .env: set MOIRA_HOST, BETTER_AUTH_SECRET, TELEGRAM_ENCRYPTION_KEY
+#   cp .env.example .env       # localhost defaults work unchanged
 #   docker compose up -d
 #   open http://localhost:8080
 #
@@ -33,7 +33,9 @@ services:
 
     # Runtime configuration. Values here override the defaults baked into the
     # image at build time (dotenv does not overwrite existing process.env).
-    # REQUIRED in .env: MOIRA_HOST, BETTER_AUTH_SECRET, TELEGRAM_ENCRYPTION_KEY.
+    # For another host, set MOIRA_HOST, MOIRA_PORT, and STATIC_ARTIFACTS_DOMAIN.
+    # Leave BETTER_AUTH_SECRET, TELEGRAM_ENCRYPTION_KEY, and ADMIN_PASSWORD empty
+    # in self-host mode so first-start bootstrap generates and persists them.
     env_file:
       - .env
 

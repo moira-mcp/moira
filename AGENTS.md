@@ -46,7 +46,7 @@ env-driven (`MOIRA_PORT`, default 8080).
 The local instance runs one of two images — registry or locally built:
 
 ```bash
-cp .env.example .env          # set BETTER_AUTH_SECRET; review MOIRA_HOST/MOIRA_PORT
+cp .env.example .env          # defaults work locally; review host, port, and artifact domain for another host
 
 # A. published image from the registry (docker-compose.yml default)
 docker compose up -d          # pulls ghcr.io/moira-mcp/moira:latest

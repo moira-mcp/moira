@@ -53,7 +53,7 @@ with those gates off by default (`DEPLOYMENT_MODE=self-host`).
 Run a complete Moira instance locally with Docker — no source build required:
 
 ```bash
-cp .env.example .env       # then set BETTER_AUTH_SECRET (and review MOIRA_HOST/MOIRA_PORT)
+cp .env.example .env       # defaults work locally; review host, port, and artifact domain for another host
 docker compose up -d
 ```
 
@@ -139,7 +139,9 @@ npm run fix                   # ESLint + Prettier fix all files
 
 - MOIRA_PORT: External access port (default 8080)
 - MOIRA_HOST: Public host:port the instance is served on (default localhost:8080)
-- BETTER_AUTH_SECRET: required — auth signing secret
+- STATIC_ARTIFACTS_DOMAIN: Wildcard subdomain base for published artifacts
+- BETTER_AUTH_SECRET: generated and persisted on first start when empty; set it
+  explicitly only when you want to manage the auth signing secret yourself
 - Database: SQLite at `./data/moira.db` (bind-mounted, persists across restarts)
 - Admin: ADMIN_EMAIL, ADMIN_PASSWORD (auto-generated on first start if unset)
 
@@ -529,8 +531,9 @@ Request logging includes country detection via geoip-lite:
 
 Admin panel at `/admin/users` provides:
 
-- **User list** with email verification status, blocked status
+- **User list** with approval, email verification, and blocked status
 - **User details** page with sessions, OAuth connections, email history
+- **Approve** pending self-host registrations
 - **Session management** - revoke individual sessions or all sessions
 - **OAuth management** - revoke tokens by provider or all OAuth connections
 - **Block/Unblock** users with reason
@@ -557,9 +560,10 @@ Track all sent emails:
 
 ## Email Features
 
-### Email Verification
+### Email Verification (SaaS)
 
-- Verification email sent on signup
+- Verification email sent on SaaS signup; self-host registration uses
+  administrator approval instead
 - Link expires in 24 hours
 - Admin can resend manually
 
