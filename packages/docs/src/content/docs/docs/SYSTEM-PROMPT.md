@@ -63,8 +63,8 @@ PROACTIVELY suggest workflows when user's task matches available patterns:
    - "This is a complex task. I suggest: 1) search for a matching workflow, 2) if none found — create one via `moira/workflow-management-flow`"
 
 4. **Multi-step task** → Always suggest `moira/robust-task`
-   - Ensures verified completion with evidence
-   - Prevents skipping steps
+   - Preserves plans, attempts, decisions, and evidence for recovery after context loss
+   - Uses cause-aware independent review, bounded result/evidence repair, and replanning instead of silently accepting unresolved work
 
 ### Decision Flow
 
@@ -82,21 +82,21 @@ flowchart TD
 
 ### Available Public Workflows
 
-| Workflow                               | Use Case                                                                                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `moira/user-onboarding`                | Interactive onboarding for new Moira users                                                                                               |
-| `moira/software-development-flow`      | Complete delivery with planning, implementation, tests, docs, cause-aware review and repair, acceptance, and authorized VCS finalization |
-| `moira/software-development-flow-lite` | Lightweight development process for small features (1-5 steps)                                                                           |
-| `moira/robust-task`                    | Multi-step tasks requiring verified completion                                                                                           |
-| `moira/content-creation`               | Articles, blog posts, documentation                                                                                                      |
-| `moira/verified-research`              | Research with verified sources (anti-hallucination)                                                                                      |
-| `moira/prd-creation`                   | Product Requirements Documents                                                                                                           |
-| `moira/ux-design`                      | UX/UI design with accessibility checks                                                                                                   |
-| `moira/test-generation`                | Generate unit/integration/e2e test code                                                                                                  |
-| `moira/test-planning`                  | Create test plans with P0-P3 prioritization                                                                                              |
-| `moira/data-analysis`                  | Data analysis from problem to conclusions                                                                                                |
-| `moira/marketing-campaign`             | Marketing materials with differentiation                                                                                                 |
-| `moira/workflow-management-flow`       | Create, edit, or deploy workflows                                                                                                        |
+| Workflow                               | Use Case                                                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moira/user-onboarding`                | Interactive onboarding for new Moira users                                                                                                                                 |
+| `moira/software-development-flow`      | Complete delivery with planning, implementation, tests, docs, cause-aware review and repair, acceptance, and authorized VCS finalization                                   |
+| `moira/software-development-flow-lite` | Lightweight development process for small features (1-5 steps)                                                                                                             |
+| `moira/robust-task`                    | Complex multi-step work needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful complete or incomplete delivery |
+| `moira/content-creation`               | Articles, blog posts, documentation                                                                                                                                        |
+| `moira/verified-research`              | Research with verified sources (anti-hallucination)                                                                                                                        |
+| `moira/prd-creation`                   | Product Requirements Documents                                                                                                                                             |
+| `moira/ux-design`                      | UX/UI design with accessibility checks                                                                                                                                     |
+| `moira/test-generation`                | Generate unit/integration/e2e test code                                                                                                                                    |
+| `moira/test-planning`                  | Create test plans with P0-P3 prioritization                                                                                                                                |
+| `moira/data-analysis`                  | Data analysis from problem to conclusions                                                                                                                                  |
+| `moira/marketing-campaign`             | Marketing materials with differentiation                                                                                                                                   |
+| `moira/workflow-management-flow`       | Create, edit, or deploy workflows                                                                                                                                          |
 
 Start workflow: `mcp__moira__start({ workflowId: "moira/test-planning" })`
 

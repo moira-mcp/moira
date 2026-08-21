@@ -416,7 +416,7 @@ function getTopicList(): string {
   result += `| one bounded task needing decomposition, independent item review, changed retries, suffix revision, and filesystem or memory operation | \`moira/task-breakdown-flow\` |\n`;
   result += `| human-guided stream of tasks that are not known in advance | \`moira/infinite-task-loop\` |\n`;
   result += `| filesystem-backed multi-step task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
-  result += `| complex critical task | \`moira/robust-task\` |\n`;
+  result += `| complex critical task needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful incomplete delivery | \`moira/robust-task\` |\n`;
   result += `| "create workflow", "make workflow", "new workflow" | \`moira/workflow-management-flow\` |\n`;
   result += `| "write tests", "create tests", "add tests" | \`moira/test-generation\` |\n`;
   result += `| "test plan", "QA strategy" | \`moira/test-planning\` |\n`;

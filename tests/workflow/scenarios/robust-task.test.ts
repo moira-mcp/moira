@@ -1,4 +1,4 @@
-/** Observable scenarios for the filesystem-only Robust Task v8. */
+/** Observable scenarios for the cause-aware Robust Task v9. */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import { GraphValidator, detectCycles, type WorkflowGraph } from "@mcp-moira/workflow-engine";
@@ -15,37 +15,66 @@ function node(workflow: WorkflowGraph, id: string): any {
   return result;
 }
 
+const plan = (revision: number) => ({
+  current_plan_file: `plans/${String(revision).padStart(3, "0")}/plan.md`,
+  total_steps: 1,
+});
+
+const stepEvidence = (planRevision: number, attempt: number) => ({
+  evidence_file: `steps/1/plans/${String(planRevision).padStart(3, "0")}/attempts/${attempt}/evidence.md`,
+});
+
+const stepVerdict = (
+  planRevision: number,
+  attempt: number,
+  review_outcome: "pass" | "repair" | "replan",
+  repair_owner?: "result" | "evidence_projection",
+) => ({
+  verdict_file: `steps/1/plans/${String(planRevision).padStart(3, "0")}/attempts/${attempt}/verdict.md`,
+  review_outcome,
+  ...(repair_owner ? { repair_owner } : {}),
+});
+
+const finalReview = (
+  revision: number,
+  review_outcome: "pass" | "repair" | "replan",
+  repair_owner?: "deliverable" | "evidence_projection",
+) => ({
+  review_file: `final/reviews/${String(revision).padStart(3, "0")}-review.md`,
+  review_outcome,
+  ...(repair_owner ? { repair_owner } : {}),
+});
+
 function ordinaryInputs(): Record<string, MockInput> {
   return {
     "initialize-workspace": {
-      workspace_path: "./moira-ws/robust-task-example-20260802-0700/",
+      workspace_path: "./moira-ws/robust-task-example-20260821-2300/",
       operating_mode: "interactive",
     },
-    "create-plan": { current_plan_file: "plans/001/plan.md", total_steps: 1 },
-    "review-plan": { issues_count: 0 },
-    "ask-plan-review-limit": { decision: "accept" },
-    "fix-plan": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
+    "create-plan": plan(1),
+    "review-plan": { review_outcome: "pass" },
+    "ask-plan-review-limit": { decision: "finish_incomplete" },
+    "fix-plan": { repair_outcome: "changed", ...plan(2) },
     "approve-plan": { decision: "yes" },
-    "revise-plan": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
-    "execute-step": { evidence_file: "steps/1/plans/001/attempts/1/evidence.md" },
-    "review-step": {
-      verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
-      accepted: "yes",
-      plan_must_change: "no",
-    },
+    "revise-plan": plan(2),
+    "execute-step": stepEvidence(1, 1),
+    "review-step": stepVerdict(1, 1, "pass"),
+    "repair-step": { repair_outcome: "changed", ...stepEvidence(1, 2) },
     "ask-retry-decision": {
       decision: "finish_incomplete",
       decision_file: "steps/1/decisions/001.md",
     },
-    "replan-from-verdict": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
-    "replan-from-decision": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
-    "teleport-replan": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
-    "verify-criteria": { review_file: "final/criteria/001-review.md", issues_count: 0 },
-    "ask-criteria-review-limit": { decision: "accept_incomplete" },
-    "fix-criteria-gaps": {},
-    "final-review": { review_file: "final/reviews/001-review.md", issues_count: 0 },
+    "replan-from-verdict": plan(2),
+    "replan-from-decision": plan(2),
+    "replan-from-plan-review": plan(2),
+    "replan-from-plan-reassess": plan(2),
+    "replan-from-step-reassess": plan(2),
+    "replan-from-final-review": plan(2),
+    "replan-from-final-reassess": plan(2),
+    "teleport-replan": plan(2),
+    "final-review": finalReview(1, "pass"),
     "ask-final-review-limit": { decision: "accept_incomplete" },
-    "fix-final-review": {},
+    "fix-final-review": { repair_outcome: "changed" },
     "deliver-result": {
       delivery_file: "final/delivery.md",
       delivery_status: "complete",
@@ -63,7 +92,7 @@ function scenario(
   return {
     name,
     mockInputs: { ...ordinaryInputs(), ...overrides },
-    expect: { status: "completed", reaches, maxSteps: 180 },
+    expect: { status: "completed", reaches, maxSteps: 220 },
     ...options,
   };
 }
@@ -73,133 +102,134 @@ const scenarios: TestScenario[] = [
     "autonomous run completes without the plan approval gate",
     {
       "initialize-workspace": {
-        workspace_path: "./moira-ws/robust-task-example-20260802-0700/",
+        workspace_path: "./moira-ws/robust-task-example-20260821-2300/",
         operating_mode: "autonomous",
       },
     },
-    [
-      "route-operating-mode-plan-approval",
-      "execute-step",
-      "verify-criteria",
-      "final-review",
-      "end",
-    ],
+    ["route-operating-mode-plan-approval", "execute-step", "final-review", "end"],
   ),
-  scenario("ordinary complete execution", {}, [
+  scenario("ordinary interactive execution completes", {}, [
+    "notify-plan-ready",
+    "approve-plan",
     "execute-step",
-    "verify-criteria",
     "final-review",
     "end",
   ]),
   scenario(
-    "plan review repairs a new immutable revision",
+    "plan repair creates a new immutable revision",
     {
-      "review-plan": [{ issues_count: 1 }, { issues_count: 0 }],
-      "fix-plan": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
+      "review-plan": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
+      "fix-plan": { repair_outcome: "changed", ...plan(2) },
     },
-    ["fix-plan", "increment-plan-review-round", "approve-plan", "end"],
+    ["fix-plan", "increment-plan-review-round", "review-plan", "end"],
   ),
   scenario(
-    "bounded plan review asks the user before continuing",
-    { "review-plan": { issues_count: 1 }, "ask-plan-review-limit": { decision: "accept" } },
-    ["ask-plan-review-limit", "route-plan-review-limit", "approve-plan", "end"],
+    "plan repair reassessment replans from its exact cause",
+    {
+      "review-plan": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
+      "fix-plan": { repair_outcome: "reassess", reassessment_file: "plans/001/repair.md" },
+    },
+    ["route-plan-repair-outcome", "replan-from-plan-reassess", "review-plan", "end"],
+  ),
+  scenario(
+    "plan reviewer can request direct replan",
+    { "review-plan": [{ review_outcome: "replan" }, { review_outcome: "pass" }] },
+    ["route-plan-review-replan", "replan-from-plan-review", "review-plan", "end"],
+  ),
+  scenario(
+    "plan review bound can authorize one changed repair",
+    {
+      "review-plan": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
+      "ask-plan-review-limit": { decision: "repair" },
+    },
+    ["ask-plan-review-limit", "reset-plan-review-for-repair", "fix-plan", "end"],
     { initialVariables: { max_review_rounds: 1 } },
   ),
   scenario(
-    "plan rejection creates and reviews a new revision",
+    "plan review bound can finish truthfully incomplete",
     {
-      "approve-plan": [{ decision: "no" }, { decision: "yes" }],
-      "revise-plan": { current_plan_file: "plans/002/plan.md", total_steps: 1 },
+      "review-plan": { review_outcome: "repair" },
+      "ask-plan-review-limit": { decision: "finish_incomplete" },
+      "deliver-result": {
+        delivery_file: "final/delivery.md",
+        delivery_status: "incomplete",
+        summary: "The unresolved plan finding is disclosed.",
+      },
     },
+    ["ask-plan-review-limit", "deliver-result", "end"],
+    { initialVariables: { max_review_rounds: 1 } },
+  ),
+  scenario(
+    "interactive plan rejection creates and reviews a new revision",
+    { "approve-plan": [{ decision: "no" }, { decision: "yes" }], "revise-plan": plan(2) },
     ["revise-plan", "review-plan", "approve-plan", "end"],
   ),
   scenario(
-    "ordinary failed step retries and preserves the open cursor",
+    "result repair consumes a retry only after a changed attempt",
     {
-      "execute-step": [
-        { evidence_file: "steps/1/plans/001/attempts/1/evidence.md" },
-        { evidence_file: "steps/1/plans/001/attempts/2/evidence.md" },
-      ],
-      "review-step": [
-        {
-          verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
-          accepted: "no",
-          plan_must_change: "no",
-        },
-        {
-          verdict_file: "steps/1/plans/001/attempts/2/verdict.md",
-          accepted: "yes",
-          plan_must_change: "no",
-        },
-      ],
+      "review-step": [stepVerdict(1, 1, "repair", "result"), stepVerdict(1, 2, "pass")],
+      "repair-step": { repair_outcome: "changed", ...stepEvidence(1, 2) },
     },
-    ["increment-step-retry", "check-step-retry-limit", "execute-step", "end"],
+    ["repair-step", "route-step-repair-budget", "increment-step-retry", "review-step", "end"],
   ),
   scenario(
-    "verifier-requested replan returns through review and approval",
+    "evidence repair returns to review without consuming result retry",
     {
       "review-step": [
-        {
-          verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
-          accepted: "no",
-          plan_must_change: "yes",
-        },
-        {
-          verdict_file: "steps/1/plans/002/attempts/1/verdict.md",
-          accepted: "yes",
-          plan_must_change: "no",
-        },
+        stepVerdict(1, 1, "repair", "evidence_projection"),
+        stepVerdict(1, 2, "pass"),
       ],
-      "execute-step": [
-        { evidence_file: "steps/1/plans/001/attempts/1/evidence.md" },
-        { evidence_file: "steps/1/plans/002/attempts/1/evidence.md" },
-      ],
+      "repair-step": { repair_outcome: "changed", ...stepEvidence(1, 2) },
     },
-    ["replan-from-verdict", "review-plan", "approve-plan", "end"],
+    ["route-step-repair-owner", "repair-step", "review-step", "end"],
   ),
   scenario(
-    "retry exhaustion can retry after a durable user decision",
+    "step repair reassessment replans from its exact cause",
     {
-      "execute-step": [
-        { evidence_file: "steps/1/plans/001/attempts/1/evidence.md" },
-        { evidence_file: "steps/1/plans/001/attempts/2/evidence.md" },
-      ],
+      "execute-step": [stepEvidence(1, 1), stepEvidence(2, 1)],
+      "review-step": [stepVerdict(1, 1, "repair", "result"), stepVerdict(2, 1, "pass")],
+      "repair-step": {
+        repair_outcome: "reassess",
+        reassessment_file: "steps/1/plans/001/attempts/1/repair.md",
+      },
+    },
+    ["route-step-repair-outcome", "replan-from-step-reassess", "review-plan", "end"],
+  ),
+  scenario(
+    "step reviewer can request direct replan",
+    {
+      "execute-step": [stepEvidence(1, 1), stepEvidence(2, 1)],
+      "review-step": [stepVerdict(1, 1, "replan"), stepVerdict(2, 1, "pass")],
+    },
+    ["route-verifier-replan", "replan-from-verdict", "review-plan", "end"],
+  ),
+  scenario(
+    "retry exhaustion can authorize another changed repair",
+    {
       "review-step": [
-        {
-          verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
-          accepted: "no",
-          plan_must_change: "no",
-        },
-        {
-          verdict_file: "steps/1/plans/001/attempts/2/verdict.md",
-          accepted: "yes",
-          plan_must_change: "no",
-        },
+        stepVerdict(1, 1, "repair", "result"),
+        stepVerdict(1, 2, "repair", "result"),
+        stepVerdict(1, 3, "pass"),
+      ],
+      "repair-step": [
+        { repair_outcome: "changed", ...stepEvidence(1, 2) },
+        { repair_outcome: "changed", ...stepEvidence(1, 3) },
       ],
       "ask-retry-decision": { decision: "retry", decision_file: "steps/1/decisions/001.md" },
     },
-    ["notify-escalation", "ask-retry-decision", "reset-step-retry", "end"],
+    ["notify-escalation", "ask-retry-decision", "reset-step-retry", "repair-step", "end"],
     { initialVariables: { max_retries: 1 } },
   ),
   scenario(
     "retry exhaustion can replan the unfinished tail",
     {
-      "execute-step": [
-        { evidence_file: "steps/1/plans/001/attempts/1/evidence.md" },
-        { evidence_file: "steps/1/plans/002/attempts/1/evidence.md" },
-      ],
+      "execute-step": [stepEvidence(1, 1), stepEvidence(2, 1)],
       "review-step": [
-        {
-          verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
-          accepted: "no",
-          plan_must_change: "no",
-        },
-        {
-          verdict_file: "steps/1/plans/002/attempts/1/verdict.md",
-          accepted: "yes",
-          plan_must_change: "no",
-        },
+        stepVerdict(1, 1, "repair", "result"),
+        stepVerdict(1, 2, "repair", "result"),
+        stepVerdict(2, 1, "pass"),
       ],
+      "repair-step": { repair_outcome: "changed", ...stepEvidence(1, 2) },
       "ask-retry-decision": { decision: "replan", decision_file: "steps/1/decisions/001.md" },
     },
     ["route-replan-choice", "replan-from-decision", "review-plan", "end"],
@@ -208,11 +238,8 @@ const scenarios: TestScenario[] = [
   scenario(
     "retry exhaustion can finish truthfully incomplete",
     {
-      "review-step": {
-        verdict_file: "steps/1/plans/001/attempts/1/verdict.md",
-        accepted: "no",
-        plan_must_change: "no",
-      },
+      "review-step": [stepVerdict(1, 1, "repair", "result"), stepVerdict(1, 2, "repair", "result")],
+      "repair-step": { repair_outcome: "changed", ...stepEvidence(1, 2) },
       "ask-retry-decision": {
         decision: "finish_incomplete",
         decision_file: "steps/1/decisions/001.md",
@@ -220,105 +247,74 @@ const scenarios: TestScenario[] = [
       "deliver-result": {
         delivery_file: "final/delivery.md",
         delivery_status: "incomplete",
-        summary: "Step 1 and its active obligations remain incomplete by explicit user decision.",
+        summary: "The open step remains incomplete by explicit decision.",
       },
     },
     ["ask-retry-decision", "deliver-result", "end"],
     { initialVariables: { max_retries: 1 } },
   ),
   scenario(
-    "criteria defects are repaired and rechecked",
+    "final review repair returns to the same reviewer",
     {
-      "verify-criteria": [
-        { review_file: "final/criteria/001-review.md", issues_count: 1 },
-        { review_file: "final/criteria/002-review.md", issues_count: 0 },
-      ],
+      "final-review": [finalReview(1, "repair", "deliverable"), finalReview(2, "pass")],
+      "fix-final-review": { repair_outcome: "changed" },
     },
-    ["fix-criteria-gaps", "increment-criteria-review-round", "verify-criteria", "end"],
+    ["fix-final-review", "increment-final-review-round", "final-review", "end"],
   ),
   scenario(
-    "criteria review bound permits explicit incomplete acceptance",
+    "final repair reassessment replans from its exact cause",
     {
-      "verify-criteria": { review_file: "final/criteria/001-review.md", issues_count: 1 },
-      "ask-criteria-review-limit": { decision: "accept_incomplete" },
-      "deliver-result": {
-        delivery_file: "final/delivery.md",
-        delivery_status: "incomplete",
-        summary: "The accepted criteria gap is disclosed.",
+      "final-review": [finalReview(1, "repair", "deliverable"), finalReview(2, "pass")],
+      "fix-final-review": {
+        repair_outcome: "reassess",
+        reassessment_file: "final/reviews/001-reassess.md",
       },
     },
-    ["ask-criteria-review-limit", "final-review", "end"],
+    ["route-final-repair-outcome", "replan-from-final-reassess", "review-plan", "end"],
+  ),
+  scenario(
+    "final reviewer can request direct replan",
+    { "final-review": [finalReview(1, "replan"), finalReview(2, "pass")] },
+    ["route-final-review-replan", "replan-from-final-review", "review-plan", "end"],
+  ),
+  scenario(
+    "final review bound can authorize one changed repair",
+    {
+      "final-review": [finalReview(1, "repair", "deliverable"), finalReview(2, "pass")],
+      "ask-final-review-limit": { decision: "repair" },
+    },
+    ["ask-final-review-limit", "reset-final-for-repair", "fix-final-review", "end"],
     { initialVariables: { max_review_rounds: 1 } },
   ),
   scenario(
-    "final review defects return through criteria verification",
+    "final review bound can accept an explicitly incomplete result",
     {
-      "verify-criteria": [
-        { review_file: "final/criteria/001-review.md", issues_count: 0 },
-        { review_file: "final/criteria/002-review.md", issues_count: 0 },
-      ],
-      "final-review": [
-        { review_file: "final/reviews/001-review.md", issues_count: 1 },
-        { review_file: "final/reviews/002-review.md", issues_count: 0 },
-      ],
-    },
-    ["fix-final-review", "increment-final-review-round", "verify-criteria", "end"],
-  ),
-  scenario(
-    "final review bound permits explicit incomplete acceptance",
-    {
-      "final-review": { review_file: "final/reviews/001-review.md", issues_count: 1 },
+      "final-review": finalReview(1, "repair", "deliverable"),
       "ask-final-review-limit": { decision: "accept_incomplete" },
       "deliver-result": {
         delivery_file: "final/delivery.md",
         delivery_status: "incomplete",
-        summary: "The accepted final-review findings are disclosed.",
+        summary: "The accepted final finding is disclosed.",
       },
     },
     ["ask-final-review-limit", "deliver-result", "end"],
     { initialVariables: { max_review_rounds: 1 } },
   ),
   scenario(
-    "each bounded quality loop can continue after explicit repair authorization",
+    "teleport replan preserves completed work and returns through review",
     {
-      "review-plan": [{ issues_count: 1 }, { issues_count: 0 }],
-      "ask-plan-review-limit": { decision: "repair" },
-      "verify-criteria": [
-        { review_file: "final/criteria/001-review.md", issues_count: 1 },
-        { review_file: "final/criteria/002-review.md", issues_count: 0 },
-      ],
-      "ask-criteria-review-limit": { decision: "repair" },
-      "final-review": [
-        { review_file: "final/reviews/001-review.md", issues_count: 1 },
-        { review_file: "final/reviews/002-review.md", issues_count: 0 },
-      ],
-      "ask-final-review-limit": { decision: "repair" },
-    },
-    ["reset-plan-review-for-repair", "reset-criteria-for-repair", "reset-final-for-repair", "end"],
-    { initialVariables: { max_review_rounds: 1 } },
-  ),
-  scenario(
-    "teleport replan preserves completed work and returns through approval",
-    {
-      "execute-step": [
-        { evidence_file: "steps/1/plans/001/attempts/1/evidence.md" },
-        { evidence_file: "steps/1/plans/002/attempts/1/evidence.md" },
-      ],
-      "review-step": {
-        verdict_file: "steps/1/plans/002/attempts/1/verdict.md",
-        accepted: "yes",
-        plan_must_change: "no",
-      },
+      "execute-step": [stepEvidence(1, 1), stepEvidence(2, 1)],
+      "review-step": stepVerdict(2, 1, "pass"),
     },
     ["teleport-replan", "review-plan", "approve-plan", "end"],
     { teleportAfter: { afterNode: "execute-step", teleportTo: "teleport-replan" } },
   ),
 ];
 
-describe("Robust Task filesystem-only contract", () => {
+describe("Robust Task cause-aware contract", () => {
   const workflow = loadWorkflow();
 
-  test("keeps only justified durable state and native routing", async () => {
+  test("keeps durable recovery state and cause-owned routing", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
@@ -326,22 +322,19 @@ describe("Robust Task filesystem-only contract", () => {
 
     const serialized = JSON.stringify(workflow);
     for (const removed of [
-      "nofile",
+      "criteria_review_round",
+      "verify-criteria",
       "jsonFingerprint",
-      "canAppend",
       "operation_state",
-      "result_code",
       "fingerprint",
-      "capacity_event",
-      "takeover",
-      "waive_requirement",
+      "proof_token",
+      "source_epoch",
     ]) {
       expect(serialized).not.toContain(removed);
     }
 
+    expect(workflow.metadata.version).toBe("9.0.0");
     expect(node(workflow, "initialize-workspace").directive).toContain("process-id.txt");
-    // Autonomous mode is routed, not schema-driven: the plan-approval gate is entered through its
-    // mode condition, and both notification routes lead to that condition.
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     expect(node(workflow, "route-operating-mode-plan-approval").connections).toEqual({
       true: "check-all-steps-done",
@@ -351,16 +344,23 @@ describe("Robust Task filesystem-only contract", () => {
       default: "route-operating-mode-plan-approval",
       error: "route-operating-mode-plan-approval",
     });
-    for (const bounded of [
-      "ask-plan-review-limit",
-      "ask-retry-decision",
-      "ask-criteria-review-limit",
-      "ask-final-review-limit",
-    ]) {
-      expect(node(workflow, bounded).directive).toContain("`autonomous` mode decide this yourself");
-    }
-    expect(node(workflow, "execute-step").directive).toContain("next unused numeric attempt");
-    expect(node(workflow, "review-step").directive).toContain("independent peer review");
+    expect(node(workflow, "review-plan").inputSchema.properties.review_outcome.enum).toEqual([
+      "pass",
+      "repair",
+      "replan",
+    ]);
+    expect(node(workflow, "review-step").inputSchema.properties.repair_owner.enum).toEqual([
+      "result",
+      "evidence_projection",
+    ]);
+    expect(node(workflow, "repair-step").inputSchema.properties.repair_outcome.enum).toEqual([
+      "changed",
+      "reassess",
+    ]);
+    expect(node(workflow, "final-review").inputSchema.properties.repair_owner.enum).toEqual([
+      "deliverable",
+      "evidence_projection",
+    ]);
     expect(node(workflow, "ask-retry-decision").inputSchema.properties.decision.enum).toEqual([
       "retry",
       "replan",
@@ -372,6 +372,38 @@ describe("Robust Task filesystem-only contract", () => {
       "delivery_status",
       "summary",
     ]);
+  });
+
+  test("keeps direct and reassessment replan sources structurally separate", () => {
+    const pairs = [
+      ["route-plan-review-replan", "replan-from-plan-review", "review"],
+      ["route-plan-repair-outcome", "replan-from-plan-reassess", "reassessment"],
+      ["route-verifier-replan", "replan-from-verdict", "verdict"],
+      ["route-step-repair-outcome", "replan-from-step-reassess", "reassessment"],
+      ["route-final-review-replan", "replan-from-final-review", "review"],
+      ["route-final-repair-outcome", "replan-from-final-reassess", "reassessment"],
+    ] as const;
+
+    for (const [routeId, consumerId, requiredSource] of pairs) {
+      expect(node(workflow, routeId).connections.true).toBe(consumerId);
+      const contract = `${node(workflow, consumerId).directive} ${node(workflow, consumerId).completionCondition}`;
+      expect(contract.toLowerCase()).toContain(requiredSource);
+    }
+    for (const directConsumer of [
+      "replan-from-plan-review",
+      "replan-from-verdict",
+      "replan-from-final-review",
+    ]) {
+      expect(node(workflow, directConsumer).completionCondition.toLowerCase()).not.toContain(
+        "reassessment",
+      );
+    }
+    expect(node(workflow, "replan-from-verdict").completionCondition).toContain(
+      "current verifier verdict cause",
+    );
+    expect(node(workflow, "replan-from-verdict").completionCondition).not.toContain(
+      "repair-producer",
+    );
   });
 
   test("representative routes cover every node and branch", async () => {
