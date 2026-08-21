@@ -15,9 +15,10 @@ See [docs/VISION.md](docs/VISION.md) for product vision and design principles.
 - **Moira Cloud (managed)** — a hosted instance with nothing to operate, at
   [moira-mcp.com](https://moira-mcp.com).
 
-Both run the **same engine and MCP tools**. Cloud adds managed hosting, multi-user
-accounts, and SaaS-only conveniences (e.g. social login); self-host runs single-tenant
-with those gates off by default (`DEPLOYMENT_MODE=self-host`).
+Both run the **same engine and MCP tools**. Self-host is a single-tenant
+private-team deployment with administrator-approved accounts. Cloud adds managed
+hosting and SaaS-only policy and administration, including social login, legal
+consent, email verification, and the broader multi-user administration surface.
 
 ## Architecture
 
