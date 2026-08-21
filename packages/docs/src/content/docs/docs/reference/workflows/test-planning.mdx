@@ -1,105 +1,125 @@
 ---
 title: Test Planning
-description: Test plan creation with P0-P3 prioritization
+description: Reviewed risk-prioritized test plans with schema-validated cases, durable artifacts, and repair-gated coverage
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Workflow for creating structured test plans with risk-based prioritization. Ensures comprehensive coverage across test categories with clear priority definitions.
+`moira/test-planning` creates an independently reviewed test strategy and detailed case plan. It does not implement or execute tests. Use it when you need to decide what should be tested, why it matters, how to verify it, and whether the proposed plan covers the known requirements and risks.
 
 ## Start
 
-```bash
-mcp__moira__start({ workflowId: "test-planning" })
+```js
+mcp__moira__start({
+  workflowId: "moira/test-planning",
+  parentExecutionId: "none"
+})
 ```
+
+The workflow accepts a feature, change, API, page, module, or system together with any available acceptance criteria, user scenarios, constraints, and known risks. The planning agent first inspects available task text, specifications, project documentation, and code. It asks for clarification only when a missing fact materially changes the strategy and cannot be discovered.
+
+## When to choose this workflow
+
+Choose Test Planning when the required result is a reviewed test plan rather than test code or a product change.
+
+| Need | Workflow |
+| --- | --- |
+| Decide coverage, risks, priorities, cases, and expected results | **Test Planning** |
+| Implement or generate executable tests from known requirements or a plan | [Test Generation](/docs/reference/workflows/test-generation/) |
+| Implement a product change together with its tests, documentation, reviews, and delivery evidence | [Software Development Flow](/docs/reference/workflow-templates/#software-development-flow) |
+
+<Aside type="note">
+Do not split one software-development task into separate implementation, testing, and documentation workflow runs when the full development workflow already owns those connected responsibilities. Use Test Planning separately when its durable plan is itself the requested deliverable or an explicit input to later work.
+</Aside>
 
 ## Process
 
 ```mermaid
 flowchart LR
-    A[Requirements] --> B[Risk Analysis]
-    B --> C[Categorize]
-    C --> D[Prioritize]
-    D --> E[Detail]
-    E --> F[Coverage Review]
-    F --> G[Output]
+    A[Plan from project evidence] --> B[Independent review]
+    B --> C{Blocking findings?}
+    C -->|No| D[Present accepted plan]
+    C -->|Yes| E[Repair contract and Markdown]
+    E --> B
+    D --> F[End]
 ```
 
-## Steps
+The planning stage performs the connected work in one responsibility:
 
-| Step | Action | Output |
-|------|--------|--------|
-| 1. Requirements | Collect feature, acceptance criteria, user stories | Requirements doc |
-| 2. Risk Analysis | Analyze what can break, impact, likelihood | Risk assessment |
-| 3. Categorize | Assign tests to categories | Categorized tests |
-| 4. Prioritize | Assign P0-P3 with justification | Prioritized tests |
-| 5. Detail | Write title, preconditions, steps, expected result | Detailed test cases |
-| 6. Coverage Review | Check AC and risk coverage, identify gaps | Coverage report |
-| 7. Output | Final test plan | Complete plan |
+- records the tested scope, evidence, stable acceptance-criterion IDs, scenarios, constraints, assumptions, and unknowns;
+- identifies applicable technical, business, security, data-integrity, compatibility, and operational risks, each with impact and likelihood;
+- selects categories from the real scope and records why relevant categories are excluded;
+- assigns every case a P0–P3 priority and rationale;
+- writes executable steps, an observable expected result, and acceptance-criterion or risk links for every case;
+- recommends automation without running tests.
 
-## Features
+## Durable artifacts
 
-<Aside type="tip">
-Minimum 2 tests per category ensures balanced coverage across all test types.
-</Aside>
+All files are fixed children of one traversal-safe local workspace named `./moira-ws/test-planning-<suffix>`:
 
-### Mandatory Test Categories
+| File | Role |
+| --- | --- |
+| `requirements.md` | Tested scope, evidence sources, acceptance criteria, scenarios, constraints, assumptions, and unknowns |
+| `test-plan.contract.json` | Canonical schema-validated risks and case fields |
+| `test-plan.md` | Ready-to-use Markdown projection plus narrative coverage, exclusions, limitations, and automation recommendations |
+| `review.md` | Complete current independent blocking findings |
 
-| Category | Focus | Minimum |
-|----------|-------|---------|
-| Positive | Happy path scenarios | 2 tests |
-| Negative | Invalid input, error handling | 2 tests |
-| Edge cases | Boundaries, limits | 2 tests |
-| Security | Auth, injection, access control | 2 tests |
-| Performance | Load, response time (if applicable) | 2 tests |
+`test-plan.contract.json` is the source of truth for fields shared with the Markdown plan. The runtime validates the canonical object when it is created and whenever it is repaired. A risk without impact or likelihood, a case without required verifiable fields, an invalid priority, empty steps, or a case with no acceptance-criterion/risk link is rejected before the workflow advances.
 
-### Priority Definitions
+## Categories and priorities
 
-| Priority | Name | Description | Release Impact |
-|----------|------|-------------|----------------|
-| P0 | Blocker | Critical functionality | Cannot release |
-| P1 | Critical | Core features | Must pass before release |
-| P2 | Major | Important features | Should verify |
-| P3 | Minor | Nice to have | Optional |
+Categories are conditional, not a universal checklist. Positive, negative, boundary, security, integration, performance, accessibility, compatibility, recovery, and compliance coverage are included when the tested scope needs them. A relevant omission requires a reason; an irrelevant category is not forced merely to reach a test count.
 
-<Aside type="caution">
-All P0 and P1 tests must pass before release. P0 failures block the release entirely.
-</Aside>
+| Priority | Meaning in the plan |
+| --- | --- |
+| P0 | Release-blocking behavior, data loss, critical security, or another failure that makes release unacceptable |
+| P1 | Release-critical core flow or high-impact risk that must be covered before release |
+| P2 | Important secondary behavior that should be verified |
+| P3 | Lower-impact, cosmetic, or rare behavior that remains useful to record |
 
-### Coverage Check
+P0/P1 assignments must be tied to release-critical behavior or high-impact risks. The workflow plans those checks; it does not claim that they passed because it does not execute them.
 
-| Verification | Question |
-|--------------|----------|
-| AC coverage | All acceptance criteria covered by tests? |
-| Risk coverage | All high-impact risks covered by P0/P1? |
-| Gap analysis | What areas lack test coverage? |
+## Independent review and repair guarantee
 
-### Test Case Template
+The reviewer runs in a separate host-supported context and reads the current files and primary project evidence directly. It checks:
 
-| Field | Description |
-|-------|-------------|
-| Title | Clear, descriptive test name |
-| Priority | P0-P3 with justification |
-| Preconditions | Required setup state |
-| Steps | Numbered action sequence |
-| Expected result | Specific, verifiable outcome |
+- every acceptance criterion and identified risk has appropriate coverage;
+- high-impact and release-critical risks have justified P0/P1 cases;
+- steps and expected results are executable and observable;
+- category exclusions and priority rationales are defensible;
+- identifiers and links are valid;
+- the Markdown projection matches the canonical JSON contract;
+- the plan stays inside its local planning authority.
 
-## Example Node Configuration
+A non-zero finding count can only enter repair. Repair changes the canonical contract or narrative evidence, regenerates the Markdown projection, and returns to the same review. The presentation node is reachable only after a zero-finding review. There is no delivery bypass for known gaps.
+
+## Authority limits
+
+This workflow may inspect project evidence and create its four local planning files. It does not execute tests, modify product code, commit, push, publish, send notifications, or deploy. Test execution can only be recommended for a separately authorized caller or workflow.
+
+## Current connection syntax
+
+Agent directives use named `success` connections, and the review gate uses `true` and `false` branches:
 
 ```json
 {
-  "id": "prioritize-tests",
-  "type": "agent-directive",
-  "directive": "Assign priority P0-P3 to each test case. P0 for blockers, P1 for critical, P2 for major, P3 for minor. Justify each priority assignment.",
-  "completionCondition": "All test cases have priority assigned with justification",
+  "id": "review-gate",
+  "type": "condition",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "issues_count" },
+    "right": 0
+  },
   "connections": {
-    "next": "detail-tests"
+    "true": "present",
+    "false": "repair"
   }
 }
 ```
 
 ## Related
 
-- [Test Generation](/docs/reference/workflows/test-generation/) — For generating test code from plans
-- [PRD Creation](/docs/reference/workflows/prd-creation/) — For defining requirements to test
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+- [Test Generation](/docs/reference/workflows/test-generation/) — implement test code
+- [Software Development Flow](/docs/reference/workflow-templates/#software-development-flow) — implement and verify a complete software change
+- [PRD Creation](/docs/reference/workflows/prd-creation/) — define product requirements and acceptance criteria
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — compare all public workflows

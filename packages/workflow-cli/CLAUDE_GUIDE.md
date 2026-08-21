@@ -13,7 +13,11 @@ npm link
 
 ```bash
 moira-workflow <workflow-file> <command> [options]
+moira-workflow --version
 ```
+
+`--version` prints both the package version and the exact CLI source path. Check it when
+multiple Moira checkouts exist: the path makes a stale global link immediately visible.
 
 ## Commands
 
@@ -29,6 +33,8 @@ moira-workflow flow.json validate
 moira-workflow flow.json list-variables
 moira-workflow flow.json get-variable <name>
 moira-workflow flow.json set-variable <name> <value>
+moira-workflow flow.json set-variable-schema <name> '<json-schema>'
+moira-workflow flow.json set-variable-schema <name> --file <schema.json>
 moira-workflow flow.json delete-variable <name>
 moira-workflow flow.json variables [--usage]
 
@@ -39,6 +45,11 @@ moira-workflow flow.json clone <node-id> <new-id>
 moira-workflow flow.json delete <node-id>
 moira-workflow flow.json move <node-id> --after <target-id>
 moira-workflow flow.json add <nodes.json>
+moira-workflow flow.json replace <node-id> <node.json>
+moira-workflow flow.json set-name "Workflow name"
+moira-workflow flow.json set-slug workflow-slug
+moira-workflow flow.json set-description "Short description"
+moira-workflow flow.json set-description --file <description.txt>
 
 # Versioning
 moira-workflow flow.json set-version <version>
@@ -47,8 +58,13 @@ moira-workflow flow.json set-version <version>
 moira-workflow flow.json export-node <node-id> <output.json>
 moira-workflow flow.json diff <other-file.json>
 moira-workflow flow.json copy <dest.json> [--name "New Name"]
+moira-workflow flow.json sync <existing-dest.json>
 moira-workflow create <file.json> --name "Name"
 ```
+
+`sync` preserves the destination workflow identity (`id`, `slug`, `owner`, and
+`visibility`) and validates the fully synchronized workflow before creating a backup or
+writing. Validation errors leave the destination byte-for-byte unchanged.
 
 ## update Options
 
@@ -78,6 +94,9 @@ moira-workflow dev-flow.json update analyze-step --directive-file ./new-directiv
 
 # Clone a node
 moira-workflow dev-flow.json clone step-1 step-1-copy
+
+# Confirm which checkout supplies a globally linked CLI
+moira-workflow --version
 ```
 
 ## Backups

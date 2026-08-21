@@ -205,22 +205,27 @@ mcp__moira__start({ workflowId: "prd-creation" })
 
 ### ux-design
 
-UX/UI design process with mandatory accessibility verification.
+Execution-bound UX/UI specification with traceable decisions, accessibility intent, independent
+review, and changed repair.
 
 ```mermaid
 flowchart LR
-    A[Users] --> B[Constraints] --> C[Flow] --> D[Microcopy] --> E[A11y] --> F[Prototype]
+    A[Contract] --> B[Package and validation plan] --> C[Independent review]
+    C -->|findings| D[Repair earliest source]
+    D --> C
+    C -->|zero| E[Accept or autonomous delivery]
 ```
 
 | Feature | Description |
 |---------|-------------|
-| Primary persona | Defined before design begins |
-| Design rationale | Alternatives documented |
-| WCAG AA | Mandatory accessibility checklist |
-| Microcopy | Clarity-focused copy guidelines |
+| Durable workspace | Contract, design package, future validation plan, review, and repair account are tied to the current execution |
+| Complete design scope | Users, jobs, pains, constraints, applicable states, flows, layout, microcopy, responsive behavior, accessibility intent, risks, and handoff |
+| Reuse and rationale | Existing primitives are preferred; every new component requires evidence, alternatives, and integration consequences |
+| Independent gate | The same separate reviewer must report exactly zero current blockers after every change |
+| Honest boundary | Produces a specification and plan; it does not implement UI, run research, certify WCAG, publish, or deploy |
 
 ```bash
-mcp__moira__start({ workflowId: "ux-design" })
+mcp__moira__start({ workflowId: "moira/ux-design", parentExecutionId: "none" })
 ```
 
 [See details →](/docs/reference/workflows/ux-design/)

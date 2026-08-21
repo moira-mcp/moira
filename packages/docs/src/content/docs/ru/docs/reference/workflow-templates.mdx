@@ -205,22 +205,27 @@ mcp__moira__start({ workflowId: "prd-creation" })
 
 ### ux-design
 
-Процесс UX/UI дизайна с обязательной проверкой accessibility.
+Привязанная к запуску UX/UI-спецификация с трассируемыми решениями, accessibility intent,
+независимым ревью и обязательным repair.
 
 ```mermaid
 flowchart LR
-    A[Пользователи] --> B[Ограничения] --> C[Flow] --> D[Microcopy] --> E[A11y] --> F[Прототип]
+    A[Contract] --> B[Package и validation plan] --> C[Независимое ревью]
+    C -->|findings| D[Исправление раннего источника]
+    D --> C
+    C -->|ноль| E[Приёмка или autonomous delivery]
 ```
 
 | Особенность | Описание |
 |-------------|----------|
-| Primary persona | Определяется до начала дизайна |
-| Design rationale | Документирование альтернатив |
-| WCAG AA | Обязательный чеклист accessibility |
-| Microcopy | Clarity-focused guidelines |
+| Долговечный workspace | Contract, design package, будущий validation plan, review и repair account привязаны к текущему execution |
+| Полный design scope | Пользователи, jobs, pains, ограничения, применимые состояния, flows, layout, microcopy, responsive behavior, accessibility intent, риски и handoff |
+| Переиспользование и rationale | Существующие примитивы имеют приоритет; новый компонент требует evidence, альтернатив и последствий интеграции |
+| Независимый gate | Один и тот же отдельный reviewer должен вернуть ровно ноль текущих blockers после каждого изменения |
+| Честная граница | Создаёт спецификацию и план, но не реализует UI, не проводит исследование, не сертифицирует WCAG, не публикует и не деплоит |
 
 ```bash
-mcp__moira__start({ workflowId: "ux-design" })
+mcp__moira__start({ workflowId: "moira/ux-design", parentExecutionId: "none" })
 ```
 
 [Подробнее →](/ru/docs/reference/workflows/ux-design/)

@@ -297,3 +297,56 @@ describe("SchemaValidator.formatSchemaForAgent", () => {
     expect(result).toContain("max: 100");
   });
 });
+
+describe("SchemaValidator xContextPathSuffixes", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      design_package_path: { type: "string" },
+      validation_plan_path: { type: "string" },
+    },
+    required: ["design_package_path", "validation_plan_path"],
+    xContextPathSuffixes: {
+      baseContextProperty: "workspace_path",
+      properties: {
+        design_package_path: "/design-package.md",
+        validation_plan_path: "/validation-plan.md",
+      },
+    },
+  };
+  const context = {
+    executionId: "123e4567-e89b-42d3-a456-426614174000",
+    workspace_path: "./moira-ws/ux-design-{{executionId}}",
+  };
+
+  test("accepts paths derived from the current execution workspace", () => {
+    const result = SchemaValidator.validate(
+      {
+        design_package_path:
+          "./moira-ws/ux-design-123e4567-e89b-42d3-a456-426614174000/design-package.md",
+        validation_plan_path:
+          "./moira-ws/ux-design-123e4567-e89b-42d3-a456-426614174000/validation-plan.md",
+      },
+      schema,
+      context,
+    );
+
+    expect(result.isValid).toBe(true);
+  });
+
+  test("rejects otherwise valid paths from another execution", () => {
+    const result = SchemaValidator.validate(
+      {
+        design_package_path: "./moira-ws/ux-design-deadbeef/design-package.md",
+        validation_plan_path: "./moira-ws/ux-design-deadbeef/validation-plan.md",
+      },
+      schema,
+      context,
+    );
+
+    expect(result.isValid).toBe(false);
+    expect(result.errors).toEqual([
+      expect.stringContaining("must equal the current execution path"),
+    ]);
+  });
+});

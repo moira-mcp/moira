@@ -5,399 +5,462 @@
   "id": "31526b3b-d623-4e34-b62d-ef0327e9bd11",
   "metadata": {
     "name": "Test Planning Workflow",
-    "version": "1.2.0",
-    "description": "Structured test plan creation process: REQUIREMENTS -> RISK_ANALYSIS -> CATEGORIZE -> PRIORITIZE -> DETAIL -> COVERAGE_REVIEW -> OUTPUT. Guarantees complete coverage of critical scenarios with P0-P3 prioritization."
+    "version": "2.0.0",
+    "description": "Creates a reviewed, risk-prioritized test plan for a feature, change, API, page, module, or system. It accepts supplied requirements, acceptance criteria, user scenarios, constraints, and risks, and first discovers missing context from available project evidence before asking for material unknowns. The workflow records requirements, analyzes applicable technical, business, security, data-integrity, compatibility, and operational risks, selects only relevant test categories with justified exclusions, and defines traceable P0-P3 cases with executable steps and observable expected results. In one traversal-safe local workspace it writes requirements.md, a schema-validated canonical test-plan.contract.json, and a ready-to-use test-plan.md. An independent file-backed reviewer checks every criterion and risk plus contract-to-Markdown consistency; any finding enters repair and the same review repeats, so delivery is unreachable while known gaps remain. It only creates local planning artifacts: it does not execute tests, change product code, commit, publish, notify, or deploy; test execution may only be recommended for a separately authorized caller or workflow. Choose Test Planning when you need an independently reviewed test strategy and case plan; choose Test Generation when you need test code, or a full development workflow when you need implementation together with tests and documentation."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "requirements"
+        "default": "plan"
       }
     },
     {
-      "id": "requirements",
-      "type": "agent-directive",
-      "directive": "Gather testing requirements.\n\nAsk user or find in documentation:\n1. What are we testing? (feature, API, page, module)\n2. Acceptance criteria (from task/spec) — minimum 1\n3. User stories / use cases — how user will use it\n4. Known constraints (browsers, devices, limits)\n\nIf user doesn't provide AC — ask to clarify or derive from feature description.",
-      "completionCondition": "Gathered: feature description, minimum 1 acceptance criteria, user stories",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "feature": {
-            "type": "string",
-            "description": "What we're testing (feature/module name)"
-          },
-          "acceptance_criteria": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "description": "Acceptance criteria"
-          }
-        },
-        "required": [
-          "feature",
-          "acceptance_criteria"
-        ],
-        "globalInputs": [
-          "user_stories",
-          "constraints"
-        ]
-      },
-      "connections": {
-        "success": "risk-analysis"
-      }
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "result_summary"
+      ]
     },
     {
-      "id": "risk-analysis",
+      "id": "plan",
       "type": "agent-directive",
-      "directive": "Conduct risk analysis for {{requirements.feature}}.\n\nAnswer questions:\n1. What can go wrong? (technical risks)\n2. Which scenarios are business-critical? (data loss, money, reputation)\n3. What broke before in similar features?\n4. Security risks? (authorization, data, injections)\n\nFor each risk specify:\n- description: risk description\n- impact: high/medium/low (how serious if it happens)\n- likelihood: high/medium/low (how probable)",
-      "completionCondition": "Risks identified with impact and likelihood assessment",
+      "directive": "Create a complete risk-based test plan for the user's requested feature, change, API, page, module, or system. First inspect the available task text, specifications, acceptance criteria, project documentation, code, and other non-mutating evidence. Use supplied facts, resolve discoverable gaps yourself, and ask the user only when an unknown materially changes the strategy and cannot be discovered.\n\nCreate exactly one safe relative workspace named `./moira-ws/test-planning-<suffix>`, where `<suffix>` contains only letters, digits, underscores, or hyphens and begins with a letter or digit. Write `requirements.md` with the tested scope, evidence sources, stable acceptance-criterion IDs, relevant scenarios, constraints, assumptions, and explicit unknowns. Identify applicable technical, business, security, data-integrity, compatibility, and operational risks; every retained risk has impact and likelihood. Select test categories from the actual scope. Include positive, negative, boundary, security, integration, performance, accessibility, compatibility, recovery, or compliance coverage only when applicable, and record a reason for each relevant exclusion.\n\nInside that same workspace, write the canonical structured fields to `test-plan.contract.json`. Give each case a stable ID, title, category, P0-P3 priority and rationale, preconditions (an empty list is valid), executable steps, a specific observable expected result, and links to acceptance-criterion and/or risk IDs. P0/P1 cases must cover release-critical behavior and high-impact risks. Write `test-plan.md` beside it as the ready-to-use projection of that exact contract plus scope, assumptions/constraints, category decisions, traceability and coverage explanations, justified exclusions, remaining limitations, and automation recommendations. The JSON contract is the source of truth for overlapping fields; do not create an independently divergent Markdown representation.\n\nReturn only `workspace_path` for the workspace and `plan_contract` as exactly the JSON object persisted at `<workspace_path>/test-plan.contract.json`; the engine validates both here. Do not copy the Markdown body into the response. This workflow may create only these local planning artifacts. It does not execute any tests; it may only recommend test execution for a separately authorized caller or workflow. Do not modify product code, use VCS, publish, notify, or deploy.",
+      "completionCondition": "Requirements, the canonical schema-valid risk/case contract, and its complete ready-to-use Markdown projection exist at the returned safe workspace paths",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "risks": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "description": {
-                  "type": "string"
-                },
-                "impact": {
-                  "type": "string",
-                  "enum": [
-                    "high",
-                    "medium",
-                    "low"
-                  ]
-                },
-                "likelihood": {
-                  "type": "string",
-                  "enum": [
-                    "high",
-                    "medium",
-                    "low"
-                  ]
-                }
-              },
-              "required": [
-                "description",
-                "impact"
-              ]
-            },
-            "description": "List of risks"
-          }
-        },
-        "required": [
-          "risks"
-        ]
-      },
-      "connections": {
-        "success": "categorize"
-      }
-    },
-    {
-      "id": "categorize",
-      "type": "agent-directive",
-      "directive": "Categorize tests for {{requirements.feature}}.\n\n{{test_categories}}\n\nFor each category:\n1. Category name\n2. Description of what we're checking\n3. List of tests (names)\n\nConsider acceptance criteria:\n{{requirements.acceptance_criteria}}\n\nConsider risks:\n{{risk-analysis.risks}}\n\nEach high-risk scenario must have a corresponding test.",
-      "completionCondition": "Tests distributed by categories, minimum 2 tests in each mandatory category",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "categories": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "description": {
-                  "type": "string"
-                },
-                "tests": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
+          "plan_contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "risks": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "impact": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "likelihood": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    }
                   },
-                  "minItems": 2
-                }
-              },
-              "required": [
-                "name",
-                "tests"
-              ]
-            },
-            "description": "Test categories"
-          }
-        },
-        "required": [
-          "categories"
-        ]
-      },
-      "connections": {
-        "success": "prioritize"
-      }
-    },
-    {
-      "id": "prioritize",
-      "type": "agent-directive",
-      "directive": "Prioritize tests.\n\n{{priority_definitions}}\n\nTests from categorization:\n{{categorize.categories}}\n\nFor EACH test specify:\n- test_name: test name\n- priority: P0/P1/P2/P3\n- priority_reason: why this priority\n\nCheck: all high-impact risks covered by P0/P1 tests?",
-      "completionCondition": "Each test has priority P0-P3 with justification",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "prioritized_tests": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "test_name": {
-                  "type": "string"
-                },
-                "category": {
-                  "type": "string"
-                },
-                "priority": {
-                  "type": "string",
-                  "enum": [
-                    "P0",
-                    "P1",
-                    "P2",
-                    "P3"
+                  "required": [
+                    "id",
+                    "statement",
+                    "impact",
+                    "likelihood"
                   ]
-                },
-                "priority_reason": {
-                  "type": "string"
                 }
               },
-              "required": [
-                "test_name",
-                "priority",
-                "priority_reason"
-              ]
+              "cases": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "category": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "priority": {
+                      "type": "string",
+                      "enum": [
+                        "P0",
+                        "P1",
+                        "P2",
+                        "P3"
+                      ]
+                    },
+                    "priority_rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "preconditions": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      }
+                    },
+                    "steps": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 30,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      }
+                    },
+                    "expected_result": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "acceptance_criterion_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      }
+                    },
+                    "risk_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "category",
+                    "priority",
+                    "priority_rationale",
+                    "preconditions",
+                    "steps",
+                    "expected_result",
+                    "acceptance_criterion_ids",
+                    "risk_ids"
+                  ],
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "acceptance_criterion_ids": {
+                          "type": "array",
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "risk_ids": {
+                          "type": "array",
+                          "minItems": 1
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
             },
-            "description": "Prioritized tests"
+            "required": [
+              "risks",
+              "cases"
+            ]
           }
         },
         "required": [
-          "prioritized_tests"
+          "workspace_path",
+          "plan_contract"
+        ],
+        "globalInputs": [
+          "workspace_path"
         ]
       },
       "connections": {
-        "success": "detail"
+        "success": "review"
       }
     },
     {
-      "id": "detail",
+      "id": "review",
       "type": "agent-directive",
-      "directive": "Detail test cases.\n\n{{test_case_template}}\n\nPrioritized tests:\n{{prioritize.prioritized_tests}}\n\nAcceptance criteria for references:\n{{requirements.acceptance_criteria}}\n\nFor each test fill ALL template fields.\n\nIMPORTANT: Expected result must be SPECIFIC and VERIFIABLE.\n❌ Bad: 'works correctly', 'data is saved'\n✅ Good: 'message \"Successfully saved\" is displayed', 'record with fields X, Y, Z appears in DB'",
-      "completionCondition": "Each test has: title, preconditions, steps, expected result, linked requirement",
+      "directive": "Delegate an independent review in a separate host-supported context or child execution. Do not self-review and do not require a client-specific tool name or hard-coded subagent type. The reviewer must read the complete current `{{workspace_path}}/requirements.md`, `{{workspace_path}}/test-plan.contract.json`, `{{workspace_path}}/test-plan.md`, and relevant primary project evidence directly. Do not send copied plan bodies. The reviewer must not execute tests; it may only assess and recommend execution for a separately authorized caller or workflow.\n\nCheck every acceptance criterion and identified risk, category applicability and justified exclusions, P0/P1 coverage of release-critical behavior and high-impact risks, priority rationales, executable steps, observable expected results, identifier traceability, and authority limits. Verify that every overlapping structured field in the Markdown exactly represents the canonical JSON contract. A missing item, malformed or dangling link, uncovered criterion/risk, unjustified exclusion, vague result, inconsistent priority, or contract/Markdown mismatch is blocking.\n\nOverwrite `{{workspace_path}}/review.md` with the complete current reproducible finding set. The reviewer diagnoses only and must not edit the contract or plan. Return `issues_count` equal to the number of blocking findings; zero is valid only when the complete current artifacts pass every check.",
+      "completionCondition": "An independent complete review is stored in review.md and issues_count exactly matches its current blocking findings",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "issues_count"
+        ],
+        "globalInputs": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "review-gate"
+      }
+    },
+    {
+      "id": "review-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "present",
+        "false": "repair"
+      }
+    },
+    {
+      "id": "repair",
+      "type": "agent-directive",
+      "directive": "Read the complete current `{{workspace_path}}/review.md`, `{{workspace_path}}/requirements.md`, `{{workspace_path}}/test-plan.contract.json`, `{{workspace_path}}/test-plan.md`, and relevant primary project evidence. Reproduce every reported finding. Repair confirmed defects at their source: update the canonical JSON contract or narrative evidence as required, then regenerate the Markdown projection so all overlapping fields match exactly. Preserve correct content and authority boundaries. If a finding is false, explain that in the current review evidence; if no meaningful authorized change can be made or the artifacts would remain unchanged, stop and report the blocker instead of submitting an unchanged loop.\n\nPersist the changed `test-plan.contract.json` and `test-plan.md` in the same workspace. Return `plan_contract` as exactly the changed JSON object on disk so the engine applies the same structural validation as initial authorship. Do not return the Markdown body. This workflow does not execute any tests; it may only recommend test execution for a separately authorized caller or workflow. Do not modify product code, use VCS, publish, notify, or deploy.",
+      "completionCondition": "Confirmed findings are repaired in changed canonical/projection artifacts and the returned contract exactly matches the persisted current JSON",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "test_cases": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "title": {
-                  "type": "string"
-                },
-                "preconditions": {
-                  "type": "string"
-                },
-                "steps": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "expected_result": {
-                  "type": "string"
-                },
-                "requirement_ref": {
-                  "type": "string"
-                },
-                "priority": {
-                  "type": "string"
+          "plan_contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "risks": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "impact": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    "likelihood": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "impact",
+                    "likelihood"
+                  ]
                 }
               },
-              "required": [
-                "title",
-                "steps",
-                "expected_result"
-              ]
+              "cases": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "category": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "priority": {
+                      "type": "string",
+                      "enum": [
+                        "P0",
+                        "P1",
+                        "P2",
+                        "P3"
+                      ]
+                    },
+                    "priority_rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "preconditions": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      }
+                    },
+                    "steps": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 30,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      }
+                    },
+                    "expected_result": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "acceptance_criterion_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      }
+                    },
+                    "risk_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "category",
+                    "priority",
+                    "priority_rationale",
+                    "preconditions",
+                    "steps",
+                    "expected_result",
+                    "acceptance_criterion_ids",
+                    "risk_ids"
+                  ],
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "acceptance_criterion_ids": {
+                          "type": "array",
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "risk_ids": {
+                          "type": "array",
+                          "minItems": 1
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
             },
-            "description": "Detailed test cases"
+            "required": [
+              "risks",
+              "cases"
+            ]
           }
         },
         "required": [
-          "test_cases"
+          "plan_contract"
         ]
       },
       "connections": {
-        "success": "coverage-review"
+        "success": "review"
       }
     },
     {
-      "id": "coverage-review",
+      "id": "present",
       "type": "agent-directive",
-      "directive": "Delegate test coverage review to subagent via Task tool.\n\n**CONTEXT:**\n- Acceptance criteria: {{requirements.acceptance_criteria}}\n- Risks: {{risk-analysis.risks}}\n- Test cases: {{detail.test_cases}}\n\n**SUBAGENT TASK:**\nUse Task tool with subagent_type=\"universal-reviewer\" and prompt:\n\n\"YOU ARE a test coverage reviewer.\n\nTASK: Check test plan coverage against requirements and risks.\n\nACCEPTANCE CRITERIA:\n{{requirements.acceptance_criteria}}\n\nIDENTIFIED RISKS:\n{{risk-analysis.risks}}\n\nTEST CASES:\n{{detail.test_cases}}\n\nCHECK:\n1. Are ALL acceptance criteria covered by tests? For each AC specify which tests cover it.\n2. Are ALL high-impact risks covered by P0/P1 tests?\n3. Are there gaps (uncovered areas)?\n4. What additional tests are needed (if gaps exist)?\n\nOUTPUT:\n- Coverage matrix: each requirement → covering tests\n- Risk coverage: each risk → covering tests\n- Gaps found (if any)\n- Recommendations for additional tests\n- issues_count: number of coverage gaps\n\nReturn issues_count = 0 if coverage is complete.\"\n\n**IMPORTANT:** Pass subagent result honestly to output.",
-      "completionCondition": "Coverage matrix built, gaps identified, recommendations provided",
+      "directive": "Read the accepted current `{{workspace_path}}/test-plan.md`, `{{workspace_path}}/test-plan.contract.json`, and `{{workspace_path}}/review.md`. Confirm the review reports zero blocking findings. Present a concise final result that identifies the durable Markdown plan at that exact child path, summarizes its tested scope and P0-P3 strategy, and honestly states any documented remaining limitations. Do not execute tests, rewrite accepted artifacts, or perform external side effects. Return only the bounded `result_summary`.",
+      "completionCondition": "The accepted durable plan is identified with an accurate concise summary and honest limitations",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "coverage",
-          "all_ac_covered",
-          "all_risks_covered"
+          "result_summary"
         ],
         "globalInputs": [
-          "coverage",
-          "gaps",
-          "recommendations",
-          "all_ac_covered",
-          "all_risks_covered"
-        ]
-      },
-      "connections": {
-        "success": "output"
-      }
-    },
-    {
-      "id": "output",
-      "type": "agent-directive",
-      "directive": "Create final test plan for {{requirements.feature}}.\n\nInclude:\n1. **Summary** — test count by priority (P0: X, P1: Y, P2: Z, P3: W)\n2. **Full test case list** — grouped by categories\n3. **Coverage matrix** — which requirements are covered by which tests\n4. **Gaps and recommendations** — if there are uncovered areas\n5. **Automation recommendations** — which tests should be automated first (usually P0/P1)\n\nFormat: ready-to-use document (markdown).",
-      "completionCondition": "Test plan ready and shown to user",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "test_plan_delivered",
-          "total_tests"
-        ],
-        "globalInputs": [
-          "test_plan_delivered",
-          "total_tests",
-          "p0_count",
-          "p1_count",
-          "p2_count",
-          "p3_count"
+          "result_summary"
         ]
       },
       "connections": {
         "success": "end"
       }
-    },
-    {
-      "id": "end",
-      "type": "end"
     }
   ],
   "variableRegistry": {
-    "test_categories": {
+    "workspace_path": {
       "type": "string",
-      "description": "Mandatory test categories for comprehensive coverage",
-      "default": "MANDATORY TEST CATEGORIES:\n\n1. Positive tests (happy path) — main usage scenarios\n2. Negative tests (invalid input, errors) — error handling, invalid input\n3. Edge cases (boundaries, limits) — boundary conditions, limits\n4. Security tests (auth, injection) — authorization, injections, OWASP\n5. Performance tests (if applicable) — load, speed\n\nMinimum 2 tests in each mandatory category."
+      "description": "Traversal-safe relative workspace containing all current Test Planning artifacts at fixed child names",
+      "minLength": 23,
+      "maxLength": 151,
+      "pattern": "^\\./moira-ws/test-planning-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
     },
-    "priority_definitions": {
+    "issues_count": {
+      "type": "integer",
+      "description": "Current independent blocking finding count used by the review gate",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "result_summary": {
       "type": "string",
-      "description": "Test priority definitions P0-P3",
-      "default": "TEST PRIORITIES:\n\nP0: Blocker — cannot release without this. Critical functionality, data loss, security.\nP1: Critical — must pass before release. Main user flows.\nP2: Major — should be checked. Secondary scenarios.\nP3: Minor — nice to have. Cosmetics, rare edge cases.\n\nAll high-risk scenarios must be covered by P0/P1 tests."
-    },
-    "test_case_template": {
-      "type": "string",
-      "description": "Template for writing test cases",
-      "default": "TEST CASE TEMPLATE:\n\n- Title: brief name (what we're testing)\n- Preconditions: what needs to be prepared before test\n- Steps: numbered execution steps\n- Expected result: SPECIFIC verifiable result (not 'works correctly')\n- Linked requirement: reference to AC/user story\n- Priority: P0/P1/P2/P3 with justification"
-    },
-    "all_ac_covered": {
-      "type": "boolean",
-      "description": "Workflow-global all_ac_covered"
-    },
-    "all_risks_covered": {
-      "type": "boolean",
-      "description": "Workflow-global all_risks_covered"
-    },
-    "constraints": {
-      "type": "array",
-      "description": "Workflow-global constraints",
-      "items": {
-        "type": "string"
-      }
-    },
-    "coverage": {
-      "type": "array",
-      "description": "Workflow-global coverage",
-      "items": {
-        "type": "object",
-        "properties": {
-          "requirement": {
-            "type": "string"
-          },
-          "covered_by": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "requirement",
-          "covered_by"
-        ]
-      }
-    },
-    "gaps": {
-      "type": "array",
-      "description": "Workflow-global gaps",
-      "items": {
-        "type": "string"
-      }
-    },
-    "p0_count": {
-      "type": "number",
-      "description": "Workflow-global p0_count"
-    },
-    "p1_count": {
-      "type": "number",
-      "description": "Workflow-global p1_count"
-    },
-    "p2_count": {
-      "type": "number",
-      "description": "Workflow-global p2_count"
-    },
-    "p3_count": {
-      "type": "number",
-      "description": "Workflow-global p3_count"
-    },
-    "recommendations": {
-      "type": "array",
-      "description": "Workflow-global recommendations",
-      "items": {
-        "type": "string"
-      }
-    },
-    "test_plan_delivered": {
-      "type": "string",
-      "description": "Workflow-global test_plan_delivered",
-      "enum": [
-        "yes"
-      ]
-    },
-    "total_tests": {
-      "type": "number",
-      "description": "Workflow-global total_tests"
-    },
-    "user_stories": {
-      "type": "array",
-      "description": "Workflow-global user_stories",
-      "items": {
-        "type": "string"
-      }
+      "description": "Bounded final summary identifying the accepted plan and any remaining limitations",
+      "minLength": 1,
+      "maxLength": 2000
     }
   }
 }

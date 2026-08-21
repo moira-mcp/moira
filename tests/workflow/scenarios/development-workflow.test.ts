@@ -681,7 +681,7 @@ describe("software-development-flow v12", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("12.10.1");
+    expect(workflow.metadata.version).toBe("12.10.3");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -998,6 +998,69 @@ describe("software-development-flow v12", () => {
     };
     expect(delegation.directive).toContain("The reviewer repairs nothing in the repository either");
     expect(delegation.directive).toContain("instead of counting it as a finding");
+  });
+
+  test("review stays on its subject while repair closes the defect class within task scope", () => {
+    const review = workflow.nodes.find((node) => node.id === "review-unit-completeness") as {
+      directive: string;
+      completionCondition: string;
+    };
+    const repair = workflow.nodes.find((node) => node.id === "repair-unit-completeness") as {
+      directive: string;
+      completionCondition: string;
+    };
+
+    // The independent reviewer judges the current unit and uses the rest of the system only as
+    // contract context; finding one problem does not turn the review into a product-wide audit.
+    expect(review.directive).toContain("Scope the review strictly to this approved unit");
+    expect(review.directive).toContain("they are not additional review subjects");
+    expect(review.directive).toContain("Do not turn that diagnosis into a review of other plan units");
+    expect(review.completionCondition).toContain("covers only the current unit");
+
+    // Repair is observably class-wide rather than a point fix: it inventories all occurrences and
+    // requires evidence capable of distinguishing those two states.
+    expect(repair.directive).toContain("Before changing files, treat every finding as a possible defect class");
+    expect(repair.directive).toContain("every materially analogous occurrence within the original task scope");
+    expect(repair.directive).toContain("Repair every confirmed in-scope occurrence consistently");
+    expect(repair.directive).toContain("closure of the whole class from repair of one occurrence");
+    expect(repair.completionCondition).toContain("class-wide regression evidence");
+
+    // Scope and planning are separate decisions: nobody silently widens the task, but evidence that
+    // the approved plan cannot meet an original requirement still requires replanning.
+    expect(review.directive).toContain("the scope boundary does not protect a bad plan");
+    expect(repair.directive).toContain("staying within scope does not mean preserving a bad plan");
+    expect(repair.directive).toContain("beyond the original task boundary");
+  });
+
+  test("semantic reviewers use current mechanical evidence and keep explicit scope boundaries", () => {
+    const reviewerIds = [
+      "review-plan",
+      "review-test-adequacy",
+      "review-architecture",
+      "review-unit-completeness",
+      "validate-documentation",
+      "review-final-semantics",
+    ];
+    for (const id of reviewerIds) {
+      const node = workflow.nodes.find((candidate) => candidate.id === id) as {
+        directive: string;
+      };
+      expect(node.directive).toMatch(/Do not run linters, type checks, test suites, builds/);
+      expect(node.directive).toContain("original task");
+    }
+
+    const planReview = workflow.nodes.find((node) => node.id === "review-plan") as {
+      directive: string;
+    };
+    expect(planReview.directive).toContain("This boundary does not protect an inadequate plan");
+    expect(planReview.directive).toContain("require the plan to change within the original task");
+
+    const architectureReview = workflow.nodes.find((node) => node.id === "review-architecture") as {
+      directive: string;
+    };
+    expect(architectureReview.directive).toContain("Set requires_replan when evidence shows");
+    expect(architectureReview.directive).toContain("route back to planning");
+    expect(architectureReview.directive).toContain("explicitly for the user");
   });
 
   test("documentation is reconciled again only when its subject moved", () => {

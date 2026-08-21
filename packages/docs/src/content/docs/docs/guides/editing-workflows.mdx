@@ -38,6 +38,35 @@ Select "edit" when prompted for action.
   changes.
 </Aside>
 
+### Via the Workflow CLI
+
+Repository authors can use the official `moira-workflow` CLI for file-backed edits. First confirm
+which checkout supplies a globally linked command, especially when several Moira worktrees exist:
+
+```bash
+moira-workflow --version
+```
+
+The output includes both the package version and exact source path. Long descriptions and complete
+variable schemas can be read from files, avoiding fragile shell quoting:
+
+```bash
+moira-workflow ./workflow.json set-description --file ./description.txt
+moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
+```
+
+For a complete planned rewrite, `sync` preserves the destination workflow identity and validates
+the fully synchronized graph before writing. A validation error leaves the destination unchanged.
+The standalone `validate` command exits unsuccessfully when errors exist, so an agent or CI script
+can use it as a real gate.
+
+```bash
+moira-workflow ./workspace/workflow.json sync ./workflows/production/flows/<flow>.json
+moira-workflow ./workflows/production/flows/<flow>.json validate
+```
+
+### How workflow-management-flow handles edits
+
 For an edit, the management workflow loads the complete current workflow and records the edit
 requirements, analysis, plan, and review reports in its workspace. Their contents stay in files;
 the graph carries only small values that affect routing.

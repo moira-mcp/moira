@@ -5,53 +5,73 @@
   "id": "0bad4d93-d199-4fa5-b318-d2d3c5ddc26a",
   "metadata": {
     "name": "Infinite Task Loop",
-    "version": "1.2.0",
-    "description": "Infinite task execution loop for continuous agent work. Runs in a permanent loop: ask → plan → confirm → execute → report → repeat. Only exit via teleport."
+    "version": "2.0.0",
+    "description": "Interactive open-ended session for a live sequence of tasks that are not known in advance. It reuses an already stated current task or asks for one, creates a proportionate task-scoped plan, waits for explicit user plan approval, executes and verifies only authorized work, presents a factual result, and waits for explicit acceptance before returning to next-task intake. Plan revision and result rework both require non-blank feedback and return through the plan gate; each new task atomically clears the prior current plan and result so exit cannot mix iterations. The native exit teleport is available from every step and returns only a bounded truthful session summary, disclosing any history that is no longer observable. State lives only in execution context: there is no durable task ledger, filesystem artifact, crash-recovery contract, or independent reviewer. Plan approval never broadens the original task authority, and separately sensitive side effects still require task and host authorization. Choose Infinite Task Loop for a human-guided stream of not-yet-known tasks. Choose Quick Task for one bounded independently reviewed task, Robust Task for durable recovery and retry, Todo List for a finite known checklist, or Software Development Flow for full software delivery. This workflow is intentionally interactive and is not for unattended batch work."
   },
   "nodes": [
     {
-      "type": "start",
       "id": "start",
+      "type": "start",
       "connections": {
         "default": "ask-task"
-      },
-      "initialData": {}
+      }
     },
     {
-      "type": "agent-directive",
       "id": "ask-task",
-      "directive": "Ask the user what task they want to do next. Everything the user writes IS the task description.\n\n⛔ CRITICAL: Do NOT execute, read, study, or analyze the task. Do NOT perform any actions. Your ONLY job is to capture what the user said in task_description and submit this step IMMEDIATELY. The workflow handles planning and execution in subsequent steps.",
-      "completionCondition": "User described their task and agent submitted step immediately without performing any actions",
+      "type": "agent-directive",
+      "directive": "Obtain the next task for this live interactive session. If the user already stated a concrete task in the request that started or continued this workflow, reuse it without asking again. Otherwise ask what they want done next and wait for the actual answer. Preserve the user's meaning and constraints in task_description; do not plan, inspect, or execute the task yet.\n\nA request to stop, exit, leave, or finish the session is not a task. In that case do not submit task_description: call step for this execution with teleportTo \"teleport-exit\" and no input.",
+      "completionCondition": "One concrete non-exit task has been captured faithfully from an existing explicit request or the user's actual answer, without planning or execution",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "task_description": {
-            "type": "string",
-            "minLength": 10,
-            "description": "Full description of the task the user wants done"
-          }
-        },
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "task_description"
+        ],
         "required": [
           "task_description"
         ]
       },
       "connections": {
-        "success": "understand-and-plan"
+        "success": "reset-current-task-state"
       }
     },
     {
-      "type": "agent-directive",
+      "id": "reset-current-task-state",
+      "type": "expression",
+      "expressions": [
+        "execution_plan = \"\"",
+        "execution_summary = \"\""
+      ],
+      "connections": {
+        "default": "understand-and-plan"
+      }
+    },
+    {
       "id": "understand-and-plan",
-      "directive": "Analyze the task and create a precise execution plan.\n\nTask: {{ask-task.task_description}}\nPrevious attempt feedback (if returning from results rejection): {{user_feedback}}\n\n⛔ This step is MANDATORY for ALL tasks — no matter how simple or small. No task is too small to skip planning.\n\nThis is for PLANNING and ANALYSIS only — do NOT start executing the task.\n\nBreak the task down into clear, specific, actionable steps. Consider edge cases and potential issues. The plan should be detailed enough that you can follow it step by step.",
-      "completionCondition": "Execution plan created with specific actionable steps",
+      "type": "agent-directive",
+      "directive": "Analyze only the current task and create a concrete execution plan.\n\nCurrent task: {{task_description}}\n\nPlanning is mandatory for every task in this workflow, but keep it proportionate to the task. Discover applicable host and project instructions, dependencies, authority boundaries, observable success criteria, edge cases, and verification. The plan may decompose only the user's current task; it cannot grant new authority or perform the work. Do not execute anything in this step.",
+      "completionCondition": "A proportionate actionable plan for the current task exists, covers its constraints, authority boundaries, risks, and observable verification, and no task work has been executed",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
+        "globalInputs": [
+          "execution_plan"
+        ],
         "required": [
           "execution_plan"
         ],
-        "globalInputs": [
-          "execution_plan"
+        "allOf": [
+          {
+            "properties": {
+              "execution_plan": {
+                "type": "string",
+                "minLength": 20,
+                "pattern": "\\S"
+              }
+            }
+          }
         ]
       },
       "connections": {
@@ -59,27 +79,51 @@
       }
     },
     {
-      "type": "agent-directive",
       "id": "present-plan",
-      "directive": "Present the execution plan to the user and ask for their confirmation.\n\nPlan:\n{{execution_plan}}\n\n⛔ MANDATORY USER CONFIRMATION: You MUST ask the user and wait for their ACTUAL response. NEVER auto-approve. NEVER skip this confirmation under ANY circumstances. If you do not have a real response from the user — you have NOT completed this step.\n\nCRITICALLY IMPORTANT — REACTION TO FEEDBACK:\nIf user said 'yes' / approved → plan_approved = 'yes'.\nIf user gave ANY feedback, corrections, or said 'no' → plan_approved = 'no'.\nDO NOT fix the plan yourself! Set plan_approved = 'no' and write the user's feedback in user_feedback. The workflow will route to the revision branch automatically.",
-      "completionCondition": "User has reviewed the plan and provided approval or feedback",
+      "type": "agent-directive",
+      "directive": "Present the current execution plan to the user and wait for their actual decision.\n\nCurrent task: {{task_description}}\nCurrent plan: {{execution_plan}}\n\nExplain that approving the plan permits execution only within the authority of the original task; it does not authorize a materially different side effect. Return plan_decision \"approve\" only for explicit approval. For any rejection, correction, or requested change return \"revise\" and preserve the user's non-blank feedback exactly enough for the revision owner. Never infer approval from silence or engagement, and do not revise or execute in this step.",
+      "completionCondition": "The user has actually reviewed the current plan and explicitly approved it or supplied non-blank revision feedback, with no execution performed",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "plan_approved": {
+          "plan_decision": {
             "type": "string",
             "enum": [
-              "yes",
-              "no"
+              "approve",
+              "revise"
             ],
-            "description": "Whether user approved the plan"
+            "description": "The user's actual decision on the current plan"
+          },
+          "user_feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "pattern": "\\S",
+            "description": "Required non-blank user feedback when the plan must be revised"
           }
         },
         "required": [
-          "plan_approved"
+          "plan_decision"
         ],
-        "globalInputs": [
-          "user_feedback"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "plan_decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "plan_decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "user_feedback"
+              ]
+            }
+          }
         ]
       },
       "connections": {
@@ -87,14 +131,14 @@
       }
     },
     {
-      "type": "condition",
       "id": "route-plan-approved",
+      "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "present-plan.plan_approved"
+          "contextPath": "present-plan.plan_decision"
         },
-        "right": "yes"
+        "right": "approve"
       },
       "connections": {
         "true": "execute-task",
@@ -102,18 +146,30 @@
       }
     },
     {
-      "type": "agent-directive",
       "id": "revise-plan",
-      "directive": "Revise the execution plan based on user feedback.\n\nOriginal task: {{ask-task.task_description}}\nPrevious plan: {{execution_plan}}\nUser feedback: {{user_feedback}}\n\nCreate an updated plan that addresses the feedback.\n\n⛔ You MUST present the revised plan to the user in the next step. NEVER auto-continue without user seeing the plan.",
-      "completionCondition": "Plan revised to address user feedback",
+      "type": "agent-directive",
+      "directive": "Revise the current execution plan using the user's plan feedback.\n\nCurrent task: {{task_description}}\nPrevious plan: {{execution_plan}}\nUser feedback: {{present-plan.user_feedback}}\n\nAddress the feedback without expanding the task or its authority. Produce a complete replacement plan; do not execute it. The same user plan-decision gate will inspect the changed plan next.",
+      "completionCondition": "The current plan has materially changed to address the user's non-blank feedback while preserving task scope and authority, and no execution has occurred",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
+        "globalInputs": [
+          "execution_plan"
+        ],
         "required": [
           "execution_plan"
         ],
-        "globalInputs": [
-          "execution_plan"
+        "allOf": [
+          {
+            "properties": {
+              "execution_plan": {
+                "type": "string",
+                "minLength": 20,
+                "pattern": "\\S"
+              }
+            }
+          }
         ]
       },
       "connections": {
@@ -121,21 +177,30 @@
       }
     },
     {
-      "type": "agent-directive",
       "id": "execute-task",
-      "directive": "Execute the task according to the approved plan.\n\nTask: {{ask-task.task_description}}\nPlan: {{execution_plan}}\n\nDo the work thoroughly. Follow each step of the plan. Verify results as you go.",
-      "completionCondition": "Task executed according to the plan with verifiable results",
+      "type": "agent-directive",
+      "directive": "Execute the current task according to the explicitly approved current plan.\n\nCurrent task: {{task_description}}\nApproved plan: {{execution_plan}}\n\nFollow applicable host and project instructions, inspect real dependencies, perform proportionate verification, and report factual outcomes. Plan approval does not broaden the original task authority. Credentials, destructive work, publication, deployment, notification, production mutation, financial action, or communication to another person still require authority from the original task and any separate consent required by the host contract. If authority, information, or external state is missing, report the verified blocker instead of performing or claiming the action. Never describe incomplete or failed work as completed.",
+      "completionCondition": "The authorized current task has been executed to the extent actually possible under the approved plan, proportionate verification has been performed, and the execution summary truthfully distinguishes completed work, failures, and blockers",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "execution_summary": {
-            "type": "string",
-            "minLength": 20,
-            "description": "Summary of what was done and the results"
-          }
-        },
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "execution_summary"
+        ],
         "required": [
           "execution_summary"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "execution_summary": {
+                "type": "string",
+                "minLength": 20,
+                "pattern": "\\S"
+              }
+            }
+          }
         ]
       },
       "connections": {
@@ -143,27 +208,51 @@
       }
     },
     {
-      "type": "agent-directive",
       "id": "report-results",
-      "directive": "Report the execution results to the user and ask if they are satisfied.\n\nTask: {{ask-task.task_description}}\nWhat was done: {{execute-task.execution_summary}}\n\nPresent the results clearly and ask the user if the outcome is acceptable.\n\n⛔ MANDATORY USER CONFIRMATION: You MUST ask the user and wait for their ACTUAL response. NEVER auto-approve. NEVER skip this confirmation under ANY circumstances. If you do not have a real response from the user — you have NOT completed this step.\n\nCRITICALLY IMPORTANT — REACTION TO FEEDBACK:\nIf user said 'yes' / approved → results_approved = 'yes'.\nIf user gave ANY feedback or said 'no' → results_approved = 'no'.\nDO NOT fix issues yourself! Set results_approved = 'no' and write the feedback in user_feedback. The workflow will route to full re-planning cycle automatically.",
-      "completionCondition": "User has reviewed results and provided approval or feedback",
+      "type": "agent-directive",
+      "directive": "Present the factual result of the current task and wait for the user's actual decision.\n\nCurrent task: {{task_description}}\nExecution result: {{execution_summary}}\n\nDo not overstate completion or hide recorded blockers. Return result_decision \"accept\" only when the user explicitly accepts this result. For any rejection, correction, or requested rework return \"rework\" and preserve the user's non-blank feedback for the result-replanning owner. Never infer acceptance from silence or engagement, and do not repair work in this step.",
+      "completionCondition": "The user has actually reviewed the factual current result and explicitly accepted it or supplied non-blank rework feedback",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "results_approved": {
+          "result_decision": {
             "type": "string",
             "enum": [
-              "yes",
-              "no"
+              "accept",
+              "rework"
             ],
-            "description": "Whether user approved the results"
+            "description": "The user's actual decision on the current task result"
+          },
+          "user_feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "pattern": "\\S",
+            "description": "Required non-blank user feedback when the result must be reworked"
           }
         },
         "required": [
-          "results_approved"
+          "result_decision"
         ],
-        "globalInputs": [
-          "user_feedback"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result_decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "result_decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "user_feedback"
+              ]
+            }
+          }
         ]
       },
       "connections": {
@@ -171,48 +260,65 @@
       }
     },
     {
-      "type": "condition",
       "id": "route-results-approved",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "report-results.results_approved"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "loop-back",
-        "false": "understand-and-plan"
-      }
-    },
-    {
       "type": "condition",
-      "id": "loop-back",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "always_exit"
+          "contextPath": "report-results.result_decision"
         },
-        "right": "yes"
+        "right": "accept"
       },
       "connections": {
-        "true": "end",
-        "false": "ask-task"
+        "true": "ask-task",
+        "false": "replan-after-results"
       }
     },
     {
-      "type": "teleport",
-      "id": "teleport-exit",
-      "hint": "Use when you want to exit the infinite task loop and end the session",
-      "directive": "The user wants to exit the task loop. Provide a brief summary of all tasks completed during this session.",
-      "completionCondition": "Session summary provided",
+      "id": "replan-after-results",
+      "type": "agent-directive",
+      "directive": "Create a complete replacement plan for reworking the same current task from the user's result feedback.\n\nCurrent task: {{task_description}}\nPrevious plan: {{execution_plan}}\nExecution result: {{execution_summary}}\nUser feedback: {{report-results.user_feedback}}\n\nUse the observed result and feedback to change the approach while preserving the original task and authority. Do not execute work here. The changed plan must return to the ordinary user plan-decision gate before any re-execution.",
+      "completionCondition": "A materially changed replacement plan addresses the rejected result and non-blank user feedback for the same task without execution",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
+        "globalInputs": [
+          "execution_plan"
+        ],
         "required": [
+          "execution_plan"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "execution_plan": {
+                "type": "string",
+                "minLength": 20,
+                "pattern": "\\S"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "present-plan"
+      }
+    },
+    {
+      "id": "teleport-exit",
+      "type": "teleport",
+      "hint": "Use when the user explicitly wants to stop, exit, leave, or finish this interactive task-loop session",
+      "directive": "The user explicitly requested exit from the interactive task loop. Produce a concise truthful session summary using only work observable in the current agent/session context. The workflow stores no durable task ledger, so if earlier completed tasks are not fully observable, state that limitation instead of inventing a complete history.\n\n{{#if task_description}}Current task: {{task_description}}{{else}}No current task has been captured in workflow state.{{/if}}\n{{#if execution_plan}}Current task plan: {{execution_plan}}{{else}}No plan has been produced for the current task.{{/if}}\n{{#if execution_summary}}Current task result: {{execution_summary}}{{else}}No execution result has been produced for the current task.{{/if}}\n\nDo not perform more task work or imply durable recovery.",
+      "completionCondition": "A bounded truthful session summary has been produced; it reports only observable completed work and explicitly discloses any unavailable earlier history",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
           "session_summary"
         ],
-        "globalInputs": [
+        "required": [
           "session_summary"
         ]
       },
@@ -221,32 +327,37 @@
       }
     },
     {
-      "type": "end",
       "id": "end",
+      "type": "end",
       "finalOutput": [
-        "session_summary",
-        "task_description",
-        "execution_summary"
+        "session_summary"
       ]
     }
   ],
   "variableRegistry": {
-    "always_exit": {
-      "type": "string",
-      "description": "Workflow-global always_exit"
-    },
     "execution_plan": {
       "type": "string",
-      "description": "Workflow-global execution_plan",
-      "minLength": 20
+      "maxLength": 20000,
+      "description": "Current task plan; empty only between successful task intake and its plan writer"
     },
     "session_summary": {
       "type": "string",
-      "description": "Workflow-global session_summary"
+      "minLength": 1,
+      "maxLength": 20000,
+      "pattern": "\\S",
+      "description": "Truthful bounded exit summary based only on observable session work"
     },
-    "user_feedback": {
+    "task_description": {
       "type": "string",
-      "description": "Workflow-global user_feedback"
+      "minLength": 1,
+      "maxLength": 20000,
+      "pattern": "\\S",
+      "description": "Exact current non-exit task supplied by the user"
+    },
+    "execution_summary": {
+      "type": "string",
+      "maxLength": 20000,
+      "description": "Current task execution summary; empty until the current task has been executed"
     }
   }
 }

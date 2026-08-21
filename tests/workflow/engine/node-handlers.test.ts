@@ -215,6 +215,46 @@ describe("Node Handlers", () => {
       });
     });
 
+    test("should resolve engine-owned system variables in condition context paths", async () => {
+      const handler = new ConditionHandler();
+      const context = TestUtils.createTestContext({
+        submittedExecutionId: "test-execution-id",
+      });
+
+      const conditionNode: ConditionNode = {
+        type: "condition",
+        id: "execution-id-check",
+        condition: {
+          operator: "eq",
+          left: { contextPath: "submittedExecutionId" },
+          right: { contextPath: "executionId" },
+        },
+        connections: {
+          true: "matching-execution",
+          false: "wrong-execution",
+        },
+      };
+
+      const mockStorage = {} as IGraphStorage;
+      const mockEngine = {} as IGraphExecutionEngine;
+      const result = await handler.execute(
+        conditionNode,
+        context,
+        new AgentMessageQueue(),
+        mockStorage,
+        mockEngine,
+      );
+
+      expect(result.outputPath).toBe("true");
+      expect(result.data).toMatchObject({
+        conditionResult: true,
+        evaluatedValues: {
+          submittedExecutionId: "test-execution-id",
+          executionId: "test-execution-id",
+        },
+      });
+    });
+
     test("should handle AND compound condition", async () => {
       const handler = new ConditionHandler();
       const context = TestUtils.createTestContext({ score: 8, status: "approved" });

@@ -1,370 +1,332 @@
 /**
- * test-planning Scenario Tests
+ * Contract and behavioral scenarios for moira/test-planning.
  *
- * Linear test planning workflow for creating test plans with prioritization.
- * Path: requirements → risk-analysis → categorize → prioritize → detail → coverage-review → output → end
- *
- * Coverage target: 100% nodes (9), 100% branches
+ * The flow writes one canonical structured contract and one Markdown projection, validates
+ * structural records at the real agent-response boundary, and can deliver only after an
+ * independent zero-finding review.
  */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import {
   runScenario,
-  type TestScenario,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("test-planning", "public")!.graph as WorkflowGraph;
+type PlanRisk = {
+  id: string;
+  statement: string;
+  impact: string;
+  likelihood: string;
+};
+
+type PlanCase = {
+  id: string;
+  title: string;
+  category: string;
+  priority: "P0" | "P1" | "P2" | "P3";
+  priority_rationale: string;
+  preconditions: string[];
+  steps: string[];
+  expected_result: string;
+  acceptance_criterion_ids: string[];
+  risk_ids: string[];
+};
+
+type PlanContract = { risks: PlanRisk[]; cases: PlanCase[] };
+
+const catalogEntry = findSystemCatalogEntry("test-planning", "public")!;
+
+function loadWorkflow(): WorkflowGraph {
+  return structuredClone(catalogEntry.graph) as WorkflowGraph;
 }
 
-describe("test-planning Scenarios", () => {
+function node(workflow: WorkflowGraph, id: string): any {
+  const found = workflow.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
+}
+
+function validContract(title = "Successful checkout charges once"): PlanContract {
+  return {
+    risks: [
+      {
+        id: "R-1",
+        statement: "A retry can create a duplicate charge",
+        impact: "High: customer is charged twice",
+        likelihood: "Medium under a timeout and retry",
+      },
+    ],
+    cases: [
+      {
+        id: "TC-1",
+        title,
+        category: "Integration and data integrity",
+        priority: "P0",
+        priority_rationale: "Duplicate charging is release-blocking",
+        preconditions: ["A payable cart and deterministic payment test double exist"],
+        steps: ["Submit checkout", "Simulate a timeout", "Retry the same idempotency key"],
+        expected_result: "Exactly one charge and one order exist for the idempotency key",
+        acceptance_criterion_ids: ["AC-1"],
+        risk_ids: ["R-1"],
+      },
+    ],
+  };
+}
+
+function validPlanInput(contract = validContract()): Record<string, unknown> {
+  return {
+    workspace_path: "./moira-ws/test-planning-checkout_20260820",
+    plan_contract: contract,
+  };
+}
+
+async function runInvalidPlan(input: Record<string, unknown>): Promise<ScenarioResult> {
+  return runScenario(loadWorkflow(), {
+    name: "malformed producer response",
+    description: "The actual engine must reject malformed producer data before review",
+    mockInputs: { plan: input },
+    expect: { status: "completed" },
+  });
+}
+
+function compactRoute(result: ScenarioResult): string[] {
+  return result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+}
+
+describe("test-planning", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
-    workflow = loadProductionWorkflow();
+    workflow = loadWorkflow();
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "test-planning"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
+  test("preserves catalog identity and has the intended valid clean-or-repair graph", async () => {
+    expect(catalogEntry.owner).toBe("system-moira");
+    expect(catalogEntry.slug).toBe("test-planning");
+    expect(catalogEntry.visibility).toBe("public");
+    expect(workflow.id).toBe("31526b3b-d623-4e34-b62d-ef0327e9bd11");
+    expect(workflow.metadata.version).toBe("2.0.0");
 
-    it("should have no cycles (linear workflow)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles).toHaveLength(0);
+    const validation = await new GraphValidator().validateUnified(workflow);
+    expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(workflow.nodes.map((candidate) => candidate.id)).toEqual([
+      "start",
+      "end",
+      "plan",
+      "review",
+      "review-gate",
+      "repair",
+      "present",
+    ]);
+    expect(node(workflow, "review-gate").connections).toEqual({
+      true: "present",
+      false: "repair",
     });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(9);
-    });
+    expect(node(workflow, "repair").connections).toEqual({ success: "review" });
+    expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        // Scenario 1: Complete test planning flow
-        {
-          name: "Complete test planning workflow",
-          description: "Full test planning with all phases",
-          expect: { status: "completed" },
-          mockInputs: {
-            requirements: {
-              feature: "E-commerce checkout",
-              acceptance_criteria: [
-                "Cart displays correct total",
-                "Payment processes successfully",
-                "Order confirmation email sent",
-              ],
-              user_stories: ["As a customer, I want to checkout my cart"],
-            },
-            "risk-analysis": {
-              risks: [
-                { description: "Payment processing failure", impact: "high", likelihood: "medium" },
-                { description: "Inventory sync issues", impact: "medium", likelihood: "low" },
-              ],
-            },
-            categorize: {
-              categories: [
-                {
-                  name: "functional",
-                  description: "Core functionality",
-                  tests: ["Cart operations", "Payment flow"],
-                },
-                {
-                  name: "performance",
-                  description: "Speed and load",
-                  tests: ["Checkout load time", "Page render"],
-                },
-                {
-                  name: "security",
-                  description: "Security checks",
-                  tests: ["Payment data handling", "Auth validation"],
-                },
-              ],
-            },
-            prioritize: {
-              prioritized_tests: [
-                {
-                  test_name: "Payment success",
-                  priority: "P0",
-                  priority_reason: "Critical business function",
-                },
-                {
-                  test_name: "Cart total calculation",
-                  priority: "P0",
-                  priority_reason: "Must be accurate for billing",
-                },
-                {
-                  test_name: "Shipping cost",
-                  priority: "P1",
-                  priority_reason: "Important for user experience",
-                },
-                { test_name: "UI animations", priority: "P3", priority_reason: "Nice to have" },
-              ],
-            },
-            detail: {
-              test_cases: [
-                {
-                  title: "TC001: Verify cart total",
-                  steps: ["Add item", "Check total"],
-                  expected_result: "Total matches sum of items",
-                },
-                {
-                  title: "TC002: Complete payment",
-                  steps: ["Enter card", "Submit"],
-                  expected_result: "Payment confirmed message displayed",
-                },
-              ],
-            },
-            "coverage-review": {
-              coverage: [
-                { requirement: "Cart displays correct total", covered_by: ["TC001"] },
-                { requirement: "Payment processes successfully", covered_by: ["TC002"] },
-              ],
-              all_ac_covered: true,
-              all_risks_covered: true,
-              gaps: ["Partial refund scenario"],
-            },
-            output: {
-              test_plan_delivered: "yes",
-              total_tests: 45,
-              p0_count: 10,
-              p1_count: 15,
-              p2_count: 12,
-              p3_count: 8,
-            },
-          },
-        },
+  test("publishes a decision-useful and truthful description with the no-test authority boundary", () => {
+    const description = workflow.metadata.description;
+    expect(description).toContain("discovers missing context");
+    expect(description).toContain("test-plan.contract.json");
+    expect(description).toContain("test-plan.md");
+    expect(description).toContain("independent file-backed reviewer");
+    expect(description).toContain("delivery is unreachable while known gaps remain");
+    expect(description).toContain("does not execute tests");
+    expect(description).toContain("separately authorized caller or workflow");
+    expect(description).toContain("Choose Test Planning");
+    expect(description).toContain("Test Generation");
+    expect(description).toContain("full development workflow");
 
-        // Scenario 2: Simple test planning
-        {
-          name: "Simple test planning",
-          description: "Minimal test planning for small feature",
-          expect: { status: "completed" },
-          mockInputs: {
-            requirements: {
-              feature: "Login form",
-              acceptance_criteria: ["User can log in", "Error on wrong password"],
-            },
-            "risk-analysis": {
-              risks: [
-                {
-                  description: "Credential handling vulnerability",
-                  impact: "high",
-                  likelihood: "medium",
-                },
-              ],
-            },
-            categorize: {
-              categories: [
-                {
-                  name: "functional",
-                  description: "Login functionality",
-                  tests: ["Login success", "Login failure"],
-                },
-                {
-                  name: "security",
-                  description: "Auth security",
-                  tests: ["Password validation", "Session handling"],
-                },
-              ],
-            },
-            prioritize: {
-              prioritized_tests: [
-                {
-                  test_name: "Login success",
-                  priority: "P0",
-                  priority_reason: "Core auth function",
-                },
-                {
-                  test_name: "Login failure",
-                  priority: "P0",
-                  priority_reason: "Security critical",
-                },
-              ],
-            },
-            detail: {
-              test_cases: [
-                {
-                  title: "TC001: Login test",
-                  steps: ["Enter creds", "Submit"],
-                  expected_result: "User redirected to dashboard",
-                },
-              ],
-            },
-            "coverage-review": {
-              coverage: [
-                { requirement: "User can log in", covered_by: ["TC001"] },
-                { requirement: "Error on wrong password", covered_by: ["TC001"] },
-              ],
-              all_ac_covered: true,
-              all_risks_covered: true,
-            },
-            output: {
-              test_plan_delivered: "yes",
-              total_tests: 10,
-            },
-          },
-        },
+    for (const id of ["plan", "review", "repair", "present"]) {
+      expect(node(workflow, id).directive).toMatch(
+        /(does not|must not|Do not) execute (any )?tests/i,
+      );
+    }
+  });
 
-        // Scenario 3: Comprehensive test planning
-        {
-          name: "Comprehensive test planning",
-          description: "Detailed test planning for complex system",
-          expect: { status: "completed" },
-          mockInputs: {
-            requirements: {
-              feature: "Banking API",
-              acceptance_criteria: [
-                "Account balance accurate",
-                "Transactions atomic",
-                "Audit trail complete",
-              ],
-              user_stories: ["As a user, I can view my balance", "As a user, I can transfer money"],
-              constraints: ["Must meet SOX compliance", "Latency < 200ms"],
-            },
-            "risk-analysis": {
-              risks: [
-                {
-                  description: "Money transfer accuracy issues",
-                  impact: "high",
-                  likelihood: "medium",
-                },
-                {
-                  description: "Concurrent transaction failures",
-                  impact: "high",
-                  likelihood: "high",
-                },
-                { description: "Data consistency problems", impact: "high", likelihood: "medium" },
-              ],
-            },
-            categorize: {
-              categories: [
-                {
-                  name: "functional",
-                  description: "Core operations",
-                  tests: ["CRUD operations", "Business rules"],
-                },
-                {
-                  name: "performance",
-                  description: "Load and stress",
-                  tests: ["Load testing", "Stress testing"],
-                },
-                {
-                  name: "security",
-                  description: "Security validation",
-                  tests: ["Auth", "Encryption"],
-                },
-                {
-                  name: "compliance",
-                  description: "Regulatory compliance",
-                  tests: ["SOX controls", "PCI requirements"],
-                },
-                {
-                  name: "integration",
-                  description: "External systems",
-                  tests: ["Core banking", "Payment gateway"],
-                },
-              ],
-            },
-            prioritize: {
-              prioritized_tests: [
-                {
-                  test_name: "Account balance accuracy",
-                  priority: "P0",
-                  priority_reason: "Financial accuracy critical",
-                },
-                {
-                  test_name: "Transfer atomicity",
-                  priority: "P0",
-                  priority_reason: "Data integrity required",
-                },
-                {
-                  test_name: "Authentication",
-                  priority: "P0",
-                  priority_reason: "Security critical",
-                },
-                {
-                  test_name: "Transaction history",
-                  priority: "P1",
-                  priority_reason: "Important for audit",
-                },
-                {
-                  test_name: "Report scheduling",
-                  priority: "P2",
-                  priority_reason: "Convenience feature",
-                },
-                { test_name: "Dashboard widgets", priority: "P3", priority_reason: "Nice to have" },
-              ],
-            },
-            detail: {
-              test_cases: [
-                {
-                  title: "TC001: Balance check",
-                  steps: ["Query API", "Verify response"],
-                  expected_result: "Balance matches expected value",
-                },
-                {
-                  title: "TC002: Transfer test",
-                  steps: ["Init transfer", "Confirm", "Verify"],
-                  expected_result: "Funds transferred atomically",
-                },
-              ],
-            },
-            "coverage-review": {
-              coverage: [
-                { requirement: "Account balance accurate", covered_by: ["TC001"] },
-                { requirement: "Transactions atomic", covered_by: ["TC002"] },
-                { requirement: "Audit trail complete", covered_by: ["TC001", "TC002"] },
-              ],
-              all_ac_covered: true,
-              all_risks_covered: true,
-              gaps: ["Disaster recovery scenarios"],
-              recommendations: ["Add chaos engineering tests"],
-            },
-            output: {
-              test_plan_delivered: "yes",
-              total_tests: 250,
-              p0_count: 50,
-              p1_count: 80,
-              p2_count: 70,
-              p3_count: 50,
-            },
-          },
-        },
-      ];
+  test("uses one traversal-safe workspace and fixed derived artifact names", () => {
+    const registry = workflow.variableRegistry!;
+    expect(Object.keys(registry).sort()).toEqual([
+      "issues_count",
+      "result_summary",
+      "workspace_path",
+    ]);
+    expect(registry.workspace_path.pattern).toBe(
+      "^\\./moira-ws/test-planning-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+    );
+    expect(node(workflow, "plan").inputSchema.globalInputs).toEqual(["workspace_path"]);
 
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
+    for (const id of ["review", "repair", "present"]) {
+      const directive = node(workflow, id).directive;
+      expect(directive).toContain("{{workspace_path}}/test-plan.contract.json");
+      expect(directive).toContain("{{workspace_path}}/test-plan.md");
+      expect(directive).not.toContain("{{contract_path}}");
+      expect(directive).not.toContain("{{plan_path}}");
+    }
+  });
 
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
+  test("keeps producer and repair on the same strict canonical contract schema", () => {
+    const producerSchema = node(workflow, "plan").inputSchema.properties.plan_contract;
+    const repairSchema = node(workflow, "repair").inputSchema.properties.plan_contract;
+    expect(repairSchema).toEqual(producerSchema);
+    expect(producerSchema.additionalProperties).toBe(false);
+    expect(producerSchema.properties.risks.minItems).toBe(1);
+    expect(producerSchema.properties.cases.minItems).toBe(1);
+    expect(producerSchema.properties.cases.items.additionalProperties).toBe(false);
+    expect(producerSchema.properties.cases.items.properties.priority.enum).toEqual([
+      "P0",
+      "P1",
+      "P2",
+      "P3",
+    ]);
+  });
 
-      console.log(formatCoverageReport(coverage));
+  test("rejects a risk without likelihood at the actual producer response boundary", async () => {
+    const contract = validContract() as unknown as {
+      risks: Array<Record<string, unknown>>;
+      cases: PlanCase[];
+    };
+    delete contract.risks[0].likelihood;
+    const result = await runInvalidPlan(validPlanInput(contract as unknown as PlanContract));
 
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'plan'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
 
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+  test.each([
+    "id",
+    "title",
+    "category",
+    "priority",
+    "priority_rationale",
+    "preconditions",
+    "steps",
+    "expected_result",
+    "acceptance_criterion_ids",
+    "risk_ids",
+  ])("rejects a case missing required field %s", async (field) => {
+    const contract = validContract() as unknown as {
+      risks: PlanRisk[];
+      cases: Array<Record<string, unknown>>;
+    };
+    delete contract.cases[0][field];
+    const result = await runInvalidPlan(validPlanInput(contract as unknown as PlanContract));
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'plan'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
+
+  test("rejects a case with no acceptance-criterion or risk link", async () => {
+    const contract = validContract();
+    contract.cases[0].acceptance_criterion_ids = [];
+    contract.cases[0].risk_ids = [];
+    const result = await runInvalidPlan(validPlanInput(contract));
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'plan'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
+
+  test.each([
+    "./moira-ws/test-planning-../../tmp",
+    "./moira-ws/test-planning-.",
+    "./moira-ws/test-planning-a//b",
+    "./moira-ws/test-planning-a/other",
+  ])("rejects unsafe or nested workspace %s", async (workspacePath) => {
+    const result = await runInvalidPlan({
+      ...validPlanInput(),
+      workspace_path: workspacePath,
     });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'plan'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
+
+  test("delivers a valid plan only after a zero-finding independent review", async () => {
+    const result = await runScenario(workflow, {
+      name: "clean reviewed plan",
+      mockInputs: {
+        plan: validPlanInput(),
+        review: { issues_count: 0 },
+        present: {
+          result_summary:
+            "Accepted plan: ./moira-ws/test-planning-checkout_20260820/test-plan.md; no remaining limitations.",
+        },
+      },
+      expect: { status: "completed", avoids: ["repair"] },
+    });
+
+    expect(result.passed).toBe(true);
+    expect(compactRoute(result)).toEqual([
+      "start",
+      "plan",
+      "review",
+      "review-gate",
+      "present",
+      "end",
+    ]);
+    expect(result.finalContext.workspace_path).toBe("./moira-ws/test-planning-checkout_20260820");
+    expect(result.finalContext).not.toHaveProperty("contract_path");
+    expect(result.finalContext).not.toHaveProperty("plan_path");
+  });
+
+  test("repairs a contract/Markdown mismatch, re-reviews, and covers every route", async () => {
+    const repairedContract = validContract("Retry preserves a single charge and order");
+    const repairScenario: TestScenario = {
+      name: "projection mismatch repaired",
+      description: "The independent report blocks delivery until regenerated artifacts pass",
+      mockInputs: {
+        plan: validPlanInput(),
+        review: [{ issues_count: 1 }, { issues_count: 0 }],
+        repair: { plan_contract: repairedContract },
+        present: {
+          result_summary:
+            "Accepted repaired plan: ./moira-ws/test-planning-checkout_20260820/test-plan.md.",
+        },
+      },
+      expect: { status: "completed", reaches: ["repair", "present"] },
+    };
+    const repaired = await runScenario(workflow, repairScenario);
+
+    expect(repaired.passed).toBe(true);
+    expect(compactRoute(repaired)).toEqual([
+      "start",
+      "plan",
+      "review",
+      "review-gate",
+      "repair",
+      "review",
+      "review-gate",
+      "present",
+      "end",
+    ]);
+    expect(repaired.inputSubmissionCounts.review).toBe(2);
+    expect(repaired.inputSubmissionCounts.repair).toBe(1);
+    expect(compactRoute(repaired).indexOf("present")).toBeGreaterThan(
+      compactRoute(repaired).indexOf("repair"),
+    );
+
+    const clean = await runScenario(workflow, {
+      name: "clean route for coverage",
+      mockInputs: {
+        plan: validPlanInput(),
+        review: { issues_count: 0 },
+        present: { result_summary: "Accepted test-plan.md with no remaining limitation." },
+      },
+      expect: { status: "completed", avoids: ["repair"] },
+    });
+    const coverage = calculateCoverage(workflow, [clean, repaired], { includeGapAnalysis: true });
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
+    expect(coverage.unvisitedNodes).toEqual([]);
+    expect(coverage.uncoveredBranches).toEqual([]);
   });
 });

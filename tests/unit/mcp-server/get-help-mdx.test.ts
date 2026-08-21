@@ -316,6 +316,15 @@ tags:
       expect(filePathToTopicId("reference/workflows/test-planning.mdx")).toBe(
         "workflow-test-planning",
       );
+      expect(filePathToTopicId("reference/workflows/simple-plan-execution.mdx")).toBe(
+        "workflow-simple-plan-execution",
+      );
+      expect(filePathToTopicId("reference/workflows/infinite-task-loop.mdx")).toBe(
+        "workflow-infinite-task-loop",
+      );
+      expect(filePathToTopicId("reference/workflows/task-breakdown-flow.mdx")).toBe(
+        "workflow-task-breakdown-flow",
+      );
     });
   });
 
@@ -335,14 +344,20 @@ tags:
       expect(result).toContain("workflow-management-flow");
       expect(result).toContain("test-generation");
       expect(result).toContain("test-planning");
+      expect(result).toContain("test-suite-audit");
       expect(result).toContain("content-creation");
       expect(result).toContain("research");
+      expect(result).toContain("iterative-research");
+      expect(result).toContain("universal-research-workflow");
       expect(result).toContain("prd-creation");
       expect(result).toContain("ux-design");
       expect(result).toContain("data-analysis");
       expect(result).toContain("marketing-campaign");
       expect(result).toContain("quick-task");
       expect(result).toContain("robust-task");
+      expect(result).toContain("simple-plan-execution");
+      expect(result).toContain("task-breakdown-flow");
+      expect(result).toContain("infinite-task-loop");
       expect(result).toContain("software-development-flow");
     });
 
@@ -353,12 +368,16 @@ tags:
       expect(result).toContain("create workflow");
       expect(result).toContain("write tests");
       expect(result).toContain("test plan");
+      expect(result).toContain("test suite audit");
       expect(result).toContain("write article");
       expect(result).toContain("research");
+      expect(result).toContain("repeated independent zero-issue review");
       expect(result).toContain("develop feature");
       expect(result).toContain("implement");
       expect(result).toContain("build feature");
       expect(result).toContain("fix bug");
+      expect(result).toContain("tasks that are not known in advance");
+      expect(result).toContain("independent item review, changed retries, suffix revision");
     });
 
     it("should include start command with parentExecutionId", () => {

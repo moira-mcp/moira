@@ -5,302 +5,1062 @@
   "id": "c4ed8a62-f21e-4973-b359-bc035fbefda3",
   "metadata": {
     "name": "Iterative Research",
-    "version": "2.2.0",
-    "description": "Исследование с итеративным улучшением качества через цикл critique/improve. Субагент-критик оценивает результаты, предлагает улучшения, процесс повторяется до достижения качества."
+    "version": "3.0.0",
+    "description": "Iterative external research for questions that need a durable evidence record, a current report, and repeated independent critique with changed repair. Captures the question, audience, language, depth, scope, constraints, source/privacy/licensing limits, and delivery authority; writes an execution-bound contract, typed source evidence, report, review, repair account, and self-contained delivery artifact; and allows authoritative completion only after an independent reviewer reports exactly zero blocking issues. Repairs re-enter at the earliest stale contract, source, analysis, or presentation boundary, while insufficient evidence, blocked repair, and exhausted bounded review remain explicit limited outcomes. Local delivery has no external side effect; static publication and Telegram notification require separate caller authority and expose observed success or failure. Choose Verified Research for a bounded one-pass verification, Deep Corpus Research for corpus-first collection, Data Analysis for supplied datasets, Content Creation for drafting, and software-development workflows for repository changes."
   },
   "nodes": [
     {
-      "type": "start",
       "id": "start",
+      "type": "start",
       "connections": {
-        "default": "setup-research"
+        "default": "materialize-workspace"
       }
     },
     {
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "deliver-local",
+        "review-research"
+      ]
+    },
+    {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "./moira-ws/iterative-research-{{executionId}}",
+      "files": [
+        {
+          "path": "research-contract.md",
+          "content": ""
+        },
+        {
+          "path": "source-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "research-report.md",
+          "content": ""
+        },
+        {
+          "path": "research-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "delivery.html",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "frame-contract",
+        "error": "workspace-failure"
+      }
+    },
+    {
+      "id": "frame-contract",
       "type": "agent-directive",
-      "id": "setup-research",
-      "directive": "RESEARCH PROCESS CONFIGURATION: Check if research-config.md file exists with information about research agents, project structure and publication process. If exists - use data from it. If not - ask user where to get configuration or let them specify everything needed (where to store research, which agents to use, how to publish). RESEARCH PARAMETERS: Get from user: topic, depth_level (quick/normal/deep/scientific), audience, language. PREPARATION: Create workspace. If research index exists - check for duplicates.",
-      "completionCondition": "Configuration defined, parameters obtained, workspace ready",
+      "directive": "Own the research contract for this execution. Return execution_id exactly {{executionId}}; the next engine condition rejects any other UUID before research. Reuse every explicit caller decision and the current canonical file at ./moira-ws/iterative-research-{{executionId}}/research-contract.md; ask only for a materially missing decision. Resolve operating_mode once: reuse an explicit value, inherit an unambiguous autonomous parent, otherwise ask once and explain that autonomous mode chooses safe local delivery at optional human gates. Write the complete current contract to that exact file: bounded research question/topic, intended audience, output language, requested depth, scope and exclusions, constraints, deliverable, source expectations, success criteria, confidentiality/privacy/licensing/minimization limits, and delivery authority. Delivery intent is local, publish, publish_and_notify, or undecided; tool availability and configuration are never authority. Do not choose another workspace or path.",
+      "completionCondition": "The canonical bounded contract is current at the exact execution workspace and all typed routing inputs are resolved without broadening authority",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
-        "required": [
-          "research_topic",
-          "depth_level",
-          "target_audience",
-          "output_language"
-        ],
         "globalInputs": [
+          "execution_id",
+          "operating_mode",
           "research_topic",
-          "depth_level",
           "target_audience",
           "output_language",
-          "workspace_path"
-        ]
-      },
-      "connections": {
-        "success": "generate-research"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "generate-research",
-      "directive": "Generate research on the specified topic. If research_specialist agent is specified in config - run it as subagent. If no specialized agent but subagents capability available - run general-purpose subagent with prompt from {{research_generation_prompt}}. If subagents unavailable - perform research directly using {{research_generation_prompt}}. Save result.",
-      "completionCondition": "Research generated and saved to file",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "research_file_path"
+          "depth_level",
+          "delivery_intent"
         ],
-        "globalInputs": [
-          "research_file_path"
+        "required": [
+          "execution_id",
+          "operating_mode",
+          "research_topic",
+          "target_audience",
+          "output_language",
+          "depth_level",
+          "delivery_intent"
         ]
       },
       "connections": {
-        "success": "critique-research"
+        "success": "execution-id-matches"
       }
     },
     {
+      "id": "conduct-research",
       "type": "agent-directive",
-      "id": "critique-research",
-      "directive": "Assess research quality. If research_critic agent is specified in config - run it as subagent. If no specialized agent but subagents capability available - run general-purpose subagent with prompt from {{research_critique_prompt}}. If subagents unavailable - perform critique directly using {{research_critique_prompt}}. MANDATORY provide numerical values for all metrics. Current iteration: {{iteration_count}}.",
-      "completionCondition": "Critique completed, all metrics obtained with numerical values",
+      "directive": "Read ./moira-ws/iterative-research-{{executionId}}/research-contract.md and verify it agrees with the typed boundary values topic {{research_topic}}, audience {{target_audience}}, language {{output_language}}, and depth {{depth_level}} before using it. Perform only the authorized external research. Choose tools, search strategy, source mix, decomposition, and report form from the actual question and host policy; do not use fixed source counts, word counts, formatting scores, hard-coded agent names, or client-specific commands. Overwrite source-evidence.md with typed source identities and sanitized provenance, explicit acquired/unavailable/not-authorized/access-error outcomes, authority and quality judgments, recency, contradictions, uncertainty, limitations, and claim support. Never fabricate a citation, URL, author, date, access result, quotation, finding, or availability. Preserve privacy, licensing, access, and minimization limits; do not copy secrets or unnecessary sensitive bodies. Overwrite research-report.md with the current evidence-grounded answer and delivery.html with a minimized self-contained rendering containing no raw private evidence. Return sufficient only when authorized available evidence can support the contracted result; otherwise return insufficient and keep the limitations truthful in the durable files.",
+      "completionCondition": "Canonical source evidence, report, and delivery artifact are current, truthful, and the evidence sufficiency route matches them",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "critical_issues_count": {
-            "type": "number",
-            "minimum": 0
-          },
-          "major_issues_count": {
-            "type": "number",
-            "minimum": 0
-          },
-          "formatting_score": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 10
-          },
-          "critique_feedback": {
+          "evidence_status": {
             "type": "string",
-            "minLength": 50
+            "enum": [
+              "sufficient",
+              "insufficient"
+            ]
           }
         },
         "required": [
-          "critical_issues_count",
-          "major_issues_count",
-          "formatting_score",
-          "critique_feedback"
+          "evidence_status"
         ]
       },
       "connections": {
-        "success": "check-quality-gates"
+        "success": "evidence-sufficient"
       }
     },
     {
+      "id": "evidence-sufficient",
       "type": "condition",
-      "id": "check-quality-gates",
       "condition": {
-        "operator": "and",
-        "conditions": [
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "critique-research.critical_issues_count"
-            },
-            "right": 0
-          },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "critique-research.major_issues_count"
-            },
-            "right": 0
-          },
-          {
-            "operator": "gte",
-            "left": {
-              "contextPath": "critique-research.formatting_score"
-            },
-            "right": 8
-          }
-        ]
+        "operator": "eq",
+        "left": {
+          "contextPath": "conduct-research.evidence_status"
+        },
+        "right": "sufficient"
       },
       "connections": {
-        "true": "prepare-publication",
-        "false": "check-iteration-limit"
+        "true": "review-research",
+        "false": "limited-insufficient"
       }
     },
     {
+      "id": "review-research",
+      "type": "agent-directive",
+      "directive": "Act as a genuinely independent reviewer in a separate host-supported context from the research author. Read the current primary files directly: ./moira-ws/iterative-research-{{executionId}}/research-contract.md, source-evidence.md, research-report.md, and delivery.html. Confirm execution_id is exactly {{executionId}}, the canonical workspace follows artifact_locator's immutable prefix for that ID, and the contract preserves and agrees with typed boundary values topic {{research_topic}}, audience {{target_audience}}, language {{output_language}}, and depth {{depth_level}}. Keep all candidate files immutable while reviewing. Overwrite research-review.md with the complete current set of reproducible blocking findings; zero findings is valid and at most 1000 current blocking findings may be returned. Review question fitness, source authority and quality, claim-to-source traceability, contradictions, recency, method, uncertainty, limitations, completeness for requested depth, audience and language fitness, privacy/licensing/minimization, and presentation correctness. Diagnose only; do not repair. Return only the integer count that exactly matches the written blocking findings.",
+      "completionCondition": "An independent complete current review is written without candidate mutation and issues_count exactly matches it",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "review-zero"
+      }
+    },
+    {
+      "id": "review-zero",
       "type": "condition",
-      "id": "check-iteration-limit",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-research.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "delivery-is-local",
+        "false": "increment-repair-round"
+      }
+    },
+    {
+      "id": "increment-repair-round",
+      "type": "expression",
+      "expressions": [
+        "repair_round = repair_round + 1"
+      ],
+      "connections": {
+        "default": "repair-limit-reached"
+      }
+    },
+    {
+      "id": "repair-limit-reached",
+      "type": "condition",
       "condition": {
         "operator": "gte",
         "left": {
-          "contextPath": "iteration_count"
+          "contextPath": "repair_round"
         },
-        "right": 5
+        "right": 3
       },
       "connections": {
-        "true": "force-completion",
-        "false": "improve-research"
+        "true": "limit-mode-autonomous",
+        "false": "repair-research"
       }
     },
     {
-      "type": "agent-directive",
-      "id": "improve-research",
-      "directive": "Improve research based on critique. If research_specialist available - run it in revision mode with parameter critique_feedback={{critique-research.critique_feedback}}. If no specialized agent - use general-purpose subagent or direct execution with prompt {{research_improvement_prompt}}. Iteration {{iteration_count}} of {{max_iterations}}.",
-      "completionCondition": "Improvements applied and saved",
-      "connections": {
-        "success": "increment-iteration"
+      "id": "limit-mode-autonomous",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
       },
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "improvements_applied"
-        ],
-        "globalInputs": [
-          "improvements_applied"
-        ]
-      }
-    },
-    {
-      "type": "expression",
-      "id": "increment-iteration",
-      "expressions": [
-        "iteration_count = iteration_count + 1"
-      ],
       "connections": {
-        "default": "critique-research"
+        "true": "limited-exhausted",
+        "false": "limit-decision"
       }
     },
     {
+      "id": "limit-decision",
       "type": "agent-directive",
-      "id": "force-completion",
-      "directive": "Iteration limit reached ({{iteration_count}}). Research completing forcefully. Current quality: formatting {{critique-research.formatting_score}}/10, Critical: {{critique-research.critical_issues_count}}, Major: {{critique-research.major_issues_count}}. Warn user that quality may be suboptimal.\n\nAsk the user how to proceed:\n- **publish** — proceed to publication despite quality issues\n- **stop** — stop workflow entirely\n- **reset** — reset iteration counter and try improving again",
-      "completionCondition": "Decision about forced completion obtained",
+      "directive": "The bounded repair budget is exhausted and the latest independent review still has {{review-research.issues_count}} blocking issue(s). Explain that the result is not authoritative and cannot be published. Ask once whether to deliver the truthful limited local artifacts or abort. Do not offer reset, success, publication, or notification.",
+      "completionCondition": "The user selected truthful limited local delivery or abort",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "decision": {
             "type": "string",
             "enum": [
-              "publish",
-              "stop",
-              "reset"
-            ],
-            "description": "Proceed with publication, stop workflow, or reset counter and try again"
+              "limited",
+              "abort"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "const": "aborted"
           }
         },
         "required": [
           "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "abort"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-iteration-limit-decision"
+        "success": "limit-decision-is-limited"
       }
     },
     {
+      "id": "limit-decision-is-limited",
       "type": "condition",
-      "id": "route-force-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "force-completion.decision"
+          "contextPath": "limit-decision.decision"
+        },
+        "right": "limited"
+      },
+      "connections": {
+        "true": "limited-exhausted",
+        "false": "end-aborted-limit"
+      }
+    },
+    {
+      "id": "repair-research",
+      "type": "agent-directive",
+      "directive": "Read ./moira-ws/iterative-research-{{executionId}}/research-review.md and every current primary artifact in that exact execution workspace. Reproduce all findings before changing work. The reviewer diagnoses only; you own repair. Overwrite ./moira-ws/iterative-research-{{executionId}}/repair-account.md with what was reproduced and the exact changed artifacts, or the factual reason repair is blocked. For a changed repair, mutate the required canonical artifact now and set repair_reach only after inspecting the actual change: presentation for delivery/report presentation only, analysis for reasoning or conclusions using the current sources, sources when acquisition/provenance/source set changed, or contract when the canonical question, scope, audience, language, depth, constraints, deliverable, source/privacy/licensing limits, or delivery authority changed. Never broaden authority from a finding. If no finding can be reproduced or no artifact can be changed, return blocked with a concise cause instead of repeating unchanged work.",
+      "completionCondition": "Every finding is reproduced and the canonical work changed with truthful earliest reach, or a factual blocked cause is recorded",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "blocked"
+            ]
+          },
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "presentation",
+              "analysis",
+              "sources",
+              "contract"
+            ]
+          },
+          "blocked_reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_reach"
+              ],
+              "not": {
+                "required": [
+                  "blocked_reason"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocked_reason"
+              ],
+              "not": {
+                "required": [
+                  "repair_reach"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-is-blocked"
+      }
+    },
+    {
+      "id": "repair-is-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-research.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "limited-repair-blocked",
+        "false": "repair-reach-contract"
+      }
+    },
+    {
+      "id": "repair-reach-contract",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-research.repair_reach"
+        },
+        "right": "contract"
+      },
+      "connections": {
+        "true": "frame-contract",
+        "false": "repair-reach-sources"
+      }
+    },
+    {
+      "id": "repair-reach-sources",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-research.repair_reach"
+        },
+        "right": "sources"
+      },
+      "connections": {
+        "true": "conduct-research",
+        "false": "review-research"
+      }
+    },
+    {
+      "id": "delivery-is-local",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery_intent"
+        },
+        "right": "local"
+      },
+      "connections": {
+        "true": "deliver-local",
+        "false": "delivery-is-publish"
+      }
+    },
+    {
+      "id": "delivery-is-publish",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery_intent"
         },
         "right": "publish"
       },
       "connections": {
-        "true": "prepare-publication",
-        "false": "end"
+        "true": "publish-result",
+        "false": "delivery-is-publish-notify"
       }
     },
     {
-      "type": "agent-directive",
-      "id": "prepare-publication",
-      "directive": "Prepare research for publication. If publication process is described in research-config.md - follow it (upload via outline-manager.js, update index). If publication process not configured - notify user about ready research. Optionally send Telegram notification if configured.",
-      "completionCondition": "Publication completed or user notified about readiness",
-      "connections": {
-        "success": "end"
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "publication_status"
-        ],
-        "globalInputs": [
-          "publication_status",
-          "publication_url"
-        ]
-      }
-    },
-    {
-      "type": "end",
-      "id": "end"
-    },
-    {
+      "id": "delivery-is-publish-notify",
       "type": "condition",
-      "id": "route-iteration-limit-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "force-completion.decision"
+          "contextPath": "delivery_intent"
         },
-        "right": "reset"
+        "right": "publish_and_notify"
       },
       "connections": {
-        "true": "expr-reset-iteration-counter",
-        "false": "route-force-decision"
+        "true": "publish-result",
+        "false": "delivery-mode-autonomous"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-iteration-counter",
-      "expressions": [
-        "iteration_count = 0"
-      ],
+      "id": "delivery-mode-autonomous",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
       "connections": {
-        "default": "improve-research"
+        "true": "deliver-local",
+        "false": "choose-delivery"
       }
+    },
+    {
+      "id": "choose-delivery",
+      "type": "agent-directive",
+      "directive": "The local result has an exact zero-issue independent review. Ask once whether to keep it local, publish delivery.html through the current Moira static-artifact file/archive interface, publish and then notify through Telegram, or abort delivery. State that publication and notification are separate external side effects; neither is implied by tool availability or configuration.",
+      "completionCondition": "One explicit delivery decision is recorded without performing a side effect",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "local",
+              "publish",
+              "publish_and_notify",
+              "abort"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "const": "aborted"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "abort"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "choice-is-abort"
+      }
+    },
+    {
+      "id": "choice-is-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "choose-delivery.decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "end-aborted-choice",
+        "false": "choice-is-local"
+      }
+    },
+    {
+      "id": "choice-is-local",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "choose-delivery.decision"
+        },
+        "right": "local"
+      },
+      "connections": {
+        "true": "deliver-local",
+        "false": "publish-result"
+      }
+    },
+    {
+      "id": "deliver-local",
+      "type": "agent-directive",
+      "directive": "Report the independently zero-reviewed local result to the caller. The canonical workspace is ./moira-ws/iterative-research-{{executionId}} with research-contract.md, source-evidence.md, research-report.md, research-review.md, repair-account.md, and delivery.html. Do not mutate reviewed artifacts and do not publish or notify.",
+      "completionCondition": "The caller receives the exact local artifact locations and no external side effect occurred",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "const": "clean_local"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "publish-result",
+      "type": "agent-directive",
+      "directive": "Publication is explicitly authorized and the current local result has an exact zero-issue independent review. Upload only ./moira-ws/iterative-research-{{executionId}}/delivery.html through the current Moira static-artifact file/archive interface. Do not upload research-contract.md, source-evidence.md, raw private material, credentials, or secrets. Return published only after observing the successful response and copy its real public URL exactly. On any upload/API failure return failed with the observed concise cause; do not invent a URL, notify, or rerun research.",
+      "completionCondition": "The authorized upload has an observed truthful success URL or an observed failure cause",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "publication_status": {
+            "type": "string",
+            "enum": [
+              "published",
+              "failed"
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "published",
+              "delivery_failed"
+            ]
+          },
+          "failure_reason": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 2000
+          }
+        },
+        "globalInputs": [
+          "publication_url"
+        ],
+        "required": [
+          "publication_status",
+          "outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "published"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "publication_url"
+              ],
+              "properties": {
+                "outcome": {
+                  "const": "published"
+                }
+              },
+              "not": {
+                "required": [
+                  "failure_reason"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "failure_reason"
+              ],
+              "properties": {
+                "outcome": {
+                  "const": "delivery_failed"
+                }
+              },
+              "not": {
+                "required": [
+                  "publication_url"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "publication-succeeded"
+      }
+    },
+    {
+      "id": "publication-succeeded",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "publish-result.publication_status"
+        },
+        "right": "published"
+      },
+      "connections": {
+        "true": "notification-requested",
+        "false": "end-delivery-failed"
+      }
+    },
+    {
+      "id": "notification-requested",
+      "type": "condition",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery_intent"
+            },
+            "right": "publish_and_notify"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "choose-delivery.decision"
+            },
+            "right": "publish_and_notify"
+          }
+        ]
+      },
+      "connections": {
+        "true": "send-notification",
+        "false": "end-published"
+      }
+    },
+    {
+      "id": "send-notification",
+      "type": "telegram-notification",
+      "message": "Iterative Research completed and was published after an independent zero-issue review: {{publication_url}}",
+      "connections": {
+        "default": "notification-sent",
+        "error": "end-notification-error"
+      }
+    },
+    {
+      "id": "notification-sent",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "send-notification.telegramNotificationSent"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "end-notified",
+        "false": "end-notification-unsent"
+      }
+    },
+    {
+      "id": "limited-insufficient",
+      "type": "agent-directive",
+      "directive": "Authorized available evidence is insufficient for the contracted result. Preserve truthful limitations in source-evidence.md and research-report.md, overwrite delivery.html with a clearly non-authoritative limited local report, and report the canonical workspace. Do not claim review success, publish, or notify.",
+      "completionCondition": "A truthful limited local artifact is current and no authoritative or external outcome is claimed",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "const": "limited"
+          },
+          "reason": {
+            "type": "string",
+            "const": "insufficient_evidence"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-limited-insufficient"
+      }
+    },
+    {
+      "id": "limited-exhausted",
+      "type": "agent-directive",
+      "directive": "The bounded repair budget ended with blocking findings. Preserve research-review.md and repair-account.md, overwrite delivery.html with a clearly non-authoritative limited local report that names unresolved limitations, and report the canonical workspace. Do not reset, claim success, publish, or notify.",
+      "completionCondition": "A truthful limited artifact records unresolved review findings without external side effects",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "const": "limited"
+          },
+          "reason": {
+            "type": "string",
+            "const": "review_exhausted"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-limited-exhausted"
+      }
+    },
+    {
+      "id": "limited-repair-blocked",
+      "type": "agent-directive",
+      "directive": "Repair cannot truthfully continue because the finding was not reproducible or no artifact could be changed. Preserve the factual cause and current findings in repair-account.md, overwrite delivery.html with a clearly non-authoritative limited local report, and report the canonical workspace. Do not repeat unchanged work, claim success, publish, or notify.",
+      "completionCondition": "A factual repair-blocked limited result is durable and no unchanged loop or side effect occurred",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "const": "limited"
+          },
+          "reason": {
+            "type": "string",
+            "const": "repair_blocked"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-limited-blocked"
+      }
+    },
+    {
+      "id": "workspace-failure",
+      "type": "agent-directive",
+      "directive": "The execution-bound workspace could not be materialized. Report the actual materialize failure from engine context and stop without inventing artifact paths, doing research, publishing, or notifying.",
+      "completionCondition": "The caller receives a truthful workspace-unavailable limited outcome with no downstream work",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "const": "limited"
+          },
+          "reason": {
+            "type": "string",
+            "const": "workspace_unavailable"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-workspace-failure"
+      }
+    },
+    {
+      "id": "revise-process",
+      "type": "teleport",
+      "hint": "Use only when the captured research contract or agreed process is actually wrong. Do not use to bypass insufficient evidence, a review finding, repair exhaustion, or delivery failure.",
+      "directive": "Revise the complete canonical research contract at ./moira-ws/iterative-research-{{executionId}}/research-contract.md because the process itself is wrong. Return execution_id exactly {{executionId}} so the engine rechecks identity before any downstream work. Preserve explicit caller authority, resolve all typed contract routing values, and never broaden publication or notification authority from a defect. Explain the concrete process correction.",
+      "completionCondition": "The changed canonical contract and typed routing values agree and justify full ordinary re-entry",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision_reason": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 2000
+          }
+        },
+        "globalInputs": [
+          "execution_id",
+          "operating_mode",
+          "research_topic",
+          "target_audience",
+          "output_language",
+          "depth_level",
+          "delivery_intent"
+        ],
+        "required": [
+          "revision_reason",
+          "execution_id",
+          "operating_mode",
+          "research_topic",
+          "target_audience",
+          "output_language",
+          "depth_level",
+          "delivery_intent"
+        ]
+      },
+      "connections": {
+        "success": "execution-id-matches"
+      }
+    },
+    {
+      "id": "end-limited-insufficient",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "limited-insufficient",
+        "conduct-research"
+      ]
+    },
+    {
+      "id": "end-limited-exhausted",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "limited-exhausted",
+        "review-research",
+        "repair_round"
+      ]
+    },
+    {
+      "id": "end-limited-blocked",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "limited-repair-blocked",
+        "repair-research",
+        "review-research"
+      ]
+    },
+    {
+      "id": "end-workspace-failure",
+      "type": "end",
+      "finalOutput": [
+        "workspace-failure"
+      ]
+    },
+    {
+      "id": "end-aborted-limit",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "limit-decision",
+        "review-research",
+        "repair_round"
+      ]
+    },
+    {
+      "id": "end-aborted-choice",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "choose-delivery",
+        "review-research"
+      ]
+    },
+    {
+      "id": "end-published",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "publish-result",
+        "review-research"
+      ]
+    },
+    {
+      "id": "end-delivery-failed",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "publish-result",
+        "review-research"
+      ]
+    },
+    {
+      "id": "end-notified",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "terminal_notified",
+        "publication_url",
+        "review-research"
+      ]
+    },
+    {
+      "id": "end-notification-unsent",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "terminal_notification_failed",
+        "publication_url",
+        "review-research"
+      ]
+    },
+    {
+      "id": "end-notification-error",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "artifact_locator",
+        "terminal_notification_failed",
+        "publication_url",
+        "review-research"
+      ]
+    },
+    {
+      "id": "execution-id-matches",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "execution_id"
+        },
+        "right": {
+          "contextPath": "executionId"
+        }
+      },
+      "connections": {
+        "true": "conduct-research",
+        "false": "identity-failure"
+      }
+    },
+    {
+      "id": "identity-failure",
+      "type": "agent-directive",
+      "directive": "The submitted execution identity does not equal the engine-owned current execution ID. Report the mismatch and stop without reading or writing another workspace, doing research, publishing, or notifying.",
+      "completionCondition": "A truthful execution-identity-mismatch limited outcome is reported with no cross-workspace action",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "const": "limited"
+          },
+          "reason": {
+            "type": "string",
+            "const": "execution_identity_mismatch"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-identity-failure"
+      }
+    },
+    {
+      "id": "end-identity-failure",
+      "type": "end",
+      "finalOutput": [
+        "identity-failure",
+        "artifact_locator"
+      ]
     }
   ],
   "variableRegistry": {
-    "workflow_version": {
-      "type": "string",
-      "description": "Stores workflow version",
-      "default": "1.0.0"
-    },
-    "iteration_count": {
-      "type": "number",
-      "description": "Stores iteration count",
-      "default": 1
-    },
-    "max_iterations": {
-      "type": "number",
-      "description": "Stores max iterations",
-      "default": 5
-    },
-    "research_generation_prompt": {
-      "type": "string",
-      "description": "Stores research generation prompt",
-      "default": "RESEARCH GENERATION TASK:\n\nTOPIC: {{research_topic}}\nDEPTH LEVEL: {{depth_level}}\nAUDIENCE: {{target_audience}}\nLANGUAGE: {{output_language}}\n\nDEPTH STANDARDS:\n- quick: 5-8 quality sources, 1500-2500 words, focused validation, rapid overview for immediate understanding\n- normal: 12-20 quality sources, 3000-5000 words, systematic validation, practical guidance with implementation focus\n- deep: 25-35 authoritative sources, 6000-10000 words, comprehensive analysis, strategic analysis with detailed trade-offs\n- scientific: 40+ peer-reviewed sources, 10000+ words, publication-quality analysis, academic rigor with systematic methodology\n\nRESEARCH METHODOLOGY:\n1. SOURCE STRATEGY: Identify most credible and authoritative sources through intellectual reasoning. Use WebSearch and WebFetch tools for systematic investigation. Verify source quality - never assume without independent verification.\n\n2. MULTI-PERSPECTIVE ANALYSIS: Combine insights from multiple sources intelligently. Address all significant aspects through reasoned analysis. Include contradictory information and acknowledge limitations.\n\n3. PUBLICATION QUALITY: Create self-contained report that can be understood without prior context. Define ALL specialized terms. Provide historical evolution and current state context. Clear scope and boundaries.\n\n4. VISUAL FORMATTING: Structure with clear sections and logical hierarchy. Use visual elements for scannable content:\n   - Notice blocks for key information (:::info, :::warning, :::success)\n   - Tables for comparisons and metrics (max 6-8 columns)\n   - Code blocks with syntax highlighting\n   - Diagrams for process visualization (Mermaid support)\n   - Visual breaks: max 7-10 lines of text without visual elements\n\n5. DOCUMENT STRUCTURE:\n   - Title with descriptive subtitle\n   - Metadata block: category, date, status, tags\n   - Executive summary with key findings (3-5 bullet points)\n   - Clear section headings with emoji markers for grouping\n   - Introduction: context, goals, scope\n   - Methodology: approach, data sources, evaluation criteria\n   - Results: key findings in notice blocks, comparative tables, diagrams\n   - Recommendations: actionable steps, priority matrix\n   - Conclusion: summary in success block, future work\n\n6. CITATION EXCELLENCE: Every claim supported by sources. Complete source attribution with URL, author, date accessed. Inline citations [1][2] with full bibliography.\n\n7. PROFESSIONAL STANDARDS: Publication-ready writing. Appropriate academic tone. Logical flow from simple to complex. Technical accuracy in examples.\n\nOUTPUT: Save research to appropriate location. Return file path."
-    },
-    "research_critique_prompt": {
-      "type": "string",
-      "description": "Stores research critique prompt",
-      "default": "RESEARCH QUALITY ASSESSMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nDECLARED LEVEL: {{depth_level}}\nITERATION: {{iteration_count}}\n\nEVALUATION DIMENSIONS:\n\n1. FACTUAL ACCURACY: Analyze claims for logical consistency. Evaluate source quality and relevance. Identify contradictions or unsupported assertions. Assess information currency and appropriateness.\n\n2. SOURCE COVERAGE (Level-Specific Standards):\n   - quick: Validate 5-8 sources minimum\n   - normal: Assess 12-20 quality sources\n   - deep: Evaluate 25-35 authoritative sources\n   - scientific: Review 40+ academic sources\n   Judgment: Does source coverage match declared level?\n\n3. COMPLETENESS: Analyze if all significant aspects addressed. Evaluate depth appropriateness for declared level. Identify missing perspectives. Assess scope coverage.\n\n4. FORMATTING QUALITY:\n   - Notice blocks: Check frequency (1 per 3-5 sections), type distribution (info/warning/success), effectiveness\n   - Visual elements: Tables (6-8 column limit), diagrams (Mermaid syntax), code blocks (language specification)\n   - Visual breaks: Max 7-10 lines without elements\n   - Navigation: Clear headers, cross-references (min 3-5 internal links), no manual TOC\n   - Metadata: Category, date, status, tags completeness\n   - Executive summary: Notice blocks with key results\n\n5. CITATION QUALITY: Evaluate source attribution completeness. Assess source authority and relevance. Review bibliography formatting. Check integration into narrative flow.\n\n6. PROFESSIONAL STANDARDS: Writing quality and tone consistency. Structural integrity. Argumentation quality and logical progression.\n\nISSUE CLASSIFICATION:\n- CRITICAL: Fundamental flaws, factual inaccuracies, missing essential components, significant gaps affecting validity\n- MAJOR: Important aspects needing substantial enhancement, clarity problems, source attribution gaps\n- MODERATE: Depth enhancement opportunities, alternative perspectives worth exploring, structural improvements\n- MINOR: Polish opportunities, formatting consistency, style refinements\n\nOUTPUT: Provide quality_level, formatting_score (0-10), critical_issues_count, major_issues_count, moderate_issues_count, minor_issues_count, detailed critique_feedback."
-    },
-    "research_improvement_prompt": {
-      "type": "string",
-      "description": "Stores research improvement prompt",
-      "default": "RESEARCH IMPROVEMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nITERATION: {{iteration_count}} of {{max_iterations}}\n\nCRITIQUE RECEIVED:\n{{critique-research.critique_feedback}}\n\nIMPROVEMENT PROTOCOL:\n\n1. UNDERSTAND FEEDBACK: Analyze criticism to identify root issues. Prioritize by impact: critical > major > moderate > minor.\n\n2. TARGETED RESEARCH: Conduct additional investigation for weak areas identified. Add authoritative sources where gaps exist. Deepen analysis in areas marked insufficient.\n\n3. CRITICAL ISSUES (Must Address):\n   - Fix fundamental flaws immediately with focused additional research\n   - Resolve factual inaccuracies through verification\n   - Add missing essential components\n   - Fill significant gaps affecting research validity\n\n4. MAJOR ISSUES (Should Address):\n   - Expand analysis in identified weak areas\n   - Improve clarity in problematic sections\n   - Strengthen source attribution and citations\n   - Add missing perspectives\n\n5. MODERATE & MINOR (Based on Time):\n   - Enhance depth where suggested\n   - Polish formatting and structure\n   - Refine style and readability\n\n6. FORMATTING IMPROVEMENTS:\n   - Add/improve notice blocks if frequency insufficient\n   - Enhance tables and visual elements\n   - Improve navigation and cross-references\n   - Fix metadata completeness issues\n\n7. CONTENT INTEGRATION: Seamlessly integrate improvements into existing work. Maintain research coherence and flow. Ensure revisions enhance rather than fragment.\n\n8. QUALITY VERIFICATION: Self-assess improvements through intellectual analysis. Verify all critical and major issues resolved. Check formatting compliance improved.\n\nOUTPUT: Save improved version."
-    },
     "depth_level": {
       "type": "string",
-      "description": "Workflow-global depth_level",
+      "description": "Requested research depth; guides fitness and cost, not fixed quotas",
       "enum": [
         "quick",
         "normal",
@@ -308,42 +1068,124 @@
         "scientific"
       ]
     },
-    "improvements_applied": {
-      "type": "string",
-      "description": "Workflow-global improvements_applied",
-      "minLength": 10
-    },
     "output_language": {
       "type": "string",
-      "description": "Workflow-global output_language"
-    },
-    "publication_status": {
-      "type": "string",
-      "description": "Workflow-global publication_status",
-      "enum": [
-        "published",
-        "notified"
-      ]
-    },
-    "publication_url": {
-      "type": "string",
-      "description": "Workflow-global publication_url"
-    },
-    "research_file_path": {
-      "type": "string",
-      "description": "Workflow-global research_file_path"
+      "description": "Requested output language",
+      "minLength": 2,
+      "maxLength": 100
     },
     "research_topic": {
       "type": "string",
-      "description": "Workflow-global research_topic"
+      "description": "Bounded research question or topic used for routing and rendering",
+      "minLength": 5,
+      "maxLength": 4000
     },
     "target_audience": {
       "type": "string",
-      "description": "Workflow-global target_audience"
+      "description": "Intended audience for the research result",
+      "minLength": 1,
+      "maxLength": 2000
     },
-    "workspace_path": {
+    "operating_mode": {
       "type": "string",
-      "description": "Workflow-global workspace_path"
+      "description": "Single execution mode resolved at contract framing",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ]
+    },
+    "delivery_intent": {
+      "type": "string",
+      "description": "Caller-authorized delivery intent; undecided is resolved only after zero review",
+      "enum": [
+        "local",
+        "publish",
+        "publish_and_notify",
+        "undecided"
+      ]
+    },
+    "repair_round": {
+      "type": "integer",
+      "description": "Engine-owned count of nonzero independent reviews in this bounded execution",
+      "minimum": 0,
+      "maximum": 3,
+      "default": 0
+    },
+    "execution_id": {
+      "type": "string",
+      "description": "Current engine execution UUID returned by contract framing and checked against the system variable",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "maxLength": 36
+    },
+    "artifact_locator": {
+      "type": "object",
+      "description": "Immutable bounded convention for locating durable research artifacts from execution_id",
+      "additionalProperties": false,
+      "properties": {
+        "workspace_prefix": {
+          "type": "string",
+          "const": "./moira-ws/iterative-research-"
+        },
+        "report_file": {
+          "type": "string",
+          "const": "research-report.md"
+        },
+        "delivery_file": {
+          "type": "string",
+          "const": "delivery.html"
+        }
+      },
+      "required": [
+        "workspace_prefix",
+        "report_file",
+        "delivery_file"
+      ],
+      "default": {
+        "workspace_prefix": "./moira-ws/iterative-research-",
+        "report_file": "research-report.md",
+        "delivery_file": "delivery.html"
+      }
+    },
+    "publication_url": {
+      "type": "string",
+      "description": "Observed public HTTPS URL from a successful authorized static-artifact upload",
+      "pattern": "^https://[^/\\s]+(?:/[^\\s]*)?$",
+      "minLength": 9,
+      "maxLength": 2000
+    },
+    "terminal_notified": {
+      "type": "object",
+      "description": "Engine-seeded explicit terminal outcome for a successful authorized notification",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "notified"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "default": {
+        "outcome": "notified"
+      }
+    },
+    "terminal_notification_failed": {
+      "type": "object",
+      "description": "Engine-seeded explicit terminal outcome for an unsent or failed authorized notification",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "const": "notification_failed"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "default": {
+        "outcome": "notification_failed"
+      }
     }
   }
 }

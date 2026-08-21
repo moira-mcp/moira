@@ -74,6 +74,8 @@ const MAX_STEPS_DEFAULT = 100;
  */
 export interface MockInputContext {
   variables: Record<string, unknown>;
+  /** Engine-owned execution ID for inputs that must be correlated to the current run. */
+  executionId: string;
   visitCount: number; // How many times this node has been visited
   nodeId: string;
   /** Rendered directive presented when this node paused on the preceding engine cycle. */
@@ -235,6 +237,7 @@ export async function runScenario(
         scenario.mockInputs[currentNodeId],
         currentNodeId,
         context.variables as Record<string, unknown>,
+        context.executionId,
         nodeVisitCounts,
         renderedDirectives.get(currentNodeId),
       );
@@ -388,6 +391,7 @@ function resolveMockInput(
   mockInput: MockInput | undefined,
   nodeId: string,
   variables: Record<string, unknown>,
+  executionId: string,
   visitCounts: Record<string, number>,
   directive?: string,
 ): Record<string, unknown> {
@@ -401,7 +405,7 @@ function resolveMockInput(
 
   // Function: call with context
   if (typeof mockInput === "function") {
-    return mockInput({ variables, visitCount, nodeId, directive });
+    return mockInput({ variables, executionId, visitCount, nodeId, directive });
   }
 
   // Array: return element by visit count (cycle through array)

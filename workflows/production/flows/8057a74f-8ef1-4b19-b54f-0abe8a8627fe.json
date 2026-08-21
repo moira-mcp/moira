@@ -5,318 +5,3837 @@
   "id": "8057a74f-8ef1-4b19-b54f-0abe8a8627fe",
   "metadata": {
     "name": "Universal Research Workflow",
-    "version": "1.4.0",
-    "description": "Universal workflow for conducting research with iterative quality improvement"
+    "version": "3.0.2",
+    "description": "Portable adaptive external research for a supplied topic or decision question. Captures audience, language, scope, advisory depth, constraints, success criteria, source expectations, privacy/licensing limits, storage capability, operating mode, and separate publication/notification authority. It discovers and evaluates authorized literature or web evidence without fixed source, word, tool, or formatting quotas; records truthful provenance, access outcomes, claim support, contradictions, uncertainty, currency, and limitations; and produces either six execution-bound filesystem artifacts or a bounded self-contained memory result. A genuinely independent reviewer must report exactly zero current blockers before authoritative or reviewed-limited delivery, and changed repair re-enters at the earliest stale contract, source, analysis, or presentation boundary. Local delivery is the default; static publication and Telegram notification require separate explicit authority and observed success, while failures preserve the accepted local result. Choose this portable workflow when the method must adapt to the question and filesystem access may be unavailable; use Verified Research for bounded mostly linear verification, Iterative Research for filesystem-first bounded review cycles, Deep Corpus Research for separately authorized corpus-scale work, Data Analysis for supplied datasets, Content Creation for drafting, and Software Development Flow for repository implementation."
   },
   "nodes": [
     {
-      "type": "start",
       "id": "start",
-      "initialData": {
-        "variables": {
-          "workflow_version": {
-            "description": "Stores workflow version",
-            "value": "1.0.0"
-          },
-          "iteration_count": {
-            "description": "Stores iteration count",
-            "value": 1
-          },
-          "max_iterations": {
-            "description": "Stores max iterations",
-            "value": 5
-          },
-          "research_generation_prompt": {
-            "description": "Stores research generation prompt",
-            "value": "RESEARCH GENERATION TASK:\n\nTOPIC: {{research_topic}}\nDEPTH LEVEL: {{depth_level}}\nAUDIENCE: {{target_audience}}\nLANGUAGE: {{output_language}}\n\nDEPTH STANDARDS:\n- quick: 5-8 quality sources, 1500-2500 words, focused validation, rapid overview for immediate understanding\n- normal: 12-20 quality sources, 3000-5000 words, systematic validation, practical guidance with implementation focus\n- deep: 25-35 authoritative sources, 6000-10000 words, comprehensive analysis, strategic analysis with detailed trade-offs\n- scientific: 40+ peer-reviewed sources, 10000+ words, publication-quality analysis, academic rigor with systematic methodology\n\nRESEARCH METHODOLOGY:\n1. SOURCE STRATEGY: Identify most credible and authoritative sources through intellectual reasoning. Use WebSearch and WebFetch tools for systematic investigation. Verify source quality - never assume without independent verification.\n\n2. MULTI-PERSPECTIVE ANALYSIS: Combine insights from multiple sources intelligently. Address all significant aspects through reasoned analysis. Include contradictory information and acknowledge limitations.\n\n3. PUBLICATION QUALITY: Create self-contained report that can be understood without prior context. Define ALL specialized terms. Provide historical evolution and current state context. Clear scope and boundaries.\n\n4. VISUAL FORMATTING: Structure with clear sections and logical hierarchy. Use visual elements for scannable content:\n   - Notice blocks for key information (:::info, :::warning, :::success)\n   - Tables for comparisons and metrics (max 6-8 columns)\n   - Code blocks with syntax highlighting\n   - Diagrams for process visualization (Mermaid support)\n   - Visual breaks: max 7-10 lines of text without visual elements\n\n5. DOCUMENT STRUCTURE:\n   - Title with descriptive subtitle\n   - Metadata block: category, date, status, tags\n   - Executive summary with key findings (3-5 bullet points)\n   - Clear section headings with emoji markers for grouping\n   - Introduction: context, goals, scope\n   - Methodology: approach, data sources, evaluation criteria\n   - Results: key findings in notice blocks, comparative tables, diagrams\n   - Recommendations: actionable steps, priority matrix\n   - Conclusion: summary in success block, future work\n\n6. CITATION EXCELLENCE: Every claim supported by sources. Complete source attribution with URL, author, date accessed. Inline citations [1][2] with full bibliography.\n\n7. PROFESSIONAL STANDARDS: Publication-ready writing. Appropriate academic tone. Logical flow from simple to complex. Technical accuracy in examples.\n\nOUTPUT: Save research to appropriate location. Return file path."
-          },
-          "research_critique_prompt": {
-            "description": "Stores research critique prompt",
-            "value": "RESEARCH QUALITY ASSESSMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nDECLARED LEVEL: {{depth_level}}\nITERATION: {{iteration_count}}\n\nEVALUATION DIMENSIONS:\n\n1. FACTUAL ACCURACY: Analyze claims for logical consistency. Evaluate source quality and relevance. Identify contradictions or unsupported assertions. Assess information currency and appropriateness.\n\n2. SOURCE COVERAGE (Level-Specific Standards):\n   - quick: Validate 5-8 sources minimum\n   - normal: Assess 12-20 quality sources\n   - deep: Evaluate 25-35 authoritative sources\n   - scientific: Review 40+ academic sources\n   Judgment: Does source coverage match declared level?\n\n3. COMPLETENESS: Analyze if all significant aspects addressed. Evaluate depth appropriateness for declared level. Identify missing perspectives. Assess scope coverage.\n\n4. FORMATTING QUALITY:\n   - Notice blocks: Check frequency (1 per 3-5 sections), type distribution (info/warning/success), effectiveness\n   - Visual elements: Tables (6-8 column limit), diagrams (Mermaid syntax), code blocks (language specification)\n   - Visual breaks: Max 7-10 lines without elements\n   - Navigation: Clear headers, cross-references (min 3-5 internal links), no manual TOC\n   - Metadata: Category, date, status, tags completeness\n   - Executive summary: Notice blocks with key results\n\n5. CITATION QUALITY: Evaluate source attribution completeness. Assess source authority and relevance. Review bibliography formatting. Check integration into narrative flow.\n\n6. PROFESSIONAL STANDARDS: Writing quality and tone consistency. Structural integrity. Argumentation quality and logical progression.\n\nISSUE CLASSIFICATION:\n- CRITICAL: Fundamental flaws, factual inaccuracies, missing essential components, significant gaps affecting validity\n- MAJOR: Important aspects needing substantial enhancement, clarity problems, source attribution gaps\n- MODERATE: Depth enhancement opportunities, alternative perspectives worth exploring, structural improvements\n- MINOR: Polish opportunities, formatting consistency, style refinements\n\nOUTPUT: Provide quality_level, formatting_score (0-10), critical_issues_count, major_issues_count, moderate_issues_count, minor_issues_count, detailed critique_feedback."
-          },
-          "research_improvement_prompt": {
-            "description": "Stores research improvement prompt",
-            "value": "RESEARCH IMPROVEMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nITERATION: {{iteration_count}} of {{max_iterations}}\n\nCRITIQUE RECEIVED:\n{{critique_feedback}}\n\nIMPROVEMENT PROTOCOL:\n\n1. UNDERSTAND FEEDBACK: Analyze criticism to identify root issues. Prioritize by impact: critical > major > moderate > minor.\n\n2. TARGETED RESEARCH: Conduct additional investigation for weak areas identified. Add authoritative sources where gaps exist. Deepen analysis in areas marked insufficient.\n\n3. CRITICAL ISSUES (Must Address):\n   - Fix fundamental flaws immediately with focused additional research\n   - Resolve factual inaccuracies through verification\n   - Add missing essential components\n   - Fill significant gaps affecting research validity\n\n4. MAJOR ISSUES (Should Address):\n   - Expand analysis in identified weak areas\n   - Improve clarity in problematic sections\n   - Strengthen source attribution and citations\n   - Add missing perspectives\n\n5. MODERATE & MINOR (Based on Time):\n   - Enhance depth where suggested\n   - Polish formatting and structure\n   - Refine style and readability\n\n6. FORMATTING IMPROVEMENTS:\n   - Add/improve notice blocks if frequency insufficient\n   - Enhance tables and visual elements\n   - Improve navigation and cross-references\n   - Fix metadata completeness issues\n\n7. CONTENT INTEGRATION: Seamlessly integrate improvements into existing work. Maintain research coherence and flow. Ensure revisions enhance rather than fragment.\n\n8. QUALITY VERIFICATION: Self-assess improvements through intellectual analysis. Verify all critical and major issues resolved. Check formatting compliance improved.\n\nOUTPUT: Save improved version."
-          }
-        }
-      },
+      "type": "start",
       "connections": {
-        "default": "setup-research"
+        "default": "capture-context"
       }
     },
     {
+      "id": "capture-context",
       "type": "agent-directive",
-      "id": "setup-research",
-      "directive": "RESEARCH PROCESS CONFIGURATION: Check if research-config.md file exists with information about research agents, project structure and publication process. If exists - use data from it. If not - ask user where to get configuration or let them specify everything needed (where to store research, which agents to use, how to publish). RESEARCH PARAMETERS: Get from user: topic, depth_level (quick/normal/deep/scientific), audience, language. PREPARATION: Create workspace. If research index exists - check for duplicates.",
-      "completionCondition": "Configuration defined, parameters obtained, workspace ready",
+      "directive": "Resolve the complete research contract once. Return execution_id exactly {{executionId}} for the next engine identity check. Reuse supplied facts and ask only about material unknowns. Resolve operating_mode once; infer autonomous for a child of an autonomous run, otherwise ask once, and never rewrite it later. Capture the bounded question/topic, decision or use, audience, output language, scope/exclusions, advisory depth, constraints, observable success criteria, expected deliverable, and current source_policy expectations. Capture confidentiality_policy once as the immutable originating source-access, confidentiality, privacy, consent, retention, licensing, and data-minimization authority ceiling. Capture current_data_policy separately as the current equal-or-narrower correctable policy. A source_policy authorization value is only a requested/current state and never grants access beyond confidentiality_policy. Capture actual filesystem capability and delivery_intent. Capture publication_authorized and notification_authorized separately; configuration or tool availability is never authority. Public discovery is allowed only within the originating request; private, authenticated, paid, personal, confidential, or restricted sources require matching authority in confidentiality_policy. Never request or store credentials or raw private material. Filesystem mode always uses ./moira-ws/universal-research-{{executionId}}; memory mode creates no path. Starting this workflow never authorizes commit, push, deploy, production mutation, destructive cleanup, or administration.",
+      "completionCondition": "The complete bounded research, mode, storage, source-policy, privacy/licensing, success, and separate delivery-authority contract is resolved and execution_id equals the current engine identity",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "workspace_path": {
-            "type": "string",
-            "description": "Path to workspace for storing research"
-          }
-        },
-        "required": [
-          "research_topic",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "operating_mode",
+          "storage_mode",
+          "execution_id",
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
           "depth_level",
-          "target_audience",
-          "output_language"
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "confidentiality_policy",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "publication_authorized",
+          "notification_authorized"
         ],
-        "globalInputs": [
-          "research_topic",
+        "required": [
+          "operating_mode",
+          "storage_mode",
+          "execution_id",
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
           "depth_level",
-          "target_audience",
-          "output_language"
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "confidentiality_policy",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "publication_authorized",
+          "notification_authorized"
         ]
       },
       "connections": {
-        "success": "generate-research"
+        "success": "execution-id-matches"
       }
     },
     {
-      "type": "agent-directive",
-      "id": "generate-research",
-      "directive": "Generate research on the specified topic. If research_specialist agent is specified in config - run it as subagent. If no specialized agent but subagents capability available - run general-purpose subagent with prompt from {{research_generation_prompt}}. If subagents unavailable - perform research directly using {{research_generation_prompt}}. Save result.",
-      "completionCondition": "Research generated and saved to file",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "research_file_path"
-        ],
-        "globalInputs": [
-          "research_file_path"
-        ]
-      },
-      "connections": {
-        "success": "critique-research"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "critique-research",
-      "directive": "Assess research quality. If research_critic agent is specified in config - run it as subagent. If no specialized agent but subagents capability available - run general-purpose subagent with prompt from {{research_critique_prompt}}. If subagents unavailable - perform critique directly using {{research_critique_prompt}}. MANDATORY provide numerical values for all metrics. Current iteration: {{iteration_count}}.",
-      "completionCondition": "Critique completed, all metrics obtained with numerical values",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "critical_issues_count",
-          "major_issues_count",
-          "formatting_score",
-          "critique_feedback"
-        ],
-        "globalInputs": [
-          "critical_issues_count",
-          "major_issues_count",
-          "formatting_score",
-          "critique_feedback"
-        ]
-      },
-      "connections": {
-        "success": "check-quality-gates"
-      }
-    },
-    {
+      "id": "execution-id-matches",
       "type": "condition",
-      "id": "check-quality-gates",
-      "condition": {
-        "operator": "and",
-        "conditions": [
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "critical_issues_count"
-            },
-            "right": 0
-          },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "major_issues_count"
-            },
-            "right": 0
-          },
-          {
-            "operator": "gte",
-            "left": {
-              "contextPath": "formatting_score"
-            },
-            "right": 8
-          }
-        ]
-      },
-      "connections": {
-        "true": "prepare-publication",
-        "false": "check-iteration-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-iteration-limit",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "iteration_count"
-        },
-        "right": 5
-      },
-      "connections": {
-        "true": "force-completion",
-        "false": "improve-research"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "improve-research",
-      "directive": "Improve research based on critique. If research_specialist available - run it in revision mode with parameter critique_feedback={{critique_feedback}}. If no specialized agent - use general-purpose subagent or direct execution with prompt {{research_improvement_prompt}}. Iteration {{iteration_count}} of {{max_iterations}}.",
-      "completionCondition": "Improvements applied and saved",
-      "connections": {
-        "success": "increment-iteration"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "increment-iteration",
-      "directive": "Increment iteration_count by 1. Current value: {{iteration_count}}. Return new value.",
-      "completionCondition": "Iteration counter incremented",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "iteration_count"
-        ],
-        "globalInputs": [
-          "iteration_count"
-        ]
-      },
-      "connections": {
-        "success": "critique-research"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "force-completion",
-      "directive": "Iteration limit reached ({{iteration_count}}). Research completing forcefully. Current quality: formatting {{formatting_score}}/10, Critical: {{critical_issues_count}}, Major: {{major_issues_count}}. Warn user that quality may be suboptimal. Ask whether to proceed to publication or stop workflow.",
-      "completionCondition": "Decision about forced completion obtained",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "user_decision"
-        ],
-        "globalInputs": [
-          "user_decision"
-        ]
-      },
-      "connections": {
-        "success": "route-force-decision"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-force-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "user_decision"
+          "contextPath": "execution_id"
+        },
+        "right": {
+          "contextPath": "executionId"
+        }
+      },
+      "connections": {
+        "true": "delivery-mode-file",
+        "false": "identity-failure"
+      }
+    },
+    {
+      "id": "identity-failure",
+      "type": "agent-directive",
+      "directive": "The submitted execution identity does not equal the engine-owned executionId. Report this recovery blocker without reading or writing any execution workspace and without inventing an artifact location.",
+      "completionCondition": "The identity mismatch is reported without filesystem access",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-identity-failure"
+      }
+    },
+    {
+      "id": "delivery-mode-file",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "storage_mode"
+        },
+        "right": "filesystem"
+      },
+      "connections": {
+        "true": "materialize-workspace",
+        "false": "frame-problem"
+      }
+    },
+    {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "./moira-ws/universal-research-{{executionId}}",
+      "files": [
+        {
+          "path": "research-contract.md",
+          "content": ""
+        },
+        {
+          "path": "source-evidence.json",
+          "content": ""
+        },
+        {
+          "path": "research-report.md",
+          "content": ""
+        },
+        {
+          "path": "research-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "delivery.html",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "frame-problem",
+        "error": "fallback-to-memory"
+      }
+    },
+    {
+      "id": "fallback-to-memory",
+      "type": "expression",
+      "expressions": [
+        "storage_mode = \"memory\"",
+        "storage_limitation = \"filesystem_unavailable_memory_fallback\""
+      ],
+      "connections": {
+        "default": "frame-problem"
+      }
+    },
+    {
+      "id": "frame-problem",
+      "type": "agent-directive",
+      "directive": "Frame the research from the exact canonical values: question {{question}}, decision context {{decision_context}}, scope {{scope}}, audience {{audience}}, language {{output_language}}, advisory depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, current equal-or-narrower data policy {{current_data_policy}}, storage {{storage_mode}}, delivery intent {{delivery_intent}}, and separate publication/notification authority. Reject any current source or data policy that would broaden the immutable ceiling. Select a question-appropriate research family and evidence needs without prescribing tools, source counts, word counts, agents, or formatting. Name assumptions and material unknowns. In filesystem mode write the complete readable canonical projection to research-contract.md; in memory mode return the bounded problem summary and rely on typed globals as canonical state. After revision mark invalidated downstream work and preserve only still-current facts.",
+      "completionCondition": "The complete decision-use research contract and adaptive method family are explicit without unsupported tactics, quotas, or authority",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "problem_summary": {
+            "type": "string",
+            "minLength": 100,
+            "maxLength": 12000
+          }
+        },
+        "required": [
+          "problem_summary"
+        ]
+      },
+      "connections": {
+        "success": "problem-approval-mode"
+      }
+    },
+    {
+      "id": "problem-approval-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "approve-problem",
+        "false": "resume-stage-gate"
+      }
+    },
+    {
+      "id": "approve-problem",
+      "type": "agent-directive",
+      "directive": "Present the framed problem {{frame-problem.problem_summary}}. Explain which fields are mutable and that operating_mode, storage identity/capability, immutable authority/privacy ceiling confidentiality_policy, and separate publication/notification authority cannot be broadened here. Ask whether question, decision context, scope, current source expectations, equal-or-narrower current data policy, success criteria, and deliverables are correct. Return accepted only for clear acceptance. Any correction or rejection returns revise with concrete feedback; do not silently repair in this turn.",
+      "completionCondition": "The user accepts the problem contract or supplies actionable revision feedback",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "revise"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "problem-approval-gate"
+      }
+    },
+    {
+      "id": "problem-approval-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-problem.decision"
+        },
+        "right": "accepted"
+      },
+      "connections": {
+        "true": "resume-stage-gate",
+        "false": "revise-problem"
+      }
+    },
+    {
+      "id": "revise-problem",
+      "type": "agent-directive",
+      "directive": "Revise every mutable canonical research field using the exact interactive feedback {{approve-problem.feedback}}. operating_mode, storage_mode, execution identity, confidentiality_policy, publication_authorized, and notification_authorized are immutable after intake; inherit them and do not return or rewrite them. source_policy may correct expectations, locators, availability, or narrow requested access, but cannot grant authority beyond confidentiality_policy. current_data_policy may be corrected only when equal to or narrower than confidentiality_policy. Because this is the pre-research contract approval, return the complete mutable contract with resume_stage acquisition so the independent pre-access authority review and acquisition run on the accepted values. In filesystem mode update research-contract.md and invalidate stale report/review/delivery content. Overwrite current_repair_account with this exact bounded revision account.",
+      "completionCondition": "The rejected contract is fully changed from feedback, authority is preserved, and earliest stale re-entry is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
+          "depth_level",
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "required": [
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
+          "depth_level",
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "resume_stage": {
+                "const": "acquisition"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "frame-problem"
+      }
+    },
+    {
+      "id": "resume-stage-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "resume_stage"
+        },
+        "right": "acquisition"
+      },
+      "connections": {
+        "true": "review-policy-authority",
+        "false": "analyze-and-synthesize"
+      }
+    },
+    {
+      "id": "acquisition-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "storage_mode"
+        },
+        "right": "filesystem"
+      },
+      "connections": {
+        "true": "acquire-sources",
+        "false": "acquire-sources-memory"
+      }
+    },
+    {
+      "id": "acquire-sources",
+      "type": "agent-directive",
+      "directive": "Conduct adaptive external research against the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope and exclusions {{scope}}, audience {{audience}}, output language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current equal-or-narrower data policy {{current_data_policy}}. Choose question-appropriate discovery, verification, comparison, and synthesis; depth guides rigor/cost but never fixes source count, word count, tool, agent topology, or ornament. The independent pre-access authority gate has accepted the current proposal, but source_policy is still not an authority grant; enforce confidentiality_policy and current_data_policy on every actual access. Honor every exclusion, constraint, success criterion, audience, and deliverable when selecting evidence. Never invent identity, URL, author, date, quote, access result, citation, or support. For every attempted/used source record a unique stable ID, type, sanitized locator/provenance, authorization state, initial/actual availability, typed outcome, relevance, supported claims, contradictions, uncertainty, currency, classification, and limitation. Write the bounded array to ./moira-ws/universal-research-{{executionId}}/source-evidence.json, current report to research-report.md, and equivalent minimized delivery.html. Set usable_evidence_count exactly and return only it plus bounded acquisition_summary.",
+      "completionCondition": "Filesystem evidence, report, and delivery artifacts truthfully reflect authorized research, and the returned usable count matches source-evidence.json without copying its body into context",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "usable_evidence_count",
+          "acquisition_summary"
+        ],
+        "required": [
+          "usable_evidence_count",
+          "acquisition_summary"
+        ]
+      },
+      "connections": {
+        "success": "prepare-data"
+      }
+    },
+    {
+      "id": "acquire-sources-memory",
+      "type": "agent-directive",
+      "directive": "Conduct adaptive external research in memory mode against the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope and exclusions {{scope}}, audience {{audience}}, output language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current equal-or-narrower data policy {{current_data_policy}}. Choose question-appropriate methods without fixed source, word, tool, agent, or formatting quotas. The independent pre-access gate has accepted the proposal, but current expectations never grant access; enforce the immutable ceiling and current policy on actual access and honor every exclusion, constraint, success criterion, audience, and deliverable. Never invent identity, URL, author, date, quote, access result, citation, or support. Return bounded minimized source_evidence with unique stable IDs, type, sanitized locator/provenance, authorization state, initial/actual availability, typed outcome, relevance, supported claims, contradictions, uncertainty, currency, classification, and limitation; never source bodies or unnecessary private material. Set usable_evidence_count exactly and return bounded acquisition_summary.",
+      "completionCondition": "Bounded memory evidence truthfully records authorized research and usable_evidence_count matches its usable records",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "source_evidence",
+          "usable_evidence_count",
+          "acquisition_summary"
+        ],
+        "required": [
+          "source_evidence",
+          "usable_evidence_count",
+          "acquisition_summary"
+        ]
+      },
+      "connections": {
+        "success": "prepare-data"
+      }
+    },
+    {
+      "id": "prepare-data",
+      "type": "agent-directive",
+      "directive": "Assess evidence fitness against the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope and exclusions {{scope}}, audience {{audience}}, output language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current equal-or-narrower data policy {{current_data_policy}}. {{#eq storage_mode 'filesystem'}}Read the exact current evidence directly from ./moira-ws/universal-research-{{executionId}}/source-evidence.json.{{else}}Use the exact bounded current memory evidence {{source_evidence}}.{{/eq}} Also use acquisition_summary {{acquisition_summary}}. Reject evidence outside the immutable ceiling or scope. Check quality, currency, applicability, exclusions, constraints, material contrary evidence, traceability, uncertainty, gaps, success criteria, and deliverable fitness; never use an arbitrary count as sufficiency. Preserve every access and limitation truth. Set evidence_status sufficient only when evidence supports the complete contracted result; otherwise limited. Overwrite current_readiness_record with the exact current bounded assessment every time, including after reacquisition; in filesystem mode also update research-report.md and delivery.html without treating context as durable source.",
+      "completionCondition": "Evidence fitness and gaps are explicitly assessed against the actual contract without quotas or loss of provenance",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "evidence_status",
+          "current_readiness_record"
+        ],
+        "required": [
+          "evidence_status",
+          "current_readiness_record"
+        ]
+      },
+      "connections": {
+        "success": "readiness-review-mode"
+      }
+    },
+    {
+      "id": "readiness-review-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "storage_mode"
+        },
+        "right": "filesystem"
+      },
+      "connections": {
+        "true": "review-data-file",
+        "false": "review-data-inline"
+      }
+    },
+    {
+      "id": "review-data-file",
+      "type": "agent-directive",
+      "directive": "Act as a genuinely independent evidence-readiness reviewer in a separate host-supported context. Read research-contract.md, source-evidence.json, research-report.md, delivery.html, and applicable primary sources directly from ./moira-ws/universal-research-{{executionId}}. Check current source expectations {{source_policy}} against immutable authority/privacy ceiling {{confidentiality_policy}} and current equal-or-narrower policy {{current_data_policy}}, plus acquisition_summary {{acquisition_summary}}, usable count {{usable_evidence_count}}, depth {{depth_level}}, and success criteria {{success_criteria}}. Treat invented identity, URL, quote, metadata, access outcome, availability, citation, support, authority broadening, or privacy-policy weakening as blocking. Check unique IDs, truthful typed outcomes, provenance, traceability, relevance, quality, currency, contrary evidence, uncertainty, gaps, minimization, report/delivery consistency, and whether a limited account truthfully states what cannot be concluded. Overwrite research-review.md with all current reproducible blockers; do not mutate. Zero means the representation is truthful, not that a limited result became authoritative. Return only the exact count.",
+      "completionCondition": "A separate reviewer writes the complete current filesystem evidence-readiness findings and returns the exact bounded blocker count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "review-data-file-gate"
+      }
+    },
+    {
+      "id": "review-data-file-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-data-file.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "evidence-status-sufficient",
+        "false": "repair-data-file"
+      }
+    },
+    {
+      "id": "review-data-inline",
+      "type": "agent-directive",
+      "directive": "Act as a genuinely independent memory evidence-readiness reviewer in a separate host-supported context. Review the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope and exclusions {{scope}}, audience {{audience}}, output language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current equal-or-narrower data policy {{current_data_policy}}. Review bounded source_evidence {{source_evidence}}, acquisition_summary {{acquisition_summary}}, usable count {{usable_evidence_count}}, and exact current_readiness_record {{current_readiness_record}}. Check scope/exclusions, constraints, success and deliverable fitness, policy subset, unique IDs, authority, typed access truth, provenance, claim support, relevance, quality, currency, contrary evidence, uncertainty, gaps, minimization, and truthful limited claims. Never invent or mutate. Return zero without findings only when the exact current representation is complete and truthful; otherwise return the complete bounded findings and exact count.",
+      "completionCondition": "A separate reviewer returns complete bounded memory evidence-readiness findings with an exact matching count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "findings": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "issues_count"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "issues_count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "issues_count"
+              ]
+            },
+            "then": {
+              "required": [
+                "findings"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "issues_count": {
+                  "const": 0
+                }
+              },
+              "required": [
+                "issues_count"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "findings"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "review-data-inline-gate"
+      }
+    },
+    {
+      "id": "review-data-inline-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-data-inline.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "evidence-status-sufficient",
+        "false": "repair-data-inline"
+      }
+    },
+    {
+      "id": "repair-data-file",
+      "type": "agent-directive",
+      "directive": "Read research-review.md and reproduce every evidence-readiness finding against the current workspace, primary sources, complete contract, immutable authority/privacy ceiling {{confidentiality_policy}}, current policy {{current_data_policy}}, and source expectations {{source_policy}}. Write repair-account.md with reproduced findings, changed artifacts, reach, and blocker, and overwrite current_repair_account. For contained or limited reach, also overwrite current_readiness_record with the exact changed bounded assessment matching current files. For source reach omit readiness; reacquisition and prepare-data overwrite it before any reader. Change source/provenance, limited account, or contained readiness/report/delivery at the earliest stale boundary without changing the immutable ceiling. If no finding is reproducible or no artifact changes, select blocked. Set reach only after changes.",
+      "completionCondition": "Every reproducible filesystem readiness finding is changed at its earliest owner or a factual blocker is recorded, with post-change reach",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "evidence_repair_reach",
+          "current_readiness_record",
+          "current_repair_account"
+        ],
+        "required": [
+          "evidence_repair_reach",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "evidence_repair_reach": {
+                  "enum": [
+                    "contained",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "evidence_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "current_readiness_record"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "evidence_repair_reach": {
+                  "enum": [
+                    "source",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "evidence_repair_reach"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "current_readiness_record"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-repair-blocked"
+      }
+    },
+    {
+      "id": "repair-data-inline",
+      "type": "agent-directive",
+      "directive": "Reproduce every finding in {{review-data-inline.findings}} against the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope and exclusions {{scope}}, audience {{audience}}, output language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current equal-or-narrower data policy {{current_data_policy}}. Use source_evidence {{source_evidence}}, acquisition_summary {{acquisition_summary}}, current_readiness_record {{current_readiness_record}}, and current_repair_account {{current_repair_account}}. The immutable ceiling cannot change. For contained/limited reach overwrite current_readiness_record with a changed complete record covering scope, exclusions, constraints, success, deliverable, evidence, and limitations. For source reach omit readiness; reacquisition and prepare-data overwrite it before review. Always overwrite current_repair_account. If nothing can change, select blocked. Select reach only after mutation.",
+      "completionCondition": "Every reproducible memory readiness finding is changed at its earliest owner or a factual blocker is reported, with post-change reach",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "evidence_repair_reach",
+          "current_readiness_record",
+          "current_repair_account"
+        ],
+        "required": [
+          "evidence_repair_reach",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "evidence_repair_reach": {
+                  "enum": [
+                    "contained",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "evidence_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "current_readiness_record"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "evidence_repair_reach": {
+                  "enum": [
+                    "source",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "evidence_repair_reach"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "current_readiness_record"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-repair-blocked"
+      }
+    },
+    {
+      "id": "route-data-repair-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_repair_reach"
+        },
+        "right": "source"
+      },
+      "connections": {
+        "true": "review-policy-authority",
+        "false": "route-data-repair-limited"
+      }
+    },
+    {
+      "id": "route-data-repair-limited",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_repair_reach"
+        },
+        "right": "limited"
+      },
+      "connections": {
+        "true": "produce-limited-result",
+        "false": "readiness-review-mode"
+      }
+    },
+    {
+      "id": "analyze-and-synthesize",
+      "type": "agent-directive",
+      "directive": "Synthesize the authoritative research candidate for question {{question}}, decision context {{decision_context}}, scope {{scope}}, audience {{audience}}, language {{output_language}}, advisory depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, current equal-or-narrower policy {{current_data_policy}}, and acquisition_summary {{acquisition_summary}}. {{#eq storage_mode 'filesystem'}}Read the exact current evidence directly from ./moira-ws/universal-research-{{executionId}}/source-evidence.json.{{else}}Use the exact bounded current memory evidence {{source_evidence}}.{{/eq}} Use only usable evidence within the immutable ceiling. Distinguish verified facts, source claims, analysis, inference, uncertainty, disagreement, and recommendations; trace every material claim, address contrary evidence and currency, and preserve limitations. Method and structure fit the question without quotas or prescribed tools. Minimize private/raw content. In filesystem mode finish research-report.md and equivalent minimized delivery.html, set research_result.storage_mode filesystem, report_path exactly ./moira-ws/universal-research-{{executionId}}/research-report.md, artifact_paths to the fixed current-state files, and omit memory_report. In memory mode set storage_mode memory, include a bounded self-contained memory_report and no paths. Project sanitized source metadata without source bodies. Never publish, notify, commit, deploy, or mutate production here.",
+      "completionCondition": "A current authoritative research candidate is evidence-traceable, uncertainty-aware, privacy-safe, and represented consistently for the selected storage mode",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "research_result"
+        ],
+        "required": [
+          "research_result"
+        ]
+      },
+      "connections": {
+        "success": "final-review-mode"
+      }
+    },
+    {
+      "id": "produce-limited-result",
+      "type": "agent-directive",
+      "directive": "Produce a truthful limited candidate against the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope/exclusions {{scope}}, audience {{audience}}, language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current data policy {{current_data_policy}}. Use acquisition_summary {{acquisition_summary}} and exact current_readiness_record {{current_readiness_record}}. {{#eq storage_mode 'filesystem'}}Read the exact current evidence directly from ./moira-ws/universal-research-{{executionId}}/source-evidence.json.{{else}}Use the exact bounded current memory evidence {{source_evidence}}.{{/eq}} Do not invent findings or treat requested authorization as grant. State attempts, every scope/exclusion/constraint/success gap, access/provenance/quality/currency/privacy/licensing limitation, what cannot be concluded or delivered, uncertainty, and safest next evidence/authority. In filesystem mode update source-evidence.json, research-report.md, and clearly limited delivery.html; set exact filesystem result paths and no memory_report. In memory mode return bounded self-contained memory_report and no paths. Set status limited. The candidate must pass independent final review and can never publish or notify.",
+      "completionCondition": "A self-contained limited result explains the evidence boundary without false analytical success",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "research_result"
+        ],
+        "required": [
+          "research_result"
+        ]
+      },
+      "connections": {
+        "success": "final-review-mode"
+      }
+    },
+    {
+      "id": "final-review-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "storage_mode"
+        },
+        "right": "filesystem"
+      },
+      "connections": {
+        "true": "review-result-file",
+        "false": "review-result-inline"
+      }
+    },
+    {
+      "id": "review-result-file",
+      "type": "agent-directive",
+      "directive": "Act as a genuinely independent final reviewer in a separate host-supported context. Read every current primary artifact in ./moira-ws/universal-research-{{executionId}} and applicable primary sources directly: research-contract.md, source-evidence.json, research-report.md, delivery.html, evidence-readiness review, and repair-account.md. Review the exact current bounded registry projection {{research_result}} against those files and the complete contract. Verify source/data policy stays within immutable ceiling; truthful access/provenance, unique IDs, material-claim traceability, contrary evidence, quality/currency/applicability, uncertainty, limitations, minimization, success criteria, and report-to-delivery equality. Require research_result filesystem mode, exact current report path, exactly the six fixed artifact paths, source projection agreement, and no memory_report. A limited candidate must show all attempts/gaps/limitations and unsupported conclusions; zero validates representation but not authority. Overwrite research-review.md with all blockers without mutating and return only exact count.",
+      "completionCondition": "A separate reviewer writes the complete current filesystem final findings and returns their exact bounded blocker count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "review-result-file-gate"
+      }
+    },
+    {
+      "id": "review-result-file-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-result-file.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "reviewed-result-limited",
+        "false": "repair-result-file"
+      }
+    },
+    {
+      "id": "review-result-inline",
+      "type": "agent-directive",
+      "directive": "Act as a genuinely independent memory final reviewer in a separate host-supported context. Review the complete canonical contract: question {{question}}, decision context {{decision_context}}, scope/exclusions {{scope}}, audience {{audience}}, language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, source expectations {{source_policy}}, immutable ceiling {{confidentiality_policy}}, and current policy {{current_data_policy}}. Review exact bounded source_evidence {{source_evidence}}, acquisition_summary {{acquisition_summary}}, current_readiness_record {{current_readiness_record}}, current_repair_account {{current_repair_account}}, and exact current bounded result including memory_report {{research_result}} against primary evidence. Verify all contract/result/evidence representations agree; check policy subset, truthful access/provenance, unique IDs, traceability, contrary evidence, quality/currency/applicability, uncertainty, limitations, and minimization. Require memory mode, self-contained bounded memory_report, and no paths/durable claim. A limited candidate must show every contract gap and unsupported conclusion. Do not mutate; zero only when complete/truthful, otherwise return all blockers.",
+      "completionCondition": "A separate reviewer returns the complete current memory final findings with an exact matching bounded count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "findings": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 30000
+          }
+        },
+        "required": [
+          "issues_count"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "issues_count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "issues_count"
+              ]
+            },
+            "then": {
+              "required": [
+                "findings"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "issues_count": {
+                  "const": 0
+                }
+              },
+              "required": [
+                "issues_count"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "findings"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "review-result-inline-gate"
+      }
+    },
+    {
+      "id": "review-result-inline-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-result-inline.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "reviewed-result-limited",
+        "false": "repair-result-inline"
+      }
+    },
+    {
+      "id": "repair-result-file",
+      "type": "agent-directive",
+      "directive": "Read research-review.md and reproduce every current final finding against all workspace artifacts, primary sources, and exact current bounded research_result {{research_result}}. Write repair-account.md with findings, changes, reach, and blocker. Immutable mode/identity/authority fields remain unchanged; source/current-data policy corrections must remain within the ceiling. Use contract/source/analysis/contained reach at earliest stale boundary. Non-contract reach changes every stale file and returns an exact changed research_result matching fixed filesystem paths and six-file boundary. Always overwrite current_repair_account. If nothing can change, select blocked with no product mutation. Set reach after mutation.",
+      "completionCondition": "Every reproducible filesystem final finding is changed at the earliest stale owner or a factual blocker is recorded, with post-change reach",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "research_result",
+          "research_repair_reach",
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
+          "depth_level",
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "required": [
+          "research_repair_reach",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "const": "contract"
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "question",
+                "decision_context",
+                "scope",
+                "audience",
+                "output_language",
+                "depth_level",
+                "constraints",
+                "success_criteria",
+                "deliverables",
+                "current_data_policy",
+                "source_policy",
+                "delivery_intent",
+                "resume_stage"
+              ],
+              "properties": {
+                "resume_stage": {
+                  "const": "acquisition"
+                }
+              },
+              "not": {
+                "required": [
+                  "research_result"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "enum": [
+                    "contained",
+                    "analysis",
+                    "source"
+                  ]
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "research_result"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "audience"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "output_language"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "deliverables"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resume_stage"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "research_result"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "audience"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "output_language"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "deliverables"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resume_stage"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-research-repair-blocked"
+      }
+    },
+    {
+      "id": "repair-result-inline",
+      "type": "agent-directive",
+      "directive": "Reproduce every finding in {{review-result-inline.findings}} against the complete canonical contract, source_evidence {{source_evidence}}, acquisition_summary {{acquisition_summary}}, current_readiness_record {{current_readiness_record}}, current_repair_account {{current_repair_account}}, exact current bounded research_result {{research_result}}, and primary evidence. Immutable mode/identity/authority fields remain unchanged; policy corrections return through pre-access review. Use contract/source/analysis/contained reach at earliest stale boundary. Non-contract reach returns the changed complete bounded memory result with no paths and all contract/evidence representations aligned. Always overwrite current_repair_account. If nothing changes, select blocked with no product mutation. Set reach after mutation.",
+      "completionCondition": "Every reproducible memory final finding is changed at the earliest stale owner or a factual blocker is reported, with post-change reach",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "research_result",
+          "research_repair_reach",
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
+          "depth_level",
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "required": [
+          "research_repair_reach",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "const": "contract"
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "question",
+                "decision_context",
+                "scope",
+                "audience",
+                "output_language",
+                "depth_level",
+                "constraints",
+                "success_criteria",
+                "deliverables",
+                "current_data_policy",
+                "source_policy",
+                "delivery_intent",
+                "resume_stage"
+              ],
+              "properties": {
+                "resume_stage": {
+                  "const": "acquisition"
+                }
+              },
+              "not": {
+                "required": [
+                  "research_result"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "enum": [
+                    "contained",
+                    "analysis",
+                    "source"
+                  ]
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "research_result"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "audience"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "output_language"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "deliverables"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resume_stage"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "research_result"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "audience"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "output_language"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "deliverables"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resume_stage"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-research-repair-blocked"
+      }
+    },
+    {
+      "id": "route-result-repair-contract",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research_repair_reach"
+        },
+        "right": "contract"
+      },
+      "connections": {
+        "true": "frame-problem",
+        "false": "route-result-repair-source"
+      }
+    },
+    {
+      "id": "route-result-repair-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research_repair_reach"
+        },
+        "right": "source"
+      },
+      "connections": {
+        "true": "review-policy-authority",
+        "false": "route-result-repair-data"
+      }
+    },
+    {
+      "id": "route-result-repair-data",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research_repair_reach"
+        },
+        "right": "analysis"
+      },
+      "connections": {
+        "true": "prepare-data",
+        "false": "final-review-mode"
+      }
+    },
+    {
+      "id": "final-approval-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "approve-final",
+        "false": "prepare-delivery-summary"
+      }
+    },
+    {
+      "id": "approve-final",
+      "type": "agent-directive",
+      "directive": "Present the exact independently zero-reviewed authoritative research_result {{research_result}}. In filesystem mode provide its verified fixed report/artifact locations; in memory mode present its bounded self-contained memory_report and weaker persistence. Ask accept, revise, or abort. accepted requires clear acceptance, revise exact bounded feedback, abort explicit stop. Do not mutate or perform side effects.",
+      "completionCondition": "The interactive caller accepts, supplies actionable revision feedback, or explicitly aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "revise",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "final-choice-abort"
+      }
+    },
+    {
+      "id": "final-approval-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-final.decision"
+        },
+        "right": "accepted"
+      },
+      "connections": {
+        "true": "prepare-delivery-summary",
+        "false": "revise-final-from-feedback"
+      }
+    },
+    {
+      "id": "revise-final-from-feedback",
+      "type": "agent-directive",
+      "directive": "Apply the user's exact feedback {{approve-final.feedback}} to exact current bounded research_result {{research_result}}. operating_mode, identity, storage mode, immutable authority/privacy ceiling, and publication/notification authority remain unchanged. source/current-data policy corrections stay within the ceiling and return through pre-access review. Select contract/source/analysis/contained reach after mutation. Contract reach returns all mutable contract fields and reacquires/reviews; other reaches return an exact changed complete result with every stale evidence/report/delivery representation aligned. Always overwrite current_repair_account. Filesystem paths remain fixed; memory remains path-free. Every changed result returns through independent review.",
+      "completionCondition": "The user-requested change is applied at its earliest stale boundary, authority is preserved, and post-change reach is exact",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "research_result",
+          "research_repair_reach",
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
+          "depth_level",
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "required": [
+          "research_repair_reach",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "const": "contract"
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "question",
+                "decision_context",
+                "scope",
+                "audience",
+                "output_language",
+                "depth_level",
+                "constraints",
+                "success_criteria",
+                "deliverables",
+                "current_data_policy",
+                "source_policy",
+                "delivery_intent",
+                "resume_stage"
+              ],
+              "properties": {
+                "resume_stage": {
+                  "const": "acquisition"
+                }
+              },
+              "not": {
+                "required": [
+                  "research_result"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "enum": [
+                    "contained",
+                    "analysis",
+                    "source"
+                  ]
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "research_result"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "audience"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "output_language"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "deliverables"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resume_stage"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "research_repair_reach": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "research_repair_reach"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "research_result"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "audience"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "output_language"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "deliverables"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resume_stage"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-research-repair-blocked"
+      }
+    },
+    {
+      "id": "revise-analysis-process",
+      "type": "teleport",
+      "hint": "Use only when the research contract or agreed process itself became materially wrong, incomplete, or obsolete. Do not use for evidence insufficiency, a review finding, blocked repair, user result feedback, publication failure, or notification failure; those have normal owners.",
+      "directive": "Revise the typed research contract because the process itself materially changed. Return execution_id unchanged and equal to {{executionId}}. operating_mode, confidentiality_policy, publication_authorized, and notification_authorized are immutable and remain in context. For acquisition re-entry, return storage_mode and every mutable contract field; source_policy may correct expectations/locators/availability or narrow access, and current_data_policy may change only within confidentiality_policy. The independent pre-access authority reviewer will clear the exact proposal before acquisition. For analysis re-entry, return only audience, output_language, and deliverables; schema forbids storage, source, policy, question, scope, depth, constraint, success, or delivery changes on that route. Overwrite current_repair_account with the exact revision account. Invalidate all state stale for the selected reach. This teleport cannot bypass insufficiency, review, repair, acceptance, or external-delivery failure; identity/storage and ordinary gates run next.",
+      "completionCondition": "The complete changed contract preserves identity and authority, invalidates stale work, and selects safe normal re-entry",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "execution_id",
+          "storage_mode",
+          "question",
+          "decision_context",
+          "scope",
+          "audience",
+          "output_language",
+          "depth_level",
+          "constraints",
+          "success_criteria",
+          "deliverables",
+          "current_data_policy",
+          "source_policy",
+          "delivery_intent",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "required": [
+          "execution_id",
+          "resume_stage",
+          "current_repair_account"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "resume_stage": {
+                  "const": "acquisition"
+                }
+              },
+              "required": [
+                "resume_stage"
+              ]
+            },
+            "then": {
+              "required": [
+                "storage_mode",
+                "question",
+                "decision_context",
+                "scope",
+                "audience",
+                "output_language",
+                "depth_level",
+                "constraints",
+                "success_criteria",
+                "deliverables",
+                "current_data_policy",
+                "source_policy",
+                "delivery_intent"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "resume_stage": {
+                  "const": "analysis"
+                }
+              },
+              "required": [
+                "resume_stage"
+              ]
+            },
+            "then": {
+              "required": [
+                "audience",
+                "output_language",
+                "deliverables"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "storage_mode"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "decision_context"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "scope"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "depth_level"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "constraints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "success_criteria"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "delivery_intent"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "execution-id-matches"
+      }
+    },
+    {
+      "id": "reviewed-result-limited",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research_result.status"
+        },
+        "right": "limited"
+      },
+      "connections": {
+        "true": "deliver-reviewed-limited",
+        "false": "final-approval-mode"
+      }
+    },
+    {
+      "id": "deliver-reviewed-limited",
+      "type": "agent-directive",
+      "directive": "Deliver the exact independently zero-reviewed limited research_result {{research_result}} locally. Explain that zero validates truthfulness/completeness of the limited account, not evidence sufficiency. Produce only bounded result_status, safe result_summary, exact fixed report path or memory location, and fixed limited outcome; never publish/notify or copy raw evidence, findings, or the full memory report into terminal output.",
+      "completionCondition": "The accepted limited result is truthfully identified as local and non-authoritative",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "limited"
+          }
+        },
+        "globalInputs": [
+          "result_status",
+          "result_summary",
+          "result_location"
+        ],
+        "required": [
+          "outcome",
+          "result_status",
+          "result_summary",
+          "result_location"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "result_status": {
+                "const": "limited"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-reviewed-limited"
+      }
+    },
+    {
+      "id": "route-delivery-local",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery_intent"
+        },
+        "right": "local"
+      },
+      "connections": {
+        "true": "deliver-local",
+        "false": "route-delivery-publish"
+      }
+    },
+    {
+      "id": "route-delivery-publish",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery_intent"
         },
         "right": "publish"
       },
       "connections": {
-        "true": "prepare-publication",
-        "false": "end"
+        "true": "external-storage-available",
+        "false": "route-delivery-publish-notify"
       }
     },
     {
-      "type": "agent-directive",
-      "id": "prepare-publication",
-      "directive": "Prepare research for publication. If publication process is described in research-config.md - follow it (upload via outline-manager.js, update index). If publication process not configured - notify user about ready research. Optionally send Telegram notification if configured.",
-      "completionCondition": "Publication completed or user notified about readiness",
+      "id": "route-delivery-publish-notify",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery_intent"
+        },
+        "right": "publish_and_notify"
+      },
       "connections": {
-        "success": "end"
+        "true": "external-storage-available",
+        "false": "undecided-mode-autonomous"
       }
     },
     {
+      "id": "undecided-mode-autonomous",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "deliver-local",
+        "false": "choose-delivery"
+      }
+    },
+    {
+      "id": "choose-delivery",
+      "type": "agent-directive",
+      "directive": "The authoritative result has an exact zero-blocker independent review. Ask once whether to keep it local, publish delivery.html, publish and then notify by Telegram, or abort. Explain that publication and notification use their separately captured authority flags and this decision cannot grant missing authority. Do not perform any side effect here.",
+      "completionCondition": "The interactive caller chooses one delivery outcome without a side effect",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "local",
+              "publish",
+              "publish_and_notify",
+              "abort"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "choice-delivery-abort"
+      }
+    },
+    {
+      "id": "choice-delivery-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "choose-delivery.decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "record-delivery-abort",
+        "false": "choice-delivery-local"
+      }
+    },
+    {
+      "id": "deliver-local",
+      "type": "agent-directive",
+      "directive": "Deliver the independently zero-reviewed authoritative result locally with no external side effect. Return a concise outcome only; research_result already contains the bounded caller-facing summary and safe location or memory report.",
+      "completionCondition": "The authoritative result is delivered locally without publication or notification",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "accepted_local"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "connections": {
+        "success": "end-local"
+      }
+    },
+    {
+      "id": "external-storage-available",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "storage_mode"
+        },
+        "right": "filesystem"
+      },
+      "connections": {
+        "true": "publication-authorized",
+        "false": "external-delivery-unavailable"
+      }
+    },
+    {
+      "id": "publication-authorized",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "publication_authorized"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "publish-result",
+        "false": "publication-not-authorized"
+      }
+    },
+    {
+      "id": "external-delivery-unavailable",
+      "type": "agent-directive",
+      "directive": "The accepted memory result cannot be published through a filesystem artifact. Preserve and report the accepted local memory result plus the factual weaker-persistence/storage limitation. Do not invent a file, upload, URL, or notification and do not rerun research.",
+      "completionCondition": "The storage-based external-delivery failure is reported while accepted local work is preserved",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "delivery_failed"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-delivery-unavailable"
+      }
+    },
+    {
+      "id": "publication-not-authorized",
+      "type": "agent-directive",
+      "directive": "Publication was requested but explicit publication authority was not captured. Preserve and report the accepted local result and the missing-authority failure. Do not upload, notify, or rerun research.",
+      "completionCondition": "The missing-publication-authority failure is reported without side effects",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "delivery_failed"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-delivery-not-authorized"
+      }
+    },
+    {
+      "id": "publish-result",
+      "type": "agent-directive",
+      "directive": "Publication is explicitly authorized and the filesystem result has an exact zero-blocker independent review. Upload only ./moira-ws/universal-research-{{executionId}}/delivery.html through the current Moira static-artifact file/archive interface. Do not upload the contract, evidence, review, repair account, raw private material, or credentials. Return published only after observing a successful response and copy its real HTTPS URL exactly. On any failure return failed with the observed concise cause; do not invent a URL, notify, or rerun research.",
+      "completionCondition": "The authorized upload has an observed real HTTPS URL or an observed failure cause",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "publication_status": {
+            "type": "string",
+            "enum": [
+              "published",
+              "failed"
+            ]
+          },
+          "failure_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "globalInputs": [
+          "publication_url"
+        ],
+        "required": [
+          "publication_status"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "published"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "publication_url"
+              ],
+              "not": {
+                "required": [
+                  "failure_reason"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "failure_reason"
+              ],
+              "not": {
+                "required": [
+                  "publication_url"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "publication-succeeded"
+      }
+    },
+    {
+      "id": "publication-succeeded",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "publish-result.publication_status"
+        },
+        "right": "published"
+      },
+      "connections": {
+        "true": "notification-requested",
+        "false": "end-publication-failed"
+      }
+    },
+    {
+      "id": "notification-requested",
+      "type": "condition",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "delivery_intent"
+            },
+            "right": "publish_and_notify"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "choose-delivery.decision"
+            },
+            "right": "publish_and_notify"
+          }
+        ]
+      },
+      "connections": {
+        "true": "notification-authorized",
+        "false": "end-published"
+      }
+    },
+    {
+      "id": "notification-authorized",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "notification_authorized"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "send-notification",
+        "false": "notification-not-authorized"
+      }
+    },
+    {
+      "id": "send-notification",
+      "type": "telegram-notification",
+      "message": "Universal Research completed, passed an independent zero-blocker review, and was published: {{publication_url}}",
+      "connections": {
+        "default": "notification-sent",
+        "error": "record-notification-error"
+      }
+    },
+    {
+      "id": "notification-sent",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "send-notification.telegramNotificationSent"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "record-notified",
+        "false": "record-notification-unsent"
+      }
+    },
+    {
+      "id": "end-reviewed-limited",
       "type": "end",
-      "id": "end"
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "storage_limitation",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "deliver-reviewed-limited"
+      ]
+    },
+    {
+      "id": "end-local",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "storage_limitation",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "deliver-local"
+      ]
+    },
+    {
+      "id": "end-delivery-unavailable",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "storage_limitation",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "external-delivery-unavailable"
+      ]
+    },
+    {
+      "id": "end-delivery-not-authorized",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publication-not-authorized"
+      ]
+    },
+    {
+      "id": "end-publication-failed",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publish-result"
+      ]
+    },
+    {
+      "id": "end-published",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publication_url",
+        "publish-result"
+      ]
+    },
+    {
+      "id": "end-notification-not-authorized",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publication_url",
+        "notification-not-authorized"
+      ]
+    },
+    {
+      "id": "end-notified",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publication_url",
+        "record-notified"
+      ]
+    },
+    {
+      "id": "end-notification-unsent",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publication_url",
+        "record-notification-unsent"
+      ]
+    },
+    {
+      "id": "end-notification-error",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "result_status",
+        "result_summary",
+        "result_location",
+        "publication_url",
+        "record-notification-error"
+      ]
+    },
+    {
+      "id": "end-identity-failure",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "identity-failure"
+      ]
+    },
+    {
+      "id": "repair-blocked",
+      "type": "agent-directive",
+      "directive": "Repair cannot truthfully continue because a current blocker was not reproducible or no authorized artifact could change. Use exact current_repair_account {{current_repair_account}} to report the bounded factual cause, preserve the current local candidate, and do not relabel it accepted, publish, notify, or loop unchanged.",
+      "completionCondition": "The recovery blocker is reported without false acceptance or side effect",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "recovery_blocker"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-repair-blocked"
+      }
+    },
+    {
+      "id": "end-repair-blocked",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "repair-blocked"
+      ]
+    },
+    {
+      "id": "final-choice-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "approve-final.decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "record-final-abort",
+        "false": "final-approval-gate"
+      }
+    },
+    {
+      "id": "route-evidence-repair-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_repair_reach"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "repair-blocked",
+        "false": "route-data-repair-source"
+      }
+    },
+    {
+      "id": "route-research-repair-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research_repair_reach"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "repair-blocked",
+        "false": "route-result-repair-contract"
+      }
+    },
+    {
+      "id": "evidence-status-sufficient",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_status"
+        },
+        "right": "sufficient"
+      },
+      "connections": {
+        "true": "analyze-and-synthesize",
+        "false": "produce-limited-result"
+      }
+    },
+    {
+      "id": "notification-not-authorized",
+      "type": "agent-directive",
+      "directive": "The result was published successfully, but separate notification authority was not captured. Preserve the published result and report the missing-authority notification failure without sending anything.",
+      "completionCondition": "The missing notification authority is reported without a send",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "notification_failed"
+          },
+          "reason": {
+            "const": "notification_not_authorized"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-notification-not-authorized"
+      }
+    },
+    {
+      "id": "record-notified",
+      "type": "agent-directive",
+      "directive": "Record only the observed successful Telegram outcome; do not copy the full tool response.",
+      "completionCondition": "The observed sent outcome is represented minimally",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "published_and_notified"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "connections": {
+        "success": "end-notified"
+      }
+    },
+    {
+      "id": "record-notification-unsent",
+      "type": "agent-directive",
+      "directive": "Record only that Telegram did not report a successful send. Preserve the published result and do not invent success or rerun research.",
+      "completionCondition": "The observed unsent outcome is represented minimally",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "notification_failed"
+          },
+          "reason": {
+            "const": "telegram_unsent"
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-notification-unsent"
+      }
+    },
+    {
+      "id": "record-notification-error",
+      "type": "agent-directive",
+      "directive": "Record a concise bounded notification error from engine context. Preserve the published result, do not copy the whole tool response, invent success, or rerun research.",
+      "completionCondition": "The observed notification error is represented minimally",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "notification_failed"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "outcome",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-notification-error"
+      }
+    },
+    {
+      "id": "prepare-delivery-summary",
+      "type": "agent-directive",
+      "directive": "Prepare only the bounded caller-facing terminal projection from exact independently zero-reviewed authoritative research_result {{research_result}}. Set result_status complete, result_summary to a concise safe summary without raw evidence, findings, credentials, private material, prompts, memory_report, or repair state, and result_location to the exact current research-report.md path in filesystem mode or memory in memory mode. Do not mutate research, publish, or notify.",
+      "completionCondition": "A safe bounded authoritative terminal summary, status, and location are current",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "result_status",
+          "result_summary",
+          "result_location"
+        ],
+        "required": [
+          "result_status",
+          "result_summary",
+          "result_location"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "result_status": {
+                "const": "complete"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-delivery-local"
+      }
+    },
+    {
+      "id": "choice-delivery-local",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "choose-delivery.decision"
+        },
+        "right": "local"
+      },
+      "connections": {
+        "true": "deliver-local",
+        "false": "external-storage-available"
+      }
+    },
+    {
+      "id": "record-final-abort",
+      "type": "agent-directive",
+      "directive": "Record the caller's explicit abort at the final-result acceptance stage. Return only the fixed safe outcome, stage, and bounded factual reason; do not include feedback, research content, evidence, or internal state and do not mutate work or perform side effects.",
+      "completionCondition": "A bounded caller-visible final-acceptance abort outcome is recorded",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "aborted"
+          },
+          "stage": {
+            "const": "final_acceptance"
+          },
+          "reason": {
+            "const": "user_requested_abort"
+          }
+        },
+        "required": [
+          "outcome",
+          "stage",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "record-delivery-abort",
+      "type": "agent-directive",
+      "directive": "Record the caller's explicit abort at the delivery-choice stage. Return only the fixed safe outcome, stage, and bounded factual reason; do not include feedback, research content, evidence, or internal state and do not mutate work or perform side effects.",
+      "completionCondition": "A bounded caller-visible delivery-choice abort outcome is recorded",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "const": "aborted"
+          },
+          "stage": {
+            "const": "delivery_choice"
+          },
+          "reason": {
+            "const": "user_requested_abort"
+          }
+        },
+        "required": [
+          "outcome",
+          "stage",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "execution_id",
+        "storage_mode",
+        "record-final-abort",
+        "record-delivery-abort"
+      ]
+    },
+    {
+      "id": "review-policy-authority",
+      "type": "agent-directive",
+      "directive": "Act as a genuinely independent pre-access authority reviewer in a separate host-supported context from intake, revision, repair, and research owners. Compare the exact proposed policies against this canonical boundary: question {{question}}, decision context {{decision_context}}, scope and exclusions {{scope}}, audience {{audience}}, output language {{output_language}}, depth {{depth_level}}, constraints {{constraints}}, success criteria {{success_criteria}}, deliverable {{deliverables}}, current source expectations {{source_policy}}, immutable authority/privacy ceiling {{confidentiality_policy}}, and current equal-or-narrower data policy {{current_data_policy}}. Diagnose only; do not acquire or inspect any proposed source and do not mutate state. Treat free-form labels and equal/narrower assertions as untrusted. A blocker exists for unrelated public discovery outside the exact question/scope, any new private/authenticated/paid/personal/confidential/restricted access, broader classification, weaker consent/retention/licensing/minimization, locator outside originating authority, ambiguous subset relationship, hidden credential need, or any proposal not proven equal or narrower. Safe locator/expectation corrections and genuine narrowing are valid. Return exactly zero with no findings only when every proposal is demonstrably within both the immutable ceiling and question/scope; otherwise return the complete bounded reproducible set and exact count. Acquisition is prohibited until zero.",
+      "completionCondition": "A separate reviewer has compared the exact proposed policies to the immutable ceiling before access and returned the exact bounded blocker count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "findings": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          }
+        },
+        "required": [
+          "issues_count"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "issues_count": {
+                  "const": 0
+                }
+              },
+              "required": [
+                "issues_count"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "findings"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "issues_count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "issues_count"
+              ]
+            },
+            "then": {
+              "required": [
+                "findings"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "review-policy-authority-gate"
+      }
+    },
+    {
+      "id": "review-policy-authority-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-policy-authority.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "acquisition-mode",
+        "false": "repair-policy-authority"
+      }
+    },
+    {
+      "id": "repair-policy-authority",
+      "type": "agent-directive",
+      "directive": "Reproduce every pre-access finding in {{review-policy-authority.findings}} against the exact immutable ceiling {{confidentiality_policy}}, current source_policy {{source_policy}}, and current_data_policy {{current_data_policy}}. Never acquire a source or rewrite the ceiling, operating mode, execution identity, or delivery authority. If the finding is reproducible, change the proposed source expectations and data policy to a demonstrably equal-or-narrower subset and select changed only after the mutation. If the requested correction cannot fit the immutable ceiling, select blocked and return no policy mutation. Always overwrite current_repair_account with the exact bounded repair or factual-blocker account. An unchanged policy cannot re-enter review.",
+      "completionCondition": "Every reproducible pre-access authority finding is changed to a real subset or a factual blocker is reported without access",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "source_policy",
+          "current_data_policy",
+          "current_repair_account",
+          "policy_repair_reach"
+        ],
+        "required": [
+          "current_repair_account",
+          "policy_repair_reach"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "policy_repair_reach": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "policy_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "source_policy",
+                "current_data_policy"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "policy_repair_reach": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "policy_repair_reach"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "source_policy"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "current_data_policy"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "policy-repair-blocked"
+      }
+    },
+    {
+      "id": "policy-repair-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "policy_repair_reach"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "repair-blocked",
+        "false": "review-policy-authority"
+      }
     }
   ],
   "variableRegistry": {
-    "workflow_version": {
+    "execution_id": {
       "type": "string",
-      "description": "Stores workflow version",
-      "default": "1.0.0"
-    },
-    "iteration_count": {
-      "type": "number",
-      "description": "Stores iteration count",
-      "default": 1
-    },
-    "max_iterations": {
-      "type": "number",
-      "description": "Stores max iterations",
-      "default": 5
-    },
-    "research_generation_prompt": {
-      "type": "string",
-      "description": "Stores research generation prompt",
-      "default": "RESEARCH GENERATION TASK:\n\nTOPIC: {{research_topic}}\nDEPTH LEVEL: {{depth_level}}\nAUDIENCE: {{target_audience}}\nLANGUAGE: {{output_language}}\n\nDEPTH STANDARDS:\n- quick: 5-8 quality sources, 1500-2500 words, focused validation, rapid overview for immediate understanding\n- normal: 12-20 quality sources, 3000-5000 words, systematic validation, practical guidance with implementation focus\n- deep: 25-35 authoritative sources, 6000-10000 words, comprehensive analysis, strategic analysis with detailed trade-offs\n- scientific: 40+ peer-reviewed sources, 10000+ words, publication-quality analysis, academic rigor with systematic methodology\n\nRESEARCH METHODOLOGY:\n1. SOURCE STRATEGY: Identify most credible and authoritative sources through intellectual reasoning. Use WebSearch and WebFetch tools for systematic investigation. Verify source quality - never assume without independent verification.\n\n2. MULTI-PERSPECTIVE ANALYSIS: Combine insights from multiple sources intelligently. Address all significant aspects through reasoned analysis. Include contradictory information and acknowledge limitations.\n\n3. PUBLICATION QUALITY: Create self-contained report that can be understood without prior context. Define ALL specialized terms. Provide historical evolution and current state context. Clear scope and boundaries.\n\n4. VISUAL FORMATTING: Structure with clear sections and logical hierarchy. Use visual elements for scannable content:\n   - Notice blocks for key information (:::info, :::warning, :::success)\n   - Tables for comparisons and metrics (max 6-8 columns)\n   - Code blocks with syntax highlighting\n   - Diagrams for process visualization (Mermaid support)\n   - Visual breaks: max 7-10 lines of text without visual elements\n\n5. DOCUMENT STRUCTURE:\n   - Title with descriptive subtitle\n   - Metadata block: category, date, status, tags\n   - Executive summary with key findings (3-5 bullet points)\n   - Clear section headings with emoji markers for grouping\n   - Introduction: context, goals, scope\n   - Methodology: approach, data sources, evaluation criteria\n   - Results: key findings in notice blocks, comparative tables, diagrams\n   - Recommendations: actionable steps, priority matrix\n   - Conclusion: summary in success block, future work\n\n6. CITATION EXCELLENCE: Every claim supported by sources. Complete source attribution with URL, author, date accessed. Inline citations [1][2] with full bibliography.\n\n7. PROFESSIONAL STANDARDS: Publication-ready writing. Appropriate academic tone. Logical flow from simple to complex. Technical accuracy in examples.\n\nOUTPUT: Save research to appropriate location. Return file path."
-    },
-    "research_critique_prompt": {
-      "type": "string",
-      "description": "Stores research critique prompt",
-      "default": "RESEARCH QUALITY ASSESSMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nDECLARED LEVEL: {{depth_level}}\nITERATION: {{iteration_count}}\n\nEVALUATION DIMENSIONS:\n\n1. FACTUAL ACCURACY: Analyze claims for logical consistency. Evaluate source quality and relevance. Identify contradictions or unsupported assertions. Assess information currency and appropriateness.\n\n2. SOURCE COVERAGE (Level-Specific Standards):\n   - quick: Validate 5-8 sources minimum\n   - normal: Assess 12-20 quality sources\n   - deep: Evaluate 25-35 authoritative sources\n   - scientific: Review 40+ academic sources\n   Judgment: Does source coverage match declared level?\n\n3. COMPLETENESS: Analyze if all significant aspects addressed. Evaluate depth appropriateness for declared level. Identify missing perspectives. Assess scope coverage.\n\n4. FORMATTING QUALITY:\n   - Notice blocks: Check frequency (1 per 3-5 sections), type distribution (info/warning/success), effectiveness\n   - Visual elements: Tables (6-8 column limit), diagrams (Mermaid syntax), code blocks (language specification)\n   - Visual breaks: Max 7-10 lines without elements\n   - Navigation: Clear headers, cross-references (min 3-5 internal links), no manual TOC\n   - Metadata: Category, date, status, tags completeness\n   - Executive summary: Notice blocks with key results\n\n5. CITATION QUALITY: Evaluate source attribution completeness. Assess source authority and relevance. Review bibliography formatting. Check integration into narrative flow.\n\n6. PROFESSIONAL STANDARDS: Writing quality and tone consistency. Structural integrity. Argumentation quality and logical progression.\n\nISSUE CLASSIFICATION:\n- CRITICAL: Fundamental flaws, factual inaccuracies, missing essential components, significant gaps affecting validity\n- MAJOR: Important aspects needing substantial enhancement, clarity problems, source attribution gaps\n- MODERATE: Depth enhancement opportunities, alternative perspectives worth exploring, structural improvements\n- MINOR: Polish opportunities, formatting consistency, style refinements\n\nOUTPUT: Provide quality_level, formatting_score (0-10), critical_issues_count, major_issues_count, moderate_issues_count, minor_issues_count, detailed critique_feedback."
-    },
-    "research_improvement_prompt": {
-      "type": "string",
-      "description": "Stores research improvement prompt",
-      "default": "RESEARCH IMPROVEMENT TASK:\n\nRESEARCH FILE: {{research_file_path}}\nITERATION: {{iteration_count}} of {{max_iterations}}\n\nCRITIQUE RECEIVED:\n{{critique_feedback}}\n\nIMPROVEMENT PROTOCOL:\n\n1. UNDERSTAND FEEDBACK: Analyze criticism to identify root issues. Prioritize by impact: critical > major > moderate > minor.\n\n2. TARGETED RESEARCH: Conduct additional investigation for weak areas identified. Add authoritative sources where gaps exist. Deepen analysis in areas marked insufficient.\n\n3. CRITICAL ISSUES (Must Address):\n   - Fix fundamental flaws immediately with focused additional research\n   - Resolve factual inaccuracies through verification\n   - Add missing essential components\n   - Fill significant gaps affecting research validity\n\n4. MAJOR ISSUES (Should Address):\n   - Expand analysis in identified weak areas\n   - Improve clarity in problematic sections\n   - Strengthen source attribution and citations\n   - Add missing perspectives\n\n5. MODERATE & MINOR (Based on Time):\n   - Enhance depth where suggested\n   - Polish formatting and structure\n   - Refine style and readability\n\n6. FORMATTING IMPROVEMENTS:\n   - Add/improve notice blocks if frequency insufficient\n   - Enhance tables and visual elements\n   - Improve navigation and cross-references\n   - Fix metadata completeness issues\n\n7. CONTENT INTEGRATION: Seamlessly integrate improvements into existing work. Maintain research coherence and flow. Ensure revisions enhance rather than fragment.\n\n8. QUALITY VERIFICATION: Self-assess improvements through intellectual analysis. Verify all critical and major issues resolved. Check formatting compliance improved.\n\nOUTPUT: Save improved version."
-    },
-    "critical_issues_count": {
-      "type": "number",
-      "description": "Global variable critical_issues_count"
-    },
-    "major_issues_count": {
-      "type": "number",
-      "description": "Global variable major_issues_count"
-    },
-    "formatting_score": {
-      "type": "number",
-      "description": "Global variable formatting_score"
-    },
-    "critique_feedback": {
-      "type": "string",
-      "description": "Global variable critique_feedback"
-    },
-    "user_decision": {
-      "type": "string",
-      "description": "Global variable user_decision",
-      "enum": [
-        "publish",
-        "stop"
-      ]
-    },
-    "research_topic": {
-      "type": "string",
-      "description": "Topic of research"
-    },
-    "depth_level": {
-      "type": "string",
-      "description": "Depth level of research"
-    },
-    "target_audience": {
-      "type": "string",
-      "description": "Target audience for the research"
+      "description": "Exact current engine execution UUID returned by intake",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "output_language": {
       "type": "string",
-      "description": "Language for the research output"
+      "description": "Requested language of the research result",
+      "minLength": 2,
+      "maxLength": 100
     },
-    "research_file_path": {
+    "depth_level": {
       "type": "string",
-      "description": "Path to the generated research file"
+      "description": "Advisory rigor and cost level; never a fixed source, word, method, or tool quota",
+      "enum": [
+        "quick",
+        "normal",
+        "deep",
+        "scientific"
+      ]
+    },
+    "delivery_intent": {
+      "type": "string",
+      "description": "Caller-requested delivery route subject to separately captured authority and storage capability",
+      "enum": [
+        "local",
+        "publish",
+        "publish_and_notify",
+        "undecided"
+      ]
+    },
+    "publication_authorized": {
+      "type": "boolean",
+      "description": "Explicit caller authority for static publication"
+    },
+    "notification_authorized": {
+      "type": "boolean",
+      "description": "Explicit caller authority for Telegram notification after successful publication"
+    },
+    "storage_limitation": {
+      "type": "string",
+      "description": "Bounded disclosure when filesystem materialization falls back to memory",
+      "maxLength": 1000,
+      "default": "none"
+    },
+    "publication_url": {
+      "type": "string",
+      "description": "Observed HTTPS URL returned by a successful authorized static-artifact upload",
+      "pattern": "^https://[^\\s]+$",
+      "maxLength": 2000
+    },
+    "acquisition_summary": {
+      "type": "string",
+      "description": "Bounded acquisition summary shared by storage-specific research branches",
+      "minLength": 50,
+      "maxLength": 12000
+    },
+    "result_status": {
+      "type": "string",
+      "description": "Safe terminal status after independent review",
+      "enum": [
+        "complete",
+        "limited"
+      ]
+    },
+    "result_summary": {
+      "type": "string",
+      "description": "Bounded safe caller-facing summary without raw evidence or internal findings",
+      "minLength": 20,
+      "maxLength": 12000
+    },
+    "result_location": {
+      "type": "string",
+      "description": "Exact fixed report path or explicit in-memory location",
+      "pattern": "^(memory|\\./moira-ws/universal-research-[0-9a-f-]{36}/research-report\\.md)$"
+    },
+    "evidence_status": {
+      "type": "string",
+      "description": "Current evidence fitness after question-specific readiness assessment",
+      "enum": [
+        "sufficient",
+        "limited"
+      ]
+    },
+    "audience": {
+      "type": "string",
+      "description": "Audience that will interpret and act on the result",
+      "minLength": 2,
+      "maxLength": 2000
+    },
+    "constraints": {
+      "type": "string",
+      "description": "Time, technical, methodological, and resource constraints, or an explicit none statement",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "deliverables": {
+      "type": "string",
+      "description": "Expected report and any authorized auxiliary outputs",
+      "minLength": 2,
+      "maxLength": 4000
+    },
+    "scope": {
+      "type": "string",
+      "description": "Included and excluded analytical scope",
+      "minLength": 5,
+      "maxLength": 4000
+    },
+    "success_criteria": {
+      "type": "string",
+      "description": "Observable criteria for a useful and valid result",
+      "minLength": 5,
+      "maxLength": 4000
+    },
+    "operating_mode": {
+      "type": "string",
+      "description": "Run mode resolved once at entry; autonomous skips only intermediate human approvals",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ]
+    },
+    "storage_mode": {
+      "type": "string",
+      "description": "Whether this execution uses the fixed filesystem workspace or bounded in-memory state",
+      "enum": [
+        "filesystem",
+        "memory"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "description": "Concrete analytical question",
+      "minLength": 10,
+      "maxLength": 4000
+    },
+    "decision_context": {
+      "type": "string",
+      "description": "Decision or action the analysis will inform and why it matters",
+      "minLength": 10,
+      "maxLength": 4000
+    },
+    "confidentiality_policy": {
+      "type": "string",
+      "description": "Immutable intake authority and privacy ceiling covering allowed source access, confidentiality, consent, retention, licensing, and data minimization",
+      "minLength": 1,
+      "maxLength": 12000
+    },
+    "current_data_policy": {
+      "type": "object",
+      "description": "Current correctable data-handling policy, which must remain equal to or narrower than the immutable confidentiality_policy ceiling",
+      "additionalProperties": false,
+      "required": [
+        "relation_to_ceiling",
+        "policy"
+      ],
+      "properties": {
+        "relation_to_ceiling": {
+          "type": "string",
+          "enum": [
+            "equal",
+            "narrower"
+          ]
+        },
+        "policy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12000
+        }
+      }
+    },
+    "current_readiness_record": {
+      "type": "string",
+      "description": "Single current bounded memory evidence-readiness record overwritten by every readiness producer or repair",
+      "minLength": 100,
+      "maxLength": 30000
+    },
+    "current_repair_account": {
+      "type": "string",
+      "description": "Single current bounded account of the latest contract, readiness, result repair, rework, revision, or factual blocker",
+      "minLength": 20,
+      "maxLength": 12000,
+      "default": "No repair or revision has occurred for the current candidate."
+    },
+    "source_policy": {
+      "type": "array",
+      "description": "Current correctable source expectations, locators, availability, and requested authorization state; never an authority grant beyond confidentiality_policy",
+      "minItems": 0,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "locator",
+          "authorization",
+          "relation_to_authority_ceiling",
+          "availability",
+          "data_classification",
+          "limitation"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "supplied",
+              "public_discovery",
+              "private",
+              "authenticated",
+              "paid",
+              "other"
+            ]
+          },
+          "locator": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Non-secret source label or location; never credentials or raw records"
+          },
+          "authorization": {
+            "type": "string",
+            "enum": [
+              "authorized",
+              "not_authorized"
+            ]
+          },
+          "relation_to_authority_ceiling": {
+            "type": "string",
+            "enum": [
+              "equal",
+              "narrower"
+            ],
+            "description": "Required representational proof that the current expectation does not broaden immutable confidentiality_policy authority"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable",
+              "unknown"
+            ]
+          },
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "public",
+              "internal",
+              "confidential",
+              "restricted"
+            ]
+          },
+          "limitation": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    "usable_evidence_count": {
+      "type": "integer",
+      "description": "Bounded count of discovered or supplied sources actually accessed and lawfully usable",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "resume_stage": {
+      "type": "string",
+      "description": "Normal re-entry selected by the guarded process-revision owner",
+      "enum": [
+        "acquisition",
+        "analysis"
+      ],
+      "default": "acquisition"
+    },
+    "research_result": {
+      "type": "object",
+      "description": "Current reviewed research candidate; bounded memory report or fixed filesystem report reference",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "storage_mode",
+        "decision_context",
+        "sources",
+        "executive_summary",
+        "evidence_summary",
+        "limitations",
+        "recommendations",
+        "visualization_summary",
+        "reproducibility"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "limited"
+          ]
+        },
+        "storage_mode": {
+          "type": "string",
+          "enum": [
+            "filesystem",
+            "memory"
+          ]
+        },
+        "decision_context": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 4000
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "type",
+              "locator",
+              "authorization",
+              "initial_availability",
+              "actual_availability",
+              "access_outcome",
+              "sanitized_provenance",
+              "data_classification",
+              "limitation"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "web_page",
+                  "paper",
+                  "book",
+                  "dataset",
+                  "supplied",
+                  "other"
+                ]
+              },
+              "locator": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "authorization": {
+                "type": "string",
+                "enum": [
+                  "authorized",
+                  "not_authorized"
+                ]
+              },
+              "data_classification": {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "internal",
+                  "confidential",
+                  "restricted"
+                ]
+              },
+              "limitation": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "initial_availability": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "unavailable",
+                  "unknown"
+                ],
+                "description": "Availability known before acquisition from the immutable user contract"
+              },
+              "actual_availability": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "unavailable",
+                  "unknown"
+                ]
+              },
+              "access_outcome": {
+                "type": "string",
+                "enum": [
+                  "usable",
+                  "unavailable",
+                  "not_authorized",
+                  "access_error"
+                ]
+              },
+              "sanitized_provenance": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "access_outcome": {
+                      "const": "usable"
+                    }
+                  },
+                  "required": [
+                    "access_outcome"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "authorization": {
+                      "const": "authorized"
+                    },
+                    "actual_availability": {
+                      "const": "available"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "access_outcome": {
+                      "const": "unavailable"
+                    }
+                  },
+                  "required": [
+                    "access_outcome"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actual_availability": {
+                      "const": "unavailable"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "access_outcome": {
+                      "const": "not_authorized"
+                    }
+                  },
+                  "required": [
+                    "access_outcome"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "authorization": {
+                      "const": "not_authorized"
+                    },
+                    "actual_availability": {
+                      "const": "unknown"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "access_outcome": {
+                      "const": "access_error"
+                    }
+                  },
+                  "required": [
+                    "access_outcome"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "actual_availability": {
+                      "const": "unknown"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "executive_summary": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 8000
+        },
+        "evidence_summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 12000
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "recommendations": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "visualization_summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "reproducibility": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "report_path": {
+          "type": "string",
+          "pattern": "^\\./moira-ws/universal-research-[0-9a-f-]{36}/research-report\\.md$"
+        },
+        "artifact_paths": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "pattern": "^\\./moira-ws/universal-research-[0-9a-f-]{36}/(research-contract\\.md|source-evidence\\.json|research-report\\.md|research-review\\.md|repair-account\\.md|delivery\\.html)$"
+          }
+        },
+        "memory_report": {
+          "type": "string",
+          "minLength": 100,
+          "maxLength": 60000
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "storage_mode": {
+                "const": "filesystem"
+              }
+            },
+            "required": [
+              "storage_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "report_path",
+              "artifact_paths"
+            ],
+            "not": {
+              "required": [
+                "memory_report"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "storage_mode": {
+                "const": "memory"
+              }
+            },
+            "required": [
+              "storage_mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "memory_report"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "report_path"
+                  ]
+                },
+                {
+                  "required": [
+                    "artifact_paths"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "source_evidence": {
+      "type": "array",
+      "description": "Sanitized external or supplied evidence discovered within the immutable source-policy authority ceiling",
+      "minItems": 0,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "type",
+          "locator",
+          "authorization",
+          "data_classification",
+          "initial_availability",
+          "actual_availability",
+          "access_outcome",
+          "sanitized_provenance",
+          "relevance",
+          "claims_supported",
+          "contradictions",
+          "uncertainty",
+          "currency",
+          "limitation"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "web_page",
+              "paper",
+              "book",
+              "dataset",
+              "supplied",
+              "other"
+            ]
+          },
+          "locator": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Sanitized URL, DOI, citation, file label, or other non-secret source identity"
+          },
+          "authorization": {
+            "type": "string",
+            "enum": [
+              "authorized",
+              "not_authorized"
+            ]
+          },
+          "data_classification": {
+            "type": "string",
+            "enum": [
+              "public",
+              "internal",
+              "confidential",
+              "restricted"
+            ]
+          },
+          "initial_availability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable",
+              "unknown"
+            ]
+          },
+          "actual_availability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "unavailable",
+              "unknown"
+            ]
+          },
+          "access_outcome": {
+            "type": "string",
+            "enum": [
+              "usable",
+              "unavailable",
+              "not_authorized",
+              "access_error"
+            ]
+          },
+          "sanitized_provenance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "relevance": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "claims_supported": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          },
+          "contradictions": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            }
+          },
+          "uncertainty": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "currency": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Publication/access date or an explicit unknown/not-material statement"
+          },
+          "limitation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "access_outcome": {
+                  "const": "usable"
+                }
+              },
+              "required": [
+                "access_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authorization": {
+                  "const": "authorized"
+                },
+                "actual_availability": {
+                  "const": "available"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "access_outcome": {
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "access_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "actual_availability": {
+                  "const": "unavailable"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "access_outcome": {
+                  "const": "not_authorized"
+                }
+              },
+              "required": [
+                "access_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authorization": {
+                  "const": "not_authorized"
+                },
+                "actual_availability": {
+                  "const": "unknown"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "access_outcome": {
+                  "const": "access_error"
+                }
+              },
+              "required": [
+                "access_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "actual_availability": {
+                  "const": "unknown"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "evidence_repair_reach": {
+      "type": "string",
+      "description": "Actual readiness-repair reach",
+      "enum": [
+        "contained",
+        "source",
+        "limited",
+        "blocked"
+      ]
+    },
+    "policy_repair_reach": {
+      "type": "string",
+      "description": "Post-change reach for the independent pre-access authority-policy gate",
+      "enum": [
+        "changed",
+        "blocked"
+      ]
+    },
+    "research_repair_reach": {
+      "type": "string",
+      "description": "Actual final-result repair reach, including canonical analysis-contract correction",
+      "enum": [
+        "contained",
+        "analysis",
+        "source",
+        "contract",
+        "blocked"
+      ]
     }
   }
 }

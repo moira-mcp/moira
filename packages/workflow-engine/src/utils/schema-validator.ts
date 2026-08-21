@@ -12,6 +12,95 @@ const ajv = new Ajv({
   strict: false,
 });
 
+export const ORDERED_UNIQUE_REFERENCES_KEYWORD = "xOrderedUniqueReferences";
+export const EVIDENCE_BOUNDARY_KEYWORD = "xEvidenceBoundary";
+export const PRESERVE_PLAN_PREFIX_KEYWORD = "xPreservePlanPrefix";
+export const CONTEXT_PATH_SUFFIXES_KEYWORD = "xContextPathSuffixes";
+
+/** Register the reusable cross-item contract for ordered plans. */
+export function registerWorkflowSchemaKeywords(instance: {
+  addKeyword(definition: Record<string, unknown>): unknown;
+}): void {
+  instance.addKeyword({
+    keyword: ORDERED_UNIQUE_REFERENCES_KEYWORD,
+    type: "array",
+    schemaType: "object",
+    errors: true,
+    compile(schema: unknown) {
+      const config = schema as { idProperty?: unknown; referencesProperty?: unknown };
+      const idProperty = config.idProperty;
+      const referencesProperty = config.referencesProperty;
+      if (typeof idProperty !== "string" || typeof referencesProperty !== "string") {
+        throw new Error(
+          `${ORDERED_UNIQUE_REFERENCES_KEYWORD} requires string idProperty and referencesProperty`,
+        );
+      }
+
+      const validate = (data: unknown): boolean => {
+        if (!Array.isArray(data)) return true;
+        const seen = new Set<string>();
+        for (let index = 0; index < data.length; index += 1) {
+          const item = data[index];
+          if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+          const record = item as Record<string, unknown>;
+          const id = record[idProperty];
+          if (typeof id !== "string") continue;
+          if (seen.has(id)) {
+            (validate as { errors?: unknown[] }).errors = [
+              {
+                keyword: ORDERED_UNIQUE_REFERENCES_KEYWORD,
+                instancePath: `/${index}/${idProperty}`,
+                schema,
+                params: { duplicateId: id },
+                message: `must be unique; duplicate identity ${JSON.stringify(id)}`,
+              },
+            ];
+            return false;
+          }
+          const references = record[referencesProperty];
+          if (Array.isArray(references)) {
+            for (const reference of references) {
+              if (typeof reference === "string" && !seen.has(reference)) {
+                (validate as { errors?: unknown[] }).errors = [
+                  {
+                    keyword: ORDERED_UNIQUE_REFERENCES_KEYWORD,
+                    instancePath: `/${index}/${referencesProperty}`,
+                    schema,
+                    params: { invalidReference: reference },
+                    message: `must reference an earlier identity; got ${JSON.stringify(reference)}`,
+                  },
+                ];
+                return false;
+              }
+            }
+          }
+          seen.add(id);
+        }
+        (validate as { errors?: unknown[] }).errors = undefined;
+        return true;
+      };
+      return validate;
+    },
+  });
+  instance.addKeyword({
+    keyword: EVIDENCE_BOUNDARY_KEYWORD,
+    schemaType: "object",
+    valid: true,
+  });
+  instance.addKeyword({
+    keyword: PRESERVE_PLAN_PREFIX_KEYWORD,
+    schemaType: "object",
+    valid: true,
+  });
+  instance.addKeyword({
+    keyword: CONTEXT_PATH_SUFFIXES_KEYWORD,
+    schemaType: "object",
+    valid: true,
+  });
+}
+
+registerWorkflowSchemaKeywords(ajv);
+
 export function validateSchema(data: unknown, schema: Record<string, unknown>): boolean {
   try {
     const validate = ajv.compile(schema);
@@ -31,6 +120,7 @@ export class SchemaValidator {
   static validate(
     data: unknown,
     schema: Record<string, unknown>,
+    context?: Record<string, unknown>,
   ): {
     isValid: boolean;
     errors?: string[];
@@ -51,6 +141,19 @@ export class SchemaValidator {
         };
       }
 
+      const contextualError = SchemaValidator.validateEvidenceBoundary(data, schema, context);
+      if (contextualError) {
+        return { isValid: false, errors: [contextualError] };
+      }
+      const prefixError = SchemaValidator.validatePlanPrefix(data, schema, context);
+      if (prefixError) {
+        return { isValid: false, errors: [prefixError] };
+      }
+      const pathError = SchemaValidator.validateContextPathSuffixes(data, schema, context);
+      if (pathError) {
+        return { isValid: false, errors: [pathError] };
+      }
+
       return {
         isValid: true,
         validatedData: data,
@@ -61,6 +164,177 @@ export class SchemaValidator {
         errors: [error instanceof Error ? error.message : "Schema compilation error"],
       };
     }
+  }
+
+  private static validateEvidenceBoundary(
+    data: unknown,
+    schema: Record<string, unknown>,
+    context?: Record<string, unknown>,
+  ): string | undefined {
+    const rawConfig = schema[EVIDENCE_BOUNDARY_KEYWORD];
+    if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) return undefined;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+
+    const config = rawConfig as Record<string, unknown>;
+    const response = data as Record<string, unknown>;
+    const reachProperty = String(config.reachProperty ?? "final_repair_reach");
+    const boundaryProperty = String(config.boundaryProperty ?? "repair_from");
+    const planProperty = String(config.planProperty ?? "steps");
+    const ledgerProperty = String(config.ledgerProperty ?? "evidence_ledger");
+    const workReach = String(config.workReach ?? "work");
+    const checkedReaches = Array.isArray(config.checkedReaches)
+      ? new Set(config.checkedReaches.filter((value): value is string => typeof value === "string"))
+      : new Set(["task", "plan", workReach]);
+    const reach = response[reachProperty];
+    if (typeof reach !== "string" || !checkedReaches.has(reach)) return undefined;
+
+    const boundary = response[boundaryProperty];
+    const ledger = response[ledgerProperty];
+    const plan = Array.isArray(response[planProperty])
+      ? response[planProperty]
+      : context?.[planProperty];
+    if (!Number.isInteger(boundary) || !Array.isArray(ledger) || !Array.isArray(plan)) {
+      return `VALIDATION ERROR: ${EVIDENCE_BOUNDARY_KEYWORD} requires integer '${boundaryProperty}', array '${ledgerProperty}', and an available '${planProperty}' plan.`;
+    }
+
+    const numericBoundary = boundary as number;
+    const expectedLength = reach === workReach ? numericBoundary + 1 : numericBoundary;
+    if (numericBoundary < 0 || numericBoundary > plan.length || ledger.length !== expectedLength) {
+      return `VALIDATION ERROR: '${ledgerProperty}' must contain exactly ${expectedLength} ordered record(s) for '${reach}' at ${boundaryProperty}=${numericBoundary}; got ${ledger.length}.`;
+    }
+
+    const seen = new Set<string>();
+    const contextPlan = context?.[planProperty];
+    const contextLedger = context?.[ledgerProperty];
+    if (!Array.isArray(contextPlan) || !Array.isArray(contextLedger)) {
+      return `VALIDATION ERROR: ${EVIDENCE_BOUNDARY_KEYWORD} requires current context arrays '${planProperty}' and '${ledgerProperty}'.`;
+    }
+    for (let index = 0; index < ledger.length; index += 1) {
+      const planItem = plan[index] as Record<string, unknown> | undefined;
+      const record = ledger[index] as Record<string, unknown> | undefined;
+      const expectedId = planItem?.id;
+      const itemId = record?.item_id;
+      if (typeof expectedId !== "string" || itemId !== expectedId || seen.has(itemId as string)) {
+        return `VALIDATION ERROR: '${ledgerProperty}' record ${index} must uniquely match plan item ${JSON.stringify(expectedId)} in order.`;
+      }
+      seen.add(itemId as string);
+      if (index < numericBoundary) {
+        if (!SchemaValidator.deepEqual(plan[index], contextPlan[index])) {
+          return `VALIDATION ERROR: protected plan prefix item ${index} differs from current context.`;
+        }
+        if (!SchemaValidator.deepEqual(record, contextLedger[index])) {
+          return `VALIDATION ERROR: protected evidence prefix record ${index} differs from current context.`;
+        }
+      }
+      if (index === numericBoundary && reach === workReach && record?.status !== "verified") {
+        return `VALIDATION ERROR: corrected work record at ${boundaryProperty}=${numericBoundary} must have status 'verified' before independent item review.`;
+      }
+    }
+    return undefined;
+  }
+
+  private static validatePlanPrefix(
+    data: unknown,
+    schema: Record<string, unknown>,
+    context?: Record<string, unknown>,
+  ): string | undefined {
+    const rawConfig = schema[PRESERVE_PLAN_PREFIX_KEYWORD];
+    if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) return undefined;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+    const config = rawConfig as Record<string, unknown>;
+    const planProperty = String(config.planProperty ?? "steps");
+    const boundaryProperty = String(config.boundaryContextProperty ?? "current_step");
+    const responsePlan = (data as Record<string, unknown>)[planProperty];
+    // A response that does not carry the plan cannot mutate its protected prefix.
+    // Variant schemas remain responsible for requiring the plan when a route edits it.
+    if (responsePlan === undefined) return undefined;
+    const currentPlan = context?.[planProperty];
+    const boundary = context?.[boundaryProperty];
+    if (
+      !Array.isArray(responsePlan) ||
+      !Array.isArray(currentPlan) ||
+      !Number.isInteger(boundary)
+    ) {
+      return `VALIDATION ERROR: ${PRESERVE_PLAN_PREFIX_KEYWORD} requires response plan '${planProperty}', current plan, and integer context '${boundaryProperty}'.`;
+    }
+    const prefixLength = boundary as number;
+    if (
+      prefixLength < 0 ||
+      responsePlan.length < prefixLength ||
+      currentPlan.length < prefixLength
+    ) {
+      return `VALIDATION ERROR: replacement plan must retain the complete ${prefixLength}-item protected prefix.`;
+    }
+    for (let index = 0; index < prefixLength; index += 1) {
+      if (!SchemaValidator.deepEqual(responsePlan[index], currentPlan[index])) {
+        return `VALIDATION ERROR: protected plan prefix item ${index} differs from current context.`;
+      }
+    }
+    return undefined;
+  }
+
+  private static validateContextPathSuffixes(
+    data: unknown,
+    schema: Record<string, unknown>,
+    context?: Record<string, unknown>,
+  ): string | undefined {
+    const rawConfig = schema[CONTEXT_PATH_SUFFIXES_KEYWORD];
+    if (!rawConfig || typeof rawConfig !== "object" || Array.isArray(rawConfig)) return undefined;
+    if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+
+    const config = rawConfig as Record<string, unknown>;
+    const baseContextProperty = config.baseContextProperty;
+    const rawProperties = config.properties;
+    if (
+      typeof baseContextProperty !== "string" ||
+      !rawProperties ||
+      typeof rawProperties !== "object" ||
+      Array.isArray(rawProperties)
+    ) {
+      return `VALIDATION ERROR: ${CONTEXT_PATH_SUFFIXES_KEYWORD} requires string 'baseContextProperty' and object 'properties'.`;
+    }
+
+    const rawBase = context?.[baseContextProperty];
+    if (typeof rawBase !== "string") {
+      return `VALIDATION ERROR: ${CONTEXT_PATH_SUFFIXES_KEYWORD} requires string context '${baseContextProperty}'.`;
+    }
+    const executionId = context?.executionId;
+    const workflowId = context?.workflowId;
+    const base = rawBase
+      .replaceAll("{{executionId}}", typeof executionId === "string" ? executionId : "")
+      .replaceAll("{{workflowId}}", typeof workflowId === "string" ? workflowId : "")
+      .replace(/\/$/, "");
+    if (base.includes("{{") || base.includes("}}")) {
+      return `VALIDATION ERROR: ${CONTEXT_PATH_SUFFIXES_KEYWORD} could not resolve context '${baseContextProperty}'.`;
+    }
+
+    const response = data as Record<string, unknown>;
+    for (const [property, rawSuffix] of Object.entries(rawProperties as Record<string, unknown>)) {
+      if (typeof rawSuffix !== "string" || !rawSuffix.startsWith("/")) {
+        return `VALIDATION ERROR: ${CONTEXT_PATH_SUFFIXES_KEYWORD} property '${property}' requires an absolute path suffix beginning with '/'.`;
+      }
+      const expected = `${base}${rawSuffix}`;
+      if (response[property] !== expected) {
+        return `VALIDATION ERROR: Field '${property}' must equal the current execution path ${JSON.stringify(expected)}.`;
+      }
+    }
+    return undefined;
+  }
+
+  private static deepEqual(left: unknown, right: unknown): boolean {
+    if (Object.is(left, right)) return true;
+    if (Array.isArray(left) || Array.isArray(right)) {
+      if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length)
+        return false;
+      return left.every((value, index) => SchemaValidator.deepEqual(value, right[index]));
+    }
+    if (!left || !right || typeof left !== "object" || typeof right !== "object") return false;
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const leftKeys = Object.keys(leftRecord).sort();
+    const rightKeys = Object.keys(rightRecord).sort();
+    if (!SchemaValidator.deepEqual(leftKeys, rightKeys)) return false;
+    return leftKeys.every((key) => SchemaValidator.deepEqual(leftRecord[key], rightRecord[key]));
   }
 
   /**

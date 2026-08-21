@@ -26,6 +26,7 @@ import { createLogger } from "@mcp-moira/shared/logging/logger";
 import { ConfigurationError } from "@mcp-moira/shared/errors";
 import type { UnifiedValidationResult, UnifiedValidationIssue } from "./validation-types.js";
 import { parseExpressionAst } from "../expression/expression-parser.js";
+import { registerWorkflowSchemaKeywords } from "../utils/schema-validator.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -648,6 +649,7 @@ export class GraphValidator {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const testAjv = new (AjvModule as any).default({ allErrors: true });
+        registerWorkflowSchemaKeywords(testAjv);
         testAjv.compile(decl);
         if (Object.prototype.hasOwnProperty.call(decl, "default")) {
           const validateDefault = testAjv.compile(decl);
@@ -910,6 +912,7 @@ export class GraphValidator {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const testAjv = new (AjvModule as any).default({ allErrors: true });
+        registerWorkflowSchemaKeywords(testAjv);
         testAjv.compile(jsonSchema);
       } catch (error) {
         issues.push({

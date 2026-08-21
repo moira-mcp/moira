@@ -1,780 +1,714 @@
-/**
- * data-analysis Scenario Tests
- *
- * Data analysis workflow with multiple validation loops and branching.
- * Coverage target: 100% nodes (27), 100% branches
- */
+/** Contract and behavioral scenarios for moira/data-analysis. */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
-  runScenario,
-  type TestScenario,
-  type ScenarioResult,
-} from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
+import { runScenario, type ScenarioResult, type TestScenario } from "../../helpers/scenario-runner.js";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("data-analysis", "public")!.graph as WorkflowGraph;
+type Delivery = "filesystem" | "inline";
+type Mode = "autonomous" | "interactive";
+type Outcome = "usable" | "unavailable" | "not_authorized" | "access_error";
+type Source = {
+  id: string;
+  type: "inline" | "file" | "api";
+  locator: string;
+  authorization: "authorized" | "not_authorized";
+  availability: "available" | "unavailable" | "unknown";
+  data_classification: "public" | "internal" | "confidential" | "restricted";
+  limitation: string;
+};
+
+const catalogEntry = findSystemCatalogEntry("data-analysis", "public")!;
+const workspace = "./moira-ws/data-analysis-checkout_20260820";
+const initialDecision = "Decide whether the checkout change is ready for a controlled launch";
+const revisedDecision = "Decide whether the checkout change is ready for a full launch";
+
+function loadWorkflow(): WorkflowGraph {
+  return structuredClone(catalogEntry.graph) as WorkflowGraph;
 }
 
-describe("data-analysis Scenarios", () => {
+function node(workflow: WorkflowGraph, id: string): any {
+  const found = workflow.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
+}
+
+function source(
+  authorization: Source["authorization"] = "authorized",
+  availability: Source["availability"] = "available",
+): Source {
+  return {
+    id: "checkout-events",
+    type: "inline",
+    locator: "supplied checkout event aggregate",
+    authorization,
+    availability,
+    data_classification: "internal",
+    limitation: "One release-candidate sample without production identifiers.",
+  };
+}
+
+function evidence(outcome: Outcome = "usable") {
+  return {
+    id: "checkout-events",
+    actual_availability:
+      outcome === "usable" ? "available" : outcome === "unavailable" ? "unavailable" : "unknown",
+    access_outcome: outcome,
+    sanitized_provenance: "Aggregate supplied by the authorized release owner.",
+    limitation: outcome === "usable" ? "One release-candidate sample." : `Source outcome: ${outcome}.`,
+  };
+}
+
+function capture(
+  delivery: Delivery = "inline",
+  mode: Mode = "autonomous",
+  contract = source(),
+  decision = initialDecision,
+) {
+  return {
+    operating_mode: mode,
+    delivery_mode: delivery,
+    ...(delivery === "filesystem" ? { workspace_path: workspace } : {}),
+    question: "Which checkout regressions are supported by the supplied event evidence?",
+    decision_context: decision,
+    scope: "The supplied checkout aggregate; production mutation is excluded.",
+    audience: "Release owner and checkout engineering team",
+    constraints: "Use only supplied authorized evidence; do not inspect production systems.",
+    success_criteria: "Every conclusion is traceable to a source outcome and limitation.",
+    deliverables: "A reviewed report with limitations and a launch recommendation.",
+    confidentiality_policy: "Keep internal aggregates local and omit raw identifiers.",
+    source_contract: [contract],
+  };
+}
+
+function contractRevision(decision = initialDecision, contract = source()) {
+  const captured = capture("inline", "autonomous", contract, decision);
+  const {
+    question,
+    decision_context,
+    scope,
+    audience,
+    constraints,
+    success_criteria,
+    deliverables,
+    confidentiality_policy,
+    source_contract,
+  } = captured;
+  return {
+    question,
+    decision_context,
+    scope,
+    audience,
+    constraints,
+    success_criteria,
+    deliverables,
+    confidentiality_policy,
+    source_contract,
+  };
+}
+
+function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {
+  const handlers = (
+    engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> }
+  ).nodeHandlers;
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "data-analysis-scenario-token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
+function acquisition(outcome: Outcome = "usable") {
+  return {
+    source_evidence: [evidence(outcome)],
+    usable_source_count: outcome === "usable" ? 1 : 0,
+    acquisition_summary:
+      "Each source has a sanitized provenance, actual access outcome, volume summary, quality observation, lawful-use boundary, and material limitation.",
+  };
+}
+
+function projectedSource(contract = source(), outcome: Outcome = "usable") {
+  const acquired = evidence(outcome);
+  return {
+    id: contract.id,
+    type: contract.type,
+    locator: contract.locator,
+    authorization: contract.authorization,
+    initial_availability: contract.availability,
+    actual_availability: acquired.actual_availability,
+    access_outcome: acquired.access_outcome,
+    sanitized_provenance: acquired.sanitized_provenance,
+    data_classification: contract.data_classification,
+    limitation: acquired.limitation,
+  };
+}
+
+function analysisResult(
+  delivery: Delivery = "inline",
+  status: "complete" | "limited" = "complete",
+  contract = source(),
+  outcome: Outcome = "usable",
+  decision = initialDecision,
+) {
+  const common = {
+    status,
+    delivery_mode: delivery,
+    decision_context: decision,
+    sources: [projectedSource(contract, outcome)],
+    executive_summary:
+      status === "complete"
+        ? "The supplied aggregate supports a bounded checkout readiness conclusion."
+        : "No authorized usable evidence supports an analytical conclusion.",
+    evidence_summary: "Evidence and uncertainty are traced to the typed source outcome.",
+    limitations: ["The evidence covers one release candidate and cannot establish causality."],
+    recommendations: ["Use this result only for the stated launch decision."],
+    visualization_summary: "No visualization is needed for this bounded decision.",
+    reproducibility: "Repeat with the same aggregate, contract, and documented method.",
+  };
+  return delivery === "filesystem"
+    ? { ...common, report_path: `${workspace}/analysis-report.md`, artifact_paths: [] }
+    : {
+        ...common,
+        inline_report:
+          "# Checkout analysis\n\nThe supplied evidence was analyzed under the stated authority and confidentiality constraints. Findings, uncertainty, limitations, and recommendations remain bounded to the release-candidate aggregate.",
+      };
+}
+
+function framing(label = "Current") {
+  return {
+    problem_summary: `${label} framing evaluates the supplied checkout aggregate for a launch decision, preserves source authority and confidentiality, and requires evidence-traceable findings, limitations, and recommendations before delivery.`,
+  };
+}
+
+function readiness() {
+  return {
+    readiness_record:
+      "The aggregate has documented provenance, preparation choices, missing-data handling, sampling limits, lawful-use constraints, and reproducible readiness evidence for the stated decision.",
+  };
+}
+
+function cleanInputs(delivery: Delivery = "inline", mode: Mode = "autonomous") {
+  return {
+    "capture-context": capture(delivery, mode),
+    "frame-problem": framing(),
+    ...(mode === "interactive"
+      ? { "approve-problem": { decision: "accepted" }, "approve-final": { decision: "accepted" } }
+      : {}),
+    "acquire-sources": acquisition(),
+    "prepare-data": readiness(),
+    ...(delivery === "filesystem"
+      ? { "review-data-file": { issues_count: 0 } }
+      : { "review-data-inline": { issues_count: 0 } }),
+    "analyze-and-synthesize": { analysis_result: analysisResult(delivery) },
+    ...(delivery === "filesystem"
+      ? { "review-result-file": { issues_count: 0 } }
+      : { "review-result-inline": { issues_count: 0 } }),
+  };
+}
+
+function compactRoute(result: ScenarioResult): string[] {
+  return result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+}
+
+describe("data-analysis", () => {
   let workflow: WorkflowGraph;
-
   beforeAll(() => {
-    workflow = loadProductionWorkflow();
+    workflow = loadWorkflow();
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "data-analysis"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
+  test("preserves public identity and implements the accepted graph", async () => {
+    expect(catalogEntry).toMatchObject({ owner: "system-moira", slug: "data-analysis", visibility: "public" });
+    expect(workflow.id).toBe("5dd9c5c3-1176-4967-9d6c-798134b769df");
+    expect(workflow.metadata.version).toBe("2.0.0");
+    expect(workflow.nodes).toHaveLength(40);
+    expect(node(workflow, "end").finalOutput).toEqual(["analysis_result"]);
+    const validation = await new GraphValidator().validateUnified(workflow);
+    expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+  });
 
-    it("should have expected cycles (validation loops)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles.length).toBeGreaterThan(0);
-    });
+  test("publishes a decision-useful description and neighboring-flow boundaries", () => {
+    for (const claim of [
+      "one or more",
+      "inline, file, or API",
+      "decision context",
+      "confidentiality policy",
+      "Independent readiness and final-result reviews",
+      "limited result",
+      "never broadens access",
+      "Verified Research",
+      "Iterative Research",
+    ]) expect(workflow.metadata.description).toContain(claim);
+  });
 
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(33);
+  test("separates authority, acquisition evidence, and owner-specific repair reach", () => {
+    const registry = workflow.variableRegistry!;
+    expect(Object.keys(registry).sort()).toEqual([
+      "analysis_result", "audience", "confidentiality_policy", "constraints",
+      "decision_context", "deliverables", "delivery_mode", "operating_mode", "question",
+      "readiness_repair_reach", "result_repair_reach", "resume_stage", "scope",
+      "source_contract", "source_evidence", "success_criteria", "usable_source_count",
+      "workspace_path",
+    ]);
+    expect(node(workflow, "acquire-sources").inputSchema.globalInputs).toEqual([
+      "source_evidence", "usable_source_count",
+    ]);
+    expect(registry.readiness_repair_reach.enum).toEqual(["contained", "source", "limited"]);
+    expect(registry.result_repair_reach.enum).toEqual(["contained", "data", "source", "contract"]);
+  });
+
+  test("keeps unique source IDs and one-to-one projection as semantic invariants", () => {
+    for (const id of ["capture-context", "revise-problem", "revise-analysis-process"])
+      expect(node(workflow, id).directive).toMatch(/pairwise.unique/i);
+    for (const id of ["acquire-sources", "review-data-inline", "analyze-and-synthesize", "review-result-inline"])
+      expect(node(workflow, id).directive).toMatch(/one-to-one|one matching unique/i);
+  });
+
+  test("types truthful source outcomes in the terminal projection", () => {
+    const evidenceItem = workflow.variableRegistry!.source_evidence.items;
+    expect(evidenceItem.properties.actual_availability.enum).toEqual(["available", "unavailable", "unknown"]);
+    const resultItem = workflow.variableRegistry!.analysis_result.properties.sources.items;
+    expect(resultItem.required).toEqual(expect.arrayContaining([
+      "initial_availability", "actual_availability", "access_outcome", "sanitized_provenance",
+    ]));
+    expect(resultItem.properties).not.toHaveProperty("availability");
+  });
+
+  test("rejects invented availability for a not-authorized source", async () => {
+    const invalid = acquisition("not_authorized");
+    invalid.source_evidence[0].actual_availability = "available";
+    const result = await runScenario(workflow, {
+      name: "invented availability",
+      mockInputs: {
+        "capture-context": capture("inline", "autonomous", source("not_authorized", "unknown")),
+        "frame-problem": framing(),
+        "acquire-sources": invalid,
+      },
+      expect: { status: "completed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'acquire-sources'");
+  });
+
+  test("rejects an incomplete typed source projection before final review", async () => {
+    const malformed = analysisResult() as any;
+    delete malformed.sources[0].access_outcome;
+    const result = await runScenario(workflow, {
+      name: "missing outcome",
+      mockInputs: { ...cleanInputs(), "analyze-and-synthesize": { analysis_result: malformed } },
+      expect: { status: "completed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'analyze-and-synthesize'");
+  });
+
+  test("rejects hidden canonical mutation on non-contract repair", async () => {
+    const result = await runScenario(workflow, {
+      name: "contained mutation",
+      mockInputs: {
+        ...cleanInputs(),
+        "review-result-inline": { issues_count: 1, findings: "Correct presentation." },
+        "repair-result-inline": {
+          result_repair_reach: "contained",
+          repair_summary: "Corrected the presentation in the inline result.",
+          analysis_result: analysisResult(),
+          question: "A hidden replacement question that strict schema must reject",
+        },
+      },
+      expect: { status: "completed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'repair-result-inline'");
+  });
+
+  test("autonomous inline delivery retains every substantive gate", async () => {
+    const result = await runScenario(workflow, {
+      name: "inline clean",
+      mockInputs: cleanInputs(),
+      expect: { status: "completed", avoids: ["approve-problem", "approve-final", "materialize-workspace"] },
+    });
+    expect(result.passed).toBe(true);
+    expect(compactRoute(result)).toEqual([
+      "start", "capture-context", "delivery-mode-file", "frame-problem", "problem-approval-mode",
+      "resume-stage-gate", "acquire-sources", "usable-sources-gate", "prepare-data",
+      "readiness-review-mode", "review-data-inline", "review-data-inline-gate",
+      "analyze-and-synthesize", "final-review-mode", "review-result-inline",
+      "review-result-inline-gate", "final-approval-mode", "end",
+    ]);
+  });
+
+  test("filesystem delivery materializes and reviews the current workspace", async () => {
+    const result = await runScenario(workflow, {
+      name: "filesystem clean", mockInputs: cleanInputs("filesystem"),
+      expect: { status: "completed", reaches: ["materialize-workspace", "review-data-file", "review-result-file"] },
+    }, { engineSetup: useScenarioMaterializeGrant });
+    expect(result.passed).toBe(true);
+    expect(result.finalContext.analysis_result).toMatchObject({
+      delivery_mode: "filesystem", report_path: `${workspace}/analysis-report.md`,
     });
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        // Scenario 1: Happy path with inline data
-        {
-          name: "Happy path - inline data source",
-          description: "All validations pass, inline data collection",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "What are top-performing products by region?",
-              context: "Sales performance analysis for Q4",
-              data_sources: "sales_database, inventory_system",
-              data_source_type: "inline",
-              audience: "Sales leadership team",
-            },
-            "define-problem": {
-              research_question: "Identify top-performing products by region",
-              hypotheses: "West region leads in product A sales, Q4 shows seasonal trends",
-              success_criteria: "Clear ranking of products by region",
-              scope: "Q4 2024 sales data",
-              deliverables: "Analysis report, Recommendations",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data-inline": {
-              datasets_info: "Sales data from internal system, 10000 rows",
-              quality_observations: "Data looks clean, no major issues",
-              data_volume: "10000 rows",
-            },
-            "prepare-data": {
-              missing_values_strategy: "Imputation with mean values",
-              transformations_applied: "Normalized revenue, Date parsing applied",
-              final_dataset_info: "Cleaned dataset with 9500 rows ready for analysis",
-            },
-            "check-data-quality": { quality_passed: "yes" },
-            "explore-data": {
-              key_statistics: "Mean revenue: 1500, Std dev: 500, Median: 1400",
-              patterns_found: "Seasonality in Q4, Regional variance observed",
-              preliminary_insights: "West leads in revenue, strong Q4 performance",
-            },
-            "check-eda": { eda_complete: "yes" },
-            "find-insights": {
-              hypotheses_results: "West leads hypothesis confirmed with 95% confidence",
-              answer_to_research_question:
-                "Product A leads in West region with 30% above average sales",
-              key_insights: "West region 30% above average, Q4 spike pattern identified",
-              limitations: "Only Q4 data analyzed, no YoY comparison",
-              recommendations: "Focus marketing on West for Product A, expand Q4 campaigns",
-            },
-            visualize: {
-              visualizations_created: "Bar chart by region, Time series analysis, Heatmap",
-              key_visual_insights: "Clear West dominance in chart, seasonal patterns visible",
-            },
-            conclude: {
-              executive_summary: "West region outperforms in Product A sales by 30%",
-              key_findings: "West leads by 30%, Q4 shows seasonal spike pattern",
-              recommendations: "Increase West region marketing budget significantly",
-              limitations_caveats: "Limited to Q4 data, needs validation",
-              next_steps: "Validate findings with Q1 data when available",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: {
-              deliverables_prepared: "Analysis report, Dashboard completed",
-              artifacts_saved: "report.pdf, dashboard.html",
-            },
-          },
+  test("zero usable sources produce a reviewed limited result", async () => {
+    const contract = source("not_authorized", "unknown");
+    const result = await runScenario(workflow, {
+      name: "limited result",
+      mockInputs: {
+        "capture-context": capture("inline", "autonomous", contract),
+        "frame-problem": framing(),
+        "acquire-sources": acquisition("not_authorized"),
+        "produce-limited-result": {
+          analysis_result: analysisResult("inline", "limited", contract, "not_authorized"),
         },
-
-        // Scenario 2: Happy path with external data
-        {
-          name: "Happy path - external data source",
-          description: "All validations pass, external data collection",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "What predicts customer churn?",
-              context: "Customer retention analysis",
-              data_sources: "CRM and usage_logs exports",
-              data_source_type: "file",
-              audience: "Customer success team",
-            },
-            "define-problem": {
-              research_question: "Identify churn predictors",
-              hypotheses: "Low engagement predicts churn, usage patterns correlate",
-              success_criteria: "Model with 80% accuracy",
-              scope: "Last 12 months customer data",
-              deliverables: "Churn prediction model, Documentation",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data": {
-              datasets_info: "CRM data exported to CSV, 50000 customers",
-              quality_observations: "Some missing values in engagement metrics found",
-              data_volume: "50000 customers",
-            },
-            "prepare-data": {
-              missing_values_strategy: "Drop rows with >50% missing values",
-              transformations_applied: "Feature encoding, Scaling, Normalization",
-              final_dataset_info: "48000 customer records cleaned and ready",
-            },
-            "check-data-quality": { quality_passed: "yes" },
-            "explore-data": {
-              key_statistics: "Churn rate: 15%, Mean engagement: 0.65, Std: 0.25",
-              patterns_found: "Usage decline before churn, weekly patterns",
-              preliminary_insights: "2-week usage drop signals churn with high probability",
-            },
-            "check-eda": { eda_complete: "yes" },
-            "find-insights": {
-              hypotheses_results: "Low engagement hypothesis confirmed with 85% confidence",
-              answer_to_research_question: "Usage decline is primary predictor with 80% accuracy",
-              key_insights: "2-week usage drop equals 80% churn probability",
-              limitations: "Model trained on historical data only",
-              recommendations: "Implement engagement alerts for at-risk users",
-            },
-            visualize: {
-              visualizations_created: "Churn funnel, Feature importance chart, Timeline",
-              key_visual_insights: "Clear correlation visible between usage and churn",
-            },
-            conclude: {
-              executive_summary: "Usage decline predicts churn with 80% accuracy",
-              key_findings: "2-week usage drop is the key signal for churn prediction",
-              recommendations: "Automated engagement monitoring system required",
-              limitations_caveats: "Requires ongoing model updates and retraining",
-              next_steps: "Implement real-time monitoring dashboard",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: {
-              deliverables_prepared: "Model deployed, Documentation complete",
-            },
-          },
-        },
-
-        // Scenario 3: Problem not approved - revision loop
-        {
-          name: "Problem not approved - needs revision",
-          description: "Initial problem statement rejected, revised",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "Improve conversion",
-              context: "Funnel analysis",
-              data_sources: "analytics database",
-              data_source_type: "inline",
-              audience: "Product team",
-            },
-            "define-problem": [
-              {
-                research_question: "Vague question about conversions",
-                hypotheses: "Need more specific hypotheses to be defined",
-                success_criteria: "Unknown criteria needs clarification",
-                scope: "Unclear scope needs definition",
-                deliverables: "Unclear deliverables",
-              },
-              {
-                research_question: "Identify funnel drop-off points",
-                hypotheses: "Checkout is primary drop-off point, mobile worse",
-                success_criteria: "Clear drop-off analysis with percentages",
-                scope: "Last month's funnel data",
-                deliverables: "Funnel report with recommendations",
-              },
-            ],
-            "approve-problem": [{ approved: "no", feedback: "Too vague" }, { approved: "yes" }],
-            "collect-data-inline": {
-              datasets_info: "Funnel events from analytics, 10000 users",
-              quality_observations: "Good quality data observed",
-            },
-            "prepare-data": {
-              missing_values_strategy: "None needed for this dataset",
-              transformations_applied: "Event aggregation, Session grouping",
-              final_dataset_info: "Clean funnel data ready for analysis",
-            },
-            "check-data-quality": { quality_passed: "yes" },
-            "explore-data": {
-              key_statistics: "Total users: 10000, Conversions: 500, Rate: 5%",
-              patterns_found: "50% drop at checkout step identified",
-              preliminary_insights: "Checkout is main friction point for users",
-            },
-            "check-eda": { eda_complete: "yes" },
-            "find-insights": {
-              hypotheses_results: "Checkout drop hypothesis confirmed with data",
-              answer_to_research_question: "Checkout causes 50% drop in conversions",
-              key_insights: "Simplify checkout to improve conversion rates",
-              limitations: "Single month data analyzed only",
-              recommendations: "Reduce checkout steps from 5 to 3",
-            },
-            visualize: {
-              visualizations_created: "Funnel chart, Drop-off heatmap, Step analysis",
-              key_visual_insights: "Clear drop visible at checkout step",
-            },
-            conclude: {
-              executive_summary: "Checkout is primary friction point causing 50% drop",
-              key_findings: "50% drop at checkout, mobile 60% drop",
-              recommendations: "Simplify checkout flow and add guest checkout",
-              limitations_caveats: "Limited timeframe of one month",
-              next_steps: "A/B test simplified checkout flow",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: { deliverables_prepared: "Report complete with recommendations" },
-          },
-        },
-
-        // Scenario 4: Data quality fails
-        {
-          name: "Data quality fails - re-preparation needed",
-          description: "Initial data quality check fails, data re-prepared",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "Revenue forecast",
-              context: "Financial planning",
-              data_sources: "finance database",
-              data_source_type: "inline",
-              audience: "Finance team",
-            },
-            "define-problem": {
-              research_question: "Predict next quarter revenue",
-              hypotheses: "Growth will continue based on historical trends",
-              success_criteria: "Forecast with 90% confidence interval",
-              scope: "Last 3 years data",
-              deliverables: "Revenue forecast report",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data-inline": {
-              datasets_info: "Revenue data from finance system, 3 years",
-              quality_observations: "Some nulls detected in data",
-            },
-            "prepare-data": [
-              {
-                missing_values_strategy: "Initial attempt with basic imputation",
-                transformations_applied: "Basic cleaning, Date formatting",
-                final_dataset_info: "500 rows cleaned initially",
-              },
-              {
-                missing_values_strategy: "Advanced imputation with interpolation",
-                transformations_applied: "Full cleaning pipeline, Outlier removal",
-                final_dataset_info: "2000 rows fully cleaned and validated",
-              },
-            ],
-            "check-data-quality": [
-              { quality_passed: "no", issues_found: "Too many nulls, Inconsistent dates" },
-              { quality_passed: "yes" },
-            ],
-            "explore-data": {
-              key_statistics: "Revenue trend: positive, Mean growth: 18%, Std: 5%",
-              patterns_found: "Steady growth pattern with seasonality",
-              preliminary_insights: "20% YoY growth observed consistently",
-            },
-            "check-eda": { eda_complete: "yes" },
-            "find-insights": {
-              hypotheses_results: "Growth continues hypothesis confirmed with data",
-              answer_to_research_question: "Expect 15-20% growth next quarter based on trends",
-              key_insights: "Growth trend stable at 18% average annually",
-              limitations: "External factors not modeled in forecast",
-              recommendations: "Continue current strategy with growth investment",
-            },
-            visualize: {
-              visualizations_created: "Trend line, Forecast chart, Confidence intervals",
-              key_visual_insights: "Clear upward trend with narrow confidence band",
-            },
-            conclude: {
-              executive_summary: "15-20% growth expected based on analysis",
-              key_findings: "Stable growth pattern at 18% annually",
-              recommendations: "Maintain growth investments at current levels",
-              limitations_caveats: "Market conditions may change forecast",
-              next_steps: "Review forecast quarterly with actual data",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: { deliverables_prepared: "Forecast report complete" },
-          },
-        },
-
-        // Scenario 5: EDA incomplete
-        {
-          name: "EDA incomplete - more exploration needed",
-          description: "Initial EDA not complete, additional exploration done",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "User behavior patterns",
-              context: "Product analytics",
-              data_sources: "event log files",
-              data_source_type: "file",
-              audience: "Product managers",
-            },
-            "define-problem": {
-              research_question: "Identify user behavior patterns",
-              hypotheses: "Power users have distinct patterns from casual users",
-              success_criteria: "Clear user segments identified",
-              scope: "Last 3 months",
-              deliverables: "Segmentation analysis report",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data": {
-              datasets_info: "Event logs from analytics, 10000 users",
-              quality_observations: "Good quality data observed",
-              data_volume: "10000 users",
-            },
-            "prepare-data": {
-              missing_values_strategy: "Drop incomplete sessions from dataset",
-              transformations_applied: "Session aggregation, Feature extraction",
-              final_dataset_info: "9500 user records cleaned and ready",
-            },
-            "check-data-quality": { quality_passed: "yes" },
-            "explore-data": [
-              {
-                key_statistics: "Average sessions: 5, Users: 10000, Active: 60%",
-                patterns_found: "Initial patterns emerging in data",
-                preliminary_insights: "Some clustering visible in usage data",
-              },
-              {
-                key_statistics: "Average sessions: 5, Segments: 4, Power users: 15%",
-                patterns_found: "Clear 4 segments, Feature usage patterns identified",
-                preliminary_insights: "Power users focus on 3 features primarily",
-              },
-            ],
-            "check-eda": [
-              { eda_complete: "no", gaps_found: "Need feature correlations" },
-              { eda_complete: "yes" },
-            ],
-            "find-insights": {
-              hypotheses_results: "Power users distinct hypothesis confirmed with data",
-              answer_to_research_question: "4 clear user segments identified in analysis",
-              key_insights: "Power users use 3 core features intensively",
-              limitations: "Segment boundaries fuzzy in edge cases",
-              recommendations: "Enhance core 3 features for power users",
-            },
-            visualize: {
-              visualizations_created: "Cluster plot, Feature usage heatmap, Timeline",
-              key_visual_insights: "Segments clearly visible in cluster visualization",
-            },
-            conclude: {
-              executive_summary: "4 user segments identified with clear patterns",
-              key_findings: "Power users clustered around 3 core features",
-              recommendations: "Focus development on core features for power users",
-              limitations_caveats: "Segment sizes may shift over time",
-              next_steps: "Track segment migration over time",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: { deliverables_prepared: "Segmentation report complete" },
-          },
-        },
-
-        // Scenario 6: Conclusions not approved
-        {
-          name: "Conclusions not approved - revision needed",
-          description: "Initial conclusions rejected, revised",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "Marketing ROI",
-              context: "Marketing analytics",
-              data_sources: "marketing database",
-              data_source_type: "inline",
-              audience: "Marketing leadership",
-            },
-            "define-problem": {
-              research_question: "Analyze marketing ROI by channel",
-              hypotheses: "Social has highest ROI compared to other channels",
-              success_criteria: "Clear ROI ranking by channel",
-              scope: "Full year data",
-              deliverables: "ROI analysis report",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data-inline": {
-              datasets_info: "Marketing spend and attribution data, 12 months",
-              quality_observations: "Attribution may have gaps in tracking",
-            },
-            "prepare-data": {
-              missing_values_strategy: "Use last-touch attribution model",
-              transformations_applied: "ROI calculation, Channel grouping",
-              final_dataset_info: "Complete channel data for all 5 channels",
-            },
-            "check-data-quality": { quality_passed: "yes" },
-            "explore-data": {
-              key_statistics: "Channels: 5, Total spend: $1M, Avg ROI: 2.5x",
-              patterns_found: "Social outperforms other channels significantly",
-              preliminary_insights: "Social ROI 3x average, TV underperforms",
-            },
-            "check-eda": { eda_complete: "yes" },
-            "find-insights": {
-              hypotheses_results: "Social highest ROI hypothesis confirmed with 3x average",
-              answer_to_research_question: "Social has 3x ROI compared to channel average",
-              key_insights: "Reallocate to social from underperforming TV",
-              limitations: "Attribution model limitations may affect accuracy",
-              recommendations: "Increase social spend by reallocating from TV",
-            },
-            visualize: {
-              visualizations_created: "ROI by channel bar chart, Trend analysis",
-              key_visual_insights: "Clear social dominance visible in charts",
-            },
-            conclude: [
-              {
-                executive_summary: "Increase all channel spend generically",
-                key_findings: "Social performs well among channels",
-                recommendations: "Generic increase across all channels",
-                limitations_caveats: "Some limitations in data",
-                next_steps: "Review budget allocation",
-              },
-              {
-                executive_summary: "Reallocate 30% from TV to Social channels",
-                key_findings: "Social 3x ROI vs TV, clear reallocation opportunity",
-                recommendations: "Specific reallocation plan with timeline",
-                limitations_caveats: "Monitor for diminishing returns in social",
-                next_steps: "Implement reallocation in phases",
-              },
-            ],
-            "approve-conclusions": [
-              { conclusions_approved: "no", feedback: "Too generic" },
-              { conclusions_approved: "yes" },
-            ],
-            finalize: { deliverables_prepared: "ROI report with recommendations complete" },
-          },
-        },
-
-        // Scenario 7: Data quality fix limit reached - escapes to explore-data
-        {
-          name: "Data quality fix limit reached - escape loop",
-          description: "Data quality fix iterations exhausted (3 attempts), escapes to EDA phase",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "What drives employee satisfaction?",
-              context: "HR analytics for retention",
-              data_sources: "hr_database, survey_results",
-              data_source_type: "inline",
-              audience: "HR leadership team",
-            },
-            "define-problem": {
-              research_question: "Identify key drivers of employee satisfaction scores",
-              hypotheses: "Work-life balance and management quality are top drivers",
-              success_criteria: "Clear ranking of satisfaction drivers with correlation data",
-              scope: "Last 2 years of employee survey data",
-              deliverables: "Satisfaction driver analysis report",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data-inline": {
-              datasets_info: "Employee survey data from HR system, 5000 responses across 2 years",
-              quality_observations: "Significant data quality issues detected in survey responses",
-            },
-            // 3 attempts at prepare-data, all followed by quality check failures
-            "prepare-data": [
-              {
-                missing_values_strategy: "Initial basic imputation for missing survey responses",
-                transformations_applied: "Basic cleaning and date formatting applied",
-                final_dataset_info: "2000 rows initially cleaned with basic methods",
-              },
-              {
-                missing_values_strategy: "Advanced imputation with median values for survey scores",
-                transformations_applied: "Outlier removal and normalization applied",
-                final_dataset_info: "3500 rows cleaned with advanced imputation methods",
-              },
-              {
-                missing_values_strategy:
-                  "Final attempt with interpolation and cross-validation checks",
-                transformations_applied: "Full pipeline including deduplication and validation",
-                final_dataset_info: "4000 rows cleaned but still has edge case issues",
-              },
-            ],
-            "check-data-quality": [
-              { quality_passed: "no", issues_found: "Too many nulls in key fields" },
-              { quality_passed: "no", issues_found: "Inconsistent date formats remain" },
-              { quality_passed: "no", issues_found: "Outliers still present in scores" },
-            ],
-            // After 3rd failure, expr increments to 3, check: 3 < 3 = false → ask-user-dq-fix-limit-reached
-            "ask-user-dq-fix-limit-reached": { decision: "continue" },
-            "explore-data": {
-              key_statistics: "Average satisfaction: 3.5/5, Response rate: 75%, Departments: 8",
-              patterns_found: "Management scores correlate with overall satisfaction",
-              preliminary_insights: "Work-life balance strongest predictor despite data issues",
-            },
-            "check-eda": { eda_complete: "yes" },
-            "find-insights": {
-              hypotheses_results:
-                "Work-life balance hypothesis confirmed as top driver in analysis",
-              answer_to_research_question:
-                "Work-life balance and management quality drive satisfaction scores",
-              key_insights: "Work-life balance accounts for 40% of satisfaction variance",
-              limitations: "Data quality issues may affect precision of results",
-              recommendations: "Focus on work-life balance programs and management training",
-            },
-            visualize: {
-              visualizations_created: "Driver ranking chart, Correlation heatmap, Trend analysis",
-              key_visual_insights:
-                "Clear correlation between work-life balance and satisfaction visible",
-            },
-            conclude: {
-              executive_summary: "Work-life balance is the primary driver of employee satisfaction",
-              key_findings:
-                "Work-life balance accounts for 40% of satisfaction variance across departments",
-              recommendations: "Invest in flexible work programs and management quality training",
-              limitations_caveats: "Data quality issues may affect precision",
-              next_steps: "Implement flexible work pilot and resurvey",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: {
-              deliverables_prepared: "Employee satisfaction driver analysis report complete",
-            },
-          },
-        },
-
-        // Scenario 8: EDA fix limit reached - escapes to find-insights
-        {
-          name: "EDA fix limit reached - escape loop",
-          description: "EDA fix iterations exhausted (3 attempts), escapes to insights phase",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "What are the seasonal demand patterns?",
-              context: "Supply chain optimization",
-              data_sources: "inventory_system, sales_database",
-              data_source_type: "inline",
-              audience: "Supply chain team",
-            },
-            "define-problem": {
-              research_question: "Identify seasonal demand patterns for inventory optimization",
-              hypotheses: "Q4 has highest demand and summer shows distinct patterns",
-              success_criteria: "Clear seasonal patterns identified with forecast model",
-              scope: "Last 3 years of sales and inventory data",
-              deliverables: "Seasonal demand analysis and forecast report",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data-inline": {
-              datasets_info: "Sales and inventory data from internal systems, 3 years of records",
-              quality_observations: "Data appears complete with good coverage across all quarters",
-            },
-            "prepare-data": {
-              missing_values_strategy: "Forward fill for missing inventory snapshots",
-              transformations_applied: "Time series decomposition and seasonal indexing applied",
-              final_dataset_info:
-                "Complete dataset with 36 months of daily records ready for analysis",
-            },
-            "check-data-quality": { quality_passed: "yes" },
-            // 3 attempts at explore-data, all followed by EDA completeness failures
-            "explore-data": [
-              {
-                key_statistics: "Total records: 36000, Products: 500, Regions: 4 in dataset",
-                patterns_found: "Initial seasonal trends visible in aggregate",
-                preliminary_insights: "Some clustering by product category appearing",
-              },
-              {
-                key_statistics:
-                  "Total records: 36000, Categories: 10, Seasonal index range: 0.7-1.4",
-                patterns_found: "Stronger seasonal patterns emerging by category now",
-                preliminary_insights: "Category-level analysis shows distinct seasonal profiles",
-              },
-              {
-                key_statistics:
-                  "Total records: 36000, Segments: 5, Forecast accuracy: ~70% estimated",
-                patterns_found: "Regional seasonal patterns differ significantly from aggregate",
-                preliminary_insights:
-                  "Need regional breakdown but analysis remains incomplete overall",
-              },
-            ],
-            "check-eda": [
-              { eda_complete: "no", gaps_found: "Need product-level seasonal decomposition" },
-              { eda_complete: "no", gaps_found: "Need regional breakdown analysis" },
-              { eda_complete: "no", gaps_found: "Need cross-category correlations" },
-            ],
-            // After 3rd failure, expr increments to 3, check: 3 < 3 = false → ask-user-eda-fix-limit-reached
-            "ask-user-eda-fix-limit-reached": { decision: "continue" },
-            "find-insights": {
-              hypotheses_results: "Q4 peak hypothesis confirmed with seasonal index of 1.4 average",
-              answer_to_research_question:
-                "Clear Q4 peak with summer dip pattern across all categories",
-              key_insights: "Seasonal index varies 0.7-1.4 with Q4 consistently highest",
-              limitations: "EDA incomplete, regional patterns not fully explored",
-              recommendations: "Adjust inventory levels by seasonal index per category",
-            },
-            visualize: {
-              visualizations_created:
-                "Seasonal decomposition chart, Category heatmap, Forecast plot",
-              key_visual_insights: "Clear Q4 peaks visible across all product categories",
-            },
-            conclude: {
-              executive_summary: "Strong seasonal patterns identified with Q4 peak at 1.4x average",
-              key_findings: "Q4 demand is 40% above average across all categories consistently",
-              recommendations: "Pre-position inventory 30% above baseline for Q4 season",
-              limitations_caveats: "Regional patterns need further analysis",
-              next_steps: "Implement automated seasonal inventory adjustments",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: {
-              deliverables_prepared: "Seasonal demand analysis and forecast report complete",
-            },
-          },
-        },
-        // Scenario 9: Data quality and EDA fix limit reached - user resets counters
-        {
-          name: "Fix limit reached - user resets counters",
-          description:
-            "Data quality and EDA fix limits reached, user resets counters to retry fixing",
-          expect: { status: "completed" },
-          mockInputs: {
-            "get-context": {
-              business_question: "What drives website bounce rate?",
-              context: "Web analytics improvement",
-              data_sources: "analytics_database",
-              data_source_type: "inline",
-              audience: "Growth team",
-            },
-            "define-problem": {
-              research_question: "Identify factors driving high bounce rate on landing pages",
-              hypotheses: "Page load time and content relevance are primary bounce drivers",
-              success_criteria: "Clear bounce rate drivers identified with actionable insights",
-              scope: "Last 6 months of web analytics data",
-              deliverables: "Bounce rate analysis report with recommendations",
-            },
-            "approve-problem": { approved: "yes" },
-            "collect-data-inline": {
-              datasets_info: "Web analytics data from tracking system, 100000 sessions",
-              quality_observations: "Raw data has quality issues needing cleanup",
-            },
-            // Data quality: fail 3 times, then reset, then succeed
-            "prepare-data": [
-              {
-                missing_values_strategy: "Basic imputation for missing page load times",
-                transformations_applied: "Basic cleaning",
-                final_dataset_info: "50000 rows with initial cleaning",
-              },
-              {
-                missing_values_strategy: "Median imputation for numeric fields",
-                transformations_applied: "Outlier detection applied",
-                final_dataset_info: "70000 rows after second cleaning pass",
-              },
-              {
-                missing_values_strategy: "Advanced interpolation for time series gaps",
-                transformations_applied: "Full pipeline with dedup",
-                final_dataset_info: "80000 rows but edge cases remain",
-              },
-              // After reset, prepare-data succeeds
-              {
-                missing_values_strategy: "Complete pipeline with validated imputation",
-                transformations_applied: "Full cleaning, normalization, validation",
-                final_dataset_info: "95000 clean rows ready for analysis",
-              },
-            ],
-            "check-data-quality": [
-              { quality_passed: "no", issues_found: "Missing page load times" },
-              { quality_passed: "no", issues_found: "Inconsistent session IDs" },
-              { quality_passed: "no", issues_found: "Duplicate entries detected" },
-              // After reset and re-preparation
-              { quality_passed: "yes" },
-            ],
-            "ask-user-dq-fix-limit-reached": { decision: "reset" },
-            // EDA: fail 3 times, then reset, then succeed
-            "explore-data": [
-              {
-                key_statistics: "Total sessions: 95000, Bounce rate: 45%, Avg load: 3.2s",
-                patterns_found: "Initial correlation between load time and bounce",
-                preliminary_insights: "Slow pages bounce more often",
-              },
-              {
-                key_statistics: "Total sessions: 95000, Segments: 3, Mobile: 60%",
-                patterns_found: "Mobile bounce rate significantly higher",
-                preliminary_insights: "Mobile experience needs investigation",
-              },
-              {
-                key_statistics: "Total sessions: 95000, Landing pages: 50, Top bouncer: /pricing",
-                patterns_found: "Pricing page has 70% bounce rate",
-                preliminary_insights: "Pricing page needs deep analysis",
-              },
-              // After reset
-              {
-                key_statistics:
-                  "Total sessions: 95000, Bounce rate: 45%, Load time correlation: 0.72",
-                patterns_found:
-                  "Load time > 3s causes 65% bounce, mobile 2x worse, pricing page outlier",
-                preliminary_insights:
-                  "Three main drivers: load time, mobile UX, and pricing page design",
-              },
-            ],
-            "check-eda": [
-              { eda_complete: "no", gaps_found: "Need device-level breakdown" },
-              { eda_complete: "no", gaps_found: "Need page-level analysis" },
-              { eda_complete: "no", gaps_found: "Need content relevance correlation" },
-              // After reset
-              { eda_complete: "yes" },
-            ],
-            "ask-user-eda-fix-limit-reached": { decision: "reset" },
-            "find-insights": {
-              hypotheses_results: "Page load time hypothesis confirmed with 0.72 correlation",
-              answer_to_research_question:
-                "Load time, mobile UX, and pricing page design drive bounce rate",
-              key_insights: "Pages loading > 3s have 65% bounce rate vs 25% for fast pages",
-              limitations: "Content relevance not fully quantified",
-              recommendations: "Optimize page load, improve mobile UX, redesign pricing page",
-            },
-            visualize: {
-              visualizations_created:
-                "Load time vs bounce scatter, Device comparison, Page heatmap",
-              key_visual_insights: "Clear load time threshold at 3 seconds visible in scatter plot",
-            },
-            conclude: {
-              executive_summary:
-                "Page load time is primary bounce driver with 3s threshold, mobile 2x impact",
-              key_findings: "Load time > 3s = 65% bounce, mobile bounce 2x desktop",
-              recommendations: "CDN optimization, mobile-first redesign, pricing page A/B test",
-              limitations_caveats: "Content relevance analysis incomplete",
-              next_steps: "Implement CDN and measure impact on bounce rate",
-            },
-            "approve-conclusions": { conclusions_approved: "yes" },
-            finalize: {
-              deliverables_prepared: "Bounce rate analysis report with recommendations complete",
-            },
-          },
-        },
-      ];
-
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+        "review-result-inline": { issues_count: 0 },
+      },
+      expect: { status: "completed", avoids: ["prepare-data", "analyze-and-synthesize"] },
     });
+    expect(result.passed).toBe(true);
+    expect(result.finalContext.analysis_result).toMatchObject({ status: "limited" });
+  });
+
+  test("readiness findings route to contained repair, reacquisition, or limited delivery", async () => {
+    const contained = await runScenario(workflow, {
+      name: "contained readiness",
+      mockInputs: {
+        ...cleanInputs(),
+        "review-data-inline": [{ issues_count: 1, findings: "Add sampling limit." }, { issues_count: 0 }],
+        "repair-data-inline": {
+          readiness_repair_reach: "contained",
+          readiness_record: readiness().readiness_record + " Sampling limit added.",
+          repair_summary: "Added the reproduced sampling limitation.",
+        },
+      },
+      expect: { status: "completed" },
+    });
+    const reacquired = await runScenario(workflow, {
+      name: "source readiness",
+      mockInputs: {
+        ...cleanInputs(),
+        "acquire-sources": [acquisition(), acquisition()],
+        "prepare-data": [readiness(), readiness()],
+        "review-data-inline": [{ issues_count: 1, findings: "Reacquire provenance." }, { issues_count: 0 }],
+        "repair-data-inline": {
+          readiness_repair_reach: "source",
+          readiness_record: readiness().readiness_record + " Reacquisition required.",
+          repair_summary: "Reproduced the provenance defect and selected reacquisition.",
+        },
+      },
+      expect: { status: "completed" },
+    });
+    const limited = await runScenario(workflow, {
+      name: "limited readiness",
+      mockInputs: {
+        ...cleanInputs(),
+        "review-data-inline": { issues_count: 1, findings: "Evidence is insufficient." },
+        "repair-data-inline": {
+          readiness_repair_reach: "limited",
+          readiness_record: readiness().readiness_record + " Evidence remains insufficient.",
+          repair_summary: "Confirmed that full analysis is unsupported.",
+        },
+        "produce-limited-result": { analysis_result: analysisResult("inline", "limited") },
+      },
+      expect: { status: "completed" },
+    });
+    expect([contained, reacquired, limited].filter((item) => !item.passed)).toEqual([]);
+    expect(reacquired.inputSubmissionCounts["acquire-sources"]).toBe(2);
+  });
+
+  test("independent contract finding changes canonical context before reanalysis", async () => {
+    const result = await runScenario(workflow, {
+      name: "contract repair",
+      mockInputs: {
+        ...cleanInputs(),
+        "frame-problem": [framing("Initial"), framing("Reframed")],
+        "acquire-sources": [acquisition(), acquisition()],
+        "prepare-data": [readiness(), readiness()],
+        "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
+        "analyze-and-synthesize": [
+          { analysis_result: analysisResult() },
+          { analysis_result: analysisResult("inline", "complete", source(), "usable", revisedDecision) },
+        ],
+        "review-result-inline": [
+          { issues_count: 1, findings: "The canonical decision context is stale." },
+          { issues_count: 0 },
+        ],
+        "repair-result-inline": {
+          result_repair_reach: "contract",
+          repair_summary: "Changed the reproduced stale decision context.",
+          ...contractRevision(revisedDecision),
+          resume_stage: "acquisition",
+        },
+      },
+      expect: { status: "completed", reaches: ["route-result-repair-contract"] },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.finalContext.decision_context).toBe(revisedDecision);
+    expect(result.inputSubmissionCounts["acquire-sources"]).toBe(2);
+  });
+
+  test("interactive problem and final rejection consume feedback", async () => {
+    const result = await runScenario(workflow, {
+      name: "interactive feedback",
+      mockInputs: {
+        "capture-context": capture("inline", "interactive"),
+        "frame-problem": [framing("Initial"), framing("Problem revised"), framing("Final revised")],
+        "approve-problem": [
+          { decision: "revise", feedback: "Clarify the launch boundary." },
+          { decision: "accepted" }, { decision: "accepted" },
+        ],
+        "revise-problem": {
+          revision_summary: "Clarified the launch boundary in the canonical contract.",
+          ...contractRevision(), resume_stage: "acquisition",
+        },
+        "acquire-sources": [acquisition(), acquisition()],
+        "prepare-data": [readiness(), readiness()],
+        "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
+        "analyze-and-synthesize": [
+          { analysis_result: analysisResult() },
+          { analysis_result: analysisResult("inline", "complete", source(), "usable", revisedDecision) },
+        ],
+        "review-result-inline": [{ issues_count: 0 }, { issues_count: 0 }],
+        "approve-final": [
+          { decision: "revise", feedback: "Use the full-launch decision context." },
+          { decision: "accepted" },
+        ],
+        "revise-final-from-feedback": {
+          result_repair_reach: "contract",
+          repair_summary: "Applied the explicit full-launch context correction.",
+          ...contractRevision(revisedDecision),
+          resume_stage: "acquisition",
+        },
+      },
+      expect: { status: "completed", reaches: ["revise-problem", "revise-final-from-feedback"] },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.inputSubmissionCounts["approve-problem"]).toBe(3);
+    expect(result.inputSubmissionCounts["approve-final"]).toBe(2);
+  });
+
+  test("guarded process revision can resume at analysis after readiness", async () => {
+    const result = await runScenario(workflow, {
+      name: "teleport presentation revision",
+      mockInputs: {
+        ...cleanInputs(),
+        "revise-analysis-process": {
+          revision_summary: "Changed only audience presentation after readiness review.",
+          ...contractRevision(),
+          audience: "Release owner, engineering team, and support lead",
+          resume_stage: "analysis",
+        },
+      },
+      teleportAfter: {
+        afterNode: "review-data-inline", visitNumber: 1, teleportTo: "revise-analysis-process",
+      },
+      expect: { status: "completed", reaches: ["revise-analysis-process"] },
+    });
+    expect(result.passed).toBe(true);
+    expect(result.inputSubmissionCounts["acquire-sources"]).toBe(1);
+  });
+
+  test("combined scenarios cover every ordinary node and branch", async () => {
+    const fileRepair: TestScenario = {
+      name: "file final source repair",
+      mockInputs: {
+        ...cleanInputs("filesystem"),
+        "acquire-sources": [acquisition(), acquisition()],
+        "prepare-data": [readiness(), readiness()],
+        "review-data-file": [{ issues_count: 0 }, { issues_count: 0 }],
+        "analyze-and-synthesize": [
+          { analysis_result: analysisResult("filesystem") },
+          { analysis_result: analysisResult("filesystem") },
+        ],
+        "review-result-file": [{ issues_count: 1 }, { issues_count: 0 }],
+        "repair-result-file": {
+          result_repair_reach: "source",
+          repair_summary: "Changed the reproduced provenance defect.",
+          analysis_result: analysisResult("filesystem"),
+        },
+      }, expect: { status: "completed" },
+    };
+    const dataRepair: TestScenario = {
+      name: "inline final data repair",
+      mockInputs: {
+        ...cleanInputs(),
+        "prepare-data": [readiness(), readiness()],
+        "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
+        "analyze-and-synthesize": [
+          { analysis_result: analysisResult() }, { analysis_result: analysisResult() },
+        ],
+        "review-result-inline": [
+          { issues_count: 1, findings: "Preparation evidence is stale." }, { issues_count: 0 },
+        ],
+        "repair-result-inline": {
+          result_repair_reach: "data",
+          repair_summary: "Changed the reproduced stale preparation evidence.",
+          analysis_result: analysisResult(),
+        },
+      }, expect: { status: "completed" },
+    };
+    const results = await Promise.all([
+      runScenario(workflow, { name: "coverage inline", mockInputs: cleanInputs(), expect: { status: "completed" } }),
+      runScenario(workflow, fileRepair, { engineSetup: useScenarioMaterializeGrant }),
+      runScenario(workflow, dataRepair),
+      runScenario(workflow, {
+        name: "coverage limited",
+        mockInputs: {
+          ...cleanInputs(),
+          "review-data-inline": { issues_count: 1, findings: "Evidence is insufficient." },
+          "repair-data-inline": {
+            readiness_repair_reach: "limited",
+            readiness_record: readiness().readiness_record + " Evidence remains insufficient.",
+            repair_summary: "Confirmed a limited result is required.",
+          },
+          "produce-limited-result": { analysis_result: analysisResult("inline", "limited") },
+        }, expect: { status: "completed" },
+      }),
+      runScenario(workflow, {
+        name: "coverage interactive revision",
+        mockInputs: {
+          ...cleanInputs("inline", "interactive"),
+          "frame-problem": [framing(), framing("Revised")],
+          "approve-problem": [
+            { decision: "revise", feedback: "Clarify scope." }, { decision: "accepted" },
+          ],
+          "revise-problem": {
+            revision_summary: "Clarified scope in the canonical contract.",
+            ...contractRevision(), resume_stage: "acquisition",
+          },
+          "approve-final": { decision: "accepted" },
+        }, expect: { status: "completed" },
+      }),
+      runScenario(workflow, {
+        name: "coverage file readiness repair",
+        mockInputs: {
+          ...cleanInputs("filesystem"),
+          "review-data-file": [
+            { issues_count: 1 },
+            { issues_count: 0 },
+          ],
+          "repair-data-file": {
+            readiness_repair_reach: "contained",
+            repair_summary: "Corrected the reproduced file-readiness finding.",
+          },
+        },
+        expect: { status: "completed" },
+      }, { engineSetup: useScenarioMaterializeGrant }),
+      runScenario(workflow, {
+        name: "coverage final feedback revision",
+        mockInputs: {
+          ...cleanInputs("inline", "interactive"),
+          "frame-problem": [framing(), framing("Final feedback")],
+          "approve-problem": [{ decision: "accepted" }, { decision: "accepted" }],
+          "acquire-sources": [acquisition(), acquisition()],
+          "prepare-data": [readiness(), readiness()],
+          "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
+          "analyze-and-synthesize": [
+            { analysis_result: analysisResult() },
+            { analysis_result: analysisResult("inline", "complete", source(), "usable", revisedDecision) },
+          ],
+          "review-result-inline": [{ issues_count: 0 }, { issues_count: 0 }],
+          "approve-final": [
+            { decision: "revise", feedback: "Use the full-launch decision context." },
+            { decision: "accepted" },
+          ],
+          "revise-final-from-feedback": {
+            result_repair_reach: "contract",
+            repair_summary: "Applied the explicit full-launch context correction.",
+            ...contractRevision(revisedDecision),
+            resume_stage: "acquisition",
+          },
+        },
+        expect: { status: "completed" },
+      }),
+      runScenario(workflow, {
+        name: "coverage guarded process revision",
+        mockInputs: {
+          ...cleanInputs(),
+          "revise-analysis-process": {
+            revision_summary: "Changed only audience presentation after readiness review.",
+            ...contractRevision(),
+            audience: "Release owner, engineering team, and support lead",
+            resume_stage: "analysis",
+          },
+        },
+        teleportAfter: {
+          afterNode: "review-data-inline",
+          visitNumber: 1,
+          teleportTo: "revise-analysis-process",
+        },
+        expect: { status: "completed" },
+      }),
+      runScenario(workflow, {
+        name: "coverage zero usable sources",
+        mockInputs: {
+          "capture-context": capture(
+            "inline",
+            "autonomous",
+            source("not_authorized", "unknown"),
+          ),
+          "frame-problem": framing(),
+          "acquire-sources": acquisition("not_authorized"),
+          "produce-limited-result": {
+            analysis_result: analysisResult(
+              "inline",
+              "limited",
+              source("not_authorized", "unknown"),
+              "not_authorized",
+            ),
+          },
+          "review-result-inline": { issues_count: 0 },
+        },
+        expect: { status: "completed" },
+      }),
+      runScenario(workflow, {
+        name: "coverage readiness source repair",
+        mockInputs: {
+          ...cleanInputs(),
+          "acquire-sources": [acquisition(), acquisition()],
+          "prepare-data": [readiness(), readiness()],
+          "review-data-inline": [
+            { issues_count: 1, findings: "Reacquire provenance." },
+            { issues_count: 0 },
+          ],
+          "repair-data-inline": {
+            readiness_repair_reach: "source",
+            readiness_record: readiness().readiness_record + " Reacquisition required.",
+            repair_summary: "Reproduced the provenance defect and selected reacquisition.",
+          },
+        },
+        expect: { status: "completed" },
+      }),
+      runScenario(workflow, {
+        name: "coverage contained result repair",
+        mockInputs: {
+          ...cleanInputs(),
+          "analyze-and-synthesize": [
+            { analysis_result: analysisResult() },
+            { analysis_result: analysisResult() },
+          ],
+          "review-result-inline": [
+            { issues_count: 1, findings: "Correct presentation." },
+            { issues_count: 0 },
+          ],
+          "repair-result-inline": {
+            result_repair_reach: "contained",
+            repair_summary: "Corrected the reproduced presentation defect.",
+            analysis_result: analysisResult(),
+          },
+        },
+        expect: { status: "completed" },
+      }),
+    ]);
+    expect(results.filter((result) => !result.passed)).toEqual([]);
+    const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
+    expect(coverage.unvisitedNodes).toEqual([]);
+    expect(coverage.uncoveredBranches).toEqual([]);
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
   });
 });

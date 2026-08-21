@@ -1,104 +1,125 @@
 ---
 title: Data Analysis
-description: Data analysis workflow from problem definition to conclusions
+description: Reviewed evidence-driven analysis of authorized datasets with explicit source outcomes, limitations, and repair-gated conclusions
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Workflow for data analysis from problem definition to conclusions and visualization. Follows CRISP-DM methodology with validation loops for data quality and analysis completeness.
+`moira/data-analysis` turns one or more supplied or explicitly authorized datasets into a reviewed, decision-useful analysis. It preserves the user's source authority, records what was actually accessible, checks data readiness before analysis, and delivers either a complete result or an honest limited result when the evidence cannot support the requested conclusion.
 
 ## Start
 
-```bash
-mcp__moira__start({ workflowId: "data-analysis" })
+```js
+mcp__moira__start({
+  workflowId: "moira/data-analysis",
+  parentExecutionId: "none"
+})
 ```
+
+Provide the analytical question, the decision the result must inform, scope, audience, constraints, success criteria, expected deliverables, confidentiality rules, and at least one inline, file, or API source. For each source, state its sanitized identity, non-secret locator, authorization, initially known availability, data classification, and limitations.
+
+## When to choose this workflow
+
+| Need | Workflow |
+| --- | --- |
+| Analyze datasets that are already supplied or explicitly authorized | **Data Analysis** |
+| Discover and verify external literature or web sources for a bounded answer | [Verified Research](/docs/reference/workflows/verified-research/) |
+| Develop a research direction through repeated exploration and refinement | [Iterative Research](/docs/reference/workflows/iterative-research/) |
+| Implement a product change, including its tests and documentation | [Software Development Flow](/docs/reference/workflow-templates/#software-development-flow) |
+
+<Aside type="note">
+Data Analysis does not grant access to a source merely because it appears in the request. Use it only for data the caller supplied or explicitly authorized. Use a research workflow when the primary task is finding external evidence rather than analyzing known datasets.
+</Aside>
 
 ## Process
 
 ```mermaid
 flowchart LR
-    A[Context] --> B[Problem]
-    B --> C[Collect Data]
-    C --> D[Prepare Data]
-    D --> E[Explore/EDA]
-    E --> F[Find Insights]
-    F --> G[Visualize]
-    G --> H[Conclude]
+    A[Capture contract] --> B[Frame problem]
+    B --> C[Acquire authorized sources]
+    C --> D{Usable evidence?}
+    D -->|Yes| E[Prepare data]
+    E --> F[Independent readiness review]
+    F -->|Findings| G[Repair, reacquire, or limit]
+    G --> C
+    F -->|Accepted| H[Analyze and synthesize]
+    D -->|No| I[Produce limited result]
+    H --> J[Independent result review]
+    I --> J
+    J -->|Findings| K[Repair at the owning layer]
+    K --> B
+    J -->|Accepted| L[Optional final approval]
+    L --> M[Deliver result]
 ```
 
-## Steps
+The flow performs these connected responsibilities:
 
-| Step | Action | Output |
-|------|--------|--------|
-| 1. Get Context | Collect business question, context, data sources, constraints, audience | Context document |
-| 2. Define Problem | Formulate research question, hypotheses, success criteria, scope | Problem definition |
-| 3. Collect Data | Download, study structure, initial quality check | Raw dataset |
-| 4. Prepare Data | Handle missing values, types, duplicates, outliers, transformations | Clean dataset |
-| 5. Explore Data | Distributions, correlations, patterns, preliminary insights | EDA report |
-| 6. Find Insights | Test hypotheses, answer research question, recommendations | Key insights |
-| 7. Visualize | Create charts for key findings | Visualizations |
-| 8. Conclude | Executive summary, findings, recommendations, limitations | Final report |
+- captures a canonical analysis contract without broadening source access;
+- frames the question around the stated decision, audience, scope, and success criteria;
+- records a typed acquisition outcome for every source, including authorized-but-unavailable, not-authorized, and access-error states;
+- prepares only usable data and documents provenance, transformations, missing-data handling, quality observations, sampling limits, lawful-use constraints, and reproducibility;
+- applies methods appropriate to the question and evidence instead of forcing a fixed exploratory-data-analysis checklist;
+- creates privacy-safe visualizations only when they materially improve understanding;
+- traces findings, uncertainty, limitations, recommendations, and reproducibility to the source evidence;
+- independently reviews readiness and the final result, then routes each confirmed defect to the layer that owns it.
 
-## Features
+## Source contract and acquisition evidence
 
-<Aside type="tip">
-CRISP-DM methodology ensures systematic approach: understand task → understand data → prepare → explore → conclude → visualize.
-</Aside>
+The source contract is the user's original statement of authority. Acquisition does not overwrite it. Instead, the flow records separate evidence about what happened when the source was inspected.
 
-### Validation Loops
+| Field group | Meaning |
+| --- | --- |
+| Initial contract | Source identity, type, sanitized locator, authorization, initially known availability, classification, and limitation |
+| Acquisition evidence | Actual availability, typed access outcome, sanitized provenance, and observed limitation |
+| Final source projection | Both the initial contract and acquisition outcome, kept one-to-one by source ID |
 
-| Loop | Purpose | Criteria |
-|------|---------|----------|
-| Data quality | Verify data readiness for EDA | No critical quality issues |
-| EDA completeness | Verify research thoroughness | All hypotheses addressed |
+Actual availability can remain `unknown`. A source marked `not_authorized` or `access_error` cannot be reported as known available merely to keep the analysis moving. Duplicate source IDs and unmatched terminal source records are rejected as contract defects.
 
-### User Approval Gates
+## Delivery modes
 
-| Gate | Decision |
-|------|----------|
-| Problem definition | Confirm research question and scope |
-| Conclusions | Approve final findings and recommendations |
+| Mode | Result |
+| --- | --- |
+| `inline` | A self-contained report is returned in the final workflow output |
+| `filesystem` | The workflow materializes a bounded local workspace and returns the reviewed report path and authorized artifact paths |
 
-<Aside type="caution">
-Avoid common mistakes: analyzing without understanding the question, ignoring data quality issues, confirmation bias, assuming correlation equals causation.
-</Aside>
+Filesystem paths remain inside the current canonical workspace. The flow does not upload, publish, commit, deploy, mutate production, or send substantive notifications.
 
-### Quality Standards
+## Reviews and repair guarantees
 
-| Standard | Description |
-|----------|-------------|
-| Reproducibility | Analysis can be repeated with same results |
-| Validity | Methods appropriate for data and question |
-| Relevance | Findings address the business question |
-| Clarity | Results understandable by audience |
-| Actionability | Recommendations are practical |
+Readiness review checks whether the evidence and preparation can support the requested analysis. A confirmed finding can lead to:
 
-### Data Preparation Checklist
+- a contained preparation repair;
+- reacquisition when source evidence or provenance is defective;
+- a limited result when the evidence cannot responsibly support a full analysis.
 
-| Task | Action |
-|------|--------|
-| Missing values | Identify, understand, handle appropriately |
-| Data types | Verify and correct column types |
-| Duplicates | Detect and remove if necessary |
-| Outliers | Identify, investigate, handle |
-| Transformations | Apply needed transformations |
+Final review checks the current result against the canonical question, decision context, source outcomes, methods, evidence, uncertainty, privacy constraints, limitations, recommendations, and delivery contract. A finding is routed to contained result repair, data preparation, source acquisition, or the canonical analysis contract. Contract repair re-enters framing and reruns the affected downstream stages; it cannot silently replace user context inside an ordinary presentation fix.
 
-## Example Node Configuration
+Autonomous mode skips only human approval gates. Independent readiness and result reviews, typed validation, repair loops, and limited-result behavior remain active. Interactive mode additionally asks the user to accept the framed problem and final result; rejection must consume the supplied feedback before the flow can finish.
 
-```json
-{
-  "id": "explore-data",
-  "type": "agent-directive",
-  "directive": "Perform exploratory data analysis. Examine distributions, correlations, and patterns. Document preliminary insights.",
-  "completionCondition": "EDA complete with distributions, correlations analyzed and preliminary insights documented",
-  "connections": {
-    "next": "validate-eda"
-  }
-}
-```
+## Limited results
+
+A limited result is a valid, reviewed terminal outcome, not a false success. The flow uses it when no authorized usable source remains or when readiness review confirms that the available evidence is insufficient. It states the access outcomes, unsupported conclusions, limitations, and the next evidence needed without fabricating findings.
+
+## Authority and privacy limits
+
+The flow minimizes sensitive data and keeps credentials and unnecessary raw records out of directives, reports, review artifacts, and logs. It honors supplied privacy, consent, retention, licensing, and confidentiality constraints. It never expands authorization, circumvents access controls, deploys models, or treats correlation as causation without supporting evidence.
+
+## Final output
+
+The terminal `analysis_result` records:
+
+- `complete` or `limited` status;
+- delivery mode and inline report or local report path;
+- the decision context;
+- the typed initial and actual state of every source;
+- executive and evidence summaries;
+- limitations and recommendations;
+- visualization summary;
+- reproducibility instructions.
 
 ## Related
 
-- [Verified Research Workflow](/docs/reference/workflows/verified-research/) — For qualitative research with sources
-- [PRD Creation](/docs/reference/workflows/prd-creation/) — For data-driven product decisions
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+- [Verified Research](/docs/reference/workflows/verified-research/) — bounded external-source research
+- [Iterative Research](/docs/reference/workflows/iterative-research/) — exploratory research with repeated refinement
+- [PRD Creation](/docs/reference/workflows/prd-creation/) — reviewed product requirements informed by evidence
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — compare all public workflows

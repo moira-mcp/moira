@@ -1,385 +1,420 @@
-/**
- * ux-design Scenario Tests
- *
- * Linear UX design workflow for creating user experiences.
- * Path: users → constraints → design-system → flow → microcopy → accessibility → prototype → validation → end
- *
- * Coverage target: 100% nodes (10), 100% branches
- */
-
+/** Contract and behavioral scenarios for moira/ux-design. */
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
+import {
   runScenario,
-  type TestScenario,
+  type MockInput,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("ux-design", "public")!.graph as WorkflowGraph;
+const entry = findSystemCatalogEntry("ux-design", "public")!;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+
+function node(graph: WorkflowGraph, id: string): any {
+  const found = graph.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
 }
 
-describe("ux-design Scenarios", () => {
-  let workflow: WorkflowGraph;
+function intake(overrides: Record<string, unknown> = {}): MockInput {
+  return ({ executionId }) => ({
+    operating_mode: "autonomous",
+    design_package_path: `./moira-ws/ux-design-${executionId}/design-package.md`,
+    validation_plan_path: `./moira-ws/ux-design-${executionId}/validation-plan.md`,
+    intake_status: "ready",
+    intake_summary: "The bounded UX design contract is ready for synthesis.",
+    ...overrides,
+  });
+}
 
-  beforeAll(() => {
-    workflow = loadProductionWorkflow();
+const summary = "The local UX specification reached its truthful terminal state.";
+function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockInput> {
+  return {
+    "materialize-workspace": {},
+    "capture-design-contract": intake(),
+    "create-design-package": { design_status: "reviewable", result_kind: "complete" },
+    "review-design": { review_status: "completed", issues_count: 0 },
+    "repair-design": {
+      repair_status: "changed",
+      repair_reach: "contained",
+      result_kind: "complete",
+    },
+    "present-for-approval": { decision: "accept" },
+    "apply-user-feedback": {
+      feedback_status: "changed",
+      repair_reach: "contained",
+      result_kind: "complete",
+    },
+    "prepare-accepted": { outcome: "accepted", result_summary: summary },
+    "prepare-limited": { outcome: "reviewed-limited", result_summary: summary },
+    "prepare-feedback-blocker": { outcome: "feedback-blocked", result_summary: summary },
+    "prepare-workspace-blocker": { outcome: "workspace-blocked", result_summary: summary },
+    "prepare-intake-blocker": { outcome: "intake-blocked", result_summary: summary },
+    "prepare-design-blocker": { outcome: "design-blocked", result_summary: summary },
+    "prepare-repair-blocker": { outcome: "repair-blocked", result_summary: summary },
+    "prepare-review-blocker": { outcome: "review-blocked", result_summary: summary },
+    "prepare-abort": { outcome: "aborted", result_summary: summary },
+    "revise-design-process": {},
+    ...overrides,
+  };
+}
+
+type MaterializeMode = "success" | "error";
+function configureMaterialize(engine: GraphExecutionEngine, mode: MaterializeMode): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
+  if (mode === "success") {
+    handlers.set(
+      "materialize",
+      new MaterializeHandler(
+        { createMaterializeToken: () => "scenario-token" },
+        () => "https://moira.example",
+      ),
+    );
+    return;
+  }
+  handlers.set("materialize", {
+    getNodeType: () => "materialize",
+    execute: async (current: { id: string }) => ({
+      nodeId: current.id,
+      action: "continue",
+      outputPath: "error",
+      data: { error: "workspace unavailable" },
+    }),
+  });
+}
+
+async function run(
+  scenario: TestScenario,
+  materializeMode: MaterializeMode = "success",
+): Promise<ScenarioResult> {
+  return runScenario(workflow(), scenario, {
+    engineSetup: (engine) => configureMaterialize(engine, materializeMode),
+  });
+}
+
+describe("ux-design", () => {
+  test("publishes the v2 public contract with detailed selection metadata", async () => {
+    const graph = workflow();
+    expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+    expect(entry.owner).toBe("system-moira");
+    expect(entry.visibility).toBe("public");
+    expect(graph.id).toBe("6266d829-11a6-4bf2-b00b-f3d230cee4c2");
+    expect(graph.metadata.version).toBe("2.0.0");
+    expect(graph.nodes).toHaveLength(32);
+    expect(graph.metadata.description).toContain("implementation-ready UX design specification");
+    expect(graph.metadata.description).toContain("genuinely independent reviewer");
+    expect(graph.metadata.description).toContain("does not implement UI");
+    expect(graph.metadata.description).toContain("Software Development Flow for implementation");
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "ux-design"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
+  test("materializes the complete execution-bound artifact contract", () => {
+    const graph = workflow();
+    const materialize = node(graph, "materialize-workspace");
+    expect(materialize.basePath).toBe("{{workspace_path}}");
+    expect(materialize.files.map((file: { path: string }) => file.path)).toEqual([
+      "process-id.txt",
+      "design-standard.md",
+      "design-contract.md",
+      "design-package.md",
+      "validation-plan.md",
+      "design-review.md",
+      "repair-account.md",
+    ]);
+    expect(graph.variableRegistry?.workspace_path).toMatchObject({
+      const: "./moira-ws/ux-design-{{executionId}}",
+      default: "./moira-ws/ux-design-{{executionId}}",
     });
-
-    it("should have no cycles (linear workflow)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles).toHaveLength(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(10);
-    });
+    expect(node(graph, "end").finalOutput).toEqual([
+      "workspace_path",
+      "outcome",
+      "design_package_path",
+      "validation_plan_path",
+      "result_summary",
+    ]);
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        // Scenario 1: Complete UX design flow
-        {
-          name: "Complete UX design workflow",
-          description: "Full UX design process for a feature",
-          expect: { status: "completed" },
-          mockInputs: {
-            users: {
-              personas: [
-                {
-                  name: "Sarah",
-                  role: "Product Manager",
-                  context: "Office desktop",
-                  jtbd: ["Quick navigation", "Dashboard overview"],
-                  pain_points: ["Slow load times"],
-                },
-                {
-                  name: "Mike",
-                  role: "Developer",
-                  context: "Remote laptop",
-                  jtbd: ["Clear feedback", "API access"],
-                  pain_points: ["Unclear errors"],
-                },
-              ],
-              primary_persona: "Sarah",
-            },
-            constraints: {
-              technical: ["Must work on mobile", "Load under 3s"],
-              existing_patterns: ["Button component", "Modal patterns"],
-              business: ["Consistent with brand", "Launch in Q1"],
-            },
-            "design-system": {
-              existing_components: ["Button", "Input", "Modal", "Card"],
-              reusable: ["Button", "Input"],
-              new_needed: ["FeatureCard"],
-            },
-            flow: {
-              steps: [
-                {
-                  name: "Login",
-                  user_sees: "Login form",
-                  rationale: "Authentication required first",
-                  user_actions: ["Enter credentials", "Click login"],
-                },
-                {
-                  name: "Dashboard",
-                  user_sees: "Overview with metrics",
-                  rationale: "Show context before actions",
-                  user_actions: ["View stats", "Navigate"],
-                },
-              ],
-            },
-            microcopy: {
-              copy: [
-                { element: "button", text: "Save Changes", clarity_check: "yes - clear action" },
-                { element: "button", text: "Discard", clarity_check: "yes - clear consequence" },
-                {
-                  element: "error",
-                  text: "This field is required",
-                  clarity_check: "yes - explains issue",
-                },
-              ],
-            },
-            accessibility: {
-              checklist: [
-                { requirement: "ARIA labels", how_addressed: "Added to all interactive elements" },
-                { requirement: "Keyboard navigation", how_addressed: "Tab order and focus states" },
-                { requirement: "Color contrast", how_addressed: "4.5:1 ratio verified" },
-                { requirement: "Screen reader", how_addressed: "Tested with VoiceOver" },
-                {
-                  requirement: "Focus indicators",
-                  how_addressed: "Visible focus ring on all elements",
-                },
-              ],
-            },
-            prototype: {
-              screens: [
-                {
-                  name: "Dashboard",
-                  layout: "Grid with metrics cards",
-                  interactions: ["Click card", "Navigate"],
-                },
-                {
-                  name: "Create form",
-                  layout: "Centered form with sidebar",
-                  interactions: ["Fill fields", "Submit"],
-                },
-                {
-                  name: "Confirmation",
-                  layout: "Success message with actions",
-                  interactions: ["Return home", "View details"],
-                },
-              ],
-            },
-            validation: {
-              hypotheses: ["Users can complete create flow in under 2 minutes"],
-              method: "Usability testing",
-              success_criteria: ["80% task completion rate"],
-              participants: { count: 5, criteria: ["Target persona match"] },
-            },
-          },
-        },
-
-        // Scenario 2: Simple UX design
-        {
-          name: "Simple UX design",
-          description: "Minimal UX design for small feature",
-          expect: { status: "completed" },
-          mockInputs: {
-            users: {
-              personas: [
-                {
-                  name: "End User",
-                  role: "User",
-                  context: "Desktop browser",
-                  jtbd: ["Submit forms quickly"],
-                },
-              ],
-              primary_persona: "End User",
-            },
-            constraints: {
-              technical: ["Desktop only"],
-              existing_patterns: ["Standard form"],
-            },
-            "design-system": {
-              existing_components: ["Form"],
-              reusable: ["Form"],
-            },
-            flow: {
-              steps: [
-                { name: "Input", user_sees: "Form fields", rationale: "Simple single-step flow" },
-              ],
-            },
-            microcopy: {
-              copy: [{ element: "button", text: "Submit", clarity_check: "yes - standard action" }],
-            },
-            accessibility: {
-              checklist: [
-                { requirement: "ARIA labels", how_addressed: "Added to form elements" },
-                { requirement: "Keyboard navigation", how_addressed: "Standard form tabbing" },
-                { requirement: "Color contrast", how_addressed: "Default theme passes" },
-                { requirement: "Error messages", how_addressed: "Associated with fields" },
-                { requirement: "Focus indicators", how_addressed: "Browser defaults" },
-              ],
-            },
-            prototype: {
-              screens: [
-                {
-                  name: "Form screen",
-                  layout: "Simple centered form",
-                  interactions: ["Fill fields", "Submit"],
-                },
-              ],
-            },
-            validation: {
-              hypotheses: ["Users can submit form"],
-              method: "Informal review",
-              success_criteria: ["Form submission works"],
-            },
-          },
-        },
-
-        // Scenario 3: Complex enterprise UX
-        {
-          name: "Complex enterprise UX design",
-          description: "Detailed UX for enterprise dashboard",
-          expect: { status: "completed" },
-          mockInputs: {
-            users: {
-              personas: [
-                {
-                  name: "Admin Amy",
-                  role: "Admin",
-                  context: "Office workstation",
-                  jtbd: ["User management", "Access control"],
-                  pain_points: ["Complex permissions"],
-                },
-                {
-                  name: "Analyst Alex",
-                  role: "Analyst",
-                  context: "Dual monitor setup",
-                  jtbd: ["Create reports", "Data analysis"],
-                  pain_points: ["Slow exports"],
-                },
-                {
-                  name: "Exec Emma",
-                  role: "Executive",
-                  context: "Mobile and tablet",
-                  jtbd: ["View high-level metrics"],
-                  pain_points: ["Too much detail"],
-                },
-              ],
-              primary_persona: "Analyst Alex",
-            },
-            constraints: {
-              technical: ["Support IE11", "Work offline", "Handle 10k records"],
-              existing_patterns: ["Master-detail", "Wizard", "Dashboard"],
-              business: ["Enterprise security", "White-label ready", "GDPR compliant"],
-            },
-            "design-system": {
-              existing_components: ["DataGrid", "Chart", "Filter", "Export", "DatePicker"],
-              reusable: ["DataGrid", "Chart"],
-              new_needed: ["AdvancedFilter", "BatchActions"],
-              integration_notes: "Must work with existing design tokens",
-            },
-            flow: {
-              steps: [
-                {
-                  name: "Login",
-                  user_sees: "SSO login page",
-                  rationale: "Enterprise auth required",
-                  user_actions: ["SSO login"],
-                },
-                {
-                  name: "Role Selection",
-                  user_sees: "Role picker",
-                  rationale: "Different views per role",
-                  user_actions: ["Select role"],
-                },
-                {
-                  name: "Dashboard",
-                  user_sees: "Role-specific dashboard",
-                  rationale: "Contextual starting point",
-                  user_actions: ["View metrics", "Drill down"],
-                },
-              ],
-            },
-            microcopy: {
-              copy: [
-                { element: "button", text: "Save Changes", clarity_check: "yes - clear action" },
-                {
-                  element: "button",
-                  text: "Export to Excel",
-                  clarity_check: "yes - specific format",
-                },
-                {
-                  element: "button",
-                  text: "Apply Filters",
-                  clarity_check: "yes - describes action",
-                },
-                {
-                  element: "error",
-                  text: "Your session has expired. Please log in again.",
-                  clarity_check: "yes - explains issue and next step",
-                },
-                {
-                  element: "error",
-                  text: "This record was modified. Refresh to see changes.",
-                  clarity_check: "yes - explains conflict and resolution",
-                },
-              ],
-            },
-            accessibility: {
-              checklist: [
-                { requirement: "ARIA labels", how_addressed: "All interactive elements labeled" },
-                {
-                  requirement: "Keyboard navigation",
-                  how_addressed: "Full keyboard support with shortcuts",
-                },
-                { requirement: "Focus trap", how_addressed: "Implemented in all modals" },
-                { requirement: "Live regions", how_addressed: "Used for dynamic updates" },
-                { requirement: "Skip links", how_addressed: "Added to main content" },
-                { requirement: "Semantic landmarks", how_addressed: "Header, main, nav, footer" },
-                { requirement: "WCAG AAA", how_addressed: "Key flows tested and verified" },
-              ],
-            },
-            prototype: {
-              screens: [
-                {
-                  name: "Dashboard - Empty state",
-                  layout: "Centered empty state message",
-                  interactions: ["Add first item"],
-                },
-                {
-                  name: "Dashboard - Loaded",
-                  layout: "Grid with data cards",
-                  interactions: ["Filter", "Export", "Drill down"],
-                },
-                {
-                  name: "Filter panel",
-                  layout: "Slide-out panel",
-                  interactions: ["Select filters", "Apply", "Clear"],
-                },
-                {
-                  name: "Export dialog",
-                  layout: "Modal with options",
-                  interactions: ["Select format", "Export"],
-                },
-                {
-                  name: "Error states",
-                  layout: "Inline error messages",
-                  interactions: ["Retry", "Dismiss"],
-                },
-              ],
-            },
-            validation: {
-              hypotheses: [
-                "Analysts can create report in 5 clicks",
-                "Export workflow is discoverable",
-              ],
-              method: "Usability testing across 3 roles",
-              success_criteria: ["85% task success rate for primary flows"],
-              participants: { count: 12, criteria: ["Role diversity", "Experience levels"] },
-            },
-          },
-        },
-      ];
-
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+  test("encodes correlated intake, review, repair, feedback, and authority contracts", () => {
+    const graph = workflow();
+    const intakeSchema = node(graph, "capture-design-contract").inputSchema;
+    expect(intakeSchema.xContextPathSuffixes).toEqual({
+      baseContextProperty: "workspace_path",
+      properties: {
+        design_package_path: "/design-package.md",
+        validation_plan_path: "/validation-plan.md",
+      },
     });
+    expect(node(graph, "review-design").inputSchema.properties.review_status.enum).toEqual([
+      "completed",
+      "blocked",
+    ]);
+    expect(node(graph, "review-design").completionCondition).toContain("review_status=blocked");
+    expect(node(graph, "repair-design").inputSchema.properties.repair_reach.enum).toEqual([
+      "contained",
+      "contract",
+    ]);
+    expect(node(graph, "apply-user-feedback").inputSchema.properties.feedback_status.enum).toEqual([
+      "changed",
+      "blocked",
+    ]);
+    expect(node(graph, "review-design").directive).toContain(
+      "reuse exactly that recorded reviewer context",
+    );
+    expect(node(graph, "revise-design-process").connections.success).toBe("create-design-package");
+    expect(graph.metadata.description).toContain("does not implement UI");
+    expect(graph.variableRegistry?.design_standard.default).toContain(
+      "does not implement product UI",
+    );
+    expect(graph.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(false);
+  });
+
+  test("rejects artifact paths from another otherwise valid execution", async () => {
+    const result = await run({
+      name: "foreign artifact paths",
+      mockInputs: inputs({
+        "capture-design-contract": intake({
+          design_package_path: "./moira-ws/ux-design-deadbeef/design-package.md",
+          validation_plan_path: "./moira-ws/ux-design-deadbeef/validation-plan.md",
+        }),
+      }),
+      expect: { status: "failed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("must equal the current execution path");
+  });
+
+  test.each([
+    [
+      "completed review with blocker",
+      { review_status: "completed", issues_count: 0, blocker_summary: "Impossible combination" },
+    ],
+    [
+      "blocked review with count",
+      { review_status: "blocked", issues_count: 1, blocker_summary: "Reviewer unavailable" },
+    ],
+    ["changed repair without reach", { repair_status: "changed", result_kind: "complete" }],
+    [
+      "blocked feedback with result kind",
+      {
+        feedback_status: "blocked",
+        blocker_summary: "No authorized change",
+        result_kind: "complete",
+      },
+    ],
+  ])("rejects an invalid correlated response: %s", async (name, invalid) => {
+    const target = String(name).includes("review")
+      ? "review-design"
+      : String(name).includes("repair")
+        ? "repair-design"
+        : "apply-user-feedback";
+    const scenarioInputs: Record<string, MockInput> = { [target]: invalid };
+    if (target === "repair-design") {
+      scenarioInputs["review-design"] = { review_status: "completed", issues_count: 1 };
+    }
+    if (target === "apply-user-feedback") {
+      scenarioInputs["capture-design-contract"] = intake({ operating_mode: "interactive" });
+      scenarioInputs["present-for-approval"] = {
+        decision: "revise",
+        feedback: "Clarify the recovery-state behavior.",
+      };
+    }
+    const result = await run({
+      name: String(name),
+      mockInputs: inputs(scenarioInputs),
+      expect: { status: "failed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain(`Input validation failed for node '${target}'`);
+  });
+
+  test("covers every ordinary node and connection with truthful terminal outcomes", async () => {
+    const nonzeroThenZero = [
+      { review_status: "completed", issues_count: 1 },
+      { review_status: "completed", issues_count: 0 },
+    ];
+    const cases: Array<{ scenario: TestScenario; materialize?: MaterializeMode }> = [
+      {
+        scenario: {
+          name: "autonomous accepted",
+          mockInputs: inputs(),
+          expect: { status: "completed", reaches: ["prepare-accepted", "end"] },
+        },
+      },
+      {
+        scenario: {
+          name: "autonomous reviewed limited",
+          mockInputs: inputs({
+            "create-design-package": { design_status: "reviewable", result_kind: "limited" },
+          }),
+          expect: { status: "completed", reaches: ["prepare-limited"] },
+        },
+      },
+      {
+        scenario: {
+          name: "workspace blocked",
+          mockInputs: inputs(),
+          expect: { status: "completed", reaches: ["prepare-workspace-blocker"] },
+        },
+        materialize: "error",
+      },
+      {
+        scenario: {
+          name: "intake abort",
+          mockInputs: inputs({
+            "capture-design-contract": intake({ intake_status: "abort" }),
+          }),
+          expect: { status: "completed", reaches: ["prepare-abort"] },
+        },
+      },
+      {
+        scenario: {
+          name: "intake blocked",
+          mockInputs: inputs({
+            "capture-design-contract": intake({
+              intake_status: "blocked",
+              blocker_summary: "Required primary evidence is unavailable.",
+            }),
+          }),
+          expect: { status: "completed", reaches: ["prepare-intake-blocker"] },
+        },
+      },
+      {
+        scenario: {
+          name: "design blocked",
+          mockInputs: inputs({
+            "create-design-package": {
+              design_status: "blocked",
+              blocker_summary: "The authorized evidence cannot support a reviewable package.",
+            },
+          }),
+          expect: { status: "completed", reaches: ["prepare-design-blocker"] },
+        },
+      },
+      {
+        scenario: {
+          name: "review context blocked",
+          mockInputs: inputs({
+            "review-design": {
+              review_status: "blocked",
+              blocker_summary: "The recorded reviewer context cannot be resumed.",
+            },
+          }),
+          expect: { status: "completed", reaches: ["prepare-review-blocker"] },
+        },
+      },
+      {
+        scenario: {
+          name: "repair blocked",
+          mockInputs: inputs({
+            "review-design": { review_status: "completed", issues_count: 1 },
+            "repair-design": {
+              repair_status: "blocked",
+              blocker_summary: "The finding requires unavailable authority.",
+            },
+          }),
+          expect: { status: "completed", reaches: ["prepare-repair-blocker"] },
+        },
+      },
+      ...(["contained", "contract"] as const).map((repairReach) => ({
+        scenario: {
+          name: `${repairReach} review repair`,
+          mockInputs: inputs({
+            "review-design": nonzeroThenZero,
+            "repair-design": {
+              repair_status: "changed",
+              repair_reach: repairReach,
+              result_kind: "complete",
+            },
+          }),
+          expect: { status: "completed" as const, reaches: ["repair-design", "prepare-accepted"] },
+        },
+      })),
+      {
+        scenario: {
+          name: "interactive accept",
+          mockInputs: inputs({
+            "capture-design-contract": intake({ operating_mode: "interactive" }),
+          }),
+          expect: { status: "completed", reaches: ["present-for-approval", "prepare-accepted"] },
+        },
+      },
+      {
+        scenario: {
+          name: "interactive abort",
+          mockInputs: inputs({
+            "capture-design-contract": intake({ operating_mode: "interactive" }),
+            "present-for-approval": { decision: "abort" },
+          }),
+          expect: { status: "completed", reaches: ["prepare-abort"] },
+        },
+      },
+      {
+        scenario: {
+          name: "interactive feedback blocked",
+          mockInputs: inputs({
+            "capture-design-contract": intake({ operating_mode: "interactive" }),
+            "present-for-approval": {
+              decision: "revise",
+              feedback: "Request an external implementation outside this flow.",
+            },
+            "apply-user-feedback": {
+              feedback_status: "blocked",
+              blocker_summary: "Implementation is outside the UX specification authority.",
+            },
+          }),
+          expect: { status: "completed", reaches: ["prepare-feedback-blocker"] },
+        },
+      },
+      ...(["contained", "contract"] as const).map((repairReach) => ({
+        scenario: {
+          name: `interactive ${repairReach} feedback`,
+          mockInputs: inputs({
+            "capture-design-contract": intake({ operating_mode: "interactive" }),
+            "present-for-approval": [
+              { decision: "revise", feedback: "Clarify the recovery-state behavior." },
+              { decision: "accept" },
+            ],
+            "apply-user-feedback": {
+              feedback_status: "changed",
+              repair_reach: repairReach,
+              result_kind: "complete",
+            },
+          }),
+          expect: {
+            status: "completed" as const,
+            reaches: ["apply-user-feedback", "prepare-accepted"],
+          },
+        },
+      })),
+      {
+        scenario: {
+          name: "guarded process revision",
+          mockInputs: inputs(),
+          teleportAfter: {
+            afterNode: "review-design",
+            teleportTo: "revise-design-process",
+          },
+          expect: { status: "completed", reaches: ["revise-design-process", "prepare-accepted"] },
+        },
+      },
+    ];
+
+    const results: ScenarioResult[] = [];
+    for (const current of cases) {
+      results.push(await run(current.scenario, current.materialize ?? "success"));
+    }
+    expect(results.filter((result) => !result.passed)).toEqual([]);
+    const coverage = calculateCoverage(workflow(), results, { includeGapAnalysis: true });
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
   });
 });

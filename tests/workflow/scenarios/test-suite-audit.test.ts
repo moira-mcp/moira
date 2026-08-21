@@ -1,731 +1,575 @@
 /**
- * test-suite-audit Scenario Tests
+ * Contract and behavioral scenarios for moira/test-suite-audit.
  *
- * Full test suite audit workflow: Collect → Taxonomy → Map → Analyze → Decide → Apply → Report.
- * Coverage target: 100% nodes (44), 100% branches (10 conditions × 2 = 20 branches)
+ * The flow builds complete feature-first evidence before recommendations, requires exact authority
+ * before mutation, verifies each logical mutation class, and keeps every delivery outcome distinct.
  */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  GraphExecutionEngine,
+  GraphTemplateProcessor,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
+import {
   runScenario,
+  type MockInput,
   type TestScenario,
-  type ScenarioResult,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("test-suite-audit", "public")!.graph as WorkflowGraph;
+const catalogEntry = findSystemCatalogEntry("test-suite-audit", "public")!;
+
+function loadWorkflow(): WorkflowGraph {
+  return structuredClone(catalogEntry.graph) as WorkflowGraph;
 }
 
-describe("test-suite-audit Scenarios", () => {
+function node(workflow: WorkflowGraph, id: string): any {
+  const found = workflow.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
+}
+
+function useMaterializeGrant(engine: GraphExecutionEngine): void {
+  const handlers = (
+    engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> }
+  ).nodeHandlers;
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "test-suite-audit-token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
+function cleanInputs(options: {
+  batches?: number;
+  decision?: "analysis_only" | "apply" | "abort";
+  changeClasses?: number;
+  delivery?: "local" | "publish" | "publish_notify";
+} = {}): Record<string, MockInput> {
+  const batches = options.batches ?? 1;
+  const decision = options.decision ?? "analysis_only";
+  const changeClasses = options.changeClasses ?? 1;
+  const delivery = options.delivery ?? "local";
+  return {
+    "resolve-scope": {},
+    "materialize-workspace": {},
+    "discover-corpus": { batch_total: batches, batch_cursor: 0 },
+    "review-taxonomy": { issues_count: 0 },
+    "confirm-scope-taxonomy": { decision: "accept" },
+    "map-batch": {},
+    "review-mapping": { issues_count: 0 },
+    "analyze-suite": {},
+    "review-analysis": { issues_count: 0 },
+    "present-recommendations": { decision },
+    "establish-baseline": {
+      baseline_state: "ready",
+      change_class_total: changeClasses,
+      change_class_cursor: 0,
+    },
+    "apply-change-class": {},
+    "targeted-check-class": { check_state: "pass" },
+    "review-changes": { issues_count: 0 },
+    "broad-verification": { verification_state: "pass" },
+    "write-final-report": {},
+    "review-final-report": { issues_count: 0 },
+    "delivery-decision": { delivery },
+    "upload-report": {
+      upload_state: "uploaded",
+      report_url: "https://audit.static.moira-mcp.com/",
+    },
+    "notify-user": { notification_state: "sent" },
+  };
+}
+
+function run(workflow: WorkflowGraph, value: TestScenario) {
+  return runScenario(workflow, value, { engineSetup: useMaterializeGrant });
+}
+
+describe("test-suite-audit", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
-    workflow = loadProductionWorkflow();
+    workflow = loadWorkflow();
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "test-suite-audit"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
-
-    it("should have expected cycles (taxonomy fix, batch fix, verification cleanup, test fix loops)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles.length).toBeGreaterThan(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(49);
-    });
+  test("preserves public identity and validates the accepted 93-node 4.0.0 graph", async () => {
+    expect(catalogEntry.owner).toBe("system-moira");
+    expect(catalogEntry.slug).toBe("test-suite-audit");
+    expect(catalogEntry.visibility).toBe("public");
+    expect(workflow.id).toBe("41246c35-cada-43ae-917c-57b1ea90c1bd");
+    expect(workflow.metadata.version).toBe("4.0.0");
+    expect(workflow.nodes).toHaveLength(93);
+    const validation = await new GraphValidator().validateUnified(workflow);
+    expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        {
-          name: "Happy path - all clean, 2 batches, no issues",
-          description:
-            "Ideal flow: setup approved, taxonomy clean, 2 batches mapped cleanly, verification passes, decisions approved, tests pass",
-          mockInputs: {
-            "collect-project-info": {
-              workspace_path: "audit-workspace",
-              test_file_count: 150,
-              source_dirs: ["src", "packages/shared/src"],
-            },
-            "collect-test-inventory": {
-              total_files: 150,
-              total_tests: 3122,
-              level_counts: {
-                unit: 1018,
-                integration: 386,
-                workflow: 641,
-                api: 345,
-                mcp: 231,
-                e2e: 501,
-              },
-            },
-            "approve-setup": {
-              approval: "yes",
-            },
-            "build-feature-taxonomy": {
-              domain_count: 5,
-              feature_count: 25,
-              behavior_count: 120,
-            },
-            "verify-taxonomy": {
-              issues_count: 0,
-            },
-            "approve-taxonomy": {
-              approval: "yes",
-            },
-            "plan-mapping-batches": {
-              total_batches: 2,
-            },
-            "map-batch": [
-              { files_mapped: 75, tests_mapped: 1561, unmapped_count: 5 },
-              { files_mapped: 75, tests_mapped: 1561, unmapped_count: 3 },
-            ],
-            "verify-batch": [
-              { issues_count: 0, checked_count: 20 },
-              { issues_count: 0, checked_count: 20 },
-            ],
-            "resolve-unmapped": {
-              added_behaviors: 3,
-              infra_tests: 2,
-              orphan_tests: 1,
-              still_unmapped: 2,
-            },
-            "build-coverage-matrix": {
-              total_behaviors: 123,
-              multi_level_count: 45,
-              same_level_multi: 12,
-              gap_count: 5,
-            },
-            "detect-redundancies": {
-              total_findings: 15,
-              high_confidence: 5,
-              medium_confidence: 7,
-              low_confidence: 3,
-            },
-            "sample-for-verification": {
-              total_findings: 15,
-              sample_size: 10,
-            },
-            "verify-sample": {
-              agree_count: 9,
-              disagree_count: 1,
-              disagree_rate: 0.1,
-            },
-            "apply-decision-framework": {
-              delete_count: 5,
-              merge_count: 3,
-              keep_count: 100,
-              rewrite_count: 2,
-              gap_count: 5,
-            },
-            "approve-decisions": {
-              approval: "yes",
-            },
-            "apply-changes": {
-              files_modified: 15,
-              tests_removed: 8,
-            },
-            "verify-tests-pass": {
-              all_pass: true,
-              total_tests: 3114,
-            },
-            "generate-report": {
-              report_url: "https://static.example.com/audit-report.html",
-              tests_before: 3122,
-              tests_after: 3114,
-              changes_applied: 10,
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "collect-project-info",
-              "collect-test-inventory",
-              "approve-setup",
-              "check-setup-approval",
-              "build-feature-taxonomy",
-              "verify-taxonomy",
-              "check-taxonomy-issues",
-              "approve-taxonomy",
-              "check-taxonomy-approval",
-              "plan-mapping-batches",
-              "init-batch-counter",
-              "check-batches-remaining",
-              "map-batch",
-              "verify-batch",
-              "check-batch-issues",
-              "increment-batch",
-              "resolve-unmapped",
-              "build-coverage-matrix",
-              "detect-redundancies",
-              "sample-for-verification",
-              "verify-sample",
-              "check-verification",
-              "apply-decision-framework",
-              "approve-decisions",
-              "check-decisions-approval",
-              "apply-changes",
-              "verify-tests-pass",
-              "check-tests-pass",
-              "generate-report",
-              "notify-completion",
-              "end",
-            ],
-            avoids: [
-              "inc-taxonomy-fix-attempts",
-              "fix-taxonomy",
-              "inc-batch-fix-attempts",
-              "fix-batch",
-              "ask-user-batch-skip",
-              "inc-verify-rounds",
-              "cleanup-false-positives",
-              "inc-test-fix-attempts",
-              "fix-test-failures",
-              "ask-user-test-failures",
-            ],
-          },
-        },
-        {
-          name: "Setup rejected, taxonomy fix exhausted, taxonomy rejected then approved",
-          description:
-            "User rejects setup once. Taxonomy has persistent issues, the bounded fix cycle exhausts and routes to approve-taxonomy. Taxonomy is rejected once and then approved.",
-          mockInputs: {
-            "collect-project-info": [
-              { workspace_path: "audit-ws", test_file_count: 200, source_dirs: ["src", "lib"] },
-              { workspace_path: "audit-ws-v2", test_file_count: 200, source_dirs: ["src", "lib"] },
-            ],
-            "collect-test-inventory": [
-              {
-                total_files: 200,
-                total_tests: 4000,
-                level_counts: { unit: 2000, integration: 1000, e2e: 1000 },
-              },
-              {
-                total_files: 200,
-                total_tests: 4000,
-                level_counts: { unit: 2000, integration: 1000, e2e: 1000 },
-              },
-            ],
-            "approve-setup": [
-              { approval: "no", user_feedback: "Wrong directory" },
-              { approval: "yes" },
-            ],
-            "build-feature-taxonomy": [
-              { domain_count: 3, feature_count: 15, behavior_count: 60 },
-              { domain_count: 4, feature_count: 20, behavior_count: 80 },
-            ],
-            "verify-taxonomy": [
-              { issues_count: 2, issues_summary: "Missing domains" },
-              { issues_count: 2, issues_summary: "Still missing" },
-              { issues_count: 1, issues_summary: "Partial fix" },
-              { issues_count: 1, issues_summary: "Persistent issue" },
-              { issues_count: 0 },
-            ],
-            "fix-taxonomy": [{ fixes_applied: 1 }, { fixes_applied: 1 }, { fixes_applied: 1 }],
-            "approve-taxonomy": [
-              { approval: "no", user_feedback: "Needs more granular domains" },
-              { approval: "yes" },
-            ],
-            "plan-mapping-batches": {
-              total_batches: 1,
-            },
-            "map-batch": {
-              files_mapped: 200,
-              tests_mapped: 4000,
-              unmapped_count: 10,
-            },
-            "verify-batch": {
-              issues_count: 0,
-              checked_count: 30,
-            },
-            "resolve-unmapped": {
-              added_behaviors: 5,
-              infra_tests: 3,
-              orphan_tests: 2,
-              still_unmapped: 0,
-            },
-            "build-coverage-matrix": {
-              total_behaviors: 85,
-              multi_level_count: 30,
-              same_level_multi: 8,
-              gap_count: 3,
-            },
-            "detect-redundancies": {
-              total_findings: 10,
-              high_confidence: 3,
-              medium_confidence: 5,
-              low_confidence: 2,
-            },
-            "sample-for-verification": {
-              total_findings: 10,
-              sample_size: 8,
-            },
-            "verify-sample": {
-              agree_count: 7,
-              disagree_count: 1,
-              disagree_rate: 0.125,
-            },
-            "apply-decision-framework": {
-              delete_count: 3,
-              merge_count: 2,
-              keep_count: 80,
-              rewrite_count: 1,
-              gap_count: 3,
-            },
-            "approve-decisions": {
-              approval: "yes",
-            },
-            "apply-changes": {
-              files_modified: 8,
-              tests_removed: 5,
-            },
-            "verify-tests-pass": {
-              all_pass: true,
-              total_tests: 3995,
-            },
-            "generate-report": {
-              report_url: "https://static.example.com/audit-report-2.html",
-              tests_before: 4000,
-              tests_after: 3995,
-              changes_applied: 6,
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "check-setup-approval",
-              "inc-taxonomy-fix-attempts",
-              "fix-taxonomy",
-              "check-taxonomy-issues",
-              "check-taxonomy-approval",
-              "end",
-            ],
-          },
-        },
-        {
-          name: "Batch fix exhausted → user skips, verification cleanup exhausted",
-          description:
-            "Batch has persistent issues, fix retries exhausted, user skips. Verification disagree rate stays high, cleanup retries exhausted",
-          mockInputs: {
-            "collect-project-info": {
-              workspace_path: "audit-ws",
-              test_file_count: 100,
-              source_dirs: ["src"],
-            },
-            "collect-test-inventory": {
-              total_files: 100,
-              total_tests: 2000,
-              level_counts: { unit: 1000, integration: 500, e2e: 500 },
-            },
-            "approve-setup": {
-              approval: "yes",
-            },
-            "build-feature-taxonomy": {
-              domain_count: 4,
-              feature_count: 20,
-              behavior_count: 80,
-            },
-            "verify-taxonomy": {
-              issues_count: 0,
-            },
-            "approve-taxonomy": {
-              approval: "yes",
-            },
-            "plan-mapping-batches": {
-              total_batches: 1,
-            },
-            "map-batch": {
-              files_mapped: 100,
-              tests_mapped: 2000,
-              unmapped_count: 8,
-            },
-            "verify-batch": [
-              { issues_count: 5, checked_count: 20 },
-              { issues_count: 3, checked_count: 20 },
-              { issues_count: 2, checked_count: 20 },
-              { issues_count: 1, checked_count: 20 },
-            ],
-            "fix-batch": [{ fixes_applied: 2 }, { fixes_applied: 1 }, { fixes_applied: 1 }],
-            "ask-user-batch-skip": {
-              decision: "skip",
-            },
-            "resolve-unmapped": {
-              added_behaviors: 4,
-              infra_tests: 2,
-              orphan_tests: 1,
-              still_unmapped: 1,
-            },
-            "build-coverage-matrix": {
-              total_behaviors: 84,
-              multi_level_count: 28,
-              same_level_multi: 10,
-              gap_count: 4,
-            },
-            "detect-redundancies": {
-              total_findings: 20,
-              high_confidence: 8,
-              medium_confidence: 7,
-              low_confidence: 5,
-            },
-            "sample-for-verification": [
-              { total_findings: 20, sample_size: 12 },
-              { total_findings: 18, sample_size: 10 },
-              { total_findings: 16, sample_size: 10 },
-              { total_findings: 14, sample_size: 10 },
-            ],
-            "verify-sample": [
-              { agree_count: 8, disagree_count: 4, disagree_rate: 0.33 },
-              { agree_count: 7, disagree_count: 3, disagree_rate: 0.3 },
-              { agree_count: 7, disagree_count: 3, disagree_rate: 0.3 },
-              { agree_count: 7, disagree_count: 3, disagree_rate: 0.3 },
-            ],
-            "cleanup-false-positives": [
-              { removed_count: 2 },
-              { removed_count: 2 },
-              { removed_count: 2 },
-            ],
-            "approve-decisions": {
-              approval: "yes",
-            },
-            "apply-changes": {
-              files_modified: 10,
-              tests_removed: 6,
-            },
-            "verify-tests-pass": {
-              all_pass: true,
-              total_tests: 1994,
-            },
-            "generate-report": {
-              report_url: "https://static.example.com/audit-report-3.html",
-              tests_before: 2000,
-              tests_after: 1994,
-              changes_applied: 8,
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "check-batch-issues",
-              "inc-batch-fix-attempts",
-              "fix-batch",
-              "ask-user-batch-skip",
-              "check-batch-skip-decision",
-              "increment-batch",
-              "check-verification",
-              "inc-verify-rounds",
-              "cleanup-false-positives",
-              "approve-decisions",
-              "end",
-            ],
-            avoids: ["apply-decision-framework"],
-          },
-        },
-        {
-          name: "Batch fix exhausted → user aborts audit",
-          description:
-            "Batch has persistent issues, fix retries exhausted, user chooses to abort entire audit",
-          mockInputs: {
-            "collect-project-info": {
-              workspace_path: "audit-ws",
-              test_file_count: 50,
-              source_dirs: ["src"],
-            },
-            "collect-test-inventory": {
-              total_files: 50,
-              total_tests: 1000,
-              level_counts: { unit: 500, integration: 300, e2e: 200 },
-            },
-            "approve-setup": {
-              approval: "yes",
-            },
-            "build-feature-taxonomy": {
-              domain_count: 3,
-              feature_count: 12,
-              behavior_count: 50,
-            },
-            "verify-taxonomy": {
-              issues_count: 0,
-            },
-            "approve-taxonomy": {
-              approval: "yes",
-            },
-            "plan-mapping-batches": {
-              total_batches: 1,
-            },
-            "map-batch": {
-              files_mapped: 50,
-              tests_mapped: 1000,
-              unmapped_count: 5,
-            },
-            "verify-batch": [
-              { issues_count: 3, checked_count: 15 },
-              { issues_count: 2, checked_count: 15 },
-              { issues_count: 2, checked_count: 15 },
-              { issues_count: 1, checked_count: 15 },
-            ],
-            "fix-batch": [{ fixes_applied: 1 }, { fixes_applied: 1 }, { fixes_applied: 1 }],
-            "ask-user-batch-skip": {
-              decision: "abort",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: ["ask-user-batch-skip", "check-batch-skip-decision", "end-aborted"],
-            avoids: ["resolve-unmapped", "build-coverage-matrix", "generate-report"],
-          },
-        },
-        {
-          name: "Decisions rejected then approved, tests fail → user continues with warnings",
-          description:
-            "User rejects decisions once, then approves. Tests persistently fail, user chooses to report with warnings",
-          mockInputs: {
-            "collect-project-info": {
-              workspace_path: "audit-ws",
-              test_file_count: 80,
-              source_dirs: ["src"],
-            },
-            "collect-test-inventory": {
-              total_files: 80,
-              total_tests: 1600,
-              level_counts: { unit: 800, integration: 400, e2e: 400 },
-            },
-            "approve-setup": {
-              approval: "yes",
-            },
-            "build-feature-taxonomy": {
-              domain_count: 4,
-              feature_count: 18,
-              behavior_count: 70,
-            },
-            "verify-taxonomy": {
-              issues_count: 0,
-            },
-            "approve-taxonomy": {
-              approval: "yes",
-            },
-            "plan-mapping-batches": {
-              total_batches: 1,
-            },
-            "map-batch": {
-              files_mapped: 80,
-              tests_mapped: 1600,
-              unmapped_count: 3,
-            },
-            "verify-batch": {
-              issues_count: 0,
-              checked_count: 25,
-            },
-            "resolve-unmapped": {
-              added_behaviors: 2,
-              infra_tests: 1,
-              orphan_tests: 0,
-              still_unmapped: 0,
-            },
-            "build-coverage-matrix": {
-              total_behaviors: 72,
-              multi_level_count: 20,
-              same_level_multi: 6,
-              gap_count: 2,
-            },
-            "detect-redundancies": {
-              total_findings: 8,
-              high_confidence: 3,
-              medium_confidence: 3,
-              low_confidence: 2,
-            },
-            "sample-for-verification": {
-              total_findings: 8,
-              sample_size: 6,
-            },
-            "verify-sample": {
-              agree_count: 5,
-              disagree_count: 1,
-              disagree_rate: 0.167,
-            },
-            "apply-decision-framework": [
-              { delete_count: 3, merge_count: 2, keep_count: 65, rewrite_count: 1, gap_count: 2 },
-              { delete_count: 2, merge_count: 1, keep_count: 68, rewrite_count: 1, gap_count: 2 },
-            ],
-            "approve-decisions": [
-              { approval: "no", user_feedback: "Too aggressive deletions" },
-              { approval: "yes" },
-            ],
-            "apply-changes": {
-              files_modified: 6,
-              tests_removed: 3,
-            },
-            "verify-tests-pass": [
-              { all_pass: false, total_tests: 1597, passed: 1590, failed: 7 },
-              { all_pass: false, total_tests: 1597, passed: 1593, failed: 4 },
-              { all_pass: false, total_tests: 1597, passed: 1595, failed: 2 },
-              { all_pass: false, total_tests: 1597, passed: 1596, failed: 1 },
-            ],
-            "fix-test-failures": [{ fixes_applied: 3 }, { fixes_applied: 2 }, { fixes_applied: 1 }],
-            "ask-user-test-failures": {
-              decision: "report_with_warnings",
-            },
-            "generate-report": {
-              report_url: "https://static.example.com/audit-report-5.html",
-              tests_before: 1600,
-              tests_after: 1597,
-              changes_applied: 6,
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "apply-decision-framework",
-              "check-decisions-approval",
-              "inc-test-fix-attempts",
-              "fix-test-failures",
-              "ask-user-test-failures",
-              "check-test-failure-decision",
-              "generate-report",
-              "end",
-            ],
-          },
-        },
-        {
-          name: "Tests fail → user aborts",
-          description: "Tests persistently fail after changes, user chooses to abort",
-          mockInputs: {
-            "collect-project-info": {
-              workspace_path: "audit-ws",
-              test_file_count: 60,
-              source_dirs: ["src"],
-            },
-            "collect-test-inventory": {
-              total_files: 60,
-              total_tests: 1200,
-              level_counts: { unit: 600, integration: 300, e2e: 300 },
-            },
-            "approve-setup": {
-              approval: "yes",
-            },
-            "build-feature-taxonomy": {
-              domain_count: 3,
-              feature_count: 15,
-              behavior_count: 55,
-            },
-            "verify-taxonomy": {
-              issues_count: 0,
-            },
-            "approve-taxonomy": {
-              approval: "yes",
-            },
-            "plan-mapping-batches": {
-              total_batches: 1,
-            },
-            "map-batch": {
-              files_mapped: 60,
-              tests_mapped: 1200,
-              unmapped_count: 2,
-            },
-            "verify-batch": {
-              issues_count: 0,
-              checked_count: 20,
-            },
-            "resolve-unmapped": {
-              added_behaviors: 1,
-              infra_tests: 1,
-              orphan_tests: 0,
-              still_unmapped: 0,
-            },
-            "build-coverage-matrix": {
-              total_behaviors: 56,
-              multi_level_count: 18,
-              same_level_multi: 5,
-              gap_count: 1,
-            },
-            "detect-redundancies": {
-              total_findings: 6,
-              high_confidence: 2,
-              medium_confidence: 3,
-              low_confidence: 1,
-            },
-            "sample-for-verification": {
-              total_findings: 6,
-              sample_size: 5,
-            },
-            "verify-sample": {
-              agree_count: 4,
-              disagree_count: 1,
-              disagree_rate: 0.17,
-            },
-            "apply-decision-framework": {
-              delete_count: 2,
-              merge_count: 1,
-              keep_count: 53,
-              rewrite_count: 1,
-              gap_count: 1,
-            },
-            "approve-decisions": {
-              approval: "yes",
-            },
-            "apply-changes": {
-              files_modified: 4,
-              tests_removed: 2,
-            },
-            "verify-tests-pass": [
-              { all_pass: false, total_tests: 1198, passed: 1190, failed: 8 },
-              { all_pass: false, total_tests: 1198, passed: 1192, failed: 6 },
-              { all_pass: false, total_tests: 1198, passed: 1194, failed: 4 },
-              { all_pass: false, total_tests: 1198, passed: 1195, failed: 3 },
-            ],
-            "fix-test-failures": [{ fixes_applied: 2 }, { fixes_applied: 2 }, { fixes_applied: 1 }],
-            "ask-user-test-failures": {
-              decision: "abort",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "check-tests-pass",
-              "inc-test-fix-attempts",
-              "fix-test-failures",
-              "ask-user-test-failures",
-              "check-test-failure-decision",
-              "end-aborted",
-            ],
-            avoids: ["generate-report", "notify-completion"],
-          },
-        },
-      ];
+  test("publishes a detailed selection contract instead of stale project counts", () => {
+    const description = workflow.metadata.description;
+    for (const phrase of [
+      "Feature-first audit",
+      "complete in-scope source and test corpus",
+      "independently reviewed batches",
+      "analysis only",
+      "exact reviewed mutation set",
+      "pre-change baseline",
+      "one logical mutation class at a time",
+      "scoped revert",
+      "limited non-mutating report",
+      "optional authorized static publication",
+      "preserves unrelated dirty work",
+      "Test Planning",
+      "Test Generation",
+      "Data Analysis",
+      "Software Development Flow",
+    ]) expect(description).toContain(phrase);
+    expect(description).not.toContain("3,122");
+    expect(description).not.toContain("Jest");
+  });
 
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+  test("materializes one registry standard into an execution-bound workspace", async () => {
+    expect(Object.keys(workflow.variableRegistry!).sort()).toEqual([
+      "audit_standard", "batch_cursor", "batch_total", "change_class_cursor",
+      "change_class_total", "notification_state", "outcome", "report_path",
+      "report_url", "workspace_path",
+    ]);
+    expect(workflow.variableRegistry!.workspace_path).toMatchObject({
+      const: "./moira-ws/test-suite-audit-{{executionId}}",
+      default: "./moira-ws/test-suite-audit-{{executionId}}",
     });
+    expect(workflow.variableRegistry!.report_path).toMatchObject({
+      const: "final-report.md", default: "final-report.md",
+    });
+    expect(String(workflow.variableRegistry!.audit_standard.default)).toContain(
+      "## Mutation, verification and recovery",
+    );
+    expect(node(workflow, "materialize-workspace")).toMatchObject({
+      basePath: "./moira-ws/test-suite-audit-{{executionId}}",
+      files: expect.arrayContaining([{ path: "audit-standard.md", from: "audit_standard" }]),
+    });
+    expect(node(workflow, "discover-corpus").directive).toContain("never rewrite it");
+    const executionId = "00000000-0000-4000-8000-000000000123";
+    const rendered = await new GraphTemplateProcessor().processDirectiveAsync(
+      node(workflow, "discover-corpus").directive,
+      {
+        variables: Object.fromEntries(
+          Object.entries(workflow.variableRegistry!).map(([key, definition]) => [key, definition.default]),
+        ),
+        nodeStates: {}, executionId, workflowId: workflow.id, userId: "workflow-test-user",
+        _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(workflow.variableRegistry),
+      },
+    );
+    expect(rendered).toContain(`./moira-ws/test-suite-audit-${executionId}/audit-standard.md`);
+    expect(rendered).not.toContain("{{executionId}}");
+  });
+
+  test("uses strict authority schemas and routes correction from the user target", () => {
+    const correction = node(workflow, "confirm-scope-taxonomy").inputSchema;
+    expect(correction.additionalProperties).toBe(false);
+    expect(correction.properties.decision.enum).toEqual(["accept", "correct"]);
+    expect(correction.allOf[0].then.required).toEqual(["correction_target", "feedback"]);
+    expect(node(workflow, "apply-user-correction").inputSchema.properties).toEqual({});
+    expect(node(workflow, "user-correction-scope").condition.left.contextPath).toBe(
+      "confirm-scope-taxonomy.correction_target",
+    );
+    expect(node(workflow, "present-recommendations").inputSchema.properties.decision.enum).toEqual([
+      "analysis_only", "apply", "revise", "abort",
+    ]);
+    expect(node(workflow, "failure-decision").inputSchema.properties.decision.enum).toEqual([
+      "repair", "revert",
+    ]);
+  });
+
+  test("keeps report, abort, and recovery-blocked terminals distinct", () => {
+    expect(node(workflow, "end-report").finalOutput).toEqual([
+      "outcome", "report_path", "report_url", "notification_state",
+    ]);
+    expect(node(workflow, "end-abort").finalOutput).toEqual(["outcome"]);
+    expect(node(workflow, "end-blocked").finalOutput).toEqual(["outcome"]);
+    expect(node(workflow, "repair-final-report").inputSchema.properties.repair_reach.enum).toEqual([
+      "report", "analysis", "work_applied", "work_reverted",
+    ]);
+  });
+
+  test("rejects correction without feedback before its owner", async () => {
+    const result = await run(workflow, {
+      name: "missing correction feedback",
+      mockInputs: {
+        ...cleanInputs({ batches: 0 }),
+        "confirm-scope-taxonomy": { decision: "correct", correction_target: "scope" },
+      },
+      expect: { status: "completed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'confirm-scope-taxonomy'");
+    expect(result.visitedNodes).not.toContain("apply-user-correction");
+  });
+
+  test("rejects an invented URL on upload failure", async () => {
+    const result = await run(workflow, {
+      name: "invented upload URL",
+      mockInputs: {
+        ...cleanInputs({ batches: 0, delivery: "publish" }),
+        "upload-report": { upload_state: "failed", report_url: "https://invented.example/report" },
+      },
+      expect: { status: "completed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'upload-report'");
+  });
+
+  test("scope and taxonomy corrections take observably different routes", async () => {
+    const scope = await run(workflow, {
+      name: "scope correction regenerates",
+      mockInputs: {
+        ...cleanInputs({ batches: 0 }),
+        "discover-corpus": [
+          { batch_total: 2, batch_cursor: 0 }, { batch_total: 0, batch_cursor: 0 },
+        ],
+        "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+        "confirm-scope-taxonomy": [
+          { decision: "correct", correction_target: "scope", feedback: "Exclude generated tests." },
+          { decision: "accept" },
+        ],
+        "apply-user-correction": { batch_cursor: 0 },
+      },
+      expect: { status: "completed" },
+    });
+    expect(scope.passed).toBe(true);
+    expect(scope.inputSubmissionCounts["discover-corpus"]).toBe(2);
+
+    const taxonomy = await run(workflow, {
+      name: "taxonomy correction re-reviews",
+      mockInputs: {
+        ...cleanInputs({ batches: 0 }),
+        "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+        "confirm-scope-taxonomy": [
+          { decision: "correct", correction_target: "taxonomy", feedback: "Split billing behavior." },
+          { decision: "accept" },
+        ],
+        "apply-user-correction": { batch_cursor: 0 },
+      },
+      expect: { status: "completed" },
+    });
+    expect(taxonomy.passed).toBe(true);
+    expect(taxonomy.inputSubmissionCounts["discover-corpus"]).toBe(1);
+    expect(taxonomy.inputSubmissionCounts["review-taxonomy"]).toBe(2);
+  });
+
+  test("combined discriminating scenarios cover every executable node and branch", async () => {
+    const scenarios: TestScenario[] = [
+      { name: "analysis zero local", mockInputs: cleanInputs({ batches: 0 }), expect: { status: "completed" } },
+      {
+        name: "user scope correction regenerates derived evidence",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "discover-corpus": [
+            { batch_total: 1, batch_cursor: 0 },
+            { batch_total: 0, batch_cursor: 0 },
+          ],
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [
+            {
+              decision: "correct",
+              correction_target: "scope",
+              feedback: "Exclude generated fixtures from the authorized corpus.",
+            },
+            { decision: "accept" },
+          ],
+          "apply-user-correction": { batch_cursor: 0 },
+        },
+        expect: { status: "completed" },
+      },
+      {
+        name: "apply batches classes publish notify",
+        mockInputs: cleanInputs({ batches: 2, decision: "apply", changeClasses: 2, delivery: "publish_notify" }),
+        expect: { status: "completed" },
+      },
+      {
+        name: "taxonomy repair no changes",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply", changeClasses: 0 }),
+          "review-taxonomy": [{ issues_count: 2 }, { issues_count: 0 }],
+          "repair-taxonomy": { repair_reach: "taxonomy", batch_total: 0, batch_cursor: 0 },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "taxonomy repair discovers stale scope",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "discover-corpus": [
+            { batch_total: 0, batch_cursor: 0 },
+            { batch_total: 0, batch_cursor: 0 },
+          ],
+          "review-taxonomy": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-taxonomy": { repair_reach: "scope", batch_total: 0, batch_cursor: 0 },
+        },
+        expect: { status: "completed" },
+      },
+      {
+        name: "user taxonomy correction re-enters taxonomy review",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [
+            {
+              decision: "correct",
+              correction_target: "taxonomy",
+              feedback: "Separate authentication behavior from generic infrastructure.",
+            },
+            { decision: "accept" },
+          ],
+          "apply-user-correction": { batch_cursor: 0 },
+        },
+        expect: { status: "completed" },
+      },
+      {
+        name: "irreducible taxonomy limited upload failure",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, delivery: "publish" }),
+          "review-taxonomy": { issues_count: 1 },
+          "repair-taxonomy": { repair_reach: "irreducible", batch_total: 0, batch_cursor: 0 },
+          "irreducible-decision": { decision: "limited_report" },
+          "upload-report": { upload_state: "failed", report_url: "" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "irreducible mapping abort",
+        mockInputs: {
+          ...cleanInputs(), "review-mapping": { issues_count: 1 },
+          "repair-mapping": { repair_reach: "irreducible" },
+          "irreducible-decision": { decision: "abort" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "mapping contained",
+        mockInputs: {
+          ...cleanInputs(), "review-mapping": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-mapping": { repair_reach: "mapping" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "mapping taxonomy",
+        mockInputs: {
+          ...cleanInputs(),
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }],
+          "map-batch": [{}, {}],
+          "review-mapping": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-mapping": { repair_reach: "taxonomy" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "mapping scope",
+        mockInputs: {
+          ...cleanInputs(),
+          "discover-corpus": [{ batch_total: 1, batch_cursor: 0 }, { batch_total: 0, batch_cursor: 0 }],
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }],
+          "review-mapping": { issues_count: 1 }, "repair-mapping": { repair_reach: "scope" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "analysis repair reaches and revise",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }, { decision: "accept" }],
+          "discover-corpus": [{ batch_total: 0, batch_cursor: 0 }, { batch_total: 0, batch_cursor: 0 }],
+          "analyze-suite": [{}, {}, {}, {}],
+          "review-analysis": [
+            { issues_count: 1 }, { issues_count: 1 }, { issues_count: 1 },
+            { issues_count: 0 }, { issues_count: 0 },
+          ],
+          "repair-analysis": [
+            { repair_reach: "analysis" }, { repair_reach: "taxonomy" }, { repair_reach: "scope" },
+          ],
+          "present-recommendations": [
+            { decision: "revise", feedback: "Narrow the recommendation." }, { decision: "analysis_only" },
+          ],
+          "revise-recommendations": { repair_reach: "analysis" },
+        }, expect: { status: "completed", maxSteps: 180 },
+      },
+      {
+        name: "recommendation taxonomy revision abort",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }],
+          "review-analysis": [{ issues_count: 0 }, { issues_count: 0 }],
+          "present-recommendations": [
+            { decision: "revise", feedback: "Correct taxonomy." }, { decision: "abort" },
+          ],
+          "revise-recommendations": { repair_reach: "taxonomy" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "recommendation scope revision regenerates corpus",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "discover-corpus": [
+            { batch_total: 0, batch_cursor: 0 },
+            { batch_total: 0, batch_cursor: 0 },
+          ],
+          "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
+          "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }],
+          "review-analysis": [{ issues_count: 0 }, { issues_count: 0 }],
+          "present-recommendations": [
+            { decision: "revise", feedback: "Remove generated fixtures from scope." },
+            { decision: "analysis_only" },
+          ],
+          "revise-recommendations": { repair_reach: "scope" },
+        },
+        expect: { status: "completed" },
+      },
+      ...(["limited_report", "abort"] as const).map((decision) => ({
+        name: `baseline ${decision}`,
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "establish-baseline": { baseline_state: "limited", change_class_total: 0, change_class_cursor: 0 },
+          "baseline-limited-decision": { decision },
+        }, expect: { status: "completed" as const },
+      })),
+      {
+        name: "class failure repair",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "targeted-check-class": [{ check_state: "fail" }, { check_state: "pass" }],
+          "class-failure-decision": { decision: "repair" }, "repair-class-failure": {},
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "class failure revert",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "targeted-check-class": { check_state: "fail" },
+          "class-failure-decision": { decision: "revert" },
+          "revert-changes": { restoration_state: "restored" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "changed review contained",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "review-changes": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-changes": { repair_reach: "contained" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "changed review scope changing",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "review-changes": { issues_count: 1 }, "repair-changes": { repair_reach: "scope_changing" },
+          "review-analysis": [{ issues_count: 0 }, { issues_count: 0 }],
+          "present-recommendations": [{ decision: "apply" }, { decision: "analysis_only" }],
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "broad repair",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "broad-verification": [{ verification_state: "fail" }, { verification_state: "pass" }],
+          "failure-decision": { decision: "repair" }, "repair-failure": {},
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "broad revert blocked",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "broad-verification": { verification_state: "fail" },
+          "failure-decision": { decision: "revert" },
+          "revert-changes": { restoration_state: "blocked" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "final report repair publish",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, delivery: "publish" }),
+          "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-final-report": { repair_reach: "report" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "final analysis repair",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "review-analysis": [{ issues_count: 0 }, { issues_count: 0 }],
+          "present-recommendations": [{ decision: "analysis_only" }, { decision: "analysis_only" }],
+          "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-final-report": { repair_reach: "analysis" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "final applied work repair",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-final-report": { repair_reach: "work_applied" }, "repair-final-applied-work": {},
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "final reverted work repair notify failure",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply", delivery: "publish_notify" }),
+          "broad-verification": { verification_state: "fail" },
+          "failure-decision": { decision: "revert" }, "revert-changes": { restoration_state: "restored" },
+          "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
+          "repair-final-report": { repair_reach: "work_reverted" },
+          "repair-final-reverted-work": { restoration_state: "restored" },
+          "notify-user": { notification_state: "failed" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "final reverted repair remains restoration blocked",
+        mockInputs: {
+          ...cleanInputs({ batches: 0, decision: "apply" }),
+          "broad-verification": { verification_state: "fail" },
+          "failure-decision": { decision: "revert" },
+          "revert-changes": { restoration_state: "restored" },
+          "review-final-report": { issues_count: 1 },
+          "repair-final-report": { repair_reach: "work_reverted" },
+          "repair-final-reverted-work": { restoration_state: "blocked" },
+        },
+        expect: { status: "completed" },
+      },
+      {
+        name: "impossible nonmutating work blocks",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }), "review-final-report": { issues_count: 1 },
+          "repair-final-report": { repair_reach: "work_applied" },
+        }, expect: { status: "completed" },
+      },
+      {
+        name: "impossible nonmutating revert repair blocks",
+        mockInputs: {
+          ...cleanInputs({ batches: 0 }),
+          "review-final-report": { issues_count: 1 },
+          "repair-final-report": { repair_reach: "work_reverted" },
+        },
+        expect: { status: "completed" },
+      },
+    ];
+
+    const results = [];
+    for (const value of scenarios) results.push(await run(workflow, value));
+    const failed = results.filter((result) => !result.passed);
+    if (failed.length) console.error(failed.map((result) => ({
+      scenario: result.scenario, error: result.error,
+      expectations: result.failedExpectations, last: result.visitedNodes.slice(-12),
+    })));
+    expect(failed).toEqual([]);
+    const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
+    if (coverage.nodeCoverage !== 100 || coverage.branchCoverage !== 100) console.error({
+      nodeCoverage: coverage.nodeCoverage, branchCoverage: coverage.branchCoverage,
+      unvisitedNodes: coverage.unvisitedNodes, uncoveredBranches: coverage.uncoveredBranches,
+    });
+    expect(coverage.unvisitedNodes).toEqual([]);
+    expect(coverage.uncoveredBranches).toEqual([]);
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
   });
 });

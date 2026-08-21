@@ -1,0 +1,74 @@
+---
+title: Task Breakdown Flow
+description: Bounded task decomposition with per-item evidence, independent review, changed retries, recovery, and filesystem or memory operation
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`moira/task-breakdown-flow` turns one already authorized, bounded multi-step task into a strict ordered plan and carries it to a verified result. It is a general task executor, not a software-development lifecycle.
+
+## Start
+
+```js
+mcp__moira__start({
+  workflowId: "moira/task-breakdown-flow",
+  parentExecutionId: "none"
+})
+```
+
+The workflow captures a bounded task description, observable expected result, measurable success criteria, constraints, authority boundary, operating mode, and storage capability. It reuses facts already supplied by the user and does not treat a plan, approval, retry, recovery choice, or available tool as additional authority.
+
+## When to choose it
+
+Choose Task Breakdown when the task itself is known, needs decomposition, benefits from independent review of every item, and may need changed retry or recovery. It can operate with durable files or with a bounded in-memory fallback.
+
+| Need | Workflow |
+| --- | --- |
+| Decompose one task, verify every item, and recover from an item failure | **Task Breakdown Flow** |
+| Execute a checklist already supplied by the caller | [Todo List](./todo-list/) |
+| Use the smallest filesystem-backed current-plan executor | [Simple Plan Execution](./simple-plan-execution/) |
+| Preserve immutable plans, decisions, attempts, and review artifacts | [Quick Task](./quick-task/) |
+| Add stronger durable checkpoints and recovery for critical work | [Robust Task](./robust-task/) |
+| Own implementation, tests, documentation, review, release, and deployment as one lifecycle | [Software Development Flow](/docs/reference/workflow-templates/#software-development-flow) |
+
+<Aside type="caution">
+Do not split one software-development lifecycle into several Task Breakdown runs. That loses the single owner and final guarantee across implementation, tests, documentation, release, and deployment.
+</Aside>
+
+## Process and guarantees
+
+1. Capture one canonical task contract and resolve `autonomous` or `interactive` mode once.
+2. Use an execution-bound filesystem workspace when available; otherwise continue in memory with explicitly weaker persistence.
+3. Create a plan of 1–32 ordered items. Every item has a stable unique ID, action, observable expected result, and dependencies that refer only to earlier items.
+4. Require an independent reviewer to return exactly zero plan blockers. A changed repair returns to the same gate; a blocked repair ends truthfully in recovery.
+5. Execute only the engine-selected current item, record concrete evidence, and require an independent item review before the engine advances the cursor.
+6. Permit at most two materially changed attempts for the current item. Exhaustion enters explicit interactive recovery or an autonomous recovery outcome; it never silently advances.
+7. Allow guarded process revision to replace only the unfinished suffix while preserving the exact verified plan and evidence prefix.
+8. Assemble the whole result and require an independent final review of success criteria, evidence, projections, limitations, and authority. Findings return to the earliest stale owner and re-enter all invalidated gates.
+9. In interactive mode, require explicit plan and result decisions; autonomous mode skips only those waits, not review or evidence.
+
+Clean completion is reachable only after zero current blockers and, in interactive mode, current result acceptance. Other terminal outcomes are `limited`, `aborted`, and `recovery`; each carries a factual reason and cannot masquerade as clean success.
+
+## Artifacts and memory fallback
+
+Filesystem mode materializes `./moira-ws/task-breakdown-<execution-id>` and maintains fixed current-state artifacts for the task, plan, evidence, reviews, and final report. The terminal output exposes only a bounded result summary, counts, operating/storage mode, outcome, and safe artifact location.
+
+Memory mode uses the same planning, review, retry, recovery, and authority gates, but stores bounded typed state in the execution context and reports `in-memory execution context` instead of claiming durable files or crash recovery.
+
+## Retry, recovery, and revision
+
+A failed execution or item review first identifies whether work/evidence or the remaining plan is stale. A work retry requires a non-empty changed approach and new evidence. Interactive recovery can abort, stop for later recovery, skip with an explicit limitation, revise the suffix, or apply user assistance; assisted work still returns through independent item review. Autonomous mode records a truthful recovery outcome.
+
+The guarded revision entry is not a verification bypass. It cannot rewrite completed items or their evidence, expand authority, or turn unresolved work into clean completion.
+
+## Authority limits
+
+The originating request is the authority ceiling. Destructive operations, external messages, production changes, publication, financial or administrative actions, privacy-sensitive access, commits, pushes, deployments, and notifications require authority from the original task and applicable project instructions. This workflow sends no automatic Telegram notification.
+
+## Related
+
+- [Ready Workflows](./) — compare public workflows
+- [Simple Plan Execution](./simple-plan-execution/) — smaller current-plan executor
+- [Todo List](./todo-list/) — caller-supplied checklist
+- [Quick Task](./quick-task/) — immutable decision history
+- [Robust Task](./robust-task/) — stronger durable recovery
