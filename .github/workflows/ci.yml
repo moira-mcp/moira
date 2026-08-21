@@ -173,7 +173,10 @@ jobs:
           curl -f -s http://localhost:6274 > /dev/null && echo "MCP Inspector is ready!" || echo "MCP Inspector may not be ready yet"
 
       - name: Run API tests
-        run: npm run test:api
+        # The primary API container intentionally runs in SaaS mode. The
+        # self-host admission contract is exercised against a second,
+        # explicitly self-host container below.
+        run: npm run test:api -- --testPathIgnorePatterns=self-host-auth.test.ts
         env:
           CI: true
           TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
@@ -183,6 +186,46 @@ jobs:
         env:
           CI: true
           TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
+
+      - name: Start self-host Docker container
+        run: |
+          mkdir -p data-self-host
+          docker run \
+            --name ${{ env.DOCKER_IMAGE }}-self-host \
+            -p 3031:80 \
+            -v $(pwd)/workflows:/app/workflows \
+            -v $(pwd)/data-self-host:/app/data \
+            -e DEPLOYMENT_MODE=self-host \
+            -e MOIRA_HOST=localhost:3031 \
+            -e DISABLE_RATE_LIMIT=true \
+            -d \
+            ${{ env.DOCKER_IMAGE }}:latest
+
+      - name: Wait for self-host application to start
+        run: |
+          echo "Waiting for self-host application to be ready..."
+          TIMEOUT=60
+          ELAPSED=0
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            if curl -f -s http://localhost:3031/startup-ready > /dev/null 2>&1; then
+              echo "Self-host application is ready!"
+              exit 0
+            fi
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+            echo "Waiting... ($ELAPSED/$TIMEOUT)"
+          done
+          echo "Self-host application failed to start!"
+          docker logs ${{ env.DOCKER_IMAGE }}-self-host
+          exit 1
+
+      - name: Run self-host admission API tests
+        run: npx testfold api -e local -f tests/api/auth/self-host-auth.test.ts
+        env:
+          CI: true
+          TEST_BASE_URL: http://localhost:3031
+          DOCKER_PORT: 3031
+          DOCKER_CONTAINER_NAME: ${{ env.DOCKER_IMAGE }}-self-host
 
       # E2E (Playwright) tests are flaky on shared CI runners and are NOT run on PRs.
       # They run nightly + on-demand in .github/workflows/e2e.yml instead, so they
@@ -205,4 +248,5 @@ jobs:
         if: always()
         run: |
           docker stop ${{ env.DOCKER_IMAGE }} || true
+          docker stop ${{ env.DOCKER_IMAGE }}-self-host || true
           docker compose -f docker-compose.inspector.yml down || true
