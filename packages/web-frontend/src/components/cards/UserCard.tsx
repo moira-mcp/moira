@@ -32,6 +32,7 @@ interface UserCardProps {
   onEdit?: (user: NormalizedUser) => void;
   onDelete?: (user: NormalizedUser) => void;
   onApprove?: (user: NormalizedUser) => void;
+  accountApprovalEnabled?: boolean;
   approvalStatusRef?: RefObject<HTMLSpanElement | null>;
   compact?: boolean;
 }
@@ -52,6 +53,7 @@ export const UserCard: React.FC<UserCardProps> = ({
   onEdit,
   onDelete,
   onApprove,
+  accountApprovalEnabled = false,
   approvalStatusRef,
   compact = false,
 }) => {
@@ -78,7 +80,7 @@ export const UserCard: React.FC<UserCardProps> = ({
         onClick: () => onDelete(user),
         variant: "destructive",
       });
-    if (onApprove && user.approvedAt === null)
+    if (accountApprovalEnabled && onApprove && user.approvedAt === null)
       list.unshift({
         icon: <UserCheck className="w-3.5 h-3.5" />,
         label: t("admin.userManagement.actions.approveAccessible", { email: user.email }),
@@ -87,7 +89,7 @@ export const UserCard: React.FC<UserCardProps> = ({
         testId: "approve-user-action",
       });
     return list;
-  }, [onView, onEdit, onDelete, onApprove, user, t]);
+  }, [onView, onEdit, onDelete, onApprove, accountApprovalEnabled, user, t]);
 
   if (compact) {
     return (
@@ -146,7 +148,7 @@ export const UserCard: React.FC<UserCardProps> = ({
               {t("common.blocked", { defaultValue: "Blocked" })}
             </Badge>
           )}
-          {user.approvedAt !== undefined && (
+          {accountApprovalEnabled && user.approvedAt !== undefined && (
             <span
               ref={approvalStatusRef}
               tabIndex={-1}
@@ -221,7 +223,7 @@ export const UserCard: React.FC<UserCardProps> = ({
             <Ban className="w-3 h-3" />
           </Badge>
         )}
-        {user.approvedAt !== undefined && (
+        {accountApprovalEnabled && user.approvedAt !== undefined && (
           <span
             ref={approvalStatusRef}
             tabIndex={-1}

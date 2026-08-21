@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
+import { useFeatures } from "../hooks/useFeatures";
 
 interface UserDetails {
   user: {
@@ -90,6 +91,8 @@ interface UserDetails {
 export const AdminUserDetail: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const { isEnabled } = useFeatures();
+  const accountApprovalEnabled = isEnabled("accountApproval");
   const [data, setData] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -370,7 +373,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const handleApprove = async () => {
-    if (!id) return;
+    if (!id || !accountApprovalEnabled) return;
     setActionLoading("approve");
     try {
       const result = await apiClient.approveUser(id);
@@ -536,37 +539,38 @@ export const AdminUserDetail: React.FC = () => {
                 {t("admin.userDetail.status.admin")}
               </Badge>
             )}
-            {user.approvedAt === null ? (
-              <span
-                ref={approvalStatusRef}
-                tabIndex={-1}
-                data-testid="approval-focus-target"
-                className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                <Badge
-                  className="border-transparent bg-warning/10 text-warning"
-                  data-testid="user-approval-pending"
+            {accountApprovalEnabled &&
+              (user.approvedAt === null ? (
+                <span
+                  ref={approvalStatusRef}
+                  tabIndex={-1}
+                  data-testid="approval-focus-target"
+                  className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 >
-                  <Clock3 className="h-4 w-4 mr-1" />
-                  {t("admin.userDetail.status.pendingApproval")}
-                </Badge>
-              </span>
-            ) : (
-              <span
-                ref={approvalStatusRef}
-                tabIndex={-1}
-                data-testid="approval-focus-target"
-                className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                <Badge
-                  className="border-transparent bg-success/10 text-success"
-                  data-testid="user-approval-approved"
+                  <Badge
+                    className="border-transparent bg-warning/10 text-warning"
+                    data-testid="user-approval-pending"
+                  >
+                    <Clock3 className="h-4 w-4 mr-1" />
+                    {t("admin.userDetail.status.pendingApproval")}
+                  </Badge>
+                </span>
+              ) : (
+                <span
+                  ref={approvalStatusRef}
+                  tabIndex={-1}
+                  data-testid="approval-focus-target"
+                  className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 >
-                  <UserCheck className="h-4 w-4 mr-1" />
-                  {t("admin.userDetail.status.approved")}
-                </Badge>
-              </span>
-            )}
+                  <Badge
+                    className="border-transparent bg-success/10 text-success"
+                    data-testid="user-approval-approved"
+                  >
+                    <UserCheck className="h-4 w-4 mr-1" />
+                    {t("admin.userDetail.status.approved")}
+                  </Badge>
+                </span>
+              ))}
             {user.passwordResetRequired && (
               <Badge className="border-transparent bg-chart-4/20 text-chart-4 flex items-center gap-1">
                 <AlertTriangle className="h-4 w-4" />
@@ -610,7 +614,7 @@ export const AdminUserDetail: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
-            {user.approvedAt === null && (
+            {accountApprovalEnabled && user.approvedAt === null && (
               <Button
                 ref={approveButtonRef}
                 variant="default"
@@ -917,18 +921,20 @@ export const AdminUserDetail: React.FC = () => {
               </dt>
               <dd>{new Date(user.updatedAt).toLocaleString()}</dd>
             </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">
-                {t("admin.userDetail.userInfo.approval")}
-              </dt>
-              <dd>
-                {user.approvedAt
-                  ? `${t("admin.userDetail.userInfo.approvedAt")} ${new Date(
-                      user.approvedAt,
-                    ).toLocaleString()}`
-                  : t("admin.userDetail.status.pendingApproval")}
-              </dd>
-            </div>
+            {accountApprovalEnabled && (
+              <div>
+                <dt className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.userInfo.approval")}
+                </dt>
+                <dd>
+                  {user.approvedAt
+                    ? `${t("admin.userDetail.userInfo.approvedAt")} ${new Date(
+                        user.approvedAt,
+                      ).toLocaleString()}`
+                    : t("admin.userDetail.status.pendingApproval")}
+                </dd>
+              </div>
+            )}
           </dl>
         </CardContent>
       </Card>

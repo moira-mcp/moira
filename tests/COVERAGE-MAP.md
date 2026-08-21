@@ -166,7 +166,9 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/web-backend/account-approval-route-gating.test.ts` — disabled-mode administrator approval route returns before the mutation/audit service boundary
 - `tests/unit/web-frontend/account-admission-ui.test.ts` — independent approval/email route decisions and deployment-capability selection for the registration completion page
+- `tests/unit/web-frontend/account-approval-admin-ui.test.tsx` — capability-aware account-approval status and actions in the administrator list and detail surfaces, including the SaaS null-timestamp regression
 - `tests/unit/web-frontend/admin-navigation-capabilities.test.ts` — narrow Users capability remains independent of broader multi-user administration in self-host and SaaS navigation
 - `tests/unit/shared/account-admission.test.ts` — mode-independent approval state, fail-closed null/missing identity handling, and blocked/approval/email-verification denial precedence
 - `tests/unit/shared/deployment-mode-config.test.ts` — DEPLOYMENT_MODE resolution: default self-host, case/whitespace normalization, invalid-value throws, isSelfHost/isSaas predicates

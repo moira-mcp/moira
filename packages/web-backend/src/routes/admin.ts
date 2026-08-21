@@ -19,6 +19,7 @@ import {
   getMcpTextService,
   getArtifactService,
   getArtifactUrl,
+  getFeatureResolver,
   getLockService,
   getUserService,
   MCP_TEXT_KEYS,
@@ -350,6 +351,9 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const currentUserId = (req as AuthenticatedRequest).userId;
+    if (!getFeatureResolver().isEnabled("accountApproval", { userId: currentUserId })) {
+      throw createApiError.forbidden("Account approval is not enabled for this deployment");
+    }
     const result = await getUserService().approveAccount(currentUserId, id);
 
     if (result.status === "not-found") {

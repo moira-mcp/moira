@@ -11,6 +11,7 @@ import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
 import { useDebounce } from "../hooks/useDebounce";
+import { useFeatures } from "../hooks/useFeatures";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -43,6 +44,8 @@ interface User {
 export const UserManagement: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { isEnabled } = useFeatures();
+  const accountApprovalEnabled = isEnabled("accountApproval");
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -135,12 +138,13 @@ export const UserManagement: React.FC = () => {
   };
 
   const handleApproveClick = (userId: string, email: string) => {
+    if (!accountApprovalEnabled) return;
     setUserToApprove({ id: userId, email });
     setApproveDialogOpen(true);
   };
 
   const handleApproveConfirm = async () => {
-    if (!userToApprove) return;
+    if (!accountApprovalEnabled || !userToApprove) return;
     try {
       const result = await apiClient.approveUser(userToApprove.id);
       setUsers((current) =>
@@ -188,7 +192,10 @@ export const UserManagement: React.FC = () => {
             onView={() => navigate(`${ROUTES.ADMIN_USERS}/${user.id}`)}
             onEdit={() => handleEdit(user.id)}
             onDelete={() => handleDeleteClick(user.id, user.email)}
-            onApprove={() => handleApproveClick(user.id, user.email)}
+            onApprove={
+              accountApprovalEnabled ? () => handleApproveClick(user.id, user.email) : undefined
+            }
+            accountApprovalEnabled={accountApprovalEnabled}
             approvalStatusRef={userToApprove?.id === user.id ? approvalStatusRef : undefined}
           />
         )}
@@ -251,7 +258,7 @@ export const UserManagement: React.FC = () => {
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
-        open={approveDialogOpen}
+        open={accountApprovalEnabled && approveDialogOpen}
         onOpenChange={setApproveDialogOpen}
         title={t("admin.userManagement.actions.approve")}
         description={t("admin.userManagement.confirmApprove", { email: userToApprove?.email })}
