@@ -2,27 +2,27 @@
 
 ## Public Workflows
 
-| ID                             | Name                      | Description                                                             |
-| ------------------------------ | ------------------------- | ----------------------------------------------------------------------- |
-| software-development-flow      | Software Development      | Complete feature development cycle with planning and validation         |
-| software-development-flow-lite | Software Development Lite | Lightweight development process for small features (1-5 steps)          |
-| quick-task ⭐                  | Quick Task (Recommended)  | Bounded plan, evidence-backed execution, independent review, acceptance |
-| robust-task                    | Robust Task               | Reliable execution of complex critical tasks with retry and escalation  |
-| user-onboarding                | User Onboarding           | Interactive onboarding for new Moira users                              |
-| content-creation               | Content Creation          | Text content creation: articles, posts, documentation                   |
-| verified-research              | Verified Research         | Research with verified and reproducible sources                         |
-| iterative-research             | Iterative Research        | Iterative research with critique/improve cycle                          |
-| prd-creation                   | PRD Creation              | Product Requirements Document with completeness guarantees              |
-| ux-design                      | UX Design                 | UX/UI design with WCAG AA accessibility verification                    |
-| test-generation                | Test Generation           | Automated test code generation (unit, integration, e2e)                 |
-| test-planning                  | Test Planning             | Test plan creation with P0-P3 prioritization                            |
-| data-analysis                  | Data Analysis             | Data analysis from problem definition to conclusions                    |
-| marketing-campaign             | Marketing Campaign        | Marketing materials with differentiation focus                          |
-| workflow-management-flow       | Workflow Management       | Workflow creation, editing, and deployment                              |
-| bug-hunting-workflow           | Bug Hunting               | Systematic bug investigation                                            |
-| smart-purchase-assistant       | Smart Purchase            | Purchase decision assistance                                            |
-| telegram-setup                 | Telegram Setup            | Guided Telegram bot configuration for workflow notifications            |
-| todo-list                      | Todo List                 | Minimal one-based checklist with concise local evidence                 |
+| ID                             | Name                      | Description                                                                                                                                                                                                  |
+| ------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| software-development-flow      | Software Development      | Complete software delivery with source-grounded planning, implementation, tests, documentation, cause-aware review and repair, mutation-aware validation cycles, acceptance, and authorized VCS finalization |
+| software-development-flow-lite | Software Development Lite | Lightweight development process for small features (1-5 steps)                                                                                                                                               |
+| quick-task ⭐                  | Quick Task (Recommended)  | Bounded plan, evidence-backed execution, independent review, acceptance                                                                                                                                      |
+| robust-task                    | Robust Task               | Durable complex-task execution with complete planning, cause-aware independent review, bounded result/evidence repair, recovery, replanning, and truthful complete or incomplete delivery                    |
+| user-onboarding                | User Onboarding           | Interactive onboarding for new Moira users                                                                                                                                                                   |
+| content-creation               | Content Creation          | Text content creation: articles, posts, documentation                                                                                                                                                        |
+| verified-research              | Verified Research         | Research with verified and reproducible sources                                                                                                                                                              |
+| iterative-research             | Iterative Research        | Iterative research with critique/improve cycle                                                                                                                                                               |
+| prd-creation                   | PRD Creation              | Product Requirements Document with completeness guarantees                                                                                                                                                   |
+| ux-design                      | UX Design                 | UX/UI design with WCAG AA accessibility verification                                                                                                                                                         |
+| test-generation                | Test Generation           | Automated test code generation (unit, integration, e2e)                                                                                                                                                      |
+| test-planning                  | Test Planning             | Test plan creation with P0-P3 prioritization                                                                                                                                                                 |
+| data-analysis                  | Data Analysis             | Data analysis from problem definition to conclusions                                                                                                                                                         |
+| marketing-campaign             | Marketing Campaign        | Marketing materials with differentiation focus                                                                                                                                                               |
+| workflow-management-flow       | Workflow Management       | Workflow creation, editing, and deployment                                                                                                                                                                   |
+| bug-hunting-workflow           | Bug Hunting               | Systematic bug investigation                                                                                                                                                                                 |
+| smart-purchase-assistant       | Smart Purchase            | Purchase decision assistance                                                                                                                                                                                 |
+| telegram-setup                 | Telegram Setup            | Guided Telegram bot configuration for workflow notifications                                                                                                                                                 |
+| todo-list                      | Todo List                 | Minimal one-based checklist with concise local evidence                                                                                                                                                      |
 
 ## Private Workflows
 

@@ -1,109 +1,166 @@
 ---
 title: PRD Creation
-description: Product Requirements Document creation with completeness guarantees
+description: Create an evidence-grounded product requirements document with strict artifacts and independent review
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-PRD (Product Requirements Document) creation workflow with completeness guarantees through mandatory sections and data-backed decisions. Ensures problem-first approach with measurable outcomes.
+PRD Creation produces a durable, evidence-grounded Product Requirements Document (PRD) for a
+product problem, feature, change, API, page, module, or system. It records what is known, what is
+not known, why a solution and scope were chosen, how requirements will be accepted, and whether
+the result is ready for separately authorized follow-on work.
+
+The workflow does not declare a PRD complete because headings or fixed record counts exist. A
+strict JSON contract rejects structurally incomplete records, while an independent file-backed
+review checks the current evidence, traceability, semantics, readiness, and exact agreement
+between the canonical JSON and readable Markdown. Every blocking finding enters repair and the
+same review repeats; only a zero-finding review can reach delivery.
+
+## When to use it
+
+Use PRD Creation when the required deliverable is reviewed product requirements rather than
+implementation or a specialist design.
+
+| Need | Choose |
+| --- | --- |
+| Evidence-grounded problem, scope, requirements, acceptance criteria, metrics, and readiness | **PRD Creation** |
+| User journeys, interaction states, accessibility, or experience design | UX Design |
+| Technical boundaries, interfaces, components, and architecture decisions | Architecture Design |
+| Risk-based verification strategy and planned test cases | Test Planning |
+| Executable tests derived from approved requirements | Test Generation |
+| Implementation with its tests, documentation, review, and delivery gates | Software Development Flow |
+
+<Aside type="caution">
+Do not split one implementation task into separate PRD, coding, testing, and documentation runs
+when Software Development Flow already owns the complete implementation lifecycle. Use PRD
+Creation as an upstream workflow only when a reviewed PRD is itself a required deliverable.
+</Aside>
 
 ## Start
 
+Use the qualified public workflow identity:
+
 ```bash
-mcp__moira__start({ workflowId: "prd-creation" })
+mcp__moira__start({ workflowId: "moira/prd-creation" })
 ```
+
+When an orchestration workflow starts PRD Creation as a child, it should also pass its own
+execution ID as `parentExecutionId`. This preserves the parent-child execution relationship;
+it does not grant the child additional authority.
+
+## Inputs and evidence
+
+Describe the product problem or requested change and identify the evidence the agent is authorized
+to inspect. Depending on the task, primary evidence can include user input, project documents,
+code, analytics, interviews, support material, research, or external sources.
+
+The author must inspect discoverable evidence instead of guessing. Missing facts remain explicit
+evidence gaps, assumptions, open questions, limitations, or a factual blocker. The workflow
+forbids invented sources, quotes, analytics, baselines, targets, competitor behavior, and padding
+added only to reach a count.
 
 ## Process
 
 ```mermaid
 flowchart LR
-    A[Problem] --> B[Research]
-    B --> C[Solution]
-    C --> D[User Stories]
-    D --> E[Edge Cases]
-    E --> F[Metrics]
-    F --> G[Assumptions]
-    G --> H[Output]
+    A[Author canonical PRD and Markdown] --> B[Independent file-backed review]
+    B --> C{Blocking findings = 0?}
+    C -- Yes --> D[Present accepted PRD]
+    D --> E[End]
+    C -- No --> F[Repair confirmed defects]
+    F --> B
 ```
 
-## Steps
+The workflow uses one traversal-safe relative workspace named
+`./moira-ws/prd-creation-<suffix>`. The suffix starts with a letter or digit and contains only
+letters, digits, underscores, or hyphens. Nested paths and traversal segments are rejected by the
+engine before author data can reach review.
 
-| Step | Action | Output |
-|------|--------|--------|
-| 1. Problem | Define problem statement, target users, urgency, cost of inaction | Concrete problem definition |
-| 2. Research | Gather data from analytics, interviews, support tickets | Data-backed insights |
-| 3. Solution | Describe solution, in/out of scope, constraints | Solution specification |
-| 4. User Stories | Write stories with testable acceptance criteria (min 3 AC each) | Testable requirements |
-| 5. Edge Cases | Document non-standard scenarios (min 5) | Edge case coverage |
-| 6. Metrics | Define primary metric with target and measurement method | Measurable success criteria |
-| 7. Assumptions | List assumptions with validation methods | Explicit assumptions |
-| 8. Output | Final PRD document | Complete PRD |
+## Durable artifacts
 
-## Features
+| Artifact | Purpose |
+| --- | --- |
+| `prd-requirements.md` | Requested scope, evidence references, gaps, applicability decisions, assumptions, and material unknowns |
+| `prd-standards.md` | Addressed standards used by author, reviewer, and repair |
+| `prd.contract.json` | Canonical structured PRD and source of truth for overlapping fields |
+| `prd.md` | Readable projection of the complete canonical contract plus rationale and limitations |
+| `review.md` | Complete current reproducible blocking finding set |
 
-<Aside type="tip">
-Start with problem, not solution. Problem statement must be specific, measurable, and include cost of inaction.
+The workflow result returns only the workspace path and a bounded summary that identifies the
+accepted PRD, readiness, and limitations. The full PRD remains in files rather than being copied
+through workflow state.
+
+## PRD contract
+
+The canonical contract covers:
+
+- evidence sources and explicit evidence gaps;
+- problem statement, target users, urgency, and cost of inaction;
+- solution description, rationale, alternatives, in/out scope, constraints, dependencies, and
+  previous attempts;
+- prioritized requirements with evidence links and observable acceptance criteria;
+- user stories linked to requirement and acceptance-criterion IDs;
+- relevant edge, error, expected, and recovery behavior;
+- a primary metric with baseline, target, measurement method, timeframe, evidence, and requirement
+  links, plus optional secondary metrics;
+- assumptions with validation and impact, and risks with likelihood, impact, and mitigation;
+- applicability decisions, open questions, limitations, readiness, and readiness rationale.
+
+Arrays are bounded but are not target quotas. Optional domains can be empty when they are genuinely
+not applicable. Required core domains must contain supported material; when a material fact cannot
+be obtained honestly, the author stops with the blocker instead of fabricating a record.
+
+## Review and repair guarantee
+
+The independent reviewer reads the complete current artifacts and relevant primary evidence
+directly. It checks evidence support, honest gaps, applicability, stable and unique IDs, every
+cross-link, problem/solution consistency, acceptance observability, edge and recovery relevance,
+metric measurability, uncertainty, readiness, JSON-to-Markdown equality, and authority boundaries.
+
+Unsupported claims, fabricated padding, dangling or duplicate IDs, lost structured content,
+unjustified omissions, vague acceptance, unmeasurable success, hidden material uncertainty, or
+authority expansion are blocking. A non-zero finding count routes to repair, which changes the
+canonical source or explanatory evidence, regenerates the Markdown projection, and returns to the
+same review. Repair can correct `prd-standards.md` only for a confirmed standards-artifact
+defect and cannot weaken a standard to evade a finding.
+
+<Aside type="note">
+The guarantee is bounded to known findings in the evidence and artifacts that were actually
+available and authorized. A zero-finding review is not proof that unavailable evidence exists or
+that future implementation will be correct.
 </Aside>
 
-### Problem-First Approach
+## Authority boundary
 
-| Element | Requirement |
-|---------|-------------|
-| Problem statement | Specific and measurable |
-| Target users | Clearly defined segment |
-| Urgency | Timeline and business impact |
-| Cost of inaction | What happens if not solved |
+PRD Creation may inspect authorized evidence and write only its local PRD artifacts. It does not:
 
-### Data-Backed Decisions
+- implement the product or modify project code and documentation;
+- execute tests or use version control;
+- publish or upload artifacts;
+- send notifications;
+- deploy or administer systems.
 
-Each statement requires a source:
-- Analytics data
-- User interviews
-- Support tickets
-- Competitor research
+Those actions require a separately authorized caller or workflow. The final summary may recommend
+the appropriate next workflow, but does not execute it.
 
-### Testable Acceptance Criteria
+## Result
 
-| Requirement | Description |
-|-------------|-------------|
-| Minimum count | 3 AC per user story |
-| Verifiability | Each AC testable by autotest or manually |
-| Specificity | No abstract "works correctly" |
+Successful completion returns:
 
-<Aside type="caution">
-Edge cases are mandatory. Document minimum 5 non-standard scenarios with expected behavior and recovery paths.
-</Aside>
+- `workspace_path` — the safe workspace containing the accepted artifacts;
+- `result_summary` — a bounded summary of the problem, chosen scope, readiness, primary
+  success metric, durable PRD path, and remaining limitations.
 
-### Measurable Metrics
-
-- **Primary metric** (north star) with specific target
-- **Timeline** for achievement
-- **Measurement method** defined and feasible
-
-### Explicit Assumptions
-
-| Element | Description |
-|---------|-------------|
-| Assumption | Clear statement of what is assumed |
-| Validation method | How to verify the assumption |
-| Impact if wrong | Consequences of invalid assumption |
-
-## Example Node Configuration
-
-```json
-{
-  "id": "define-problem",
-  "type": "agent-directive",
-  "directive": "Define the problem statement with target users, urgency, and cost of inaction. Be specific and measurable.",
-  "completionCondition": "Problem statement includes specific target users, measurable impact, and cost of inaction",
-  "connections": {
-    "next": "research-data"
-  }
-}
-```
+The canonical contract and review count are deliberately absent from the terminal projection.
 
 ## Related
 
-- [UX Design](/docs/reference/workflows/ux-design/) — For designing the user experience
-- [Test Planning](/docs/reference/workflows/test-planning/) — For creating test plans from PRD
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+- [UX Design](/docs/reference/workflows/ux-design/) — design the user experience after requirements
+  are sufficiently defined
+- [Test Planning](/docs/reference/workflows/test-planning/) — create a reviewed, risk-based test
+  plan without executing tests
+- [Test Generation](/docs/reference/workflows/test-generation/) — generate executable tests from
+  approved requirements
+- [Software Development Lite](/docs/reference/workflows/software-development-lite/) — implement a
+  bounded change when the full development lifecycle is not required
+- [Workflow Templates Overview](/docs/reference/workflow-templates/) — compare all public templates

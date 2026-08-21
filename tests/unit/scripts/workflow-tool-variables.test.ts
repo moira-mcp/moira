@@ -9,12 +9,12 @@ import fs from "fs";
 import os from "os";
 import { randomUUID } from "crypto";
 
-const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/src/workflow-tool.ts");
+const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/bin/moira-workflow.js");
 
-function runWorkflowTool(args: string): string {
-  return execSync(`npx tsx ${WORKFLOW_TOOL} ${args}`, {
+function runWorkflowTool(args: string, cwd = process.cwd()): string {
+  return execSync(`${process.execPath} ${WORKFLOW_TOOL} ${args}`, {
     encoding: "utf-8",
-    cwd: process.cwd(),
+    cwd,
   });
 }
 
@@ -24,6 +24,28 @@ function createTempWorkflow(workflow: object): string {
   fs.writeFileSync(tmpFile, JSON.stringify(workflow, null, 2));
   return tmpFile;
 }
+
+describe("agent-facing CLI diagnostics", () => {
+  test("--version identifies both the package version and exact source checkout", () => {
+    const output = runWorkflowTool("--version", os.tmpdir());
+
+    expect(output).toContain("@mcp-moira/workflow-cli 0.4.0");
+    expect(output).toContain(path.normalize("packages/workflow-cli/src/workflow-tool.ts"));
+  });
+
+  test("validate exits unsuccessfully when the workflow is invalid", () => {
+    const tmpFile = createTempWorkflow({
+      id: "invalid-workflow",
+      metadata: { name: "Invalid", version: "1.0.0", description: "Invalid" },
+      nodes: [{ id: "start", type: "start", connections: { default: "missing-node" } }],
+    });
+    try {
+      expect(() => runWorkflowTool(`${tmpFile} validate`)).toThrow();
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+});
 
 describe("workflow-tool variables command", () => {
   describe("initialData extraction", () => {
@@ -341,6 +363,32 @@ describe("workflow-tool variables command", () => {
       }
     });
 
+    test("set-variable-schema reads complex JSON Schema from a file", () => {
+      const tmpFile = createTempWorkflow(registryWorkflow());
+      const schemaFile = path.join(os.tmpdir(), `variable-schema-${randomUUID()}.json`);
+      const schema = {
+        type: "object",
+        description: "Structured result",
+        properties: {
+          status: { type: "string", enum: ["complete", "limited"] },
+          findings: { type: "array", items: { type: "string" } },
+        },
+        required: ["status", "findings"],
+        additionalProperties: false,
+        default: { status: "complete", findings: [] },
+      };
+      fs.writeFileSync(schemaFile, JSON.stringify(schema, null, 2));
+      try {
+        runWorkflowTool(`${tmpFile} set-variable-schema result --file ${schemaFile} --force`);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.variableRegistry.result).toEqual(schema);
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(schemaFile);
+      }
+    });
+
     test("delete-variable removes a global from variableRegistry", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
@@ -370,6 +418,28 @@ describe("workflow-tool variables command", () => {
         expect(saved.metadata.version).toBe("1.0.0");
       } finally {
         fs.unlinkSync(tmpFile);
+      }
+    });
+
+    test("set-description reads a multiline description from a file", () => {
+      const workflow = {
+        metadata: { name: "Test", version: "1.0.0", description: "Old description" },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      };
+      const tmpFile = createTempWorkflow(workflow);
+      const descriptionFile = path.join(os.tmpdir(), `workflow-description-${randomUUID()}.txt`);
+      fs.writeFileSync(descriptionFile, "First paragraph.\n\nSecond paragraph.\n");
+      try {
+        runWorkflowTool(`${tmpFile} set-description --file ${descriptionFile} --force`);
+        const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
+        expect(saved.metadata.description).toBe("First paragraph.\n\nSecond paragraph.");
+        expect(saved.metadata.version).toBe("1.0.0");
+      } finally {
+        fs.unlinkSync(tmpFile);
+        fs.unlinkSync(descriptionFile);
       }
     });
   });
@@ -478,6 +548,32 @@ describe("workflow-tool variables command", () => {
             tags: ["catalog-tag"],
           },
         });
+      } finally {
+        fs.unlinkSync(source);
+        fs.unlinkSync(destination);
+      }
+    });
+
+    test("sync leaves the destination byte-for-byte unchanged when the result is invalid", () => {
+      const source = createTempWorkflow({
+        ...migrationWorkflow(),
+        id: "invalid-source",
+        nodes: [
+          { id: "start", type: "start", connections: { default: "missing-node" } },
+          { id: "end", type: "end" },
+        ],
+      });
+      const destination = createTempWorkflow({
+        ...migrationWorkflow(),
+        id: "catalog-workflow",
+        slug: "catalog-slug",
+        owner: "catalog-owner",
+        visibility: "public",
+      });
+      const before = fs.readFileSync(destination);
+      try {
+        expect(() => runWorkflowTool(`${source} sync ${destination}`)).toThrow();
+        expect(fs.readFileSync(destination)).toEqual(before);
       } finally {
         fs.unlinkSync(source);
         fs.unlinkSync(destination);

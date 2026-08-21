@@ -1,507 +1,408 @@
 /**
- * prd-creation Scenario Tests
+ * Contract and behavioral scenarios for moira/prd-creation.
  *
- * Linear PRD creation workflow for product requirements.
- * Path: problem → research → solution → user-stories → edge-cases → metrics → assumptions → output → end
- *
- * Coverage target: 100% nodes (10), 100% branches
+ * The flow writes a canonical structured PRD and an exact Markdown projection in one safe
+ * workspace. Delivery is reachable only after an independent zero-finding review; every
+ * non-zero result must be repaired and reviewed again.
  */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import {
   runScenario,
-  type TestScenario,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("prd-creation", "public")!.graph as WorkflowGraph;
+type PrdContract = Record<string, unknown>;
+
+const catalogEntry = findSystemCatalogEntry("prd-creation", "public")!;
+
+function loadWorkflow(): WorkflowGraph {
+  return structuredClone(catalogEntry.graph) as WorkflowGraph;
 }
 
-describe("prd-creation Scenarios", () => {
+function node(workflow: WorkflowGraph, id: string): any {
+  const found = workflow.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
+}
+
+function validContract(): PrdContract {
+  return {
+    title: "Idempotent checkout retries",
+    executive_summary: "Prevent duplicate orders and charges when checkout is retried.",
+    evidence_sources: [
+      {
+        id: "EV-1",
+        kind: "code",
+        source: "checkout retry handler and incident record",
+        finding: "A timeout can trigger a second charge for the same checkout request.",
+      },
+    ],
+    evidence_gaps: [],
+    problem: {
+      statement: "Checkout retries can create duplicate charges and orders.",
+      target_users: [
+        {
+          id: "USER-1",
+          name: "Online shopper",
+          role: "Customer",
+          context: "Retries checkout after an ambiguous timeout.",
+        },
+      ],
+      urgency: "The failure can cause immediate financial and support impact.",
+      cost_of_inaction: "Customers can be charged twice and require manual refunds.",
+      evidence_ids: ["EV-1"],
+    },
+    solution: {
+      description: "Use one idempotency key for charge and order creation.",
+      rationale: "A durable key makes retries converge on the original result.",
+      alternatives: [],
+      in_scope: ["Checkout charge and order idempotency"],
+      out_of_scope: ["Payment-provider settlement changes"],
+      constraints: [],
+      dependencies: [],
+      previous_attempts: [],
+      evidence_ids: ["EV-1"],
+    },
+    requirements: [
+      {
+        id: "REQ-1",
+        statement: "A repeated checkout key must return the original order without a new charge.",
+        priority: "must",
+        priority_rationale: "Duplicate charging is release-blocking.",
+        evidence_ids: ["EV-1"],
+        acceptance_criteria: [
+          {
+            id: "AC-1",
+            statement: "A timeout followed by a retry leaves exactly one charge and one order.",
+          },
+        ],
+      },
+    ],
+    user_stories: [
+      {
+        id: "STORY-1",
+        actor: "Online shopper",
+        goal: "retry checkout safely after a timeout",
+        outcome: "receive one order and one charge",
+        requirement_ids: ["REQ-1"],
+        acceptance_criterion_ids: ["AC-1"],
+      },
+    ],
+    edge_cases: [
+      {
+        id: "EDGE-1",
+        scenario: "The first charge succeeds but its response times out.",
+        expected_behavior: "The retry returns the existing order and charge.",
+        recovery: "Reconcile the stored idempotency record before returning the result.",
+        requirement_ids: ["REQ-1"],
+      },
+    ],
+    metrics: {
+      primary: {
+        id: "METRIC-1",
+        name: "Duplicate charge rate",
+        baseline: "Current incident baseline is measured before release.",
+        target: "Zero duplicate charges in retry integration scenarios.",
+        measurement_method: "Count duplicate charges by idempotency key in tests and monitoring.",
+        timeframe: "During release validation and the first 30 production days.",
+        evidence_ids: ["EV-1"],
+        requirement_ids: ["REQ-1"],
+      },
+      secondary: [],
+    },
+    assumptions: [],
+    risks: [
+      {
+        id: "RISK-1",
+        description: "A partial write can leave the idempotency record incomplete.",
+        likelihood: "medium",
+        impact: "high",
+        mitigation: "Persist charge, order, and key atomically or reconcile before retry.",
+        requirement_ids: ["REQ-1"],
+      },
+    ],
+    applicability_decisions: [],
+    open_questions: [],
+    limitations: [],
+    readiness: "ready-with-limitations",
+    readiness_rationale: "Implementation can start after the baseline measurement is captured.",
+  };
+}
+
+function validAuthorInput(contract = validContract()): Record<string, unknown> {
+  return {
+    workspace_path: "./moira-ws/prd-creation-checkout_20260820",
+    prd_contract: contract,
+  };
+}
+
+async function runInvalidAuthor(input: Record<string, unknown>): Promise<ScenarioResult> {
+  return runScenario(loadWorkflow(), {
+    name: "malformed PRD author response",
+    description: "The actual engine must reject malformed PRD data before review",
+    mockInputs: { author: input },
+    expect: { status: "completed" },
+  });
+}
+
+function compactRoute(result: ScenarioResult): string[] {
+  return result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+}
+
+describe("prd-creation", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
-    workflow = loadProductionWorkflow();
+    workflow = loadWorkflow();
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "prd-creation"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
-
-    it("should have no cycles (linear workflow)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles).toHaveLength(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(10);
-    });
+  test("preserves public identity and has the intended valid clean-or-repair graph", async () => {
+    expect(catalogEntry.owner).toBe("system-moira");
+    expect(catalogEntry.slug).toBe("prd-creation");
+    expect(catalogEntry.visibility).toBe("public");
+    expect(workflow.id).toBe("bc9be4e1-78d3-43e0-a512-6a571c24f7e2");
+    expect(workflow.metadata.version).toBe("2.0.0");
+    const validation = await new GraphValidator().validateUnified(workflow);
+    expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(workflow.nodes.map((candidate) => candidate.id)).toEqual([
+      "start",
+      "end",
+      "author",
+      "review",
+      "review-gate",
+      "present",
+      "repair",
+    ]);
+    expect(node(workflow, "review-gate").connections).toEqual({ true: "present", false: "repair" });
+    expect(node(workflow, "repair").connections).toEqual({ success: "review" });
+    expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        // Scenario 1: Complete PRD creation
-        {
-          name: "Complete PRD creation workflow",
-          description: "Full PRD creation with all sections",
-          expect: { status: "completed" },
-          mockInputs: {
-            problem: {
-              problem_statement: "Users cannot track order status in real-time",
-              target_users: [
-                { name: "E-commerce Customer", role: "End User" },
-                { name: "Support Agent", role: "Internal Staff" },
-              ],
-              urgency_reason: "30% of support tickets are about order status",
-              cost_of_inaction: "Growing support costs and customer churn",
-            },
-            research: {
-              data_sources: [
-                { source: "Customer surveys", key_finding: "Customers check status 5x per order" },
-                { source: "Support ticket analysis", key_finding: "30% tickets are order status" },
-              ],
-              key_insights: [
-                "Customers check status 5x per order",
-                "Real-time updates reduce support tickets by 40%",
-              ],
-              competitor_solutions: [
-                { competitor: "Amazon", how_they_solve: "Real-time tracking with map" },
-                { competitor: "FedEx", how_they_solve: "SMS notifications", gaps: "No map view" },
-              ],
-            },
-            solution: {
-              solution_description: "Real-time order tracking dashboard with push notifications",
-              in_scope: ["Tracking API", "Push notifications", "Map integration"],
-              out_of_scope: ["Carrier management", "Return tracking"],
-              why_this_approach: "Addresses core pain point with minimal complexity",
-            },
-            "user-stories": {
-              stories: [
-                {
-                  user: "Customer",
-                  action: "see my order location on a map",
-                  outcome: "know when my package arrives",
-                  acceptance_criteria: [
-                    "Map shows real-time location",
-                    "ETA displayed",
-                    "Updates every 5 min",
-                  ],
-                },
-                {
-                  user: "Customer",
-                  action: "receive push notifications",
-                  outcome: "stay informed about status changes",
-                  acceptance_criteria: [
-                    "Notification on status change",
-                    "Configurable preferences",
-                    "Works on mobile",
-                  ],
-                },
-                {
-                  user: "Customer",
-                  action: "see estimated delivery time",
-                  outcome: "plan my day accordingly",
-                  acceptance_criteria: [
-                    "ETA updates dynamically",
-                    "Shows time window",
-                    "Historical accuracy 90%",
-                  ],
-                },
-              ],
-            },
-            "edge-cases": {
-              edge_cases: [
-                {
-                  scenario: "Multiple items shipped separately",
-                  expected_behavior: "Show each shipment separately",
-                },
-                {
-                  scenario: "International shipping delays",
-                  expected_behavior: "Show delay reason and updated ETA",
-                },
-                {
-                  scenario: "Carrier API downtime",
-                  expected_behavior: "Show last known status with timestamp",
-                },
-                {
-                  scenario: "No tracking number yet",
-                  expected_behavior: "Show 'Preparing for shipment'",
-                },
-                {
-                  scenario: "Delivery attempted but failed",
-                  expected_behavior: "Show retry schedule",
-                },
-              ],
-              error_states: [
-                { error: "No tracking data available", user_message: "Tracking info coming soon" },
-                { error: "Stale location data", user_message: "Last update: X hours ago" },
-              ],
-            },
-            metrics: {
-              primary_metric: {
-                name: "Support ticket reduction",
-                target_value: "50% reduction",
-                how_to_measure: "Compare monthly tickets before/after",
-                timeline: "3 months",
-              },
-              success_threshold: "40% reduction within 3 months",
-              secondary_metrics: [
-                { name: "NPS improvement", target: "+10 points" },
-                { name: "App engagement", target: "20% increase" },
-              ],
-            },
-            assumptions: {
-              assumptions: [
-                {
-                  statement: "Carriers provide webhook APIs",
-                  validation_method: "API documentation review",
-                },
-                {
-                  statement: "Users have push notifications enabled",
-                  validation_method: "Analytics data check",
-                },
-              ],
-              risks: [
-                {
-                  description: "API rate limits",
-                  probability: "medium",
-                  impact: "high",
-                  mitigation: "Implement caching",
-                },
-                {
-                  description: "Data accuracy from carriers",
-                  probability: "low",
-                  impact: "medium",
-                  mitigation: "Show last known good data",
-                },
-              ],
-            },
-            output: {
-              prd_delivered: "yes",
-              sections_count: 8,
-              open_questions: ["Integration timeline with carriers"],
-            },
-          },
-        },
+  test("publishes a decision-useful description and explicit local-only authority", () => {
+    const description = workflow.metadata.description;
+    expect(description).toContain("evidence-grounded Product Requirements Document");
+    expect(description).toContain("prd.contract.json");
+    expect(description).toContain("prd.md projection");
+    expect(description).toContain("independent file-backed reviewer");
+    expect(description).toContain("delivery is unreachable while known blocking gaps remain");
+    expect(description).toContain(
+      "does not implement the product, modify project files, execute tests",
+    );
+    expect(description).toContain("Choose PRD Creation");
+    expect(description).toContain("Software Development Flow");
+    for (const id of ["author", "review", "repair", "present"]) {
+      const directive = node(workflow, id).directive;
+      expect(directive).toMatch(/implement the product/i);
+      expect(directive).toMatch(/execute (any )?tests/i);
+      expect(directive).toMatch(/publish|upload/i);
+      expect(directive).toMatch(/deploy/i);
+    }
+  });
 
-        // Scenario 2: Simple PRD
-        {
-          name: "Simple PRD - minimal inputs",
-          description: "PRD for small feature with minimal data",
-          expect: { status: "completed" },
-          mockInputs: {
-            problem: {
-              problem_statement: "Users want dark mode",
-              target_users: [{ name: "App User", role: "End User" }],
-              urgency_reason: "Requested by 50 users in feedback",
-            },
-            research: {
-              data_sources: [
-                { source: "User feedback", key_finding: "50 users requested dark mode" },
-                { source: "UX research", key_finding: "Dark mode reduces eye strain" },
-              ],
-              key_insights: ["Dark mode improves eye comfort for night use"],
-              competitor_solutions: [
-                { competitor: "Slack", how_they_solve: "System-wide dark mode toggle" },
-              ],
-            },
-            solution: {
-              solution_description: "Add dark mode toggle in settings",
-              in_scope: ["Theme toggle", "CSS variables"],
-              out_of_scope: ["System theme sync"],
-            },
-            "user-stories": {
-              stories: [
-                {
-                  user: "User",
-                  action: "toggle dark mode in settings",
-                  outcome: "have a comfortable viewing experience at night",
-                  acceptance_criteria: [
-                    "Toggle is visible in settings",
-                    "Theme changes immediately",
-                    "Preference persists",
-                  ],
-                },
-                {
-                  user: "User",
-                  action: "see dark mode applied to all screens",
-                  outcome: "have consistent dark theme everywhere",
-                  acceptance_criteria: [
-                    "All screens use dark theme",
-                    "Text is readable",
-                    "Images have good contrast",
-                  ],
-                },
-                {
-                  user: "User",
-                  action: "switch back to light mode",
-                  outcome: "return to default appearance",
-                  acceptance_criteria: [
-                    "Toggle works both ways",
-                    "No flash on switch",
-                    "Smooth transition",
-                  ],
-                },
-              ],
-            },
-            "edge-cases": {
-              edge_cases: [
-                {
-                  scenario: "Theme preference persistence across devices",
-                  expected_behavior: "Sync via user account",
-                },
-                { scenario: "First app launch", expected_behavior: "Default to light mode" },
-                {
-                  scenario: "Images with transparency",
-                  expected_behavior: "Apply appropriate background",
-                },
-                { scenario: "Email templates", expected_behavior: "Stay light for compatibility" },
-                { scenario: "Print mode", expected_behavior: "Force light theme" },
-              ],
-            },
-            metrics: {
-              primary_metric: {
-                name: "Dark mode adoption",
-                target_value: "20% of users",
-                how_to_measure: "Analytics: users with dark mode enabled",
-              },
-              success_threshold: "20% of users enable dark mode",
-            },
-            assumptions: {
-              assumptions: [
-                {
-                  statement: "CSS variables are supported by target browsers",
-                  validation_method: "Browser compatibility check",
-                },
-              ],
-              risks: [
-                {
-                  description: "Some third-party components may not support dark mode",
-                  probability: "low",
-                  impact: "medium",
-                  mitigation: "Audit components beforehand",
-                },
-              ],
-            },
-            output: {
-              prd_delivered: "yes",
-              sections_count: 7,
-            },
-          },
-        },
-
-        // Scenario 3: Comprehensive PRD
-        {
-          name: "Comprehensive PRD - detailed analysis",
-          description: "Full PRD with extensive research and analysis",
-          expect: { status: "completed" },
-          mockInputs: {
-            problem: {
-              problem_statement: "Manual invoice processing takes 2 hours per day",
-              target_users: [
-                { name: "AP Clerk", role: "Data Entry" },
-                { name: "AP Manager", role: "Approver" },
-                { name: "CFO", role: "Executive" },
-              ],
-              urgency_reason: "Scaling issues as invoice volume grows",
-              cost_of_inaction: "$50k annual cost in processing time",
-            },
-            research: {
-              data_sources: [
-                {
-                  source: "Competitive analysis",
-                  key_finding: "Top tools use AI/ML for extraction",
-                },
-                {
-                  source: "Customer interviews",
-                  key_finding: "2 hours daily spent on manual entry",
-                },
-                {
-                  source: "Technical research",
-                  key_finding: "OCR accuracy at 95% for standard formats",
-                },
-              ],
-              key_insights: [
-                "OCR accuracy at 95% for standard formats",
-                "70% of SMBs want automated invoicing",
-              ],
-              competitor_solutions: [
-                {
-                  competitor: "QuickBooks",
-                  how_they_solve: "Automated data capture",
-                  gaps: "Limited ERP integration",
-                },
-                {
-                  competitor: "Sage",
-                  how_they_solve: "AI-powered extraction",
-                  gaps: "Higher cost",
-                },
-              ],
-              previous_attempts: ["Manual OCR tool trial - accuracy too low"],
-            },
-            solution: {
-              solution_description: "AI-powered invoice processing with ML extraction",
-              in_scope: [
-                "OCR document scanning",
-                "ML field extraction",
-                "ERP integration",
-                "Approval workflow",
-              ],
-              out_of_scope: ["Payment processing", "Vendor management"],
-              why_this_approach: "Highest ROI based on cost analysis",
-              constraints: ["Must integrate with existing ERP"],
-            },
-            "user-stories": {
-              stories: [
-                {
-                  user: "AP Clerk",
-                  action: "scan invoices with my phone",
-                  outcome: "automatically extract invoice data",
-                  acceptance_criteria: [
-                    "Camera capture works",
-                    "OCR extracts key fields",
-                    "Data appears in system",
-                  ],
-                },
-                {
-                  user: "Manager",
-                  action: "approve invoices on mobile",
-                  outcome: "process approvals from anywhere",
-                  acceptance_criteria: [
-                    "Mobile app works",
-                    "Push notifications",
-                    "One-tap approval",
-                  ],
-                },
-                {
-                  user: "CFO",
-                  action: "see real-time spending dashboard",
-                  outcome: "monitor company expenses",
-                  acceptance_criteria: [
-                    "Real-time data",
-                    "Drill-down capability",
-                    "Export to Excel",
-                  ],
-                },
-              ],
-            },
-            "edge-cases": {
-              edge_cases: [
-                { scenario: "Handwritten invoices", expected_behavior: "Flag for manual review" },
-                {
-                  scenario: "Multi-page invoices",
-                  expected_behavior: "Combine pages into single document",
-                },
-                {
-                  scenario: "Foreign currency",
-                  expected_behavior: "Auto-convert with rate lookup",
-                },
-                { scenario: "Duplicate invoices", expected_behavior: "Detect and warn user" },
-                {
-                  scenario: "Partial data extraction",
-                  expected_behavior: "Highlight missing fields",
-                },
-              ],
-              error_states: [
-                { error: "OCR failure", user_message: "Could not read document. Please rescan." },
-                {
-                  error: "Unrecognized format",
-                  user_message: "Unknown format. Manual entry required.",
-                },
-                { error: "Duplicate detection", user_message: "This invoice may be a duplicate." },
-              ],
-            },
-            metrics: {
-              primary_metric: {
-                name: "Processing time reduction",
-                target_value: "80% reduction",
-                how_to_measure: "Time tracking before/after implementation",
-                timeline: "6 months",
-              },
-              success_threshold: "75% reduction in 6 months",
-              secondary_metrics: [
-                { name: "Error rate", target: "Below 1%" },
-                { name: "User adoption", target: "90%" },
-              ],
-            },
-            assumptions: {
-              assumptions: [
-                {
-                  statement: "Standard invoice formats cover 90% of volume",
-                  validation_method: "Invoice sample analysis",
-                },
-                {
-                  statement: "ERP has API access",
-                  validation_method: "Technical documentation review",
-                },
-                {
-                  statement: "Users have smartphone cameras",
-                  validation_method: "Device inventory check",
-                },
-              ],
-              risks: [
-                {
-                  description: "OCR accuracy for edge cases",
-                  probability: "medium",
-                  impact: "high",
-                  mitigation: "Manual review fallback",
-                },
-                {
-                  description: "Change management challenges",
-                  probability: "high",
-                  impact: "medium",
-                  mitigation: "Training program",
-                },
-                {
-                  description: "Integration complexity",
-                  probability: "medium",
-                  impact: "high",
-                  mitigation: "Phased rollout",
-                },
-              ],
-            },
-            output: {
-              prd_delivered: "yes",
-              sections_count: 10,
-              open_questions: ["ML model training data source", "ERP API availability"],
-            },
-          },
-        },
-      ];
-
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
+  test("uses one traversal-safe workspace, fixed artifacts, and only consumed global state", () => {
+    const registry = workflow.variableRegistry!;
+    expect(Object.keys(registry).sort()).toEqual([
+      "issues_count",
+      "result_summary",
+      "workspace_path",
+    ]);
+    expect(registry.workspace_path.pattern).toBe(
+      "^\\./moira-ws/prd-creation-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+    );
+    expect(node(workflow, "author").inputSchema.globalInputs).toEqual(["workspace_path"]);
+    for (const id of ["review", "repair"]) {
+      const directive = node(workflow, id).directive;
+      for (const file of [
+        "prd-requirements.md",
+        "prd-standards.md",
+        "prd.contract.json",
+        "prd.md",
+        "review.md",
+      ]) {
+        expect(directive).toContain(`{{workspace_path}}/${file}`);
       }
+    }
+    for (const file of ["prd.contract.json", "prd.md", "review.md"]) {
+      expect(node(workflow, "present").directive).toContain(`{{workspace_path}}/${file}`);
+    }
+  });
 
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
+  test("keeps author and repair on the same closed, bounded canonical contract schema", () => {
+    const authorSchema = node(workflow, "author").inputSchema.properties.prd_contract;
+    const repairSchema = node(workflow, "repair").inputSchema.properties.prd_contract;
+    expect(repairSchema).toEqual(authorSchema);
+    expect(authorSchema.additionalProperties).toBe(false);
+    expect(authorSchema.properties.requirements.items.additionalProperties).toBe(false);
+    expect(authorSchema.properties.user_stories.items.properties.requirement_ids.minItems).toBe(1);
+    expect(authorSchema.properties.edge_cases.items.required).toContain("recovery");
+    expect(authorSchema.properties.metrics.properties.primary.required).toEqual(
+      expect.arrayContaining(["baseline", "target", "measurement_method", "timeframe"]),
+    );
+    expect(authorSchema.properties.readiness.enum).toEqual([
+      "ready",
+      "ready-with-limitations",
+      "not-ready",
+    ]);
+  });
 
-      console.log(formatCoverageReport(coverage));
+  test.each([
+    "title",
+    "executive_summary",
+    "evidence_sources",
+    "evidence_gaps",
+    "problem",
+    "solution",
+    "requirements",
+    "user_stories",
+    "edge_cases",
+    "metrics",
+    "assumptions",
+    "risks",
+    "applicability_decisions",
+    "open_questions",
+    "limitations",
+    "readiness",
+    "readiness_rationale",
+  ])("rejects a contract missing required top-level field %s", async (field) => {
+    const contract = validContract();
+    delete contract[field];
+    const result = await runInvalidAuthor(validAuthorInput(contract));
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'author'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
 
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
+  test("rejects an evidence record without a finding", async () => {
+    const contract = validContract() as any;
+    delete contract.evidence_sources[0].finding;
+    const result = await runInvalidAuthor(validAuthorInput(contract));
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'author'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
 
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+  test("rejects an edge case without a recovery path", async () => {
+    const contract = validContract() as any;
+    delete contract.edge_cases[0].recovery;
+    const result = await runInvalidAuthor(validAuthorInput(contract));
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'author'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
+
+  test.each(["measurement_method", "timeframe"])(
+    "rejects a primary metric without %s",
+    async (field) => {
+      const contract = validContract() as any;
+      delete contract.metrics.primary[field];
+      const result = await runInvalidAuthor(validAuthorInput(contract));
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Input validation failed for node 'author'");
+      expect(result.visitedNodes).not.toContain("review");
+    },
+  );
+
+  test.each(["requirement_ids", "acceptance_criterion_ids"])(
+    "rejects a user story with an empty %s link set",
+    async (field) => {
+      const contract = validContract() as any;
+      contract.user_stories[0][field] = [];
+      const result = await runInvalidAuthor(validAuthorInput(contract));
+      expect(result.status).toBe("failed");
+      expect(result.error).toContain("Input validation failed for node 'author'");
+      expect(result.visitedNodes).not.toContain("review");
+    },
+  );
+
+  test.each([
+    "./moira-ws/prd-creation-../../tmp",
+    "./moira-ws/prd-creation-.",
+    "./moira-ws/prd-creation-a//b",
+    "./moira-ws/prd-creation-a/other",
+  ])("rejects unsafe or nested workspace %s", async (workspacePath) => {
+    const result = await runInvalidAuthor({ ...validAuthorInput(), workspace_path: workspacePath });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'author'");
+    expect(result.visitedNodes).not.toContain("review");
+  });
+
+  test("delivers a valid PRD only after a zero-finding independent review", async () => {
+    const result = await runScenario(workflow, {
+      name: "clean reviewed PRD",
+      mockInputs: {
+        author: validAuthorInput(),
+        review: { issues_count: 0 },
+        present: {
+          result_summary:
+            "Accepted PRD: ./moira-ws/prd-creation-checkout_20260820/prd.md; readiness has documented limitations.",
+        },
+      },
+      expect: { status: "completed", avoids: ["repair"] },
     });
+    expect(result.passed).toBe(true);
+    expect(compactRoute(result)).toEqual([
+      "start",
+      "author",
+      "review",
+      "review-gate",
+      "present",
+      "end",
+    ]);
+    expect(result.finalContext.workspace_path).toBe("./moira-ws/prd-creation-checkout_20260820");
+    expect(result.finalContext).not.toHaveProperty("prd_contract");
+  });
+
+  test("repairs a finding, re-reviews, and covers every reachable route", async () => {
+    const repairedContract = validContract();
+    repairedContract.readiness_rationale =
+      "The baseline is now recorded and all approved implementation prerequisites are resolved.";
+    const repairScenario: TestScenario = {
+      name: "unsupported readiness repaired",
+      description: "The independent report blocks delivery until repaired artifacts pass",
+      mockInputs: {
+        author: validAuthorInput(),
+        review: [{ issues_count: 1 }, { issues_count: 0 }],
+        repair: { prd_contract: repairedContract },
+        present: {
+          result_summary:
+            "Accepted repaired PRD: ./moira-ws/prd-creation-checkout_20260820/prd.md.",
+        },
+      },
+      expect: { status: "completed", reaches: ["repair", "present"] },
+    };
+    const repaired = await runScenario(workflow, repairScenario);
+    expect(repaired.passed).toBe(true);
+    expect(compactRoute(repaired)).toEqual([
+      "start",
+      "author",
+      "review",
+      "review-gate",
+      "repair",
+      "review",
+      "review-gate",
+      "present",
+      "end",
+    ]);
+    expect(repaired.inputSubmissionCounts.review).toBe(2);
+    expect(repaired.inputSubmissionCounts.repair).toBe(1);
+
+    const clean = await runScenario(workflow, {
+      name: "clean route for coverage",
+      mockInputs: {
+        author: validAuthorInput(),
+        review: { issues_count: 0 },
+        present: { result_summary: "Accepted prd.md with documented readiness." },
+      },
+      expect: { status: "completed", avoids: ["repair"] },
+    });
+    const coverage = calculateCoverage(workflow, [clean, repaired], { includeGapAnalysis: true });
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
+    expect(coverage.unvisitedNodes).toEqual([]);
+    expect(coverage.uncoveredBranches).toEqual([]);
   });
 });

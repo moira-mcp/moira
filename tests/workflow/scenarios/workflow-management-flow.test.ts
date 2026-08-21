@@ -1,4 +1,4 @@
-/** Behavioral scenarios for workflow-management-flow v5. */
+/** Behavioral scenarios for workflow-management-flow v6. */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
@@ -39,11 +39,22 @@ function createInputs(name: string): Record<string, MockInput> {
     },
     "gather-workflow-requirements": {},
     "design-workflow-structure": {},
+    "review-workflow-design": { design_review_outcome: "pass" },
+    "fix-create-design": {
+      repair_outcome: "changed",
+      root_cause_class: "design contract defect",
+      changed_knowledge: "The design contract now distinguishes the required behavior",
+    },
+    "reassess-design-contract": {},
     "approve-structure": { structure_approved: "yes" },
     "refine-structure": {},
     "create-workflow-json": { workflow_artifact_path: `${workspace}/workflow.json` },
-    "review-workflow-quality": { quality_issues_count: 0 },
-    "fix-quality-issues": {},
+    "review-workflow-quality": { quality_review_outcome: "pass" },
+    "fix-quality-issues": {
+      repair_outcome: "changed",
+      root_cause_class: "workflow artifact defect",
+      changed_knowledge: "The relevant workflow behavior changed and was structurally validated",
+    },
     "user-final-review": { work_approved: "yes" },
     "revise-create-requirements": {},
     "ask-upload": { upload_confirmed: false },
@@ -72,13 +83,22 @@ function editInputs(name: string, localPath = `workflows/${name}.json`): Record<
     "audit-complete-workflow": { additional_edit_scope: "none" },
     "analyze-edit-problem": {},
     "create-edit-plan": {},
-    "validate-edit-plan": { plan_issues_count: 0 },
-    "fix-edit-plan": {},
+    "review-workflow-design": { design_review_outcome: "pass" },
+    "fix-edit-plan": {
+      repair_outcome: "changed",
+      root_cause_class: "edit design contract defect",
+      changed_knowledge: "The edit contract now supplies discriminating acceptance evidence",
+    },
+    "reassess-design-contract": {},
     "present-edit-plan": { plan_approval: "yes" },
     "revise-edit-plan": {},
     "apply-workflow-changes": {},
-    "review-workflow-quality": { quality_issues_count: 0 },
-    "fix-quality-issues": {},
+    "review-workflow-quality": { quality_review_outcome: "pass" },
+    "fix-quality-issues": {
+      repair_outcome: "changed",
+      root_cause_class: "workflow artifact defect",
+      changed_knowledge: "The relevant workflow behavior changed and was structurally validated",
+    },
     "user-final-review": { work_approved: "yes" },
     "revise-edit-requirements": {},
     "ask-upload": { upload_confirmed: false },
@@ -129,10 +149,15 @@ const scenarios: TestScenario[] = [
         { structure_approved: "yes" },
         { structure_approved: "yes" },
       ],
+      "review-workflow-design": [
+        { design_review_outcome: "pass" },
+        { design_review_outcome: "pass" },
+        { design_review_outcome: "pass" },
+      ],
       "review-workflow-quality": [
-        { quality_issues_count: 1 },
-        { quality_issues_count: 0 },
-        { quality_issues_count: 0 },
+        { quality_review_outcome: "repair" },
+        { quality_review_outcome: "pass" },
+        { quality_review_outcome: "pass" },
       ],
       "user-final-review": [
         { work_approved: "no", final_feedback: "Clarify the completion contract" },
@@ -147,10 +172,11 @@ const scenarios: TestScenario[] = [
       ...editInputs("edit-audit"),
       "ask-full-antipattern-audit": { full_antipattern_audit: "yes" },
       "audit-complete-workflow": { additional_edit_scope: "Repair confirmed legacy machinery" },
-      "validate-edit-plan": [
-        { plan_issues_count: 1 },
-        { plan_issues_count: 0 },
-        { plan_issues_count: 0 },
+      "review-workflow-design": [
+        { design_review_outcome: "repair" },
+        { design_review_outcome: "pass" },
+        { design_review_outcome: "pass" },
+        { design_review_outcome: "pass" },
       ],
       "present-edit-plan": [
         { plan_approval: "no", user_feedback: "Preserve the public contract" },
@@ -168,6 +194,82 @@ const scenarios: TestScenario[] = [
       "revise-edit-requirements",
       "sync-local-file",
     ],
+  ),
+  scenario(
+    "unprovable proxy criterion replans before create mutation",
+    {
+      ...createInputs("create-proxy-replan"),
+      "review-workflow-design": [
+        { design_review_outcome: "replan" },
+        { design_review_outcome: "pass" },
+      ],
+    },
+    ["reassess-design-contract", "design-workflow-structure", "create-workflow-json", "end"],
+    ["fix-create-design"],
+  ),
+  scenario(
+    "repairable create design returns with changed knowledge",
+    {
+      ...createInputs("create-design-repair"),
+      "review-workflow-design": [
+        { design_review_outcome: "repair" },
+        { design_review_outcome: "pass" },
+      ],
+    },
+    ["fix-create-design", "route-create-design-repair-changed", "create-workflow-json", "end"],
+    ["reassess-design-contract"],
+  ),
+  scenario(
+    "create proof-token design repair can request reassessment",
+    {
+      ...createInputs("create-proof-token-reassess"),
+      "review-workflow-design": [
+        { design_review_outcome: "repair" },
+        { design_review_outcome: "pass" },
+      ],
+      "fix-create-design": { repair_outcome: "reassess" },
+    },
+    ["fix-create-design", "reassess-design-contract", "design-workflow-structure", "end"],
+  ),
+  scenario(
+    "edit metatest repair can request contract reassessment",
+    {
+      ...editInputs("edit-metatest-reassess"),
+      "review-workflow-design": [
+        { design_review_outcome: "repair" },
+        { design_review_outcome: "pass" },
+      ],
+      "fix-edit-plan": { repair_outcome: "reassess" },
+    },
+    ["fix-edit-plan", "reassess-design-contract", "analyze-edit-problem", "end"],
+  ),
+  scenario(
+    "scanner validation defect replans without artifact repair",
+    {
+      ...editInputs("edit-scanner-replan"),
+      "review-workflow-quality": [
+        { quality_review_outcome: "replan" },
+        { quality_review_outcome: "pass" },
+      ],
+    },
+    ["route-quality-review-replan", "reassess-design-contract", "analyze-edit-problem", "end"],
+    ["fix-quality-issues"],
+  ),
+  scenario(
+    "same-root guard repair exits to reassessment instead of nesting validators",
+    {
+      ...createInputs("create-guard-reassess"),
+      "review-workflow-design": [
+        { design_review_outcome: "pass" },
+        { design_review_outcome: "pass" },
+      ],
+      "review-workflow-quality": [
+        { quality_review_outcome: "repair" },
+        { quality_review_outcome: "pass" },
+      ],
+      "fix-quality-issues": { repair_outcome: "reassess" },
+    },
+    ["fix-quality-issues", "route-quality-repair-changed", "reassess-design-contract", "end"],
   ),
   scenario(
     "edit server-only source without local synchronization",
@@ -261,7 +363,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("workflow-management-flow v5", () => {
+describe("workflow-management-flow v6", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -272,8 +374,8 @@ describe("workflow-management-flow v5", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("5.8.0");
-    expect(workflow.nodes).toHaveLength(48);
+    expect(workflow.metadata.version).toBe("6.0.0");
+    expect(workflow.nodes).toHaveLength(58);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
 
@@ -300,7 +402,23 @@ describe("workflow-management-flow v5", () => {
       "### Operating mode (autonomous vs interactive)",
       "### Revising the process while the work runs",
       "### The reference the run writes itself",
-      "### Routing a repair by the reach of the correction",
+      "### Design before build",
+      "### Discriminating evidence and matching modality",
+      "### Cause before repair",
+      "### Replan without requirement erosion",
+      "### Bounded class-wide repair",
+      "### Validation as a requested result",
+      "### Minimal consumed process record",
+      "### Routing a confirmed repair by its stale-evidence cone",
+      "### Late design discovery",
+      "### Non-discriminating evidence",
+      "### Evidence modality mismatch",
+      "### Repair before diagnosis",
+      "### Validator nesting",
+      "### Changed bytes without changed knowledge",
+      "### Universal detector for a contextual property",
+      "### Validation-only drift",
+      "### User approval as semantic review",
       "### Engine state computed by the agent",
       "### A reference with no address",
       "mechanical validation",
@@ -316,8 +434,24 @@ describe("workflow-management-flow v5", () => {
     >;
     expect(nodes["gather-workflow-requirements"].directive).toContain("workspace");
     expect(nodes["create-edit-plan"].directive).toContain("edit-plan.md");
-    expect(nodes["validate-edit-plan"].directive).toContain("edit-plan-review.md");
+    expect(nodes["review-workflow-design"].directive).toContain("workflow-design-review.md");
+    expect(
+      nodes["review-workflow-design"].inputSchema.properties.design_review_outcome.enum,
+    ).toEqual(["pass", "repair", "replan"]);
     expect(nodes["review-workflow-quality"].directive).toContain("workflow-quality-review.md");
+    expect(
+      nodes["review-workflow-quality"].inputSchema.properties.quality_review_outcome.enum,
+    ).toEqual(["pass", "repair", "replan"]);
+    for (const id of ["fix-create-design", "fix-edit-plan", "fix-quality-issues"]) {
+      expect(nodes[id].inputSchema.properties.repair_outcome.enum).toEqual(["changed", "reassess"]);
+      expect(nodes[id].inputSchema.allOf[0].then.required).toEqual([
+        "root_cause_class",
+        "changed_knowledge",
+      ]);
+    }
+    expect(nodes["design-workflow-structure"].directive).toContain("plausible wrong state");
+    expect(nodes["create-edit-plan"].directive).toContain("observation that distinguishes");
+    expect(nodes["review-workflow-quality"].directive).toContain("surrogate signal");
     expect(nodes["ask-full-antipattern-audit"].connections.success).toBe(
       "route-full-antipattern-audit",
     );
@@ -358,7 +492,9 @@ describe("workflow-management-flow v5", () => {
         ).includes("teleport-revise-process"),
       ),
     ).toBe(false);
-    expect(nodes["teleport-revise-process"].connections.success).toBe("analyze-edit-problem");
+    expect(nodes["teleport-revise-process"].connections.success).toBe(
+      "route-action-after-reassessment",
+    );
     expect(nodes["teleport-revise-process"].hint).toContain("belong to their repair owners");
     expect(nodes["report-final-result"].inputSchema.properties).toEqual({});
     // The nodes that keep asking in interactive mode must state their autonomous rule.

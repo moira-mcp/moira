@@ -97,7 +97,11 @@ export class AgentDirectiveHandler implements INodeHandler {
     }
 
     // Validate agent response using schema (or empty schema if not defined)
-    this.validateAgentResponseOrThrow(agentNode, input);
+    this.validateAgentResponseOrThrow(agentNode, input, {
+      ...context.variables,
+      executionId: context.executionId,
+      workflowId: context.workflowId,
+    });
 
     // Success - continue to next node
     this.logger.info("Agent response processed successfully - continuing workflow", {
@@ -125,13 +129,17 @@ export class AgentDirectiveHandler implements INodeHandler {
    * Step 12: ValidationError now includes rich context (schema, input, errors)
    * for comprehensive error formatting in graph-execution-engine.
    */
-  private validateAgentResponseOrThrow(node: AgentDirectiveNode, input: unknown): void {
+  private validateAgentResponseOrThrow(
+    node: AgentDirectiveNode,
+    input: unknown,
+    contextVariables: Record<string, unknown>,
+  ): void {
     // Node's inputSchema is already globalInputs-inlined by the engine; enforce strict.
     const schema = node.inputSchema
       ? SchemaValidator.enforceStrictSchema(node.inputSchema as Record<string, unknown>)
       : EMPTY_INPUT_SCHEMA;
 
-    const result = SchemaValidator.validate(input, schema);
+    const result = SchemaValidator.validate(input, schema, contextVariables);
 
     if (result.isValid) {
       return; // Success - no exception

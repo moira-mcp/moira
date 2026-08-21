@@ -12,7 +12,11 @@ A universal tool for working with workflow files: editing, structure analysis, v
 
 ```bash
 moira-workflow <workflow-file> <command> [options]
+moira-workflow --version
 ```
+
+`--version` prints the package version and exact source path. Check it before editing when
+several Moira checkouts exist; it exposes a stale global link without requiring a workflow file.
 
 ## Commands
 
@@ -164,6 +168,9 @@ Outputs:
 - Errors (critical problems)
 - Warnings (non-critical remarks)
 
+The command exits with a non-zero status when errors exist, so scripts and agents can use it as a
+real gate. Warnings alone do not make the command fail.
+
 ### Variables - Working with workflow variables
 
 ```bash
@@ -178,6 +185,10 @@ moira-workflow ./workflows/production/flows/<flow>.json get-variable test_direct
 
 # Set a variable
 moira-workflow ./workflows/production/flows/<flow>.json set-variable test_directive "Run all tests"
+
+# Replace a variable's complete JSON Schema inline or from a file
+moira-workflow ./workflows/production/flows/<flow>.json set-variable-schema result '{"type":"array","items":{"type":"string"}}'
+moira-workflow ./workflows/production/flows/<flow>.json set-variable-schema result --file ./result-schema.json
 ```
 
 The `variables` command shows:
@@ -239,13 +250,13 @@ Shows:
 
 ```bash
 # Create an empty workflow
-moira-workflow -- create ./new-workflow.json --name "My Workflow"
+moira-workflow create ./new-workflow.json --name "My Workflow"
 
 # With description and version
-moira-workflow -- create ./new-workflow.json --name "My Workflow" --description "Description" --version "1.0.0"
+moira-workflow create ./new-workflow.json --name "My Workflow" --description "Description" --version "1.0.0"
 
 # From a template
-moira-workflow -- create ./new-workflow.json --name "My Workflow" --template ./template.json
+moira-workflow create ./new-workflow.json --name "My Workflow" --template ./template.json
 ```
 
 ### copy - Copy a workflow
@@ -279,7 +290,21 @@ moira-workflow ./workflows/production/flows/<flow>.json delete node-id
 
 # Set the workflow version
 moira-workflow ./workflows/production/flows/<flow>.json set-version 8.0.0
+
+# Replace one node in place from a complete node file
+moira-workflow ./workflows/production/flows/<flow>.json replace node-id ./node.json
+
+# Set identity and long metadata (a file avoids shell quoting for long text)
+moira-workflow ./workflows/production/flows/<flow>.json set-name "Workflow name"
+moira-workflow ./workflows/production/flows/<flow>.json set-slug workflow-slug
+moira-workflow ./workflows/production/flows/<flow>.json set-description --file ./description.txt
+
+# Replace an existing copy while preserving its id/slug/owner/visibility
+moira-workflow ./workspace.json sync ./workflows/production/flows/<flow>.json
 ```
+
+`sync` validates the fully synchronized result before creating a backup or writing. If validation
+fails, the destination remains byte-for-byte unchanged.
 
 ## Typical Usage Scenarios
 
@@ -401,13 +426,19 @@ Available for all modifying commands:
 - `clone`
 - `move`
 - `set-variable`
+- `set-variable-schema`
 - `delete-variable`
+- `set-name`
+- `set-slug`
+- `set-description`
+- `replace`
 
 ## Limitations
 
 - The tool only works with valid JSON
 - Backup files are not deleted automatically (clear the folder manually when needed)
-- Complex transformations are not supported (use jq or direct editing for those)
+- Use `replace` for one complete node and validated `sync` for a complete workflow rewrite; do not
+  bypass workflow validation with direct JSON mutation
 - Colored output may render incorrectly in some terminals
 
 ## Integration with /update-workflow

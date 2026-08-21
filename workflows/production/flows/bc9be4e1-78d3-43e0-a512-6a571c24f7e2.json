@@ -5,188 +5,931 @@
   "id": "bc9be4e1-78d3-43e0-a512-6a571c24f7e2",
   "metadata": {
     "name": "PRD Creation Workflow",
-    "version": "1.4.0",
-    "description": "Structured process for creating PRD (Product Requirements Document) with completeness guarantee: PROBLEM → RESEARCH → SOLUTION → USER_STORIES → EDGE_CASES → METRICS → ASSUMPTIONS → OUTPUT. Solves the problem of incomplete AI-generated PRDs through mandatory sections and data-backed decisions."
+    "version": "2.0.0",
+    "description": "Creates an independently reviewed, evidence-grounded Product Requirements Document (PRD) for a product problem, feature, change, API, page, module, or system. It inspects supplied requirements and authorized project or research evidence, records honest evidence gaps and applicability decisions, and defines problem, personas, urgency, cost of inaction, solution rationale and alternatives, in and out scope, constraints, dependencies, traceable prioritized requirements and observable acceptance criteria, linked user stories, relevant edge and recovery behavior, measurable metrics, assumptions, risks, open questions, limitations, and readiness. In one traversal-safe local workspace it writes prd-requirements.md, addressed prd-standards.md, a strict canonical prd.contract.json, and its readable prd.md projection. An independent file-backed reviewer checks evidence, traceability, completeness, internal consistency, JSON-to-Markdown equality, and authority; any finding enters repair and the same review repeats, so delivery is unreachable while known blocking gaps remain. The terminal result identifies the accepted durable PRD. This workflow creates only local PRD artifacts: it does not implement the product, modify project files, execute tests, use VCS, publish, notify, or deploy. Choose PRD Creation when the deliverable is reviewed product requirements; choose UX Design for experience design, Architecture Design for technical architecture, Test Planning or Test Generation for verification artifacts, or Software Development Flow for implementation with tests and documentation."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "problem"
+        "default": "author"
       }
     },
     {
-      "id": "problem",
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "result_summary"
+      ]
+    },
+    {
+      "id": "author",
       "type": "agent-directive",
-      "directive": "Define the problem we are solving.\n\nAsk user or find in documentation:\n1. What problem are we solving? (specifically, not generic)\n2. For whom? (target users — persona with name and role)\n3. Why is this important now? (urgency)\n4. What happens if we do not solve it? (cost of inaction)\n\n{{quality_standards}}\n\nUse planning standards: {{planning_standards}}\n\nIMPORTANT: Problem statement must be SPECIFIC and MEASURABLE.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave problem validation issues to `{{workspace_path}}/problem-issues.md` with format:\n```\n# Problem Statement Issues\n\n## SPECIFICITY\n1. [Vague or generic statement]\n\n## COMPLETENESS\n1. [Missing required element]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `problem_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Problem statement specific (not generic)\n2. Target users defined with roles\n3. Urgency justified\n4. Cost of inaction described\n\nReturn `issues_count` = number of issues found (0 if problem definition complete).",
-      "completionCondition": "Problem statement specific, target users defined, urgency and cost of inaction described",
+      "directive": "Create an evidence-grounded Product Requirements Document for the user's requested product problem, feature, change, API, page, module, or system. First inspect the available task text, specifications, project documentation, code, analytics, research, interviews, support material, and other authorized non-mutating primary evidence. Resolve discoverable gaps yourself and ask only when an unknown materially changes the PRD and cannot be discovered. Never invent sources, quotes, analytics, baselines, targets, competitor behavior, or supporting facts.\n\nCreate exactly one safe relative workspace named `./moira-ws/prd-creation-<suffix>`, where `<suffix>` begins with a letter or digit and otherwise contains only letters, digits, underscores, or hyphens. Write `prd-requirements.md` with the requested scope, primary evidence references, evidence gaps, applicability decisions, assumptions, and material unknowns. Write `prd-standards.md` as the addressed standards used by every later role: problem-first framing; evidence-linked decisions; stable IDs and traceability; explicit in/out scope, constraints, dependencies, alternatives, and previous attempts; observable acceptance criteria; relevant edge/error/recovery behavior; measurable metrics with baseline or an honest missing-baseline limitation, target, method, and timeframe; assumptions with validation and impact; risks with likelihood, impact, and mitigation; honest non-applicability and limitations; and no fabricated padding or unsupported readiness claim.\n\nWrite `prd.contract.json` as the canonical structured PRD and `prd.md` as its readable projection. Preserve all contract content in Markdown exactly, then add narrative rationale, traceability, applicability explanations, evidence gaps, limitations, readiness, and recommended separately authorized follow-on work. JSON is the source of truth for overlapping fields. Scope determines the number of records: do not manufacture sources, stories, cases, or comparisons to reach a count. A required minimum record represents a core PRD domain, not permission to invent it; if a core fact is materially unavailable, obtain it or stop with the blocker.\n\nReturn only `workspace_path` and `prd_contract` exactly as persisted in `prd.contract.json`; the engine validates both. Do not copy Markdown or evidence bodies into the response. This workflow may inspect authorized evidence and write only `prd-requirements.md`, `prd-standards.md`, `prd.contract.json`, and `prd.md` in its local workspace. It does not implement the product, modify project code or documentation, execute tests, use version control, publish or upload, notify, deploy, or administer systems. It may only recommend those actions to a separately authorized caller or workflow.",
+      "completionCondition": "The safe workspace contains complete evidence/requirements, addressed standards, a schema-valid canonical PRD, and an exact readable projection without fabricated claims",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "prd_contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "executive_summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 3000
+              },
+              "evidence_sources": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "user-input",
+                        "project-document",
+                        "code",
+                        "analytics",
+                        "interview",
+                        "support",
+                        "research",
+                        "external",
+                        "other"
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "finding": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "source",
+                    "finding"
+                  ]
+                }
+              },
+              "evidence_gaps": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "question": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "decision_impact": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "next_validation": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "question",
+                    "decision_impact",
+                    "next_validation"
+                  ]
+                }
+              },
+              "problem": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 3000
+                  },
+                  "target_users": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "role": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "context": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "role",
+                        "context"
+                      ]
+                    }
+                  },
+                  "urgency": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "cost_of_inaction": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "required": [
+                  "statement",
+                  "target_users",
+                  "urgency",
+                  "cost_of_inaction",
+                  "evidence_ids"
+                ]
+              },
+              "solution": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 3000
+                  },
+                  "alternatives": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "option": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "decision": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "rejected",
+                            "deferred"
+                          ]
+                        },
+                        "rationale": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "evidence_ids": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "option",
+                        "decision",
+                        "rationale",
+                        "evidence_ids"
+                      ]
+                    }
+                  },
+                  "in_scope": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "out_of_scope": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "constraints": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "previous_attempts": {
+                    "type": "array",
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "attempt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "lesson": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "evidence_ids": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "attempt",
+                        "outcome",
+                        "lesson",
+                        "evidence_ids"
+                      ]
+                    }
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "required": [
+                  "description",
+                  "rationale",
+                  "alternatives",
+                  "in_scope",
+                  "out_of_scope",
+                  "constraints",
+                  "dependencies",
+                  "previous_attempts",
+                  "evidence_ids"
+                ]
+              },
+              "requirements": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "priority": {
+                      "type": "string",
+                      "enum": [
+                        "must",
+                        "should",
+                        "could",
+                        "wont"
+                      ]
+                    },
+                    "priority_rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "evidence_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    },
+                    "acceptance_criteria": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 30,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          },
+                          "statement": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "statement"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "priority",
+                    "priority_rationale",
+                    "evidence_ids",
+                    "acceptance_criteria"
+                  ]
+                }
+              },
+              "user_stories": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "actor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 300
+                    },
+                    "goal": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "requirement_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    },
+                    "acceptance_criterion_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "actor",
+                    "goal",
+                    "outcome",
+                    "requirement_ids",
+                    "acceptance_criterion_ids"
+                  ]
+                }
+              },
+              "edge_cases": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "scenario": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "expected_behavior": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "recovery": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "requirement_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "scenario",
+                    "expected_behavior",
+                    "recovery",
+                    "requirement_ids"
+                  ]
+                }
+              },
+              "metrics": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "primary": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      },
+                      "baseline": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "target": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "measurement_method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1500
+                      },
+                      "timeframe": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "evidence_ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 50,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        }
+                      },
+                      "requirement_ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 50,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "baseline",
+                      "target",
+                      "measurement_method",
+                      "timeframe",
+                      "evidence_ids",
+                      "requirement_ids"
+                    ]
+                  },
+                  "secondary": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "target": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "measurement_method": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1500
+                        },
+                        "timeframe": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "requirement_ids": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 50,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "target",
+                        "measurement_method",
+                        "timeframe",
+                        "requirement_ids"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "primary",
+                  "secondary"
+                ]
+              },
+              "assumptions": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "validation_method": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "impact_if_false": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "evidence_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "validation_method",
+                    "impact_if_false",
+                    "evidence_ids"
+                  ]
+                }
+              },
+              "risks": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "likelihood": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low",
+                        "unknown"
+                      ]
+                    },
+                    "impact": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low",
+                        "unknown"
+                      ]
+                    },
+                    "mitigation": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "requirement_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description",
+                    "likelihood",
+                    "impact",
+                    "mitigation",
+                    "requirement_ids"
+                  ]
+                }
+              },
+              "applicability_decisions": {
+                "type": "array",
+                "maxItems": 30,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "domain": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "applicable",
+                        "not-applicable",
+                        "unknown"
+                      ]
+                    },
+                    "rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "evidence_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "status",
+                    "rationale",
+                    "evidence_ids"
+                  ]
+                }
+              },
+              "open_questions": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                }
+              },
+              "limitations": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1500
+                }
+              },
+              "readiness": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "ready-with-limitations",
+                  "not-ready"
+                ]
+              },
+              "readiness_rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "title",
+              "executive_summary",
+              "evidence_sources",
+              "evidence_gaps",
+              "problem",
+              "solution",
+              "requirements",
+              "user_stories",
+              "edge_cases",
+              "metrics",
+              "assumptions",
+              "risks",
+              "applicability_decisions",
+              "open_questions",
+              "limitations",
+              "readiness",
+              "readiness_rationale"
+            ]
+          }
+        },
         "required": [
-          "problem_statement",
-          "target_users",
-          "urgency_reason"
+          "workspace_path",
+          "prd_contract"
         ],
         "globalInputs": [
-          "problem_statement",
-          "target_users",
-          "urgency_reason",
-          "cost_of_inaction"
+          "workspace_path"
         ]
       },
       "connections": {
-        "success": "research"
+        "success": "review"
       }
     },
     {
-      "id": "research",
+      "id": "review",
       "type": "agent-directive",
-      "directive": "Conduct research on the problem.\n\nProblem: {{problem_statement}}\nTarget users: {{target_users}}\n\nGather information:\n1. What data exists? (analytics, surveys, support tickets)\n2. User interviews / feedback (quotes, insights)\n3. How do competitors solve this problem?\n4. What previous attempts were made? Why did they fail?\n\nIMPORTANT: Every insight must have a source.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave research issues to `{{workspace_path}}/research-issues.md` with format:\n```\n# Research Issues\n\n## DATA SOURCES\n1. [Missing or weak source]\n\n## EVIDENCE GAPS\n1. [Insight without source]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `research_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Minimum 2 data sources\n2. Key insights have sources\n3. Competitors analyzed\n4. No unsubstantiated claims\n\nReturn `issues_count` = number of issues found (0 if research complete).",
-      "completionCondition": "Minimum 2 data sources, key insights with sources, competitors analyzed",
+      "directive": "Delegate an independent review in a separate host-supported context or child execution. Do not self-review and do not require a client-specific tool name or hard-coded subagent type. The reviewer must read complete current `{{workspace_path}}/prd-requirements.md`, `{{workspace_path}}/prd-standards.md`, `{{workspace_path}}/prd.contract.json`, `{{workspace_path}}/prd.md`, and relevant authorized primary evidence directly; do not send copied bodies.\n\nVerify completeness for the actual requested scope, evidence support and honest gaps, applicability decisions, problem/solution consistency, stable IDs and all cross-links, prioritized requirements and observable acceptance criteria, user-story traceability, relevant edge/error/recovery behavior, metric baseline/target/method/timeframe, assumptions, risks and mitigations, open questions, limitations, readiness honesty, exact JSON-to-Markdown representation, and local-only authority. Unsupported claims, fabricated padding, dangling or duplicate IDs, lost structured content, an unjustified omission, vague acceptance, unmeasurable success, hidden material uncertainty, or authority expansion is blocking.\n\nOverwrite `{{workspace_path}}/review.md` with the complete current reproducible blocking finding set. Diagnose only; do not edit any PRD artifact. Return `issues_count` exactly equal to the blocking findings; zero is valid only after the complete current files pass. The reviewer must not implement the product, modify project files, execute tests, use VCS, publish or upload, notify, deploy, or administer systems.",
+      "completionCondition": "An independent complete current review is stored in review.md and issues_count exactly matches its blocking findings",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "data_sources",
-          "key_insights",
-          "competitor_solutions"
+          "issues_count"
         ],
         "globalInputs": [
-          "data_sources",
-          "key_insights",
-          "competitor_solutions",
-          "previous_attempts"
+          "issues_count"
         ]
       },
       "connections": {
-        "success": "solution"
+        "success": "review-gate"
       }
     },
     {
-      "id": "solution",
-      "type": "agent-directive",
-      "directive": "Describe proposed solution.\n\nProblem: {{problem_statement}}\nKey insights: {{key_insights}}\nCompetitors: {{competitor_solutions}}\n\nUse planning standards: {{planning_standards}}\n\nDefine:\n1. How do we solve the problem? (solution description)\n2. Why this approach? (what alternatives were considered)\n3. What do we include? (in scope)\n4. What do we NOT include? (out of scope — explicit)\n5. Constraints (technical, business, timeline)\n\n{{common_mistakes}}\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave solution issues to `{{workspace_path}}/solution-issues.md` with format:\n```\n# Solution Issues\n\n## SCOPE CLARITY\n1. [Unclear scope boundary]\n\n## STANDARDS COMPLIANCE\n1. [Missing required element]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `solution_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Solution clearly described\n2. In/out of scope explicit per {{planning_standards}}\n3. Constraints listed\n4. Alternatives considered\n\nReturn `issues_count` = number of issues found (0 if solution complete).",
-      "completionCondition": "Solution described, in/out of scope explicit, constraints listed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "solution_description",
-          "in_scope",
-          "out_of_scope"
-        ],
-        "globalInputs": [
-          "solution_description",
-          "why_this_approach",
-          "in_scope",
-          "out_of_scope",
-          "constraints"
-        ]
+      "id": "review-gate",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "issues_count"
+        },
+        "right": 0
       },
       "connections": {
-        "success": "user-stories"
+        "true": "present",
+        "false": "repair"
       }
     },
     {
-      "id": "user-stories",
+      "id": "present",
       "type": "agent-directive",
-      "directive": "Write user stories with acceptance criteria.\n\nSolution: {{solution_description}}\nIn scope: {{in_scope}}\nTarget users: {{target_users}}\n\nUse planning standards: {{planning_standards}}\n\nFor each story:\n- As a [SPECIFIC user from target_users]\n- I want to [SPECIFIC action]\n- So that [MEASURABLE outcome]\n- Acceptance Criteria (minimum 3, TESTABLE per standards)\n\n{{quality_standards}}\n\nIMPORTANT: AC must be verifiable — can write test or check manually.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave user stories issues to `{{workspace_path}}/stories-issues.md` with format:\n```\n# User Stories Issues\n\n## FORMAT COMPLIANCE\n1. [Story not following format]\n\n## ACCEPTANCE CRITERIA\n1. [Vague or untestable AC]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `stories_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER STORIES FORMAT per {{planning_standards}}\n2. ACCEPTANCE CRITERIA per {{planning_standards}}\n3. Minimum 3 stories\n4. Each story has minimum 3 testable AC\n\nReturn `issues_count` = number of issues found (0 if stories complete).",
-      "completionCondition": "Minimum 3 user stories, each with minimum 3 testable AC",
+      "directive": "Read the accepted current `{{workspace_path}}/prd.md`, `{{workspace_path}}/prd.contract.json`, and `{{workspace_path}}/review.md`. Confirm the independent report has zero blocking findings. Present a concise result that identifies the durable PRD path, summarizes the problem, chosen scope, readiness, success metric, and any remaining limitations, and recommends only separately authorized follow-on work. Do not rewrite accepted artifacts, implement the product, modify project files, execute tests, use VCS, publish or upload, notify, deploy, or administer systems. Return only bounded `result_summary`; do not copy the PRD body.",
+      "completionCondition": "The accepted durable PRD is identified with an accurate bounded summary, readiness, and honest limitations",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "stories"
+          "result_summary"
         ],
         "globalInputs": [
-          "stories"
-        ]
-      },
-      "connections": {
-        "success": "edge-cases"
-      }
-    },
-    {
-      "id": "edge-cases",
-      "type": "agent-directive",
-      "directive": "Describe edge cases and error states.\n\nSolution: {{solution_description}}\nUser stories: {{stories}}\n\nThink about non-standard situations:\n1. What if data is incomplete or invalid?\n2. What if service/API is unavailable?\n3. What if user does something wrong?\n4. What if concurrent access / race conditions?\n5. What if limits are exceeded?\n\nFor each edge case specify expected behavior and recovery path.\n\nIMPORTANT: Minimum 5 edge cases required.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave edge cases issues to `{{workspace_path}}/edge-cases-issues.md` with format:\n```\n# Edge Cases Issues\n\n## COVERAGE\n1. [Missing edge case category]\n\n## HANDLING\n1. [Incomplete error handling]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `edge_cases_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Minimum 5 edge cases\n2. Expected behavior defined\n3. Recovery path specified\n4. Error states covered\n\nReturn `issues_count` = number of issues found (0 if edge cases complete).",
-      "completionCondition": "Minimum 5 edge cases with expected behavior",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "edge_cases"
-        ],
-        "globalInputs": [
-          "edge_cases",
-          "error_states"
-        ]
-      },
-      "connections": {
-        "success": "metrics"
-      }
-    },
-    {
-      "id": "metrics",
-      "type": "agent-directive",
-      "directive": "Define success metrics.\n\nProblem: {{problem_statement}}\nSolution: {{solution_description}}\n\nDefine:\n1. Primary metric (north star) — one main metric\n   - Name\n   - Target value\n   - How to measure\n   - Timeline\n\n2. Secondary metrics — additional metrics\n\n3. Success threshold — when do we consider it success\n\nIMPORTANT: Metrics must be MEASURABLE with specific target.",
-      "completionCondition": "Primary metric with target and measurement method, secondary metrics defined",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "primary_metric",
-          "success_threshold"
-        ],
-        "globalInputs": [
-          "primary_metric",
-          "secondary_metrics",
-          "success_threshold"
-        ]
-      },
-      "connections": {
-        "success": "assumptions"
-      }
-    },
-    {
-      "id": "assumptions",
-      "type": "agent-directive",
-      "directive": "Identify assumptions and risks.\n\nSolution: {{solution_description}}\nMetrics: {{primary_metric}}\n\nFor each assumption:\n1. What do we assume?\n2. How will we verify? (validation method)\n3. What if wrong? (impact)\n\nFor each risk:\n1. Risk description\n2. Probability (high/medium/low)\n3. Impact (high/medium/low)\n4. Mitigation plan\n\n{{common_mistakes}}",
-      "completionCondition": "Assumptions with validation methods, risks with mitigation plans",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "assumptions",
-          "risks"
-        ],
-        "globalInputs": [
-          "assumptions",
-          "risks"
-        ]
-      },
-      "connections": {
-        "success": "output"
-      }
-    },
-    {
-      "id": "output",
-      "type": "agent-directive",
-      "directive": "Generate final PRD.\n\nUse planning standards: {{planning_standards}}\n\n{{validation_criteria}}\n\nUse all gathered data:\n- Problem: {{problem_statement}}\n- Target users: {{target_users}}\n- Research: {{key_insights}}\n- Solution: {{solution_description}}\n- In scope: {{in_scope}}\n- Out of scope: {{out_of_scope}}\n- User stories: {{stories}}\n- Edge cases: {{edge_cases}}\n- Primary metric: {{primary_metric}}\n- Assumptions: {{assumptions}}\n- Risks: {{risks}}\n\nCreate:\n1. Executive summary (1 paragraph)\n2. Full PRD document with all sections\n3. Open questions (what else needs clarification)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave final PRD validation issues to `{{workspace_path}}/prd-issues.md` with format:\n```\n# PRD Validation Issues\n\n## COMPLETENESS\n1. [Missing required section]\n\n## STANDARDS COMPLIANCE\n1. [Section not meeting standards]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `prd_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. All sections present per validation_criteria\n2. REQUIREMENTS TRACEABILITY per {{planning_standards}}\n3. No incomplete items\n4. All issues from previous steps addressed\n\nReturn `issues_count` = number of issues found (0 if PRD complete).\n\nShow document to user.",
-      "completionCondition": "PRD document ready and shown to user",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "prd_delivered",
-          "sections_count"
-        ],
-        "globalInputs": [
-          "prd_delivered",
-          "sections_count",
-          "open_questions"
+          "result_summary"
         ]
       },
       "connections": {
@@ -194,363 +937,878 @@
       }
     },
     {
-      "id": "end",
-      "type": "end"
+      "id": "repair",
+      "type": "agent-directive",
+      "directive": "Read the complete current `{{workspace_path}}/review.md`, `{{workspace_path}}/prd-requirements.md`, `{{workspace_path}}/prd-standards.md`, `{{workspace_path}}/prd.contract.json`, `{{workspace_path}}/prd.md`, and relevant authorized primary evidence. Reproduce every reported finding. Repair confirmed defects at their source: update the canonical JSON or explanatory requirements/evidence as required, then regenerate the Markdown projection so every overlapping field matches exactly. Preserve correct content, evidence honesty, stable IDs, traceability, applicability decisions, limitations, and authority boundaries.\n\nPersist changed `prd.contract.json` and `prd.md` in the same workspace, updating `prd-requirements.md` only when its evidence, assumptions, or unknowns actually changed. Update `prd-standards.md` only to correct a confirmed standards-artifact defect: reconcile it to the immutable workflow requirements and applicable authoring reference, and never weaken, delete, or rewrite a standard merely to evade a finding. Return only `prd_contract` exactly as persisted so the engine applies the same strict structural validation as initial authorship. Do not return Markdown or finding bodies. If a finding is false, explain that in current review evidence; if no meaningful authorized change can be made or the artifacts would remain unchanged, stop and report the factual blocker instead of submitting an unchanged loop.\n\nThis repair may change only the local PRD artifacts. It does not implement the product, modify project code or documentation, execute tests, use version control, publish or upload, notify, deploy, or administer systems. It may only recommend those actions to a separately authorized caller or workflow.",
+      "completionCondition": "Confirmed findings are repaired in changed canonical/projection artifacts and the returned contract exactly matches current JSON",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prd_contract": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "executive_summary": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 3000
+              },
+              "evidence_sources": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "user-input",
+                        "project-document",
+                        "code",
+                        "analytics",
+                        "interview",
+                        "support",
+                        "research",
+                        "external",
+                        "other"
+                      ]
+                    },
+                    "source": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "finding": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "source",
+                    "finding"
+                  ]
+                }
+              },
+              "evidence_gaps": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "question": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "decision_impact": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "next_validation": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "question",
+                    "decision_impact",
+                    "next_validation"
+                  ]
+                }
+              },
+              "problem": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 3000
+                  },
+                  "target_users": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "role": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "context": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "role",
+                        "context"
+                      ]
+                    }
+                  },
+                  "urgency": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "cost_of_inaction": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "required": [
+                  "statement",
+                  "target_users",
+                  "urgency",
+                  "cost_of_inaction",
+                  "evidence_ids"
+                ]
+              },
+              "solution": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 3000
+                  },
+                  "alternatives": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "option": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "decision": {
+                          "type": "string",
+                          "enum": [
+                            "selected",
+                            "rejected",
+                            "deferred"
+                          ]
+                        },
+                        "rationale": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "evidence_ids": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "option",
+                        "decision",
+                        "rationale",
+                        "evidence_ids"
+                      ]
+                    }
+                  },
+                  "in_scope": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "out_of_scope": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "constraints": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  },
+                  "previous_attempts": {
+                    "type": "array",
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "attempt": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "outcome": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "lesson": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "evidence_ids": {
+                          "type": "array",
+                          "maxItems": 50,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "attempt",
+                        "outcome",
+                        "lesson",
+                        "evidence_ids"
+                      ]
+                    }
+                  },
+                  "evidence_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    }
+                  }
+                },
+                "required": [
+                  "description",
+                  "rationale",
+                  "alternatives",
+                  "in_scope",
+                  "out_of_scope",
+                  "constraints",
+                  "dependencies",
+                  "previous_attempts",
+                  "evidence_ids"
+                ]
+              },
+              "requirements": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "priority": {
+                      "type": "string",
+                      "enum": [
+                        "must",
+                        "should",
+                        "could",
+                        "wont"
+                      ]
+                    },
+                    "priority_rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "evidence_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    },
+                    "acceptance_criteria": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 30,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          },
+                          "statement": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "statement"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "priority",
+                    "priority_rationale",
+                    "evidence_ids",
+                    "acceptance_criteria"
+                  ]
+                }
+              },
+              "user_stories": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "actor": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 300
+                    },
+                    "goal": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    },
+                    "requirement_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    },
+                    "acceptance_criterion_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "actor",
+                    "goal",
+                    "outcome",
+                    "requirement_ids",
+                    "acceptance_criterion_ids"
+                  ]
+                }
+              },
+              "edge_cases": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "scenario": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "expected_behavior": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "recovery": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "requirement_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "scenario",
+                    "expected_behavior",
+                    "recovery",
+                    "requirement_ids"
+                  ]
+                }
+              },
+              "metrics": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "primary": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      },
+                      "baseline": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "target": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "measurement_method": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1500
+                      },
+                      "timeframe": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      "evidence_ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 50,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        }
+                      },
+                      "requirement_ids": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 50,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "baseline",
+                      "target",
+                      "measurement_method",
+                      "timeframe",
+                      "evidence_ids",
+                      "requirement_ids"
+                    ]
+                  },
+                  "secondary": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "target": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "measurement_method": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1500
+                        },
+                        "timeframe": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "requirement_ids": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 50,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "target",
+                        "measurement_method",
+                        "timeframe",
+                        "requirement_ids"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "primary",
+                  "secondary"
+                ]
+              },
+              "assumptions": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "validation_method": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "impact_if_false": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "evidence_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "statement",
+                    "validation_method",
+                    "impact_if_false",
+                    "evidence_ids"
+                  ]
+                }
+              },
+              "risks": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                    },
+                    "description": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "likelihood": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low",
+                        "unknown"
+                      ]
+                    },
+                    "impact": {
+                      "type": "string",
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low",
+                        "unknown"
+                      ]
+                    },
+                    "mitigation": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "requirement_ids": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description",
+                    "likelihood",
+                    "impact",
+                    "mitigation",
+                    "requirement_ids"
+                  ]
+                }
+              },
+              "applicability_decisions": {
+                "type": "array",
+                "maxItems": 30,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "domain": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "applicable",
+                        "not-applicable",
+                        "unknown"
+                      ]
+                    },
+                    "rationale": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1500
+                    },
+                    "evidence_ids": {
+                      "type": "array",
+                      "maxItems": 50,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "status",
+                    "rationale",
+                    "evidence_ids"
+                  ]
+                }
+              },
+              "open_questions": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                }
+              },
+              "limitations": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1500
+                }
+              },
+              "readiness": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "ready-with-limitations",
+                  "not-ready"
+                ]
+              },
+              "readiness_rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "title",
+              "executive_summary",
+              "evidence_sources",
+              "evidence_gaps",
+              "problem",
+              "solution",
+              "requirements",
+              "user_stories",
+              "edge_cases",
+              "metrics",
+              "assumptions",
+              "risks",
+              "applicability_decisions",
+              "open_questions",
+              "limitations",
+              "readiness",
+              "readiness_rationale"
+            ]
+          }
+        },
+        "required": [
+          "prd_contract"
+        ]
+      },
+      "connections": {
+        "success": "review"
+      }
     }
   ],
   "variableRegistry": {
-    "quality_standards": {
-      "type": "string",
-      "description": "Quality standards for PRD sections",
-      "default": "PRD QUALITY STANDARDS:\n\n1. Problem statement SPECIFIC:\n   - 'Users need better'\n   + 'Users spend 2 hours on manual data entry daily'\n\n2. Data-backed decisions:\n   - Every statement has source (analytics, interviews, research)\n   - No 'users want X' without evidence\n\n3. Specific user stories:\n   - 'As a user, I want to easily access data'\n   + 'As a sales manager, I want to click Export button and get CSV file with last month sales'\n\n4. Testable acceptance criteria:\n   - Every AC verifiable by autotest or manually\n   - No 'works correctly' or 'loads fast'\n\n5. Measurable metrics:\n   - Primary metric with specific target and deadline\n   - How to measure defined"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Common mistakes to avoid in PRD creation",
-      "default": "COMMON PRD MISTAKES:\n\n1. Starting with solution instead of problem\n   → First problem statement, then solution\n\n2. Generic user stories without specifics\n   → Specific user + specific action + measurable outcome\n\n3. Skipping edge cases\n   → Minimum 5 non-standard scenarios required\n\n4. Abstract metrics\n   - 'Improve user experience'\n   + 'Increase completion rate from 60% to 80% in 3 months'\n\n5. Hidden assumptions\n   → Every assumption explicit + how to verify\n\n6. Incomplete scope\n   → Explicitly state in scope AND out of scope"
-    },
-    "validation_criteria": {
-      "type": "string",
-      "description": "PRD completeness checklist for validation",
-      "default": "PRD COMPLETENESS CHECKLIST:\n\n1. PROBLEM:\n[ ] Is problem statement specific (not generic)?\n[ ] Are target users defined?\n[ ] Is urgency justified?\n[ ] Is cost of inaction described?\n\n2. RESEARCH:\n[ ] Minimum 2 data sources?\n[ ] Are key insights specific?\n[ ] Competitors analyzed?\n\n3. SOLUTION:\n[ ] In scope and out of scope explicit?\n[ ] Constraints listed?\n[ ] Why this approach justified?\n\n4. USER STORIES:\n[ ] Does each story have minimum 3 AC?\n[ ] Are AC testable (verifiable)?\n\n5. EDGE CASES:\n[ ] Minimum 5 edge cases?\n[ ] Error states described?\n\n6. METRICS:\n[ ] Primary metric with target?\n[ ] How to measure defined?\n\n7. ASSUMPTIONS:\n[ ] All assumptions explicit?\n[ ] Validation method for each?"
-    },
-    "planning_standards": {
-      "type": "string",
-      "description": "Standards for user stories, acceptance criteria, and scope",
-      "default": "PRD PLANNING STANDARDS:\n\n1. USER STORIES FORMAT:\n- Specific user from defined personas (not generic \"user\")\n- Concrete action with clear boundaries\n- Measurable outcome with success criteria\n- Minimum 3 testable acceptance criteria per story\n- Each AC verifiable by automated test or manual check\n\n2. ACCEPTANCE CRITERIA:\n- GIVEN/WHEN/THEN format for clarity\n- No vague terms (\"fast\", \"easy\", \"user-friendly\")\n- Specific values where applicable\n- Edge case handling explicit\n- Error scenarios included\n\n3. SCOPE CLARITY:\n- In-scope items explicitly listed\n- Out-of-scope items explicitly stated (not implied)\n- Dependencies identified\n- Constraints documented\n- Assumptions made explicit\n\n4. REQUIREMENTS TRACEABILITY:\n- Each requirement linked to problem statement\n- Priority clearly assigned\n- Effort estimate provided\n- Dependencies mapped\n- Success metrics defined"
-    },
-    "constraints": {
-      "type": "array",
-      "description": "Workflow-global constraints",
-      "items": {
-        "type": "string"
-      }
-    },
-    "cost_of_inaction": {
-      "type": "string",
-      "description": "Workflow-global cost_of_inaction"
-    },
-    "data_sources": {
-      "type": "array",
-      "description": "Workflow-global data_sources",
-      "items": {
-        "type": "object",
-        "properties": {
-          "source": {
-            "type": "string"
-          },
-          "key_finding": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "source",
-          "key_finding"
-        ]
-      },
-      "minItems": 2
-    },
-    "error_states": {
-      "type": "array",
-      "description": "Workflow-global error_states",
-      "items": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "user_message": {
-            "type": "string"
-          },
-          "recovery_action": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "error",
-          "user_message"
-        ]
-      }
-    },
-    "open_questions": {
-      "type": "array",
-      "description": "Workflow-global open_questions",
-      "items": {
-        "type": "string"
-      }
-    },
-    "prd_delivered": {
-      "type": "string",
-      "description": "Workflow-global prd_delivered",
-      "enum": [
-        "yes"
-      ]
-    },
-    "previous_attempts": {
-      "type": "array",
-      "description": "Workflow-global previous_attempts",
-      "items": {
-        "type": "string"
-      }
-    },
-    "secondary_metrics": {
-      "type": "array",
-      "description": "Workflow-global secondary_metrics",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "target": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "target"
-        ]
-      }
-    },
-    "sections_count": {
-      "type": "number",
-      "description": "Workflow-global sections_count"
-    },
-    "success_threshold": {
-      "type": "string",
-      "description": "Workflow-global success_threshold"
-    },
-    "urgency_reason": {
-      "type": "string",
-      "description": "Workflow-global urgency_reason"
-    },
-    "why_this_approach": {
-      "type": "string",
-      "description": "Workflow-global why_this_approach"
-    },
     "workspace_path": {
       "type": "string",
-      "description": "Workflow-global workspace_path"
+      "description": "Traversal-safe relative workspace containing the current PRD artifacts at fixed child names",
+      "minLength": 25,
+      "maxLength": 152,
+      "pattern": "^\\./moira-ws/prd-creation-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"
     },
-    "problem_statement": {
+    "issues_count": {
+      "type": "integer",
+      "description": "Current independent blocking finding count used by the review gate",
+      "minimum": 0,
+      "maximum": 10000
+    },
+    "result_summary": {
       "type": "string",
-      "description": "Workflow-global problem_statement"
-    },
-    "target_users": {
-      "type": "array",
-      "description": "Workflow-global target_users",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "context": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "role"
-        ]
-      },
-      "minItems": 1
-    },
-    "key_insights": {
-      "type": "array",
-      "description": "Workflow-global key_insights",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
-    },
-    "competitor_solutions": {
-      "type": "array",
-      "description": "Workflow-global competitor_solutions",
-      "items": {
-        "type": "object",
-        "properties": {
-          "competitor": {
-            "type": "string"
-          },
-          "how_they_solve": {
-            "type": "string"
-          },
-          "gaps": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "competitor",
-          "how_they_solve"
-        ]
-      }
-    },
-    "solution_description": {
-      "type": "string",
-      "description": "Workflow-global solution_description"
-    },
-    "in_scope": {
-      "type": "array",
-      "description": "Workflow-global in_scope",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
-    },
-    "stories": {
-      "type": "array",
-      "description": "Workflow-global stories",
-      "items": {
-        "type": "object",
-        "properties": {
-          "user": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string"
-          },
-          "outcome": {
-            "type": "string"
-          },
-          "acceptance_criteria": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 3
-          }
-        },
-        "required": [
-          "user",
-          "action",
-          "outcome",
-          "acceptance_criteria"
-        ]
-      },
-      "minItems": 3
-    },
-    "primary_metric": {
-      "type": "object",
-      "description": "Workflow-global primary_metric",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "current_value": {
-          "type": "string"
-        },
-        "target_value": {
-          "type": "string"
-        },
-        "how_to_measure": {
-          "type": "string"
-        },
-        "timeline": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "target_value",
-        "how_to_measure"
-      ]
-    },
-    "out_of_scope": {
-      "type": "array",
-      "description": "Workflow-global out_of_scope",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
-    },
-    "edge_cases": {
-      "type": "array",
-      "description": "Workflow-global edge_cases",
-      "items": {
-        "type": "object",
-        "properties": {
-          "scenario": {
-            "type": "string"
-          },
-          "expected_behavior": {
-            "type": "string"
-          },
-          "recovery": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "scenario",
-          "expected_behavior"
-        ]
-      },
-      "minItems": 5
-    },
-    "assumptions": {
-      "type": "array",
-      "description": "Workflow-global assumptions",
-      "items": {
-        "type": "object",
-        "properties": {
-          "statement": {
-            "type": "string"
-          },
-          "validation_method": {
-            "type": "string"
-          },
-          "impact_if_wrong": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "statement",
-          "validation_method"
-        ]
-      },
-      "minItems": 1
-    },
-    "risks": {
-      "type": "array",
-      "description": "Workflow-global risks",
-      "items": {
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "probability": {
-            "type": "string",
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ]
-          },
-          "impact": {
-            "type": "string",
-            "enum": [
-              "high",
-              "medium",
-              "low"
-            ]
-          },
-          "mitigation": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "description",
-          "mitigation"
-        ]
-      }
-    },
-    "has_file_access": {
-      "type": "boolean",
-      "description": "Agent can read/write local files"
+      "description": "Bounded final summary identifying the accepted durable PRD, readiness, and limitations",
+      "minLength": 1,
+      "maxLength": 2000
     }
   }
 }

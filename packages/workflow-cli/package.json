@@ -1,6 +1,6 @@
 {
   "name": "@mcp-moira/workflow-cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "CLI tool for Moira workflow management",
   "type": "module",
   "bin": {
@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@mcp-moira/workflow-engine": "*",
-    "@mcp-moira/shared": "*"
+    "@mcp-moira/shared": "*",
+    "tsx": "^4.20.6"
   },
   "private": true
 }

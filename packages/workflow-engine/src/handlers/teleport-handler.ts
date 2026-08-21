@@ -77,7 +77,7 @@ export class TeleportHandler implements INodeHandler {
     const schema = teleportNode.inputSchema
       ? SchemaValidator.enforceStrictSchema(teleportNode.inputSchema as Record<string, unknown>)
       : EMPTY_INPUT_SCHEMA;
-    const result = SchemaValidator.validate(input, schema);
+    const result = SchemaValidator.validate(input, schema, context.variables);
 
     if (!result.isValid) {
       const errors = result.errors || ["Unknown validation error"];

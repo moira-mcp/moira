@@ -1051,7 +1051,17 @@ export class GraphTemplateProcessor {
         return match; // Return unchanged
       }
       try {
-        const value = this.getNestedValue(context.variables, path, context.variables);
+        // A fragment substituted earlier in this same rendering pass may expose a
+        // simple system template. Keep the second-pass lookup consistent with
+        // processVariableTemplates instead of looking only in user variables.
+        const value =
+          path === "executionId"
+            ? context.executionId
+            : path === "workflowId"
+              ? context.workflowId
+              : path === "userId"
+                ? context.userId
+                : this.getNestedValue(context.variables, path, context.variables);
         const serialized = this.safeSerialize(value);
 
         this.logger.debug("Replaced nested path template", {

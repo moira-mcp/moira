@@ -34,6 +34,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
 // Import GraphValidator directly to avoid auth dependencies from shared index
 import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
@@ -63,6 +64,32 @@ import {
 const MAX_DIRECTIVE_LENGTH = 150;
 const MAX_CONDITION_LENGTH = 80;
 const BACKUPS_DIR = path.join(process.cwd(), "workflow-backups");
+const CLI_SOURCE_PATH = fileURLToPath(import.meta.url);
+
+function readCliPackageVersion(): string {
+  const packagePath = path.resolve(path.dirname(CLI_SOURCE_PATH), "../package.json");
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf-8")) as { version?: unknown };
+    return typeof packageJson.version === "string" ? packageJson.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function readTextArgumentFromFile(args: string[], flag: string, label: string): string | undefined {
+  const flagIndex = args.indexOf(flag);
+  if (flagIndex === -1) return undefined;
+  const filePath = args[flagIndex + 1];
+  if (!filePath || filePath.startsWith("--")) {
+    console.error(c("red", `ERROR: ${flag} requires a file path`));
+    process.exit(1);
+  }
+  if (!fs.existsSync(filePath)) {
+    console.error(c("red", `ERROR: ${label} file not found: ${filePath}`));
+    process.exit(1);
+  }
+  return fs.readFileSync(filePath, "utf-8").trim();
+}
 
 // === COLORS ===
 const colors = {
@@ -857,6 +884,7 @@ async function cmdValidateWorkflow(workflow: WorkflowGraph): Promise<void> {
     console.log(c("red", `✗ ${errors.length} error(s) found:`));
     errors.forEach((err) => console.log(`  ${c("red", "•")} ${err.message}`));
     console.log("");
+    process.exitCode = 1;
   }
 
   if (warnings.length > 0) {
@@ -1199,7 +1227,7 @@ function copyWorkflow(sourcePath: string, destPath: string, newName?: string): v
   console.log(c("dim", `  New Name: ${copiedWorkflow.metadata.name}`));
 }
 
-function syncWorkflow(sourcePath: string, destPath: string): void {
+async function syncWorkflow(sourcePath: string, destPath: string): Promise<void> {
   if (!fs.existsSync(destPath)) {
     console.error(c("red", `ERROR: Sync destination does not exist: ${destPath}`));
     process.exit(1);
@@ -1217,6 +1245,19 @@ function syncWorkflow(sourcePath: string, destPath: string): void {
   }
   synchronizedWorkflow.metadata.author ??= destinationWorkflow.metadata.author;
   synchronizedWorkflow.metadata.tags ??= destinationWorkflow.metadata.tags;
+
+  const validator = new GraphValidator();
+  const validation = await validator.validateUnified(synchronizedWorkflow);
+  const errors = validation.issues.filter((issue) => issue.severity === "error");
+  if (errors.length > 0) {
+    console.error(
+      c("red", `ERROR: Refusing to synchronize an invalid workflow (${errors.length} error(s)):`),
+    );
+    errors.forEach((error) => console.error(`  ${c("red", "•")} ${error.message}`));
+    console.error(c("dim", `  Destination was not changed: ${destPath}`));
+    process.exit(1);
+  }
+
   createBackup(destPath);
   saveWorkflow(destPath, synchronizedWorkflow, destinationWorkflow, { force: true });
   console.log(c("green", `✓ Synchronized workflow copy: ${destPath}`));
@@ -1242,9 +1283,18 @@ interface ParsedConfig {
 function parseArgs(): ParsedConfig {
   const args = process.argv.slice(2);
 
+  if (args[0] === "--version" || args[0] === "-V") {
+    console.log(`@mcp-moira/workflow-cli ${readCliPackageVersion()}`);
+    console.log(`Source: ${CLI_SOURCE_PATH}`);
+    process.exit(0);
+  }
+
   if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
     console.log(`
 ${c("bright", "Workflow Management Tool")}
+
+Version: ${readCliPackageVersion()}
+Source: ${CLI_SOURCE_PATH}
 
 ${c("cyan", "Usage:")}
   moira-workflow <workflow-file> <command> [options]
@@ -1256,7 +1306,7 @@ ${c("cyan", "Commands:")}
   clone <node-id> <new-id>         Clone node with new ID
   export-node <node-id> <path>     Export node to JSON file
   replace <node-id> <node-file>    Replace node in place from JSON
-  sync <dest-file>                 Replace an existing workflow copy, preserving identity
+  sync <dest-file>                 Validate and replace a workflow copy, preserving identity
   move <node-id> --after <target>  Move node after target in array
   add <node-json-file>             Add nodes from JSON file
   search <text>                    Search nodes (supports regex: "a|b")
@@ -1266,12 +1316,13 @@ ${c("cyan", "Commands:")}
   variables [--usage]              Analyze all workflow variables
   get-variable <name>              Get declared global from variableRegistry
   set-variable <name> <value>      Set declared global in variableRegistry
-  set-variable-schema <name> <json> Replace a declared global's complete JSON Schema
+  set-variable-schema <name> <json|--file path>
+                                     Replace a declared global's complete JSON Schema
   delete-variable <name>           Delete declared global from variableRegistry
   list-variables                   List declared globals from variableRegistry
   set-name <text>                  Set workflow display name
   set-slug <slug>                  Set workflow catalog slug (kebab-case)
-  set-description <text>           Set workflow description
+  set-description <text|--file path> Set workflow description
   set-version <version>            Set workflow version
   diff <other-file>                Compare with another workflow file
   create <file> --name <name>      Create new workflow
@@ -1573,26 +1624,35 @@ async function main(): Promise<void> {
       );
       break;
 
-    case "set-variable-schema":
-      if (!config.nodeId || args.length < 4) {
-        console.error(c("red", "Usage: set-variable-schema <name> <schema-json>"));
+    case "set-variable-schema": {
+      if (!config.nodeId) {
+        console.error(c("red", "Usage: set-variable-schema <name> <schema-json|--file path>"));
+        process.exit(1);
+      }
+      const schemaFromFile = readTextArgumentFromFile(args, "--file", "Variable schema");
+      const inlineSchema = args
+        .slice(3)
+        .filter((argument) => argument !== "--force")
+        .join(" ")
+        .trim();
+      if (schemaFromFile !== undefined && args[3] !== "--file") {
+        console.error(c("red", "ERROR: Use either inline schema JSON or --file, not both"));
+        process.exit(1);
+      }
+      const schema = schemaFromFile ?? inlineSchema;
+      if (!schema) {
+        console.error(c("red", "Usage: set-variable-schema <name> <schema-json|--file path>"));
         process.exit(1);
       }
       createBackup(config.file);
       saveWorkflow(
         config.file,
-        setVariableSchema(
-          workflow,
-          config.nodeId,
-          args
-            .slice(3)
-            .filter((argument) => argument !== "--force")
-            .join(" "),
-        ),
+        setVariableSchema(workflow, config.nodeId, schema),
         originalWorkflow,
         saveOptions,
       );
       break;
+    }
 
     case "set-slug": {
       const slug = args
@@ -1625,13 +1685,19 @@ async function main(): Promise<void> {
     }
 
     case "set-description": {
-      const description = args
+      const descriptionFromFile = readTextArgumentFromFile(args, "--file", "Description");
+      const inlineDescription = args
         .slice(2)
         .filter((argument) => argument !== "--force")
         .join(" ")
         .trim();
+      if (descriptionFromFile !== undefined && args[2] !== "--file") {
+        console.error(c("red", "ERROR: Use either inline description text or --file, not both"));
+        process.exit(1);
+      }
+      const description = descriptionFromFile ?? inlineDescription;
       if (!description) {
-        console.error(c("red", "Usage: set-description <text>"));
+        console.error(c("red", "Usage: set-description <text|--file path>"));
         process.exit(1);
       }
       createBackup(config.file);
@@ -1713,7 +1779,7 @@ async function main(): Promise<void> {
         console.error(c("red", "ERROR: Missing destination file for sync command"));
         process.exit(1);
       }
-      syncWorkflow(config.file, config.nodeId);
+      await syncWorkflow(config.file, config.nodeId);
       break;
 
     default:

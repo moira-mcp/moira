@@ -229,12 +229,23 @@ export class ConditionHandler implements INodeHandler {
     // Context path resolution
     if ("contextPath" in value) {
       const path = value.contextPath;
-      const resolvedValue = this.getNestedValue(context.variables, path);
+      const resolvedValue = this.resolveContextPath(context, path);
       evaluatedValues[path] = resolvedValue;
       return resolvedValue;
     }
 
     return value;
+  }
+
+  /**
+   * Resolve registry/node values and the same engine-owned system values that
+   * templates and GraphValidator expose to workflow authors.
+   */
+  private resolveContextPath(context: ExecutionContext, path: string): unknown {
+    if (path === "executionId") return context.executionId;
+    if (path === "workflowId") return context.workflowId;
+    if (path === "userId") return context.userId;
+    return this.getNestedValue(context.variables, path);
   }
 
   /**

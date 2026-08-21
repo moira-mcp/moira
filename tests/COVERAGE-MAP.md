@@ -372,7 +372,7 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/scripts/workflow-tool-identity.test.ts` — set-name and set-slug: exact replacement, kebab-case validation, catalog-entry warning, version bump, and no collateral change to slug/owner/description/nodes
-- `tests/unit/scripts/workflow-tool-variables.test.ts` — incl. registry-backed globals, metadata, replace/sync, End projection/path qualification, and inert-retry migration
+- `tests/unit/scripts/workflow-tool-variables.test.ts` — incl. registry-backed globals, metadata, file-backed arguments, source diagnostics, fail-fast validation, atomic replace/sync, End projection/path qualification, and inert-retry migration
 - `tests/unit/services/mcp-text-service.test.ts`
 
 **integration**
@@ -673,6 +673,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/shared/workflow-catalog.test.ts` — catalog identity/ownership metadata is excluded from the executable graph; readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop
 - `tests/unit/web-frontend/workflow-transformer.test.ts` — including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning
 - `tests/unit/workflow-engine/variable-resolver.test.ts`
+- `tests/unit/workflow-engine/workflow-schema-keywords.test.ts` — ordered unique-reference plans, deep evidence-prefix correlation, protected plan prefixes, non-mutating blocked responses, global-input inlining, and GraphValidator keyword registration
 - `tests/unit/workflow-engine/registry-converter.test.ts`
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection
 - `tests/unit/workflow-engine/strict-schema-validation.test.ts` — recursive strict JSON Schema normalization
@@ -708,7 +709,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/engine/expression-handler.test.ts` — ordered scalar/member/fingerprint projection, undeclared-target rejection, atomic registry-default reset/rollback, JSON-assignment metadata, content-free error-edge routing and error context
 - `tests/workflow/engine/expression-parser.test.ts` — safe numeric/dynamic array reads, closed reset parsing, bounds, prototype rejection, bare-only assignment targets
 - `tests/workflow/engine/max-nodes-validation.test.ts`
-- `tests/workflow/engine/node-handlers.test.ts` — including strict empty/nested/missing End projection and runtime-input rejection
+- `tests/workflow/engine/node-handlers.test.ts` — including strict empty/nested/missing End projection, runtime-input rejection, and engine-owned system context-path resolution
 - `tests/workflow/engine/node-type-validation.test.ts`
 - `tests/workflow/engine/materialize-node.test.ts` — materialize schema/source-default contract, handler directive summary, expected/unexpected preparation failures, isolated re-presentation that cannot traverse an error connection, shell encoding, current-registry rendering, tar output, path safety, collision detection, and exact resource boundaries
 - `tests/workflow/engine/note-handlers.test.ts`
@@ -717,7 +718,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/engine/registry-default-seeding.test.ts`
 - `tests/workflow/engine/registry-schema-model.test.ts` — registry entry = full JSON Schema
 - `tests/workflow/engine/registry-schema-validation.test.ts` — registry entry compiled as JSON Schema; malformed → blocking
-- `tests/workflow/engine/schema-validator-agent-format.test.ts`
+- `tests/workflow/engine/schema-validator-agent-format.test.ts` — including exact context-derived artifact paths that resolve the engine-owned execution identity and reject a schema-valid foreign workspace
 - `tests/workflow/engine/subgraph-delegation.test.ts`
 - `tests/workflow/engine/subgraph-handler-simple.test.ts` — including discriminated child-failure provenance
 - `tests/workflow/engine/subgraph-handler.test.ts`
@@ -765,31 +766,35 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/conditional-branching.test.ts`
 - `tests/workflow/scenarios/content-creation.test.ts`
 - `tests/workflow/scenarios/coverage.test.ts`
-- `tests/workflow/scenarios/data-analysis.test.ts`
-- `tests/workflow/scenarios/development-workflow.test.ts` — filesystem-first state and authority; autonomous and gated operation; local semantic gates; delegated completeness review and repair; plan-revision teleport; conditional visual obligations; acceptance, rejection, abort, VCS, and documentation-repair routes; engine-owned round and revision state; contained and spreading repair routing; durable unit accounts; reviewer record ownership
+- `tests/workflow/scenarios/data-analysis.test.ts` — public identity and detailed neighboring-flow description; immutable source authority separated from typed acquisition evidence; schema rejection of invented availability, incomplete source projection, and hidden canonical mutation; autonomous and interactive runs; inline and filesystem delivery; reviewed limited results; readiness and final repair reaches; guarded process revision; complete ordinary node and branch coverage
+- `tests/workflow/scenarios/development-workflow.test.ts` — v13 filesystem-first state and authority; autonomous and gated operation; local semantic gates and delegated completeness review; cause-aware pass/repair/replan contracts; mechanically distinguishable acceptance evidence; meta-validation drift stop; bounded class-wide repair; verification-only versus product mutation routing; architecture-currency reset and invalidation; plan-revision teleport; acceptance, rejection, blocker, VCS, documentation, checkpoint, finalization, and complete executable node/branch coverage
 - `tests/workflow/scenarios/execution-retrospective.test.ts` — catalog identity/version, exact archive materialization, sufficient/partial/unavailable semantic fixtures, independent analysis/final review oracles, proposal-only authority, all nodes/branches and contained/spreading repair routes
 - `tests/workflow/scenarios/directive-validation.test.ts`
-- `tests/workflow/scenarios/iterative-research.test.ts`
+- `tests/workflow/scenarios/infinite-task-loop.test.ts` — public identity/version and detailed neighboring-flow description; exact current-task state; atomic cross-task reset; strict decision and feedback schemas; authority and persistence boundaries; plan revision, result rework, and complete executable node and branch coverage
+- `tests/workflow/scenarios/iterative-research.test.ts` — public identity/version and detailed neighboring-flow description; execution workspace and engine-owned identity gate; bounded review and repair schemas; invalid identity and publication-coupling rejection; local, published, notified, failed, limited, aborted, repair, materialize-error, and process-revision outcomes
 - `tests/workflow/scenarios/lock-node.test.ts`
 - `tests/workflow/scenarios/marketing-campaign.test.ts`
 - `tests/workflow/scenarios/notes-demo-metrics-collector.test.ts`
 - `tests/workflow/scenarios/notes-demo-metrics-reporter.test.ts`
-- `tests/workflow/scenarios/prd-creation.test.ts`
+- `tests/workflow/scenarios/prd-creation.test.ts` — public identity, planning and review contracts, repair routes, terminal outcomes, and executable node and branch coverage
 - `tests/workflow/scenarios/quick-task.test.ts` — autonomous plan-gate bypass and mid-execution replan; filesystem workspace and immutable iteration paths; bounded typed outputs; disk-only evidence; plan repair and user revision; cursor-preserving resumption; result repair and rework; empty End output
 - `tests/workflow/scenarios/deep-corpus-research.test.ts` — catalog identity that cannot be confused with Robust Task, cost and consent markers in name/description, the consent gate enforced in the entry node in both modes, operating-mode routing with both notification outcomes, evidence-based bounded gates
-- `tests/workflow/scenarios/robust-task.test.ts` — filesystem-only durable state and native routing; completion, plan repair/rejection, ordinary retry, verifier and teleport replanning, retry exhaustion, incomplete delivery, criteria/final repair, explicit loop-bound decisions, and autonomous plan-gate bypass
+- `tests/workflow/scenarios/robust-task.test.ts` — v9 durable recovery and public identity; complete producer ownership; cause-aware plan, step, and final pass/repair/replan contracts; result versus evidence/projection repair budgets; changed/reassess ownership; six source-pure direct/reassessment replan paths; bounded retry and review decisions; truthful incomplete delivery; autonomous plan-gate bypass; teleport replanning; complete executable node and branch coverage
+- `tests/workflow/scenarios/simple-plan-execution.test.ts` — public identity/version and detailed neighboring-flow description; bounded canonical state; semantic plan identity; autonomous and interactive execution; projection/work/task/plan repair reaches; process revision; bounded terminal projection; complete node and branch coverage
 - `tests/workflow/scenarios/smart-purchase-assistant.test.ts`
 - `tests/workflow/scenarios/software-development-flow-lite.test.ts`
 - `tests/workflow/scenarios/startup-idea-validation.test.ts`
+- `tests/workflow/scenarios/task-breakdown-flow.test.ts` — public identity/version and detailed neighboring-flow description; bounded ordered plan/evidence and safe terminal projections; autonomous memory execution; strict feedback; blocked plan repair; materially changed retry; final projection rework; protected-prefix validation
 - `tests/workflow/scenarios/telegram-setup.test.ts`
 - `tests/workflow/scenarios/test-generation.test.ts`
-- `tests/workflow/scenarios/test-planning.test.ts`
-- `tests/workflow/scenarios/test-suite-audit.test.ts`
+- `tests/workflow/scenarios/test-planning.test.ts` — catalog identity and selection description; clean-or-repair graph; traversal-safe workspace; producer/repair schema identity; runtime contract rejection; zero-finding delivery; mismatch repair with re-review; complete node and branch coverage; no test-execution authority
+- `tests/workflow/scenarios/test-suite-audit.test.ts` — public identity and selection description; immutable audit standard; execution-bound workspace; strict correction and delivery schemas; scope and taxonomy correction routes; complete terminal outcomes; targeted checks; independent review and repair; complete node and branch coverage
 - `tests/workflow/scenarios/todo-list.test.ts` — minimal registry and graph contract, absence of a per-workflow system reminder with its rules carried by the execute node, unified planning/supplied-task intake, unchanged typed supplied tasks, one-based projection, local evidence bounds and malformed-input retry, empty End output, the mid-run revision teleport (jump-only entry, engine-derived total and cursor, resume without re-executing completed tasks), and reachable node/branch coverage
-- `tests/workflow/scenarios/user-onboarding.test.ts`
-- `tests/workflow/scenarios/ux-design.test.ts`
+- `tests/workflow/scenarios/user-onboarding.test.ts` — public identity/version and authority description; minimal selection/handoff graph; complete catalog pagination; identity bounds; create-own binding; start/defer consent; parent-linked execution evidence; bounded terminal projection; complete ordinary node and branch coverage
+- `tests/workflow/scenarios/universal-research-workflow.test.ts` — public identity/version and neighboring-flow selection description; filesystem and bounded-memory state; execution-bound workspace; authority and evidence-truth boundaries; independent reviews and repair reaches; publication and notification authority; correction, process revision, abort, and materialization fallback
+- `tests/workflow/scenarios/ux-design.test.ts` — public identity/version and neighboring-flow selection description; execution workspace; correlated intake, artifact-path, reviewer, repair, feedback, and authority contracts; foreign-path rejection; accepted, limited, blocked, aborted, repair, feedback, and process-revision outcomes
 - `tests/workflow/scenarios/verified-research.test.ts`
-- `tests/workflow/scenarios/workflow-management-flow.test.ts` — embedded authoring policy, minimal state and operating-mode routing; create, edit, audit, review, publication, error, local-sync, autonomous, and process-revision routes; addressed-reference pattern and antipattern
+- `tests/workflow/scenarios/workflow-management-flow.test.ts` — embedded authoring policy, minimal state and operating-mode routing; shared pre-mutation design review; pass/repair/replan and changed/reassess routing; Proxy, scanner, metatest, guard, and proof-token regression fixtures; create, edit, audit, publication, error, local-sync, autonomous, and process-revision routes; complete node and branch coverage
 - `tests/workflow/scenarios/workflow-presentation-generator.test.ts`
 
 ## Agent Instructions

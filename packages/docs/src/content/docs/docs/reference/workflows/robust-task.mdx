@@ -1,11 +1,11 @@
 ---
 title: Robust Task
-description: Filesystem-backed execution for complex tasks with durable evidence, independent reviews, and bounded recovery
+description: Durable execution of complex tasks with cause-aware independent reviews, bounded repair, recovery, and truthful delivery
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-Robust Task runs complex multi-step work from a durable filesystem workspace. It preserves every plan version and execution attempt, uses independent reviews before approval and after work, and asks the user for a decision when an automatic repair or retry budget is exhausted.
+Robust Task runs complex multi-step work from a durable filesystem workspace. The executor owns a complete coherent result; independent reviewers classify blocking findings by their earliest cause and route them to repair or replanning. Immutable plans, attempts, decisions, and reviews make the run recoverable after context loss, while bounded repair prevents unresolved work from being reported as complete.
 
 The workflow requires an agent with filesystem access. For smaller bounded tasks, use [Quick Task](/docs/reference/workflows/quick-task/).
 
@@ -21,20 +21,28 @@ mcp__moira__start({ workflowId: "moira/robust-task", parentExecutionId: "none" }
 flowchart LR
     A[Create workspace] --> B[Create plan]
     B --> C[Independent plan review]
-    C -->|findings| D[New plan version]
+    C -->|artifact repair| D[New plan version]
+    C -->|plan or criterion defect| R[Replan from current cause]
     D --> C
-    C -->|clean or accepted at limit| E[User approval]
+    R --> C
+    C -->|pass| M{Operating mode}
+    M -->|interactive| E[User approval]
+    M -->|autonomous| F
     E -->|rejected| D
     E -->|approved| F[Execute one step]
     F --> G[Independent step review]
-    G -->|retry| F
-    G -->|replan| D
-    G -->|accepted| H{More steps?}
+    G -->|result repair| Q[Repair result]
+    G -->|evidence repair| P[Repair evidence or projection]
+    Q --> G
+    P --> G
+    G -->|replan| R
+    G -->|pass| H{More steps?}
     H -->|yes| F
-    H -->|no| I[Criteria review]
-    I --> J[Independent final review]
-    J -->|findings| I
-    J -->|clean or accepted at limit| K[Delivery]
+    H -->|no| J[Independent final review]
+    J -->|deliverable repair| L[Repair deliverable]
+    J -->|replan| R
+    L --> J
+    J -->|pass or accepted incomplete| K[Delivery]
 ```
 
 ## Durable workspace
@@ -50,11 +58,13 @@ The workspace is correlated with the execution by `process-id.txt`. It also cont
 - `task-requirements.md` — the frozen active request;
 - `workflow-guide.md` — concise rules for recovery, planning, evidence, and review;
 - `plans/NNN/plan.md` — complete immutable plan versions;
-- `plans/NNN/review.md` — the current independent review of that plan version;
+- `plans/NNN/review.md` — the independent review of that exact plan version;
+- `plans/NNN/repair.md` — a repair-owner reassessment when the reviewed cause is not locally repairable;
 - `plans/NNN/decision.md` — the user's exact approval or rejection;
 - `steps/<step>/plans/<plan-version>/attempts/<attempt>/evidence.md` — evidence for one exact execution attempt;
 - `verdict.md` beside each evidence file — its independent gate review;
-- `final/criteria/` and `final/reviews/` — versioned completion reviews and repair records;
+- `repair.md` beside a failed attempt — the exact repair or reassessment record;
+- `final/reviews/` — immutable final reviews, fix evidence, and reassessments;
 - `final/delivery.md` — the truthful final result.
 
 Directives pass paths and small routing values through workflow context. They do not relay file bodies that the agent can read from the workspace. When a directive refers to a file the agent just wrote, the path remains the authority; the agent can reuse its current context or read the file again after context recovery.
@@ -67,9 +77,11 @@ Directives pass paths and small routing values through workflow context. They do
 
 Planning is goal-first: the plan contains as many substantive steps as the task needs. Each step gives an executor its purpose, relevant context, expected result, and a fitting acceptance gate without mechanically scripting intellectual work.
 
-An independent peer reviews the complete current plan against the frozen requirements and real project context. Only reproducible blocking defects count. A repair never overwrites the reviewed plan: it creates the next `plans/NNN/plan.md`, then the new version is reviewed.
+An independent peer reviews the complete current plan against the frozen requirements, primary sources, and real project context. For each blocker it identifies the earliest cause: workflow artifact, validation or test, insufficient evidence, documentation or projection, an invalid or unprovable criterion, or the upstream plan/process. It returns `pass`, `repair`, or `replan`. Local repair is allowed only when the plan artifact owns every blocker; other or mixed causes return to planning.
 
-The automatic plan-review cycle is bounded by `max_review_rounds` (default `5`). At the bound, the user explicitly chooses whether to continue repair or accept the reviewed plan for the separate approval gate. Execution starts only after the user unconditionally approves the exact plan. Rejection creates another plan version and returns it to review.
+A repair never overwrites the reviewed plan. It first reproduces the problem, then returns `changed` with the next `plans/NNN/plan.md`, or `reassess` with `plans/NNN/repair.md` when the finding cannot honestly be repaired in place. Each direct review and repair reassessment has a separate replan consumer, so a historical reassessment cannot become the cause of a later transition merely because its file still exists.
+
+The automatic plan-review cycle is bounded by `max_review_rounds` (default `5`). At the bound, the user or autonomous agent explicitly chooses another justified repair or truthful incomplete delivery; a blocked plan is never promoted by counter exhaustion. In interactive mode execution starts only after unconditional approval of the exact plan. Rejection creates another plan version and returns it to review.
 
 ## Operating mode
 
@@ -84,11 +96,13 @@ The engine owns the one-based `current_step` cursor. For each plan step:
 <Steps>
 1. The executor reads the current plan, frozen requirements, and relevant earlier evidence or decisions.
 2. It performs only the current step and writes a new plan-qualified `evidence.md`; earlier attempts remain intact.
-3. An independent peer reads the evidence, real artifact, requirements, and plan, then writes `verdict.md` beside that evidence.
-4. An accepted verdict advances the cursor. A rejected verdict either retries the same step or requests a new plan when the defect cannot be solved by retrying.
+3. An independent peer reads the primary result, evidence, requirements, and plan, then writes `verdict.md` beside that evidence. It returns `pass`, `repair`, or `replan`; a repair also names `result` or `evidence_projection` as its owner.
+4. A result-owned repair reproduces the defect before changing the result and consumes retry budget only after a substantive changed attempt. An evidence/projection repair keeps an already-correct result intact and returns directly to the same reviewer without spending a product retry.
+5. If repair discovers a plan, criterion, ownership, or evidence-method defect, it returns `reassess` and replans from that exact current cause. A repeated root requires stronger knowledge or replanning rather than another layer of the same mechanism.
+6. A passed verdict advances the cursor.
 </Steps>
 
-`step_retry` controls the escalation budget; it is not the durable attempt directory number. After `max_retries` failed gates (default `3`), the user chooses one of three outcomes:
+`step_retry` controls the substantive result-repair budget; it is not the durable attempt directory number and evidence/projection corrections do not increment it. When `max_retries` changed result repairs have been consumed (default `3`), the user or autonomous agent chooses one of three outcomes:
 
 | Decision | Effect |
 |----------|--------|
@@ -100,16 +114,13 @@ The decision is stored under `steps/<step>/decisions/NNN.md`. A replan may chang
 
 The `teleport-replan` node is also available when the agent discovers during execution that the current plan no longer fits the real work. It preserves completed steps and sends the new complete plan through review and approval.
 
-## Completion reviews
+## Final review
 
-After all planned steps close, Robust Task performs two different checks:
+After all planned steps close, one independent `final-review` re-derives the active obligations from the frozen requirements, approved plan, real deliverable, primary artifacts, accepted step records, and authorized decisions. It does not rely on a producer-authored completeness claim or duplicate the same semantic gate. Mechanical checks support only properties they can distinguish; semantic completeness and architecture require judgment over the real artifacts.
 
-1. `verify-criteria` checks every active success criterion and goal facet against the real deliverable, using mechanical checks only for properties they actually prove. It writes the next `final/criteria/NNN-review.md`.
-2. `final-review` delegates an independent re-derivation of completeness from the requirements, approved plan, real deliverable, step records, and latest criteria review. It writes the next `final/reviews/NNN-review.md`.
+The reviewer returns `pass`, `repair`, or `replan`. A local repair names either `deliverable` or `evidence_projection` ownership. The repair owner reproduces the current finding before mutation and returns `changed` to the same reviewer, or `reassess` when the plan, criterion, evidence method, or ownership must change. Direct final-review replans and reassessment replans consume separate current-cause paths.
 
-Confirmed findings are repaired in the real artifact and recorded in a new fix file. Criteria are checked again before the next independent final review, so delivery never relies on a report produced before the latest repair.
-
-Criteria and final-review repair cycles use the same `max_review_rounds` bound. At a bound, the user explicitly chooses continued repair or acceptance of the exact remaining scope as incomplete. Accepted gaps stay visible in later reports and in delivery.
+The cycle uses `max_review_rounds`. At the bound, the user or autonomous agent may authorize another justified repair or explicitly accept the exact remaining scope as incomplete. Counter exhaustion never converts an unresolved finding into a pass.
 
 ## Result
 

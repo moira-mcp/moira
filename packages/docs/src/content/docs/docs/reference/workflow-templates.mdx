@@ -19,13 +19,13 @@ mcp__moira__start({ workflowId: "<workflow-id>" })
 
 ### software-development-flow
 
-Filesystem-first feature development with source-grounded planning, complete implementation units, independent semantic gates, impact-based validation, accepted-unit checkpoints, and explicit side-effect authority.
+Filesystem-first delivery of a complete software change: source-grounded planning, implementation, tests, applicable permanent documentation, semantic and mechanical validation, user acceptance, and authorized VCS finalization. The flow classifies the cause of every finding, replans invalid or mechanically undecidable criteria, and prevents supporting validation from becoming a second product.
 
 ```mermaid
 flowchart LR
     A[Requirements] --> B[Plan and approve] --> C[Implement unit]
-    C --> D[Test adequacy and architecture]
-    D --> E[Impact-based validation]
+    C --> D[Cheap checks and test adequacy]
+    D --> E[Architecture and impact-based validation]
     E --> G[Conditional acceptance and checkpoint]
     G -->|more units| C
     G --> F[Docs, final coverage, and report]
@@ -40,7 +40,12 @@ flowchart LR
 | Complete implementation units | Each approved unit owns dependencies, tests, applicable permanent docs, and focused evidence |
 | Layered review | Test adequacy and project-grounded architecture are judged from the diff and primary sources by the implementing agent; a single delegated reviewer then judges the completed unit for completeness and quality, and never re-runs linters, type checks or suites |
 | Agent-triggered replan | A teleport entry lets the agent restart planning the moment the plan itself is wrong, instead of waiting for a gate to notice |
+| Cause-aware repair | Every finding is classified as a product, test/validation, evidence, documentation/process, or upstream plan/criterion defect before mutation; only the owning artifact is repaired |
+| Decidable acceptance evidence | A planned check must distinguish the required state from a plausible wrong state; semantic completeness, architecture, and business provenance remain review judgments when no reliable mechanical observation exists |
+| Meta-validation stop | Repeated same-root findings or validation-only changes while product evidence stays green force reassessment and `replan` instead of another proxy, guard, harness, metatest, or proof layer |
+| Bounded class-wide repair | A confirmed root is repaired across its real manifestations inside the original task, without inventing a universal scanner for a contextual property |
 | Impact-based validation | Runtime, browser, security, performance, broad builds, and full suites run only when project policy or actual risk makes them applicable |
+| Mutation-aware cycles | Verification-only repairs rerun cheap checks, test adequacy, and the affected downstream gates while retaining current architecture evidence; any product or test-intent change advances the product iteration and reruns architecture and the full validation suffix |
 | Conditional visual evidence | A plan unit explicitly opts into screenshot inspection and a portable self-contained HTML report; incidental UI changes do not enable it automatically |
 | Incremental history | With approved VCS authority, each accepted unit checkpoints only its own changes before the next unit starts; unrelated work and workflow artifacts are excluded |
 | Explicit authority | Checkpoints and final project-native VCS reconciliation are conditional; final user acceptance occurs before reconciliation, and tool availability never authorizes a side effect |
@@ -107,18 +112,20 @@ mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
 
 ### robust-task
 
-Filesystem-backed execution of complex, critical tasks with durable recovery.
+Durable execution of complex, critical tasks with cause-aware independent review and bounded recovery.
 
 ```mermaid
 flowchart LR
-    A[Understand] --> B[Decompose] --> C[Execute] --> D[Verify] --> E[Deliver]
+    A[Freeze requirements] --> B[Plan and review] --> C[Execute a complete step] --> D[Classify and repair or replan] --> E[Independent final review] --> F[Truthful delivery]
 ```
 
 | Feature | Description |
 |---------|-------------|
 | Durable workspace | Frozen requirements, immutable plan versions, attempt evidence, reviews, decisions, and delivery stay under `./moira-ws/` |
-| Independent gates | Plans, step attempts, criteria coverage, and the final result receive fitting independent review |
-| Bounded recovery | Review and step-retry budgets end in an explicit user decision, never silent success |
+| Cause-aware independent gates | Plan, step, and final reviewers classify the earliest cause as pass, local repair, or replan instead of asking the producer to validate itself |
+| Repair ownership | Result repair spends retry budget only after substantive change; evidence/projection repair preserves the correct result; reassessment returns upstream causes to planning |
+| Source-pure replanning | Direct review findings and repair-owner reassessments use separate current-cause paths, so stale historical output cannot select a later replan |
+| Bounded recovery | Review and result-retry budgets end in a justified repair, replan, or explicit incomplete outcome, never silent success |
 | Truthful delivery | End returns the workspace, delivery file, complete/incomplete status, and concise summary |
 
 **Use for:** Complex multi-step work that must survive context loss and retain per-attempt evidence.
@@ -205,22 +212,27 @@ mcp__moira__start({ workflowId: "prd-creation" })
 
 ### ux-design
 
-UX/UI design process with mandatory accessibility verification.
+Execution-bound UX/UI specification with traceable decisions, accessibility intent, independent
+review, and changed repair.
 
 ```mermaid
 flowchart LR
-    A[Users] --> B[Constraints] --> C[Flow] --> D[Microcopy] --> E[A11y] --> F[Prototype]
+    A[Contract] --> B[Package and validation plan] --> C[Independent review]
+    C -->|findings| D[Repair earliest source]
+    D --> C
+    C -->|zero| E[Accept or autonomous delivery]
 ```
 
 | Feature | Description |
 |---------|-------------|
-| Primary persona | Defined before design begins |
-| Design rationale | Alternatives documented |
-| WCAG AA | Mandatory accessibility checklist |
-| Microcopy | Clarity-focused copy guidelines |
+| Durable workspace | Contract, design package, future validation plan, review, and repair account are tied to the current execution |
+| Complete design scope | Users, jobs, pains, constraints, applicable states, flows, layout, microcopy, responsive behavior, accessibility intent, risks, and handoff |
+| Reuse and rationale | Existing primitives are preferred; every new component requires evidence, alternatives, and integration consequences |
+| Independent gate | The same separate reviewer must report exactly zero current blockers after every change |
+| Honest boundary | Produces a specification and plan; it does not implement UI, run research, certify WCAG, publish, or deploy |
 
 ```bash
-mcp__moira__start({ workflowId: "ux-design" })
+mcp__moira__start({ workflowId: "moira/ux-design", parentExecutionId: "none" })
 ```
 
 [See details →](/docs/reference/workflows/ux-design/)
@@ -341,12 +353,23 @@ flowchart LR
     E -->|yes| F[Audit and choose scope]
     E -->|no| G[Analyze requested scope]
     F --> G
-    C --> H[Build and validate]
-    G --> I[Plan and approve]
-    I --> H
-    H --> J[Semantic review]
-    J --> K[User review]
-    K --> L{Publish?}
+    C --> H[Design contract]
+    G --> I[Edit design contract]
+    H --> J[Independent design review]
+    I --> J
+    J -->|create repair| H
+    J -->|edit repair| I
+    J -->|create replan| H
+    J -->|edit replan| G
+    J -->|pass| K[Optional user approval]
+    K --> L[Build and validate]
+    L --> M[Independent artifact review]
+    M -->|repair| P[Repair artifact]
+    P --> M
+    M -->|create replan| H
+    M -->|edit replan| G
+    M -->|pass| N[User report or review]
+    N --> O{Publish?}
 ```
 
 <Aside type="tip">
@@ -358,9 +381,11 @@ Use this workflow to create custom workflows or modify existing templates.
 | Disk-backed artifacts | Requirements, analysis, plans, and review reports stay in the workspace |
 | Embedded authoring reference | Engine rules, patterns, anti-patterns, review criteria, cost ordering, and authority rules are shipped inside the workflow |
 | Identity-aware editing | The edit path reconciles local and server provenance before semantic planning |
-| Optional source audit | A full anti-pattern audit runs only with user consent |
-| Outcome-oriented plans | Plans preserve executor freedom while fixing scope and acceptance criteria |
-| Simple review loops | Review reports stay on disk; only issue counts are used for routing |
+| Optional source audit | Interactive mode asks for consent; autonomous mode chooses from the requested change and available evidence |
+| Evidence-aware design | Every proposed proof must distinguish the required state from a plausible wrong state using an appropriate evidence method |
+| Pre-mutation design review | Create and edit share an independent semantic gate before artifact mutation; human approval remains a separate decision |
+| Cause-aware review | Reviews route to pass, artifact repair, or contract replan; repeated same-root findings without stronger evidence cannot grow another validator layer |
+| Bounded class-wide repair | A confirmed root is repaired across its real manifestations in the agreed scope, not converted into a universal contextual detector |
 | Validation | The creating or editing node runs the official schema and graph validator |
 | Context-aware handoff | Stable file paths are referenced without forcing unchanged rereads or copying file bodies through workflow state |
 | Publication gate | Standard, copy-new, and admin-override semantics require an explicit user decision; a real local target is synchronized separately |

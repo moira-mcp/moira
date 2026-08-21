@@ -1,288 +1,915 @@
 {
-  "slug": "ux-design",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "6266d829-11a6-4bf2-b00b-f3d230cee4c2",
   "metadata": {
-    "name": "UX Design Workflow",
-    "version": "1.3.1",
-    "description": "Structured UX/UI design process: USERS -> CONSTRAINTS -> DESIGN_SYSTEM -> FLOW -> MICROCOPY -> ACCESSIBILITY -> PROTOTYPE -> VALIDATION. Guarantees user-centered and context-aware solutions with mandatory accessibility checks."
+    "name": "UX Design",
+    "version": "2.0.0",
+    "description": "Produces a reviewed, implementation-ready UX design specification from supplied requirements and authorized project evidence. It captures the design goal, primary users and usage context, jobs to be done, pain points, relevant edge cases, constraints, accessibility target, success criteria, evidence limits, operating mode, deliverables, and authority in one execution-bound filesystem workspace. It then synthesizes design-contract.md, design-package.md, and validation-plan.md covering applicable interaction states, user flows, layout and hierarchy, design-system reuse, justified new components, microcopy, responsive behavior, accessibility intent and unresolved gaps, prototype behavior, risks, assumptions, limitations, decision traceability, and downstream handoff. A genuinely independent reviewer must report exactly zero current blocking findings before delivery; confirmed findings are repaired at their earliest source and reviewed again, while contract-reaching changes rerun synthesis. Interactive mode supports accept, revise with feedback, or abort; autonomous mode skips only that final human wait and retains every quality gate. Results are local-only and distinguish accepted, reviewed-limited, blocked, and aborted outcomes; the workflow does not implement UI, create a graphical prototype, execute user research or usability studies, certify WCAG conformance, commit code, publish, notify, or deploy. Choose UX Design for an interaction and interface specification; choose PRD Creation for product requirements, Content Creation for standalone content, Test Planning for executable test strategy, a research workflow for evidence discovery, or Software Development Flow for implementation, tests, documentation, release, and deployment."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "users"
+        "default": "materialize-workspace"
       }
     },
     {
-      "id": "users",
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "design-standard.md",
+          "from": "design_standard"
+        },
+        {
+          "path": "design-contract.md",
+          "content": ""
+        },
+        {
+          "path": "design-package.md",
+          "content": ""
+        },
+        {
+          "path": "validation-plan.md",
+          "content": ""
+        },
+        {
+          "path": "design-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "capture-design-contract",
+        "error": "prepare-workspace-blocker"
+      }
+    },
+    {
+      "id": "capture-design-contract",
       "type": "agent-directive",
-      "directive": "Gather information about target users.\n\nUse planning standards: {{planning_standards}}\n\nAsk user or find in documentation:\n1. Who are target users? (personas — name, role, context)\n2. What is usage context? (device, environment, time)\n3. Jobs to be done — what are they trying to achieve?\n4. Pain points — current problems\n\nDefine primary persona — main user we are designing for.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave user research issues to `{{workspace_path}}/users-issues.md` with format:\n```\n# User Research Issues\n\n## PERSONA COMPLETENESS\n1. [Missing persona element]\n\n## USER-CENTERED DESIGN\n1. [Gap in user understanding]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `users_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER-CENTERED DESIGN per {{planning_standards}}\n2. Minimum 1 complete persona\n3. Primary persona defined\n4. Context and pain points documented\n\nReturn `issues_count` = number of issues found (0 if user research complete).",
-      "completionCondition": "Gathered: minimum 1 persona with context, jtbd and pain_points, primary persona defined",
+      "directive": "Establish the complete UX design contract from the triggering request and authorized primary project sources. Verify that {{workspace_path}}/process-id.txt equals {{executionId}} and consult the stable criteria in design-standard.md. Reuse supplied facts, inspect authorized non-mutating context where useful, and ask only for a material unknown that cannot be discovered. Resolve operating_mode exactly once: reuse an explicit value, infer autonomous for an unambiguous autonomous parent, otherwise ask once while explaining that autonomous skips only final human acceptance and interactive keeps it.\n\nWrite design-contract.md as the sole detailed authority for the design goal, scope and exclusions, primary-user identity and usage context, jobs to be done, pain points, relevant edge cases, supplied evidence and provenance, hypotheses, assumptions, unknowns, technical/business/brand/content/privacy/platform/localization constraints, accessibility target, design-system evidence, required deliverables, observable success criteria, limitations, and authority boundaries. Ground every project fact in supplied or authorized evidence; label unsupported ideas as hypotheses. Starting this flow never authorizes implementation, graphical design-tool mutation, user recruitment or study execution, certification, VCS mutation, publication, notification, deployment, destructive action, or production access.\n\nReturn design_package_path exactly `{{workspace_path}}/design-package.md` and validation_plan_path exactly `{{workspace_path}}/validation-plan.md`; these are stable machine-readable pointers to the already materialized canonical files. Return intake_status=ready only when a useful bounded contract is writable. Return blocked with a factual blocker when required evidence or authority is unavailable; return abort only when the user explicitly cancels. intake_summary is a bounded routing summary, not a duplicate contract. Do not begin design synthesis here.",
+      "completionCondition": "The correlated workspace and standard are verified, operating mode is fixed, and design-contract.md truthfully contains the complete evidence-grounded contract or the response truthfully identifies blocked intake or explicit abort",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "personas": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "role": {
-                  "type": "string"
-                },
-                "context": {
-                  "type": "string"
-                },
-                "jtbd": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "pain_points": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "name",
-                "context",
-                "jtbd"
-              ]
-            },
-            "minItems": 1
-          },
-          "primary_persona": {
+          "intake_status": {
             "type": "string",
-            "description": "Primary persona name"
-          }
-        },
-        "required": [
-          "personas",
-          "primary_persona"
-        ]
-      },
-      "connections": {
-        "success": "constraints"
-      }
-    },
-    {
-      "id": "constraints",
-      "type": "agent-directive",
-      "directive": "Define design constraints.\n\nUse planning standards: {{planning_standards}}\n\nGather information about:\n1. Technical constraints — platform, devices, browsers, performance\n2. Business constraints — timeline, resources, budget\n3. Existing patterns — which patterns are already used in the product\n4. Brand guidelines — colors, fonts, communication tone\n\nThese constraints will be considered in all subsequent decisions.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave constraints issues to `{{workspace_path}}/constraints-issues.md` with format:\n```\n# Constraints Issues\n\n## CONSISTENCY\n1. [Missing constraint category]\n\n## COMPLETENESS\n1. [Undocumented constraint]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `constraints_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. CONSISTENCY per {{planning_standards}}\n2. Technical constraints documented\n3. Existing patterns identified\n4. Brand guidelines captured\n\nReturn `issues_count` = number of issues found (0 if constraints complete).",
-      "completionCondition": "Constraints gathered: technical, business, existing patterns, brand",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "technical": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Technical constraints"
+            "enum": [
+              "ready",
+              "blocked",
+              "abort"
+            ]
           },
-          "existing_patterns": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Existing patterns in the product"
+          "intake_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           }
         },
         "required": [
-          "technical",
-          "existing_patterns"
+          "operating_mode",
+          "design_package_path",
+          "validation_plan_path",
+          "intake_status",
+          "intake_summary"
         ],
         "globalInputs": [
-          "business",
-          "brand_guidelines"
-        ]
-      },
-      "connections": {
-        "success": "design-system"
-      }
-    },
-    {
-      "id": "design-system",
-      "type": "agent-directive",
-      "directive": "Check product design system.\n\nDetermine:\n1. Which components already exist in design system?\n2. What can be reused for current task?\n3. Are new components needed?\n4. How will new solution fit into existing system?\n\nExisting patterns from previous step:\n{{constraints.existing_patterns}}",
-      "completionCondition": "Determined: existing components, what to reuse, if new needed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "existing_components",
-          "reusable"
+          "operating_mode",
+          "design_package_path",
+          "validation_plan_path"
         ],
-        "globalInputs": [
-          "existing_components",
-          "reusable",
-          "new_needed",
-          "integration_notes"
-        ]
-      },
-      "connections": {
-        "success": "flow"
-      }
-    },
-    {
-      "id": "flow",
-      "type": "agent-directive",
-      "directive": "Design user flow.\n\nUse planning standards: {{planning_standards}}\n\nUsers:\n{{users.personas}}\nPrimary persona: {{users.primary_persona}}\n\nConstraints:\n- Technical: {{constraints.technical}}\n- Existing patterns: {{constraints.existing_patterns}}\n\n{{design_rationale_requirements}}\n\nFor EACH flow step specify:\n1. What user sees\n2. What they can do\n3. Why this order (rationale)\n4. Which alternatives were considered\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave flow issues to `{{workspace_path}}/flow-issues.md` with format:\n```\n# User Flow Issues\n\n## FLOW COMPLETENESS\n1. [Missing flow element]\n\n## USER-CENTERED DESIGN\n1. [Decision without rationale]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `flow_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER FLOW COMPLETENESS per {{planning_standards}}\n2. All entry/exit points mapped\n3. Rationale for each step\n4. Alternatives considered\n\nReturn `issues_count` = number of issues found (0 if flow complete).",
-      "completionCondition": "Flow designed, each step has rationale and alternatives_considered",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "steps": {
-            "type": "array",
-            "items": {
-              "type": "object",
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "design_package_path": "/design-package.md",
+            "validation_plan_path": "/validation-plan.md"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
               "properties": {
-                "name": {
-                  "type": "string"
-                },
-                "user_sees": {
-                  "type": "string"
-                },
-                "user_actions": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "rationale": {
-                  "type": "string"
-                },
-                "alternatives_considered": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                "intake_status": {
+                  "const": "blocked"
                 }
               },
               "required": [
-                "name",
-                "user_sees",
-                "rationale"
+                "intake_status"
               ]
             },
-            "minItems": 1
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "blocker_summary"
+                ]
+              }
+            }
           }
-        },
-        "required": [
-          "steps"
         ]
       },
       "connections": {
-        "success": "microcopy"
+        "success": "route-intake-ready"
       }
     },
     {
-      "id": "microcopy",
+      "id": "route-intake-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "capture-design-contract.intake_status"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "create-design-package",
+        "false": "route-intake-abort"
+      }
+    },
+    {
+      "id": "route-intake-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "capture-design-contract.intake_status"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "prepare-abort",
+        "false": "prepare-intake-blocker"
+      }
+    },
+    {
+      "id": "create-design-package",
       "type": "agent-directive",
-      "directive": "Write UX copy for the flow.\n\nFlow steps:\n{{flow.steps}}\n\n{{microcopy_guidelines}}\n\nFor each text element specify:\n- element: type (heading, button, instruction, error, empty_state)\n- text: the text\n- purpose: why this text\n- clarity_check: understandable on first read (yes/no + why)",
-      "completionCondition": "Microcopy written for all flow elements, each checked for clarity",
+      "directive": "Use design-contract.md as the sole detailed contract and consult the relevant sections of design-standard.md. Inspect only authorized primary sources and keep unknown facts explicit. Coherently synthesize the current complete UX specification into design-package.md and the future evaluation strategy into validation-plan.md; do not split one design authority across workflow outputs.\n\nThe package must preserve primary user/context, jobs, pain points, relevant edge cases, constraints, and evidence boundaries. Cover every applicable state family—entry, success, empty, loading, validation, error, recovery, permission, and responsive—and record an evidence-backed applicability reason for any genuinely irrelevant family. Trace every material decision to a user need, constraint, evidence item, or explicit hypothesis, and record meaningful alternatives. Prefer existing design-system components and universal project primitives. For every new component or pattern, document demonstrated need, considered alternatives, integration consequences, and why existing primitives are insufficient. Integrate user flow, information architecture, screen/state behavior, layout and hierarchy, interactions, microcopy, content behavior, responsive behavior, accessibility intent and unresolved gaps, prototype specification, risks, assumptions, limitations, and downstream handoff.\n\nvalidation-plan.md must map actual package risks and hypotheses to appropriate future methods, participants or data, tasks, observable signals, decision criteria, and limitations. It is a plan only: never claim research, testing, implementation, prototype construction, accessibility verification, or certification occurred. Never fabricate evidence or compliance.\n\nReturn design_status=reviewable and result_kind=complete when all applicable contract obligations are supported; use result_kind=limited only for explicit, bounded unresolved limitations that remain honestly reviewable. Return design_status=blocked with blocker_summary when no reviewable package can be produced. Do not call a semantic gap complete merely because the JSON response is valid.",
+      "completionCondition": "The current design package and validation plan coherently satisfy the evidence-grounded contract as complete or explicitly limited, or a factual unreviewable blocker is returned",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "copy": {
-            "type": "array",
-            "items": {
-              "type": "object",
+          "design_status": {
+            "type": "string",
+            "enum": [
+              "reviewable",
+              "blocked"
+            ]
+          },
+          "blocker_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "design_status"
+        ],
+        "globalInputs": [
+          "result_kind"
+        ],
+        "allOf": [
+          {
+            "if": {
               "properties": {
-                "element": {
-                  "type": "string"
-                },
-                "text": {
-                  "type": "string"
-                },
-                "purpose": {
-                  "type": "string"
-                },
-                "clarity_check": {
-                  "type": "string"
+                "design_status": {
+                  "const": "reviewable"
                 }
               },
               "required": [
-                "element",
-                "text",
-                "clarity_check"
+                "design_status"
               ]
             },
-            "minItems": 1
+            "then": {
+              "required": [
+                "result_kind"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "result_kind"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "design_status": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "design_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "blocker_summary"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-design-reviewable"
+      }
+    },
+    {
+      "id": "route-design-reviewable",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "create-design-package.design_status"
+        },
+        "right": "reviewable"
+      },
+      "connections": {
+        "true": "review-design",
+        "false": "prepare-design-blocker"
+      }
+    },
+    {
+      "id": "review-design",
+      "type": "agent-directive",
+      "directive": "Use one stable genuinely independent reviewer context for this entire run. Inspect design-review.md first. On the first review only, when it contains no prior reviewer address, obtain a separate reviewer through a host-supported context and record its stable host-specific address in design-review.md. On every rereview, including after contained repair, contract synthesis, user feedback, or process revision, reuse exactly that recorded reviewer context; never silently create a replacement. Give that reviewer execution ID {{executionId}} and workspace {{workspace_path}}, not copied artifact bodies.\n\nThe reviewer must directly inspect process-id.txt, design-standard.md, design-contract.md, design-package.md, validation-plan.md, authorized primary sources, and the originating request. It must attempt to falsify completeness and traceability; check every applicable interaction state, primary user/context, jobs, pains, edge cases, constraints, existing-component reuse, every new component's need/alternatives/integration/insufficiency evidence, material decision rationale, microcopy, responsive behavior, accessibility intent and unresolved gaps, prototype behavior, risks, limitations, handoff, future validation mapping, and current result_kind. It must reject fabricated evidence, implementation, study, compliance, certification, publication, or deployment claims and any authority expansion. A limited package is acceptable only when every limitation is explicit, bounded, and compatible with the contract.\n\nWhen the saved reviewer context is available, that same reviewer overwrites design-review.md while preserving its reviewer address and recording the complete current set of reproducible blocking findings, each with evidence and earliest affected source. It diagnoses only and must not mutate the contract, package, plan, or sources. Zero findings is valid. Return review_status=completed with the exact non-negative issues_count; do not copy findings into workflow context. If the recorded reviewer context cannot be established or resumed, preserve the existing review evidence, return review_status=blocked with a factual blocker_summary, and return no issues_count.",
+      "completionCondition": "Either the same stable separate reviewer context has overwritten design-review.md with the complete current blocking set and review_status=completed with issues_count exactly equal to that set, including zero; or that required context is factually unavailable and review_status=blocked returns a bounded blocker_summary without issues_count or any claim that review occurred",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "blocked"
+            ]
+          },
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "blocker_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           }
         },
         "required": [
-          "copy"
+          "review_status"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_status": {
+                  "const": "completed"
+                }
+              },
+              "required": [
+                "review_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "issues_count"
+              ],
+              "not": {
+                "required": [
+                  "blocker_summary"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "blocker_summary"
+              ],
+              "not": {
+                "required": [
+                  "issues_count"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "accessibility"
+        "success": "route-review-completed"
       }
     },
     {
-      "id": "accessibility",
+      "id": "route-review-completed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-design.review_status"
+        },
+        "right": "completed"
+      },
+      "connections": {
+        "true": "route-review-clean",
+        "false": "prepare-review-blocker"
+      }
+    },
+    {
+      "id": "route-review-clean",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-design.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "route-operating-mode",
+        "false": "repair-design"
+      }
+    },
+    {
+      "id": "repair-design",
       "type": "agent-directive",
-      "directive": "Check accessibility against WCAG AA checklist.\n\nUse planning standards: {{planning_standards}}\n\n{{accessibility_checklist}}\n\nFor EACH checklist item specify:\n- requirement: the requirement\n- how_addressed: how it is fulfilled in your design\n\nIf any item is not applicable — specify why.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave accessibility issues to `{{workspace_path}}/accessibility-issues.md` with format:\n```\n# Accessibility Issues\n\n## WCAG COMPLIANCE\n1. [Unaddressed requirement]\n\n## ACCESSIBILITY STANDARDS\n1. [Gap in implementation]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `accessibility_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. ACCESSIBILITY per {{planning_standards}}\n2. All WCAG AA items checked\n3. Each item addressed or justified\n4. No compliance gaps\n\nReturn `issues_count` = number of issues found (0 if accessibility complete).",
-      "completionCondition": "All WCAG AA checklist items checked and addressed",
+      "directive": "Read the complete current design-review.md, reproduce every confirmed finding against its primary sources, and repair the complete current set at the earliest affected artifact. Preserve unaffected supported decisions. If the contract itself changes, update design-contract.md and invalidate the package and validation plan for full synthesis. Otherwise change design-package.md and/or validation-plan.md directly. Overwrite repair-account.md with the review basis, reproduced findings, actual changed files, checks performed, current complete-or-limited classification, and why the returned reach is accurate.\n\nReturn repair_status=changed only after a meaningful verified artifact change. Then return current result_kind and repair_reach=contained only when the contract and evidence boundary stayed unchanged and the repair remained within what the same reviewer judges; return contract whenever design-contract.md or a source/authority assumption changed or containment is uncertain. If a finding cannot be reproduced, no authorized correction is possible, or no artifact changed, return repair_status=blocked with a factual blocker_summary instead of entering an unchanged loop, and return neither result_kind nor repair_reach. Do not return findings or artifact bodies.",
+      "completionCondition": "Every confirmed finding is reproduced and materially repaired with a verified repair account and truthful reach, or the unchanged/unauthorized repair blocker is explicit",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "repair_status": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "blocked"
+            ]
+          },
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "contained",
+              "contract"
+            ]
+          },
+          "blocker_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
         "required": [
-          "checklist"
+          "repair_status"
         ],
         "globalInputs": [
-          "checklist"
+          "result_kind"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_status": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_reach",
+                "result_kind"
+              ]
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "repair_reach"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "result_kind"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "repair_status": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "repair_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "blocker_summary"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "blocker_summary"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "prototype"
+        "success": "route-repair-changed"
       }
     },
     {
-      "id": "prototype",
+      "id": "route-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-design.repair_status"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "route-repair-contract",
+        "false": "prepare-repair-blocker"
+      }
+    },
+    {
+      "id": "route-repair-contract",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-design.repair_reach"
+        },
+        "right": "contract"
+      },
+      "connections": {
+        "true": "create-design-package",
+        "false": "review-design"
+      }
+    },
+    {
+      "id": "route-operating-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "route-result-kind",
+        "false": "present-for-approval"
+      }
+    },
+    {
+      "id": "present-for-approval",
       "type": "agent-directive",
-      "directive": "Describe prototype screen by screen.\n\nUse planning standards: {{planning_standards}}\n\nFlow:\n{{flow.steps}}\n\nMicrocopy:\n{{microcopy.copy}}\n\nFor each screen specify:\n- name: screen name\n- layout: layout description (what is positioned where)\n- interactions: which interactions are possible\n- edge_cases: what happens in edge cases (empty data, errors)\n- responsive: how it adapts to different sizes\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave prototype issues to `{{workspace_path}}/prototype-issues.md` with format:\n```\n# Prototype Issues\n\n## USER FLOW COMPLETENESS\n1. [Missing state]\n\n## CONSISTENCY\n1. [Pattern violation]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `prototype_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER FLOW COMPLETENESS per {{planning_standards}} - edge cases and empty states\n2. CONSISTENCY per {{planning_standards}} - design system adherence\n3. All screens described\n4. Responsive behavior defined\n\nReturn `issues_count` = number of issues found (0 if prototype complete).",
-      "completionCondition": "All screens described with layout, interactions, edge cases and responsive behavior",
+      "directive": "Present the current independently reviewed local design result using design-contract.md, design-package.md, validation-plan.md, and the zero-finding design-review.md. Explain whether the package is complete or reviewed-limited, name material limitations, and provide the stable workspace paths. State explicitly that this is a specification and future validation plan—not implemented UI, a graphical prototype, executed research, WCAG certification, publication, or deployment. Ask for an explicit decision. Return decision=accept only for explicit acceptance, decision=revise with the user's complete non-empty feedback, or decision=abort only for explicit cancellation. Do not mutate artifacts here.",
+      "completionCondition": "The user has seen the independently reviewed local result and explicitly accepted it, supplied complete revision feedback, or aborted",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "revise",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          }
+        },
         "required": [
-          "screens"
+          "decision"
         ],
-        "globalInputs": [
-          "screens"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "validation"
+        "success": "route-approval-accept"
       }
     },
     {
-      "id": "validation",
+      "id": "route-approval-accept",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-for-approval.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "route-result-kind",
+        "false": "route-approval-abort"
+      }
+    },
+    {
+      "id": "route-approval-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-for-approval.decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "prepare-abort",
+        "false": "apply-user-feedback"
+      }
+    },
+    {
+      "id": "apply-user-feedback",
       "type": "agent-directive",
-      "directive": "Create design testing plan with users.\n\nUse planning standards: {{planning_standards}}\n\nPrimary persona: {{users.primary_persona}}\nFlow: {{flow.steps}}\n\nDetermine:\n1. Which hypotheses are we testing? (what can go wrong)\n2. Which testing method? (usability testing, A/B, survey)\n3. Success criteria — how will we know the design works\n4. Who to involve — how many participants, selection criteria\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave validation issues to `{{workspace_path}}/validation-issues.md` with format:\n```\n# Validation Plan Issues\n\n## COMPLETENESS\n1. [Missing element]\n\n## USER-CENTERED DESIGN\n1. [Gap in testing coverage]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `validation_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. USER-CENTERED DESIGN per {{planning_standards}} - testing with target users\n2. Hypotheses defined\n3. Success criteria measurable\n4. Participant criteria clear\n\nReturn `issues_count` = number of issues found (0 if validation plan complete).",
-      "completionCondition": "Testing plan ready: hypotheses, method, success criteria, participants",
+      "directive": "Read the complete feedback at {{present-for-approval.feedback}} and the current contract, package, validation plan, clean review, standard, and authorized sources. Reproduce it against the current result. Materially apply an authorized unsatisfied request at its earliest source while preserving unaffected supported work. Overwrite repair-account.md with the feedback basis, reproduction result, actual mutations, verification, current complete-or-limited classification, invalidated evidence, and reach.\n\nReturn feedback_status=changed only after a real verified artifact mutation; then return current result_kind and repair_reach=contained only when the contract and evidence boundary remain unchanged and the change stays inside design-package.md and/or validation-plan.md, or contract when design-contract.md, evidence, scope, authority, success criteria, or another upstream assumption changed or containment is uncertain. When feedback is already satisfied, cannot be reproduced, requests work outside this workflow's authority, or cannot be changed safely, return feedback_status=blocked with a factual blocker_summary and return neither result_kind nor repair_reach. Every changed result returns through the same independent reviewer before delivery.",
+      "completionCondition": "The exact feedback is reproduced and either materially implemented with current classification and verified reach, or truthfully blocked without an unchanged review loop",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "feedback_status": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "blocked"
+            ]
+          },
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "contained",
+              "contract"
+            ]
+          },
+          "blocker_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
         "required": [
-          "hypotheses",
-          "method",
-          "success_criteria"
+          "feedback_status"
         ],
         "globalInputs": [
-          "hypotheses",
-          "method",
-          "success_criteria",
-          "participants"
+          "result_kind"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "feedback_status": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "feedback_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_reach",
+                "result_kind"
+              ],
+              "not": {
+                "required": [
+                  "blocker_summary"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "blocker_summary"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "repair_reach"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "result_kind"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-feedback-changed"
+      }
+    },
+    {
+      "id": "route-feedback-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "apply-user-feedback.feedback_status"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "route-feedback-contract",
+        "false": "prepare-feedback-blocker"
+      }
+    },
+    {
+      "id": "route-feedback-contract",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "apply-user-feedback.repair_reach"
+        },
+        "right": "contract"
+      },
+      "connections": {
+        "true": "create-design-package",
+        "false": "review-design"
+      }
+    },
+    {
+      "id": "route-result-kind",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "result_kind"
+        },
+        "right": "complete"
+      },
+      "connections": {
+        "true": "prepare-accepted",
+        "false": "prepare-limited"
+      }
+    },
+    {
+      "id": "prepare-accepted",
+      "type": "agent-directive",
+      "directive": "Deliver the accepted independently reviewed local UX specification. Set outcome exactly `accepted`. Set result_summary to a bounded truthful summary of the design goal, key design result, concrete verification, and the stable files under {{workspace_path}}. State that delivery is local-only and does not claim implementation, graphical prototype creation, executed research or testing, accessibility certification, publication, notification, or deployment.",
+      "completionCondition": "The bounded accepted local result and its stable artifact locations are truthfully presented",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-limited",
+      "type": "agent-directive",
+      "directive": "Deliver the independently reviewed but explicitly limited local UX specification. Set outcome exactly `reviewed-limited`. Set result_summary to a bounded truthful summary of the useful design result, all material limitations, verification, and stable files under {{workspace_path}}. Never erase a limitation or imply implementation, graphical prototype creation, executed research or testing, accessibility certification, publication, notification, or deployment.",
+      "completionCondition": "The bounded reviewed-limited local result, limitations, and stable artifact locations are truthfully presented",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-feedback-blocker",
+      "type": "agent-directive",
+      "directive": "Report the factual feedback blocker from {{apply-user-feedback.blocker_summary}}. Set outcome exactly `feedback-blocked` and result_summary to a bounded explanation of why the requested revision was already satisfied, unreproducible, unauthorized, or unsafe and the safe next action. Preserve the clean reviewed local artifacts and do not claim a mutation or renewed acceptance.",
+      "completionCondition": "The unchanged or unauthorized feedback outcome and safe next action are truthfully presented without entering a false repair loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-workspace-blocker",
+      "type": "agent-directive",
+      "directive": "Materialization failed before a trustworthy correlated UX workspace was available. Set outcome exactly `workspace-blocked` and result_summary to the bounded observed failure and safe next action. Do not invent files, fall back to memory, or claim any design work occurred.",
+      "completionCondition": "The workspace failure is reported truthfully without invented artifacts or design completion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-intake-blocker",
+      "type": "agent-directive",
+      "directive": "Report the factual intake blocker from {{capture-design-contract.blocker_summary}}. Set outcome exactly `intake-blocked` and result_summary to a bounded explanation of what evidence, authority, or decision is missing and the safe next action. Preserve any truthful workspace files and do not claim a reviewable design exists.",
+      "completionCondition": "The intake blocker and safe next action are truthfully presented without fabricated completion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-design-blocker",
+      "type": "agent-directive",
+      "directive": "Report the factual synthesis blocker from {{create-design-package.blocker_summary}}. Set outcome exactly `design-blocked` and result_summary to a bounded explanation of what prevents a reviewable package and the safe next action. Do not relabel an unreviewable result as limited or complete.",
+      "completionCondition": "The synthesis blocker and safe next action are truthfully presented without a false reviewable result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-repair-blocker",
+      "type": "agent-directive",
+      "directive": "Report the factual unchanged or unauthorized repair blocker from {{repair-design.blocker_summary}}. Set outcome exactly `repair-blocked` and result_summary to a bounded explanation of the unresolved reviewed findings and safe next action. Do not bypass the nonzero review or claim acceptance.",
+      "completionCondition": "The unresolved repair blocker and safe next action are truthfully presented without bypassing review",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-review-blocker",
+      "type": "agent-directive",
+      "directive": "Report the factual independent-review blocker from {{review-design.blocker_summary}}. Set outcome exactly `review-blocked` and result_summary to a bounded explanation that the required stable reviewer context could not be established or resumed and the safe next action. Preserve all current local artifacts and review evidence. Do not create a replacement reviewer, fabricate an issues count, bypass independent review, or claim acceptance.",
+      "completionCondition": "The terminal result truthfully distinguishes reviewer-context failure from a completed review and makes no acceptance claim.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "end"
+      }
+    },
+    {
+      "id": "prepare-abort",
+      "type": "agent-directive",
+      "directive": "Honor the explicit abort without further design mutation. Set outcome exactly `aborted` and result_summary to a bounded truthful account of where the run stopped and which local files, if any, exist under {{workspace_path}}. Do not describe the result as accepted or complete.",
+      "completionCondition": "The explicit abort and any existing local artifacts are truthfully presented without further mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "outcome",
+          "result_summary"
+        ],
+        "globalInputs": [
+          "outcome",
+          "result_summary"
         ]
       },
       "connections": {
@@ -291,167 +918,99 @@
     },
     {
       "id": "end",
-      "type": "end"
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "outcome",
+        "design_package_path",
+        "validation_plan_path",
+        "result_summary"
+      ]
+    },
+    {
+      "id": "revise-design-process",
+      "type": "teleport",
+      "hint": "Jump here only when the UX design contract or agreed design process itself became materially wrong, incomplete, or obsolete. Do not use it to evade a review finding, an unresolved accessibility gap, ordinary user feedback, a blocked repair, or an inconvenient design problem; those belong to the normal review, feedback, and blocker routes.",
+      "directive": "You jumped here because the design contract or process itself no longer matches reality. Read the current design-contract.md, design-standard.md, originating request, and authorized primary sources. Materially revise design-contract.md at its source while preserving operating_mode and the originating authority ceiling. Record the reason, evidence, changed obligations, invalidated downstream work, and safe re-entry in repair-account.md. Do not repair design-package.md or validation-plan.md here and do not claim findings closed; ordinary synthesis and the independent exact-zero review run next.",
+      "completionCondition": "The genuinely changed design contract and repair account preserve authority, identify invalidated work, and are ready for ordinary synthesis and review",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "create-design-package"
+      }
     }
   ],
   "variableRegistry": {
-    "accessibility_checklist": {
-      "type": "string",
-      "description": "WCAG AA compliance checklist items",
-      "default": "WCAG AA CHECKLIST:\n\n1. Color contrast: minimum 4.5:1 for text, 3:1 for large text\n2. Keyboard navigation: all interactive elements accessible via keyboard\n3. Screen reader: all elements have accessible names, correct heading structure\n4. Touch targets: minimum 44x44px for mobile\n5. Focus states: visible focus indicator for all interactive elements\n6. Alt text: all images have descriptions\n7. Form labels: all form fields have associated labels"
-    },
-    "microcopy_guidelines": {
-      "type": "string",
-      "description": "UX copywriting rules for clear communication",
-      "default": "UX COPYWRITING RULES:\n\n1. CLARITY > CLEVERNESS - user should understand on first read\n2. Short sentences - maximum 15-20 words\n3. Active voice - 'Save changes' instead of 'Changes will be saved'\n4. Specific CTAs - 'Submit application' instead of 'Submit'\n5. Friendly errors - explain what went wrong and how to fix it\n6. Empty states - explain what this space is for and how to fill it"
-    },
-    "design_rationale_requirements": {
-      "type": "string",
-      "description": "Requirements for documenting design decisions",
-      "default": "DESIGN DECISION RATIONALE REQUIREMENTS:\n\nEach design decision must contain:\n1. WHY this decision (rationale in product context)\n2. WHICH alternatives were considered\n3. WHY alternatives were rejected\n4. HOW this relates to user needs from first step"
-    },
-    "planning_standards": {
-      "type": "string",
-      "description": "UX design planning standards for accessibility, flow, consistency and user-centered design",
-      "default": "UX DESIGN PLANNING STANDARDS:\n\n1. ACCESSIBILITY:\n- WCAG AA compliance mandatory\n- Color contrast ratios verified\n- Keyboard navigation tested\n- Screen reader compatibility ensured\n- Touch targets meet minimum size\n- Focus states clearly visible\n\n2. USER FLOW COMPLETENESS:\n- All entry points mapped\n- All exit points defined\n- Error states handled\n- Edge cases covered\n- Empty states designed\n- Loading states considered\n\n3. CONSISTENCY:\n- Design system components used\n- Patterns match existing product\n- Terminology consistent throughout\n- Interaction patterns uniform\n- Visual hierarchy maintained\n- Spacing system followed\n\n4. USER-CENTERED DESIGN:\n- Primary persona defined\n- Jobs-to-be-done clear\n- Pain points addressed\n- Context of use considered\n- Rationale documented for decisions\n- Alternatives evaluated\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan/task item's directive in isolation.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
-    },
-    "brand_guidelines": {
-      "type": "array",
-      "description": "Workflow-global brand_guidelines",
-      "items": {
-        "type": "string"
-      }
-    },
-    "business": {
-      "type": "array",
-      "description": "Workflow-global business",
-      "items": {
-        "type": "string"
-      }
-    },
-    "checklist": {
-      "type": "array",
-      "description": "Workflow-global checklist",
-      "items": {
-        "type": "object",
-        "properties": {
-          "requirement": {
-            "type": "string"
-          },
-          "how_addressed": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "requirement",
-          "how_addressed"
-        ]
-      },
-      "minItems": 5
-    },
-    "existing_components": {
-      "type": "array",
-      "description": "Workflow-global existing_components",
-      "items": {
-        "type": "string"
-      }
-    },
-    "hypotheses": {
-      "type": "array",
-      "description": "Workflow-global hypotheses",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
-    },
-    "integration_notes": {
-      "type": "string",
-      "description": "Workflow-global integration_notes"
-    },
-    "method": {
-      "type": "string",
-      "description": "Workflow-global method"
-    },
-    "new_needed": {
-      "type": "array",
-      "description": "Workflow-global new_needed",
-      "items": {
-        "type": "string"
-      }
-    },
-    "participants": {
-      "type": "object",
-      "description": "Workflow-global participants",
-      "properties": {
-        "count": {
-          "type": "number"
-        },
-        "criteria": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "reusable": {
-      "type": "array",
-      "description": "Workflow-global reusable",
-      "items": {
-        "type": "string"
-      }
-    },
-    "screens": {
-      "type": "array",
-      "description": "Workflow-global screens",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "layout": {
-            "type": "string"
-          },
-          "interactions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "edge_cases": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "responsive": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "layout",
-          "interactions"
-        ]
-      },
-      "minItems": 1
-    },
-    "success_criteria": {
-      "type": "array",
-      "description": "Workflow-global success_criteria",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
-    },
     "workspace_path": {
       "type": "string",
-      "description": "Workflow-global workspace_path"
+      "description": "Execution-bound local workspace containing the sole current UX design artifacts.",
+      "const": "./moira-ws/ux-design-{{executionId}}",
+      "default": "./moira-ws/ux-design-{{executionId}}"
     },
-    "has_file_access": {
-      "type": "boolean",
-      "description": "Agent can read/write local files"
+    "workspace_process_id_file": {
+      "type": "string",
+      "description": "Registry-backed process-id.txt content for workspace correlation.",
+      "default": "{{executionId}}"
+    },
+    "operating_mode": {
+      "type": "string",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "description": "How the run handles final human acceptance: autonomous skips only that wait; interactive keeps accept, revise, and abort."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "reviewed-limited",
+        "workspace-blocked",
+        "intake-blocked",
+        "design-blocked",
+        "repair-blocked",
+        "review-blocked",
+        "feedback-blocked",
+        "aborted"
+      ],
+      "description": "Truthful terminal classification for the local UX design run."
+    },
+    "result_summary": {
+      "type": "string",
+      "description": "Bounded user-facing summary of the terminal result, verification, limitations, and stable local artifacts.",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "result_kind": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited"
+      ],
+      "description": "Current package classification, rewritten by every package mutation before review and terminal routing."
+    },
+    "design_package_path": {
+      "type": "string",
+      "description": "Canonical execution-bound UX design package path, present after successful workspace materialization.",
+      "pattern": "^\\./moira-ws/ux-design-[0-9a-f-]+/design-package\\.md$",
+      "maxLength": 240
+    },
+    "validation_plan_path": {
+      "type": "string",
+      "description": "Canonical execution-bound future validation plan path, present after successful workspace materialization.",
+      "pattern": "^\\./moira-ws/ux-design-[0-9a-f-]+/validation-plan\\.md$",
+      "maxLength": 240
+    },
+    "design_standard": {
+      "type": "string",
+      "description": "Stable evidence, completeness, review, authority, and delivery contract consulted by UX design roles.",
+      "default": "# UX design standard\n\n## Evidence and authority\n\nGround project facts in supplied or authorized primary evidence. Label unsupported statements as hypotheses, assumptions, unknowns, or limitations. Tool availability is not authority. This workflow may inspect authorized sources and write only its execution workspace. It does not implement product UI, mutate a graphical design tool, recruit participants, execute research or usability tests, certify WCAG conformance, change VCS, publish, notify, deploy, destructively clean up, or access production unless a different explicitly authorized workflow owns that work.\n\n## Design contract\n\nThe canonical contract states the design goal, scope and exclusions, primary user identity and usage context, jobs to be done, pain points, relevant edge cases, supplied evidence and provenance, technical and business constraints, brand and content constraints, privacy, platform and localization constraints, accessibility target, known design-system components and patterns, deliverables, observable success criteria, assumptions, unknowns, limitations, and authority boundaries. Do not impose a persona count; require enough grounded user context to make the design decisions testable.\n\n## Package completeness\n\nThe package covers each applicable state family: entry, success, empty, loading, validation, error, recovery, permission, and responsive. A category may be omitted only with an evidence-backed applicability decision. Every material design decision traces to a user need, constraint, evidence item, or explicit hypothesis and records meaningful alternatives. Preserve user flow, information architecture, screen and state behavior, layout and hierarchy, interaction behavior, microcopy, content behavior, responsive behavior, accessibility intent and unresolved gaps, prototype specification, risks, assumptions, limitations, and downstream handoff.\n\nPrefer existing design-system components and universal project primitives. Every proposed new component or pattern documents the demonstrated need, considered alternatives, integration consequences, and why existing primitives are insufficient. Schema-valid prose is not proof of semantic completeness. An unresolved applicable accessibility gap stays a blocker or explicit reviewed limitation; it never becomes compliance.\n\n## Validation plan\n\nMap actual package risks and hypotheses to future methods, participants or data, tasks, observable signals, decision criteria, and limitations. Do not claim a study, test, implementation, prototype construction, accessibility verification, or certification was performed.\n\n## Review and repair\n\nA genuinely separate reviewer reads primary files and sources, attempts to falsify the result, overwrites design-review.md with every current reproducible blocking finding, and returns only the exact non-negative count. Zero is valid and is the only route to acceptance. The reviewer diagnoses and never repairs. The repair owner reproduces every finding, changes the earliest affected artifact, records actual changes and checks in repair-account.md, and returns contained only when the contract and evidence boundary are unchanged. Contract-reaching work reruns synthesis. No unchanged or blocked repair may loop.\n\n## Delivery\n\nA complete package and a reviewed-limited package are distinct; an unreviewable package is blocked. Interactive accept, revise, and abort are distinct. Autonomous mode skips only final human acceptance and retains independent review. Delivery exposes a bounded summary and stable local paths. It never implies implemented UI, a graphical prototype, executed research or testing, WCAG certification, publication, notification, or deployment."
     }
-  }
+  },
+  "slug": "ux-design",
+  "owner": "system-moira",
+  "visibility": "public"
 }

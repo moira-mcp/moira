@@ -1,1163 +1,1873 @@
 {
-  "slug": "test-suite-audit",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "41246c35-cada-43ae-917c-57b1ea90c1bd",
   "metadata": {
     "name": "Test Suite Audit",
-    "version": "3.2.4",
-    "description": "Feature-centric test suite audit using LLM semantic analysis. Builds Feature Taxonomy from production code, maps tests to features, detects cross-level redundancy and coverage gaps."
+    "version": "4.0.0",
+    "description": "Feature-first audit of an existing project test suite against real production behavior. The flow resolves a traversal-safe workspace and authority boundary, inventories the complete in-scope source and test corpus, builds and independently reviews a production-grounded taxonomy, maps every test in deterministic independently reviewed batches, and produces reviewed coverage, redundancy, gap, weak-assertion and exact-change recommendations. Users can correct resolved scope or taxonomy without losing unaffected evidence, request analysis only, authorize only the exact reviewed mutation set, revise recommendations, or abort. If changes are authorized, it records a pre-change baseline and recovery contract, applies one logical mutation class at a time with immediate targeted checks, independently reviews the actual delta, runs all applicable broader project gates, and either repairs within authority or performs and verifies a scoped revert. Irreducible evidence or an unsafe baseline can produce only an explicitly selected limited non-mutating report. Local Markdown and self-contained HTML reports are independently reviewed before optional authorized static publication and optional Telegram notification; local mode has no external side effects, and upload or notification failure remains visible. The flow preserves unrelated dirty work, never treats sampling as authorization, never reports failing changed tests as success, and never broadens access or discovers credentials. Choose Test Suite Audit to assess and optionally refactor an existing suite; use Test Planning to design strategy before implementation, Test Generation to add tests for a defined target, Data Analysis for supplied datasets, or Software Development Flow for complete product delivery."
   },
   "nodes": [
     {
-      "type": "start",
       "id": "start",
+      "type": "start",
       "connections": {
-        "default": "collect-project-info"
+        "default": "resolve-scope"
       }
     },
     {
+      "id": "resolve-scope",
       "type": "agent-directive",
-      "id": "collect-project-info",
-      "directive": "Collect project information. Read package.json, project structure, and identify:\n1. Project name and type (monorepo, single package, etc.)\n2. Test framework(s) used (jest, playwright, vitest, etc.)\n3. Source code directories\n4. Test directories and their organization\n5. Number of test files per directory\n\nCreate a workspace directory for audit artifacts (e.g., ./audit-workspace-YYYY-MM-DD/).\nSave project info to the workspace as project-info.json.\nReport the workspace_path you created — it will be used by all subsequent steps.\n\nIf re-running after user rejection, incorporate this feedback: {{user_feedback}}",
-      "completionCondition": "Project info collected, workspace created, project-info.json saved",
+      "directive": "Resolve the authorized project and audit boundary once for the engine-bound workspace {{workspace_path}}. Reuse the originating request and parent context; ask only for a material fact that cannot be discovered. Read applicable host and project instructions. Identify project root, languages/frameworks, test and source roots, generated/vendor exclusions, dirty-work boundary, permitted read/write/test operations, and any already authorized delivery choice. Preserve unrelated work and never discover credentials or broaden access. Do not choose or return a workspace path: the registry binds it to this execution ID. Return an empty object after the scope facts are resolved; detailed scope is written after materialization.",
+      "completionCondition": "The actual project, authority, instructions, exclusions, dirty-work boundary, and engine-bound workspace are resolved without repository mutation",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "materialize-workspace"
+      }
+    },
+    {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "./moira-ws/test-suite-audit-{{executionId}}",
+      "files": [
+        {
+          "path": "audit-standard.md",
+          "from": "audit_standard"
+        },
+        {
+          "path": "scope.md",
+          "content": ""
+        },
+        {
+          "path": "inventory.md",
+          "content": ""
+        },
+        {
+          "path": "taxonomy.md",
+          "content": ""
+        },
+        {
+          "path": "batch-plan.md",
+          "content": ""
+        },
+        {
+          "path": "mappings.md",
+          "content": ""
+        },
+        {
+          "path": "analysis.md",
+          "content": ""
+        },
+        {
+          "path": "taxonomy-review.md",
+          "content": ""
+        },
+        {
+          "path": "mapping-review.md",
+          "content": ""
+        },
+        {
+          "path": "analysis-review.md",
+          "content": ""
+        },
+        {
+          "path": "baseline.md",
+          "content": ""
+        },
+        {
+          "path": "changes.md",
+          "content": ""
+        },
+        {
+          "path": "change-review.md",
+          "content": ""
+        },
+        {
+          "path": "verification.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        },
+        {
+          "path": "report.html",
+          "content": ""
+        },
+        {
+          "path": "final-review.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "discover-corpus"
+      }
+    },
+    {
+      "id": "discover-corpus",
+      "type": "agent-directive",
+      "directive": "Use the immutable registry-backed standard at {{workspace_path}}/audit-standard.md; never rewrite it. Write {{workspace_path}}/scope.md with the resolved authority, project root, instructions, inclusions/exclusions, dirty-work boundary, commands and constraints. Inspect the complete in-scope production and test corpus; write {{workspace_path}}/inventory.md with actual languages, frameworks, runners, source/test roots, generated/vendor exclusions, test files/cases, commands, and observable gaps. Write {{workspace_path}}/taxonomy.md grounded in reproducible production references, including cross-cutting aspects, infrastructure, orphan candidates, multi-behaviour tests, incidental coverage and parameterized paths. Write {{workspace_path}}/batch-plan.md with a proportionate deterministic partition covering every inventory test exactly once. Initialize {{workspace_path}}/mappings.md without claiming uninspected mappings. Return batch_total equal to the actual batch count and batch_cursor 0. Do not mutate the repository under audit.",
+      "completionCondition": "Canonical scope, complete inventory, production-grounded taxonomy and complete deterministic batch plan are on disk under the immutable standard; cursor and total exactly match the plan",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
         "properties": {},
-        "required": [
-          "workspace_path",
-          "test_file_count",
-          "source_dirs"
-        ],
         "globalInputs": [
-          "workspace_path",
-          "test_file_count",
-          "source_dirs"
+          "batch_total",
+          "batch_cursor"
+        ],
+        "required": [
+          "batch_total",
+          "batch_cursor"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "batch_total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "batch_cursor": {
+                "const": 0
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "collect-test-inventory"
+        "success": "review-taxonomy"
       }
     },
     {
+      "id": "review-taxonomy",
       "type": "agent-directive",
-      "id": "collect-test-inventory",
-      "directive": "Create complete test inventory. For EACH test file:\n1. Full file path\n2. Test level (unit, workflow, integration, api, mcp, e2e) — determine from directory and test content\n3. Number of test/it blocks\n4. Approximate line count\n\nSave inventory to {{workspace_path}}/test-inventory.json\n\nProvide summary: total files, total tests, tests per level.",
-      "completionCondition": "Test inventory saved to workspace. Summary with totals per level provided.",
+      "directive": "Review {{workspace_path}}/scope.md, {{workspace_path}}/inventory.md, {{workspace_path}}/taxonomy.md, {{workspace_path}}/batch-plan.md and {{workspace_path}}/audit-standard.md independently in a genuinely separate host-supported context. Read primary production and test sources directly. Verify complete scope and inventory, production-grounded feature taxonomy, explicit infrastructure/orphan/multi-behaviour/incidental/aspect/parameterized treatment, pairwise-disjoint complete batches, and exact batch_total. Overwrite {{workspace_path}}/taxonomy-review.md with every reproducible blocking finding and its earliest stale producer. Diagnose only; do not repair. Return only exact bounded issues_count; zero is valid.",
+      "completionCondition": "A complete independent current taxonomy/inventory/batch review is on disk and issues_count equals all blocking findings",
       "inputSchema": {
         "type": "object",
-        "properties": {},
-        "required": [
-          "total_files",
-          "total_tests",
-          "level_counts"
-        ],
-        "globalInputs": [
-          "total_files",
-          "total_tests",
-          "level_counts"
-        ]
-      },
-      "connections": {
-        "success": "approve-setup"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "approve-setup",
-      "directive": "Present project info and test inventory to user for approval.\n\nShow:\n1. Project: name, type, frameworks\n2. Source directories\n3. Test inventory summary: total files, total tests, per-level breakdown\n4. Estimated batches for mapping phase (~15 files per batch)\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback. Workflow will direct to fix branch itself.",
-      "completionCondition": "User reviewed setup and provided approval decision",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "approval"
-        ],
-        "globalInputs": [
-          "approval",
-          "user_feedback"
-        ]
-      },
-      "connections": {
-        "success": "check-setup-approval"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "build-feature-taxonomy",
-      "directive": "Build Feature Taxonomy from production code.\n\n{{taxonomy_prompt}}\n\nAnalyze the project's production code — read routes, handlers, services, models, repositories. For each domain, identify features and their specific behaviors.\n\nSave taxonomy to {{workspace_path}}/feature-taxonomy.json\n\nThe taxonomy should cover ALL major features of the project. Each behavior MUST reference a specific file/function.\n\nIf re-running after user rejection, incorporate this feedback: {{user_feedback}}",
-      "completionCondition": "Feature Taxonomy saved to workspace. All behaviors reference production code.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "domain_count",
-          "feature_count",
-          "behavior_count"
-        ],
-        "globalInputs": [
-          "domain_count",
-          "feature_count",
-          "behavior_count"
-        ]
-      },
-      "connections": {
-        "success": "verify-taxonomy"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "verify-taxonomy",
-      "directive": "Verify Feature Taxonomy quality:\n\n1. Check each behavior has a valid production code reference\n2. Check no duplicate behaviors across feature groups\n3. Check taxonomy covers all major routes/endpoints\n4. Check behavior naming follows pattern 'domain.feature.specific_behavior'\n\nSave issues (if any) to {{workspace_path}}/taxonomy-issues.json\n\nReport issues_count. If 0 issues, taxonomy is ready.",
-      "completionCondition": "Taxonomy verified. Issues saved to file. issues_count reported.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
         "required": [
           "issues_count"
-        ],
-        "globalInputs": [
-          "issues_count",
-          "issues_summary"
         ]
       },
       "connections": {
-        "success": "check-taxonomy-issues"
+        "success": "taxonomy-clean"
       }
     },
     {
+      "id": "taxonomy-clean",
       "type": "condition",
-      "id": "check-taxonomy-issues",
       "condition": {
-        "operator": "gt",
+        "operator": "eq",
         "left": {
-          "contextPath": "issues_count"
+          "contextPath": "review-taxonomy.issues_count"
         },
         "right": 0
       },
       "connections": {
-        "true": "inc-taxonomy-fix-attempts",
-        "false": "approve-taxonomy"
+        "true": "confirm-scope-taxonomy",
+        "false": "repair-taxonomy"
       }
     },
     {
-      "type": "expression",
-      "id": "inc-taxonomy-fix-attempts",
-      "expressions": [
-        "taxonomy_fix_attempts = taxonomy_fix_attempts + 1"
-      ],
-      "connections": {
-        "default": "check-taxonomy-fix-attempts"
-      }
-    },
-    {
+      "id": "repair-taxonomy",
       "type": "agent-directive",
-      "id": "fix-taxonomy",
-      "directive": "Fix taxonomy issues found in {{workspace_path}}/taxonomy-issues.json\n\nRead the issues file and fix each one:\n- Missing code references: find the actual production file/function\n- Duplicate behaviors: merge or differentiate\n- Missing coverage: add missing features/behaviors\n\nUpdate {{workspace_path}}/feature-taxonomy.json with fixes.",
-      "completionCondition": "Taxonomy issues fixed. Updated taxonomy saved.",
+      "directive": "Read the complete {{workspace_path}}/taxonomy-review.md and reproduce every finding against primary sources. Repair each confirmed defect at its earliest source in {{workspace_path}}/scope.md, inventory.md, taxonomy.md or batch-plan.md; reject false findings in the review report. Regenerate every actually affected downstream artifact and reset mappings.md and batch_cursor when prior mapping evidence is stale. Preserve only genuinely unaffected evidence. Return repair_reach scope when scope/inventory changed, taxonomy when the current evidence was repaired, or irreducible when a reproduced taxonomy defect cannot be resolved under current access or authority; for irreducible record exact incomplete scope and prohibited conclusions in {{workspace_path}}/analysis.md. Return exact current batch_total and batch_cursor 0. Do not mutate the audited repository.",
+      "completionCondition": "All confirmed findings are repaired at their earliest producers and every affected derived artifact is regenerated",
       "inputSchema": {
         "type": "object",
-        "properties": {},
-        "required": [
-          "fixes_applied"
-        ],
+        "additionalProperties": false,
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "scope",
+              "taxonomy",
+              "irreducible"
+            ]
+          }
+        },
         "globalInputs": [
-          "fixes_applied"
+          "batch_total",
+          "batch_cursor"
+        ],
+        "required": [
+          "repair_reach",
+          "batch_total",
+          "batch_cursor"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "batch_total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "batch_cursor": {
+                "const": 0
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "verify-taxonomy"
+        "success": "taxonomy-repair-scope"
       }
     },
     {
-      "type": "agent-directive",
-      "id": "approve-taxonomy",
-      "directive": "Present Feature Taxonomy to user for approval.\n\nShow:\n1. Number of domains, features, behaviors\n2. Top-level structure (domains and feature groups)\n3. Sample of 3-5 behaviors with their production code references\n4. Any unresolved issues from fix loops\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback.",
-      "completionCondition": "User reviewed taxonomy and provided approval decision",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "approval"
-        ],
-        "globalInputs": [
-          "approval",
-          "user_feedback"
-        ]
-      },
-      "connections": {
-        "success": "check-taxonomy-approval"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "plan-mapping-batches",
-      "directive": "Plan test file mapping batches.\n\nRead {{workspace_path}}/test-inventory.json and group test files into batches of ~15 files each.\n- Group by domain/directory when possible\n- Keep related test files in same batch\n\nSave batch plan to {{workspace_path}}/batch-plan.json with structure:\n[\n  { \"batch_index\": 0, \"files\": [\"path1\", \"path2\", ...] },\n  ...\n]\n\nReport total_batches count.",
-      "completionCondition": "Batch plan saved. total_batches reported.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "total_batches"
-        ],
-        "globalInputs": [
-          "total_batches"
-        ]
-      },
-      "connections": {
-        "success": "init-batch-counter"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "init-batch-counter",
-      "expressions": [
-        "current_batch = 0"
-      ],
-      "connections": {
-        "default": "check-batches-remaining"
-      }
-    },
-    {
+      "id": "taxonomy-repair-scope",
       "type": "condition",
-      "id": "check-batches-remaining",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-taxonomy.repair_reach"
+        },
+        "right": "scope"
+      },
+      "connections": {
+        "true": "reset-for-scope",
+        "false": "taxonomy-repair-irreducible"
+      }
+    },
+    {
+      "id": "taxonomy-repair-irreducible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-taxonomy.repair_reach"
+        },
+        "right": "irreducible"
+      },
+      "connections": {
+        "true": "irreducible-decision",
+        "false": "review-taxonomy"
+      }
+    },
+    {
+      "id": "confirm-scope-taxonomy",
+      "type": "agent-directive",
+      "directive": "Present the resolved scope, exclusions, inventory basis and zero-reviewed taxonomy to the user. Reuse an explicit correction already supplied. Otherwise ask whether these artifacts are accepted or require correction. Return accept only for explicit acceptance. For correct, require non-blank feedback and correction_target scope or taxonomy. Do not change files or infer acceptance from silence.",
+      "completionCondition": "The user explicitly accepted the resolved scope/taxonomy or supplied a bounded correction and target",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "correct"
+            ]
+          },
+          "correction_target": {
+            "type": "string",
+            "enum": [
+              "scope",
+              "taxonomy"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "correct"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "correction_target",
+                "feedback"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "scope-taxonomy-accepted"
+      }
+    },
+    {
+      "id": "scope-taxonomy-accepted",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "confirm-scope-taxonomy.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "check-batches",
+        "false": "apply-user-correction"
+      }
+    },
+    {
+      "id": "apply-user-correction",
+      "type": "agent-directive",
+      "directive": "Apply this explicit user correction to its already validated canonical target: {{confirm-scope-taxonomy.correction_target}}; feedback: {{confirm-scope-taxonomy.feedback}}. For scope, change scope.md and let the route enter discover-corpus so inventory, taxonomy, batches and mappings are regenerated. For taxonomy, update {{workspace_path}}/taxonomy.md, regenerate affected batch/mapping evidence, clear {{workspace_path}}/mappings.md, and reset the cursor. Do not restate or override the target, and do not mutate the audited repository. Return only batch_cursor 0; preserve only genuinely unaffected evidence.",
+      "completionCondition": "The explicit correction is applied to the user-selected owner and all affected derived evidence is invalidated",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "batch_cursor"
+        ],
+        "required": [
+          "batch_cursor"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "batch_cursor": {
+                "const": 0
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "user-correction-scope"
+      }
+    },
+    {
+      "id": "user-correction-scope",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "confirm-scope-taxonomy.correction_target"
+        },
+        "right": "scope"
+      },
+      "connections": {
+        "true": "discover-corpus",
+        "false": "review-taxonomy"
+      }
+    },
+    {
+      "id": "check-batches",
+      "type": "condition",
       "condition": {
         "operator": "lt",
         "left": {
-          "contextPath": "current_batch"
+          "contextPath": "batch_cursor"
         },
         "right": {
-          "contextPath": "total_batches"
+          "contextPath": "batch_total"
         }
       },
       "connections": {
         "true": "map-batch",
-        "false": "resolve-unmapped"
+        "false": "analyze-suite"
       }
     },
     {
-      "type": "agent-directive",
       "id": "map-batch",
-      "directive": "Map test batch {{current_batch}} of {{total_batches}}.\n\nRead batch plan from {{workspace_path}}/batch-plan.json, get files for batch index {{current_batch}}.\n\nFor EACH test file in this batch:\n{{mapping_prompt}}\n\nRead the Feature Taxonomy from {{workspace_path}}/feature-taxonomy.json to map behaviors.\n\nAppend mappings to {{workspace_path}}/test-mappings.json (create if first batch).",
-      "completionCondition": "All files in batch mapped. Mappings saved to workspace.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "files_mapped",
-          "tests_mapped",
-          "unmapped_count"
-        ],
-        "globalInputs": [
-          "files_mapped",
-          "tests_mapped",
-          "unmapped_count"
-        ]
-      },
-      "connections": {
-        "success": "verify-batch"
-      }
-    },
-    {
       "type": "agent-directive",
-      "id": "verify-batch",
-      "directive": "Verify batch {{current_batch}} mapping quality.\n\nSpot-check 3 random mappings from this batch:\n1. Read the actual test code\n2. Confirm behavior_id matches what test actually tests\n3. Confirm aspect is correct\n4. Check assertions list matches actual expect() calls\n\nSave any issues to {{workspace_path}}/batch-issues.json",
-      "completionCondition": "Batch verified. Issues saved. issues_count reported.",
+      "directive": "Map exactly batch {{batch_cursor}} of {{batch_total}} from {{workspace_path}}/batch-plan.md. Read every assigned test and its real assertions plus referenced production behavior. Append or replace that batch's canonical entry in {{workspace_path}}/mappings.md with one record per test/case, feature/aspect links, boundary value, infrastructure/orphan/multi-behaviour/incidental/parameterized status, production references, limitations and unresolved taxonomy gaps. Do not map another batch, mutate the audited repository, or infer coverage from names.",
+      "completionCondition": "The current batch has one complete source-grounded canonical mapping and other batch evidence is unchanged",
       "inputSchema": {
         "type": "object",
-        "properties": {},
-        "required": [
-          "issues_count",
-          "checked_count"
-        ],
-        "globalInputs": [
-          "issues_count",
-          "checked_count"
-        ]
+        "additionalProperties": false,
+        "properties": {}
       },
       "connections": {
-        "success": "check-batch-issues"
+        "success": "review-mapping"
       }
     },
     {
+      "id": "review-mapping",
+      "type": "agent-directive",
+      "directive": "Independently review the complete current mapping for batch {{batch_cursor}} in {{workspace_path}}/mappings.md in a genuinely separate context. Read {{workspace_path}}/batch-plan.md, taxonomy.md, inventory.md and every assigned primary test/production source. Verify completeness, assertion-level behavior, feature/aspect links, boundaries, special categories and taxonomy gaps. Overwrite {{workspace_path}}/mapping-review.md with all current reproducible findings and earliest owner. Diagnose only. Return exact bounded issues_count; zero is valid.",
+      "completionCondition": "The complete current batch mapping has an independent review and exact issue count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "mapping-clean"
+      }
+    },
+    {
+      "id": "mapping-clean",
       "type": "condition",
-      "id": "check-batch-issues",
       "condition": {
-        "operator": "gt",
+        "operator": "eq",
         "left": {
-          "contextPath": "issues_count"
+          "contextPath": "review-mapping.issues_count"
         },
         "right": 0
       },
       "connections": {
-        "true": "inc-batch-fix-attempts",
-        "false": "increment-batch"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "inc-batch-fix-attempts",
-      "expressions": [
-        "batch_fix_attempts = batch_fix_attempts + 1"
-      ],
-      "connections": {
-        "default": "check-batch-fix-attempts"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-batch",
-      "directive": "Fix batch mapping issues from {{workspace_path}}/batch-issues.json\n\nRe-read the actual test files and correct mappings:\n- Wrong behavior_id: re-analyze what test actually tests\n- Wrong aspect: check if happy_path vs error_handling etc.\n- Missing assertions: re-read test and list actual expect() calls\n\nUpdate {{workspace_path}}/test-mappings.json with corrections.\nReset batch_fix_attempts counter if issues resolved.",
-      "completionCondition": "Batch issues fixed. Mappings updated.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "fixes_applied"
-        ],
-        "globalInputs": [
-          "fixes_applied"
-        ]
-      },
-      "connections": {
-        "success": "verify-batch"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "increment-batch",
-      "expressions": [
-        "current_batch = current_batch + 1",
-        "batch_fix_attempts = 0"
-      ],
-      "connections": {
-        "default": "check-batches-remaining"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "resolve-unmapped",
-      "directive": "Resolve UNMAPPED tests.\n\nRead {{workspace_path}}/test-mappings.json and find all tests with behavior_id = 'UNMAPPED'.\n\nFor each:\n1. If test maps to a missing behavior → ADD behavior to taxonomy (update feature-taxonomy.json)\n2. If test is infrastructure/helper test → mark as 'INFRA'\n3. If test references deleted functionality → mark as 'ORPHAN'\n\nUpdate test-mappings.json with resolved mappings.\nReport counts of each resolution type.",
-      "completionCondition": "All UNMAPPED tests resolved. Mappings and taxonomy updated.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "added_behaviors",
-          "infra_tests",
-          "orphan_tests",
-          "still_unmapped"
-        ],
-        "globalInputs": [
-          "added_behaviors",
-          "infra_tests",
-          "orphan_tests",
-          "still_unmapped"
-        ]
-      },
-      "connections": {
-        "success": "build-coverage-matrix"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "build-coverage-matrix",
-      "directive": "Build Feature × Level Coverage Matrix.\n\nRead {{workspace_path}}/test-mappings.json and {{workspace_path}}/feature-taxonomy.json.\n\nFor each behavior, count how many tests cover it at each level:\n| Behavior ID | Unit | Workflow | Integration | API | MCP | E2E |\n\nSave matrix to {{workspace_path}}/coverage-matrix.json\n\nIdentify:\n- Behaviors with coverage at 3+ levels (potential cross-level redundancy)\n- Behaviors with 2+ tests at same level (potential same-level redundancy)\n- Behaviors with 0 tests (coverage gaps)",
-      "completionCondition": "Coverage matrix built and saved. Statistics reported.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "total_behaviors",
-          "multi_level_count",
-          "same_level_multi",
-          "gap_count"
-        ],
-        "globalInputs": [
-          "total_behaviors",
-          "multi_level_count",
-          "same_level_multi",
-          "gap_count"
-        ]
-      },
-      "connections": {
-        "success": "detect-redundancies"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "detect-redundancies",
-      "directive": "Detect redundancies using 4 rules.\n\nRead coverage matrix from {{workspace_path}}/coverage-matrix.json and test mappings from {{workspace_path}}/test-mappings.json.\n\nApply redundancy detection rules from the methodology:\n{{methodology}}\n\nFor each behavior with potential redundancy:\n\nRule R1 (Same-Level Subset): If test A on same level checks strict subset of test B → A is redundant.\nRule R2 (Cross-Level Full Overlap): If test at L1 checks EXACTLY same behavior as L2, but L1 is faster → L2 potentially redundant. ONLY if L2 adds NOTHING unique.\nRule R3 (Incidental Coverage): If behavior only checked as side effect → not real coverage.\nRule R4 (Aspect Coverage): Different aspects ≠ redundancy.\n\nFor EACH finding, read BOTH tests to confirm. Generate evidence.\n\nSave findings to {{workspace_path}}/redundancy-findings.json with structure:\n[\n  {\n    \"behavior_id\": \"...\",\n    \"redundancy_type\": \"same_level_subset|cross_level_overlap|incidental\",\n    \"tests\": [{\"file\": \"...\", \"test\": \"...\", \"role\": \"SUBSET|SUPERSET|REDUNDANT|KEEP\"}],\n    \"recommendation\": \"DELETE|MERGE|KEEP\",\n    \"confidence\": \"high|medium|low\",\n    \"evidence\": \"detailed explanation\"\n  }\n]\n\nIMPORTANT — Avoid False Positives:\n{{anti_patterns}}",
-      "completionCondition": "Redundancy findings saved. All findings have evidence from reading actual test code.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "total_findings",
-          "high_confidence",
-          "medium_confidence",
-          "low_confidence"
-        ],
-        "globalInputs": [
-          "total_findings",
-          "high_confidence",
-          "medium_confidence",
-          "low_confidence",
-          "by_type"
-        ]
-      },
-      "connections": {
-        "success": "sample-for-verification"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "sample-for-verification",
-      "directive": "Select random 15-20% of redundancy findings for cross-verification.\n\nRead {{workspace_path}}/redundancy-findings.json.\n\nSelect a random sample (15-20% of total findings, minimum 5).\nPrioritize: include at least some from each redundancy_type and confidence level.\n\nSave sample to {{workspace_path}}/verification-sample.json",
-      "completionCondition": "Verification sample selected and saved.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "total_findings",
-          "sample_size"
-        ],
-        "globalInputs": [
-          "total_findings",
-          "sample_size"
-        ]
-      },
-      "connections": {
-        "success": "verify-sample"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "verify-sample",
-      "directive": "Cross-verify sampled findings.\n\nFor each finding in {{workspace_path}}/verification-sample.json:\n\n{{verification_prompt}}\n\nBe SKEPTICAL — try to find reasons the finding might be WRONG.\nLook for subtle differences between tests that the original analysis might have missed.\n\nFor each sample, record: AGREE or DISAGREE with reasoning.\n\nCalculate disagree_rate = disagreements / total_sample.\n\nSave results to {{workspace_path}}/verification-results.json\n\nIMPORTANT — Common False Positives to Watch For:\n{{anti_patterns}}",
-      "completionCondition": "All samples verified. Disagree rate calculated.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "disagree_rate": {
-            "type": "number",
-            "description": "Ratio of disagreements to total sample (0.0 to 1.0, NOT percentage). E.g., 3 disagree out of 20 = 0.15"
-          }
-        },
-        "required": [
-          "agree_count",
-          "disagree_count",
-          "disagree_rate"
-        ],
-        "globalInputs": [
-          "agree_count",
-          "disagree_count"
-        ]
-      },
-      "connections": {
-        "success": "check-verification"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-verification",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "verify-sample.disagree_rate"
-        },
-        "right": 0.2
-      },
-      "connections": {
-        "true": "apply-decision-framework",
-        "false": "inc-verify-rounds"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "inc-verify-rounds",
-      "expressions": [
-        "verify_rounds = verify_rounds + 1"
-      ],
-      "connections": {
-        "default": "check-verification-rounds"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "cleanup-false-positives",
-      "directive": "Cross-verification disagreement rate is too high (≥20%).\n\nRead {{workspace_path}}/verification-results.json.\n\nAnalyze patterns in DISAGREE findings:\n1. Which redundancy types have most disagreements?\n2. What systematic errors are occurring?\n3. Are the detection rules too aggressive?\n\nRemove confirmed false positives from {{workspace_path}}/redundancy-findings.json.\nAdjust detection criteria if a pattern of errors is found.\n\nRe-run with cleaned findings (loop back to sample-for-verification).",
-      "completionCondition": "False positives removed. Findings cleaned up.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "removed_count"
-        ],
-        "globalInputs": [
-          "removed_count",
-          "patterns_found"
-        ]
-      },
-      "connections": {
-        "success": "sample-for-verification"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "apply-decision-framework",
-      "directive": "Apply Decision Framework to all confirmed findings.\n\n{{decision_framework}}\n\nRead verified findings from {{workspace_path}}/redundancy-findings.json.\n\nFor EACH finding, apply the decision tree:\n- Step 1: Same-Level → subset? merge? keep?\n- Step 2: Cross-Level → higher adds value? critical? delete?\n- Step 3: Subset → same level? extract edge case?\n\nAlso perform Gap Analysis — identify behaviors with 0 or insufficient test coverage.\n\nSave decisions to {{workspace_path}}/decisions.json with structure:\n[\n  {\n    \"behavior_id\": \"...\",\n    \"action\": \"DELETE|MERGE|KEEP|REWRITE\",\n    \"target_tests\": [\"file:testname\"],\n    \"confidence\": \"HIGH|MEDIUM|LOW\",\n    \"rationale\": \"...\"\n  }\n]\n\nSave gaps to {{workspace_path}}/coverage-gaps.json\n\nIf re-running after user rejection, incorporate this feedback: {{user_feedback}}",
-      "completionCondition": "Decisions and gaps saved. All decisions have rationale.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "delete_count",
-          "merge_count",
-          "keep_count",
-          "rewrite_count",
-          "gap_count"
-        ],
-        "globalInputs": [
-          "delete_count",
-          "merge_count",
-          "keep_count",
-          "rewrite_count",
-          "gap_count"
-        ]
-      },
-      "connections": {
-        "success": "approve-decisions"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "approve-decisions",
-      "directive": "Present decisions to user for approval.\n\nShow summary:\n1. DELETE: N tests (list with rationale for each)\n2. MERGE: N test groups (list with target)\n3. REWRITE: N tests (list with what needs changing)\n4. KEEP: N tests (no changes needed)\n5. Coverage gaps: N (list priorities)\n\nGroup by confidence: HIGH (auto-apply), MEDIUM (need approval), LOW (for review).\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said 'yes' → approval = 'yes'. If user gave ANY feedback or said 'no' → approval = 'no'. DO NOT fix yourself! Reply approval = 'no' and write user_feedback with feedback.",
-      "completionCondition": "User reviewed decisions and provided approval",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "approval"
-        ],
-        "globalInputs": [
-          "approval",
-          "user_feedback"
-        ]
-      },
-      "connections": {
-        "success": "check-decisions-approval"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "apply-changes",
-      "directive": "Apply approved changes to test files.\n\nRead {{workspace_path}}/decisions.json.\n\nFor each decision with action DELETE:\n- Remove the test (it block) or entire file if all tests deleted\n- Record what was deleted\n\nFor each MERGE:\n- Combine tests into single data-driven test\n- Record before/after\n\nFor each REWRITE:\n- Apply the specified rewrite\n- Record changes\n\nSave changelog to {{workspace_path}}/changelog.json",
-      "completionCondition": "All approved changes applied. Changelog saved.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "files_modified",
-          "tests_removed"
-        ],
-        "globalInputs": [
-          "files_modified",
-          "files_deleted",
-          "tests_removed",
-          "tests_merged",
-          "tests_rewritten"
-        ]
-      },
-      "connections": {
-        "success": "verify-tests-pass"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "verify-tests-pass",
-      "directive": "Verify all tests still pass after changes.\n\nRun the project's test suite. Use the project's standard test command.\n\nIf tests fail, save failures to {{workspace_path}}/test-failures.json with:\n- Failed test file\n- Failed test name\n- Error message\n- Which change likely caused the failure\n\nReport pass/fail status.",
-      "completionCondition": "Tests executed. Pass/fail status reported.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "all_pass": {
-            "type": "boolean",
-            "description": "true if all tests passed, false if any failed"
-          }
-        },
-        "required": [
-          "all_pass",
-          "total_tests"
-        ],
-        "globalInputs": [
-          "total_tests",
-          "passed",
-          "failed"
-        ]
-      },
-      "connections": {
-        "success": "check-tests-pass"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-tests-pass",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "verify-tests-pass.all_pass"
-        },
-        "right": true
-      },
-      "connections": {
-        "true": "generate-report",
-        "false": "inc-test-fix-attempts"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "inc-test-fix-attempts",
-      "expressions": [
-        "test_fix_attempts = test_fix_attempts + 1"
-      ],
-      "connections": {
-        "default": "check-test-fix-attempts"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-test-failures",
-      "directive": "Fix test failures caused by audit changes.\n\nRead {{workspace_path}}/test-failures.json.\n\nFor each failure:\n1. Identify which change caused it\n2. Fix the issue — either adjust the change or revert it\n3. Record the fix\n\nDo NOT revert changes unless the test failure reveals the change was wrong.\nUpdate changelog with fixes.",
-      "completionCondition": "Test failures addressed. Fixes applied.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "fixes_applied"
-        ],
-        "globalInputs": [
-          "fixes_applied",
-          "reverted_changes"
-        ]
-      },
-      "connections": {
-        "success": "verify-tests-pass"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "generate-report",
-      "directive": "Generate comprehensive HTML audit report.\n\nRead all workspace artifacts:\n- {{workspace_path}}/feature-taxonomy.json\n- {{workspace_path}}/test-mappings.json\n- {{workspace_path}}/coverage-matrix.json\n- {{workspace_path}}/redundancy-findings.json\n- {{workspace_path}}/decisions.json\n- {{workspace_path}}/coverage-gaps.json\n- {{workspace_path}}/changelog.json\n\nCreate HTML report with sections:\n1. Executive Summary (tests before/after, changes made)\n2. Feature Taxonomy (interactive tree)\n3. Coverage Matrix (table with color coding)\n4. Redundancy Findings (detailed list with evidence)\n5. Decisions Applied (DELETE/MERGE/REWRITE with rationale)\n6. Coverage Gaps (priorities and recommendations)\n7. Methodology (how analysis was done)\n\nUpload HTML report using Moira artifacts.\nSave report URL.",
-      "completionCondition": "HTML report generated and uploaded. Report URL available.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "report_url": {
-            "type": "string",
-            "description": "URL of uploaded HTML report"
-          },
-          "tests_before": {
-            "type": "number",
-            "description": "Total tests before audit"
-          },
-          "tests_after": {
-            "type": "number",
-            "description": "Total tests after audit changes"
-          },
-          "changes_applied": {
-            "type": "number",
-            "description": "Total number of changes applied (delete + merge + rewrite)"
-          }
-        },
-        "required": [
-          "report_url",
-          "tests_before",
-          "tests_after",
-          "changes_applied"
-        ]
-      },
-      "connections": {
-        "success": "notify-completion"
-      }
-    },
-    {
-      "type": "telegram-notification",
-      "id": "notify-completion",
-      "message": "✅ Test Suite Audit v3.0 Complete\n\nTests: {{generate-report.tests_before}} → {{generate-report.tests_after}}\nChanges: {{generate-report.changes_applied}}\nReport: {{generate-report.report_url}}",
-      "connections": {
-        "default": "end"
-      }
-    },
-    {
-      "type": "end",
-      "id": "end",
-      "finalOutput": [
-        "report_url",
-        "tests_before",
-        "tests_after",
-        "changes_applied"
-      ]
-    },
-    {
-      "type": "condition",
-      "id": "check-setup-approval",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approval"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "build-feature-taxonomy",
-        "false": "collect-project-info"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-taxonomy-approval",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approval"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "plan-mapping-batches",
-        "false": "build-feature-taxonomy"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-decisions-approval",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approval"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "apply-changes",
-        "false": "apply-decision-framework"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "ask-user-batch-skip",
-      "directive": "Batch mapping fix loop reached maximum 3 iterations. Some mapping issues remain unresolved for batch {{current_batch}}.\n\nShow the user the unresolved issues from {{workspace_path}}/batch-issues.json.\n\nAsk user:\n1. skip - Skip this batch and continue with next batch (unresolved mappings will be treated as UNMAPPED)\n2. abort - Stop the audit\n\nCRITICALLY IMPORTANT - REACTION TO FEEDBACK: If user said skip → decision = \"skip\". If user said abort → decision = \"abort\".",
-      "completionCondition": "User decision received",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "decision"
-        ],
-        "globalInputs": [
-          "decision"
-        ]
-      },
-      "connections": {
-        "success": "check-batch-skip-decision"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-batch-skip-decision",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "decision"
-        },
-        "right": "skip"
-      },
-      "connections": {
         "true": "increment-batch",
-        "false": "end-aborted"
+        "false": "repair-mapping"
       }
     },
     {
+      "id": "repair-mapping",
       "type": "agent-directive",
-      "id": "ask-user-test-failures",
-      "directive": "Test fix loop reached maximum 3 iterations. Tests are still failing after changes.\n\nShow the user the remaining failures from {{workspace_path}}/test-failures.json.\n\nPresent options:\n1. report_with_warnings - Generate report noting that tests are failing (changes remain applied)\n2. revert_all - Revert ALL audit changes and generate report showing what WOULD have been changed\n3. abort - Stop the audit immediately\n\nCRITICALLY IMPORTANT: Report the user's exact choice.",
-      "completionCondition": "User decision received",
+      "directive": "Read {{workspace_path}}/mapping-review.md and reproduce every finding. Repair confirmed defects at the earliest actual owner in the canonical workspace artifacts. Return repair_reach mapping for a current-batch-only mapping correction, taxonomy if taxonomy changes, scope if scope/inventory changes, or irreducible when current access/authority cannot resolve reproduced evidence. Mapping preserves accepted unaffected batches. Taxonomy or scope reach resets batch_cursor to 0, regenerates every affected artifact and review source, and cannot preserve stale mappings. For irreducible, write exact incomplete scope and prohibited conclusions to {{workspace_path}}/analysis.md without inventing evidence. Do not mutate the audited repository.",
+      "completionCondition": "Every finding is repaired with correct invalidation reach or a reproduced irreducible evidence boundary is recorded",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "mapping",
+              "taxonomy",
+              "scope",
+              "irreducible"
+            ]
+          }
+        },
         "required": [
-          "decision"
-        ],
-        "globalInputs": [
+          "repair_reach"
+        ]
+      },
+      "connections": {
+        "success": "mapping-repair-scope"
+      }
+    },
+    {
+      "id": "mapping-repair-scope",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-mapping.repair_reach"
+        },
+        "right": "scope"
+      },
+      "connections": {
+        "true": "reset-for-scope",
+        "false": "mapping-repair-taxonomy"
+      }
+    },
+    {
+      "id": "mapping-repair-taxonomy",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-mapping.repair_reach"
+        },
+        "right": "taxonomy"
+      },
+      "connections": {
+        "true": "reset-for-taxonomy",
+        "false": "mapping-repair-irreducible"
+      }
+    },
+    {
+      "id": "mapping-repair-irreducible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-mapping.repair_reach"
+        },
+        "right": "irreducible"
+      },
+      "connections": {
+        "true": "irreducible-decision",
+        "false": "review-mapping"
+      }
+    },
+    {
+      "id": "reset-for-scope",
+      "type": "expression",
+      "expressions": [
+        "batch_cursor = 0"
+      ],
+      "connections": {
+        "default": "discover-corpus"
+      }
+    },
+    {
+      "id": "reset-for-taxonomy",
+      "type": "expression",
+      "expressions": [
+        "batch_cursor = 0"
+      ],
+      "connections": {
+        "default": "review-taxonomy"
+      }
+    },
+    {
+      "id": "irreducible-decision",
+      "type": "agent-directive",
+      "directive": "Explain the reproduced taxonomy/mapping evidence that cannot be resolved under current access or authority. Ask for exactly limited_report or abort. limited_report authorizes only a truthful non-mutating report naming exact incomplete scope and excluding unsupported coverage, redundancy and change conclusions. Abort authorizes no later mutation. Do not infer a choice from silence.",
+      "completionCondition": "The user explicitly selected limited non-mutating reporting or abort",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "limited_report",
+              "abort"
+            ]
+          }
+        },
+        "required": [
           "decision"
         ]
       },
       "connections": {
-        "success": "check-test-failure-decision"
+        "success": "irreducible-limited"
       }
     },
     {
+      "id": "irreducible-limited",
       "type": "condition",
-      "id": "check-test-failure-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "decision"
+          "contextPath": "irreducible-decision.decision"
+        },
+        "right": "limited_report"
+      },
+      "connections": {
+        "true": "set-limited-outcome",
+        "false": "set-abort-outcome"
+      }
+    },
+    {
+      "id": "increment-batch",
+      "type": "expression",
+      "expressions": [
+        "batch_cursor = batch_cursor + 1"
+      ],
+      "connections": {
+        "default": "check-batches"
+      }
+    },
+    {
+      "id": "analyze-suite",
+      "type": "agent-directive",
+      "directive": "Read the complete zero-reviewed {{workspace_path}}/scope.md, inventory.md, taxonomy.md and every batch in mappings.md. Write {{workspace_path}}/analysis.md with evidence-backed coverage, redundancy, gaps, weak assertions, misplaced tests, infrastructure findings, costs, limitations, and an exact ordered recommendation set. Distinguish production behavior from test implementation and sampled diagnostics from complete evidence. Every proposed deletion, merge, rewrite, move or creation must name observable value, risk, affected files, logical mutation class, targeted check, broader gates and recovery needs. Do not mutate the repository or claim unsupported conclusions.",
+      "completionCondition": "A complete source-grounded analysis and exact change recommendation set are on disk without repository mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "review-analysis"
+      }
+    },
+    {
+      "id": "review-analysis",
+      "type": "agent-directive",
+      "directive": "Independently review {{workspace_path}}/analysis.md against {{workspace_path}}/audit-standard.md, scope.md, inventory.md, taxonomy.md, mappings.md and primary code/tests. Verify every coverage/redundancy/gap claim, exact recommendation, deletion value retention, mutation class, test evidence, authority and limitation. Overwrite {{workspace_path}}/analysis-review.md with all reproducible blockers and earliest stale owner. Diagnose only. Return exact bounded issues_count; zero is valid.",
+      "completionCondition": "The complete current analysis has an independent primary-source review and exact issue count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "analysis-clean"
+      }
+    },
+    {
+      "id": "analysis-clean",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-analysis.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "present-recommendations",
+        "false": "repair-analysis"
+      }
+    },
+    {
+      "id": "repair-analysis",
+      "type": "agent-directive",
+      "directive": "Read {{workspace_path}}/analysis-review.md and reproduce every finding. Repair confirmed defects at their earliest canonical workspace owner. Return repair_reach analysis when only analysis.md changes, taxonomy when taxonomy or mappings change, or scope when scope/inventory changes. For taxonomy/scope, reset mappings and batch cursor and regenerate every affected derived artifact; do not preserve stale review acceptance. Do not mutate the audited repository.",
+      "completionCondition": "Every confirmed analysis-review defect is repaired at the earliest source with complete invalidation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "analysis",
+              "taxonomy",
+              "scope"
+            ]
+          }
+        },
+        "required": [
+          "repair_reach"
+        ]
+      },
+      "connections": {
+        "success": "analysis-repair-scope"
+      }
+    },
+    {
+      "id": "analysis-repair-scope",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-analysis.repair_reach"
+        },
+        "right": "scope"
+      },
+      "connections": {
+        "true": "reset-for-scope",
+        "false": "analysis-repair-taxonomy"
+      }
+    },
+    {
+      "id": "analysis-repair-taxonomy",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-analysis.repair_reach"
+        },
+        "right": "taxonomy"
+      },
+      "connections": {
+        "true": "reset-for-taxonomy",
+        "false": "review-analysis"
+      }
+    },
+    {
+      "id": "present-recommendations",
+      "type": "agent-directive",
+      "directive": "Present the complete zero-reviewed analysis and exact recommendation set. Ask for exactly analysis_only, apply, revise or abort unless the originating request already explicitly selected the exact current option. apply authorizes only the current reviewed set; revise requires non-blank feedback and changes recommendations before renewed review; analysis_only forbids repository mutation; abort forbids every later file, repository and external mutation. Never infer approval.",
+      "completionCondition": "The user explicitly selected one closed outcome for the current reviewed recommendation set",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "analysis_only",
+              "apply",
+              "revise",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000,
+            "pattern": "\\S"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "decision-abort"
+      }
+    },
+    {
+      "id": "decision-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-recommendations.decision"
         },
         "right": "abort"
       },
       "connections": {
-        "true": "end-aborted",
-        "false": "generate-report"
+        "true": "set-abort-outcome",
+        "false": "decision-apply"
       }
     },
     {
+      "id": "decision-apply",
       "type": "condition",
-      "id": "check-taxonomy-fix-attempts",
       "condition": {
-        "operator": "lte",
+        "operator": "eq",
         "left": {
-          "contextPath": "taxonomy_fix_attempts"
+          "contextPath": "present-recommendations.decision"
         },
-        "right": 3
+        "right": "apply"
       },
       "connections": {
-        "true": "fix-taxonomy",
-        "false": "approve-taxonomy"
+        "true": "establish-baseline",
+        "false": "decision-revise"
       }
     },
     {
+      "id": "decision-revise",
       "type": "condition",
-      "id": "check-batch-fix-attempts",
       "condition": {
-        "operator": "lte",
+        "operator": "eq",
         "left": {
-          "contextPath": "batch_fix_attempts"
+          "contextPath": "present-recommendations.decision"
         },
-        "right": 3
+        "right": "revise"
       },
       "connections": {
-        "true": "fix-batch",
-        "false": "ask-user-batch-skip"
+        "true": "revise-recommendations",
+        "false": "set-analysis-outcome"
       }
     },
     {
-      "type": "condition",
-      "id": "check-verification-rounds",
-      "condition": {
-        "operator": "lte",
-        "left": {
-          "contextPath": "verify_rounds"
+      "id": "revise-recommendations",
+      "type": "agent-directive",
+      "directive": "Apply this non-blank recommendation feedback at its earliest source: {{present-recommendations.feedback}}. Return repair_reach analysis, taxonomy or scope. Scope/taxonomy reach regenerates all affected inventory, batches, mappings and reviews and resets batch_cursor; analysis reach changes {{workspace_path}}/analysis.md and returns through independent analysis review. Do not mutate the repository.",
+      "completionCondition": "The requested revision is applied with truthful invalidation reach and no repository mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "analysis",
+              "taxonomy",
+              "scope"
+            ]
+          }
         },
-        "right": 3
+        "required": [
+          "repair_reach"
+        ]
       },
       "connections": {
-        "true": "cleanup-false-positives",
-        "false": "approve-decisions"
+        "success": "revision-scope"
       }
     },
     {
+      "id": "revision-scope",
       "type": "condition",
-      "id": "check-test-fix-attempts",
       "condition": {
-        "operator": "lte",
+        "operator": "eq",
         "left": {
-          "contextPath": "test_fix_attempts"
+          "contextPath": "revise-recommendations.repair_reach"
         },
-        "right": 3
+        "right": "scope"
       },
       "connections": {
-        "true": "fix-test-failures",
-        "false": "ask-user-test-failures"
+        "true": "reset-for-scope",
+        "false": "revision-taxonomy"
       }
     },
     {
-      "id": "end-aborted",
+      "id": "revision-taxonomy",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "revise-recommendations.repair_reach"
+        },
+        "right": "taxonomy"
+      },
+      "connections": {
+        "true": "reset-for-taxonomy",
+        "false": "review-analysis"
+      }
+    },
+    {
+      "id": "set-abort-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"aborted\""
+      ],
+      "connections": {
+        "default": "end-abort"
+      }
+    },
+    {
+      "id": "set-analysis-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"analysis_only\""
+      ],
+      "connections": {
+        "default": "write-final-report"
+      }
+    },
+    {
+      "id": "set-limited-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"limited_analysis\""
+      ],
+      "connections": {
+        "default": "write-final-report"
+      }
+    },
+    {
+      "id": "establish-baseline",
+      "type": "agent-directive",
+      "directive": "Before mutation, inspect project-native version control and project policy. Write baseline.md with branch/bookmark, exact dirty state and unrelated changes to preserve, existing relevant test results, approved files and change classes, recovery method, and whether later evidence can distinguish audit-caused effects. Return baseline_state ready only when safe scoped mutation and restoration are observable; otherwise limited. For ready, return change_class_total equal to the ordered logical classes in the exact reviewed recommendation set and change_class_cursor 0. Do not mutate the repository.",
+      "completionCondition": "A factual pre-change baseline and scoped recovery contract exist, or mutation is truthfully closed as limited",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "baseline_state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "limited"
+            ]
+          }
+        },
+        "globalInputs": [
+          "change_class_total",
+          "change_class_cursor"
+        ],
+        "required": [
+          "baseline_state",
+          "change_class_total",
+          "change_class_cursor"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "change_class_total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "change_class_cursor": {
+                "const": 0
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "baseline-ready"
+      }
+    },
+    {
+      "id": "baseline-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "establish-baseline.baseline_state"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "has-change-classes",
+        "false": "baseline-limited-decision"
+      }
+    },
+    {
+      "id": "has-change-classes",
+      "type": "condition",
+      "condition": {
+        "operator": "gt",
+        "left": {
+          "contextPath": "change_class_total"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "check-change-classes",
+        "false": "set-no-changes-outcome"
+      }
+    },
+    {
+      "id": "baseline-limited-decision",
+      "type": "agent-directive",
+      "directive": "Explain why baseline.md cannot support safe mutation. Ask for exactly limited_report or abort. limited_report permits only a truthful non-mutating report; abort performs no later mutation. Do not infer a choice.",
+      "completionCondition": "The user explicitly selected limited reporting or abort after the unusable baseline",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "limited_report",
+              "abort"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "baseline-limited"
+      }
+    },
+    {
+      "id": "baseline-limited",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "baseline-limited-decision.decision"
+        },
+        "right": "limited_report"
+      },
+      "connections": {
+        "true": "set-limited-outcome",
+        "false": "set-abort-outcome"
+      }
+    },
+    {
+      "id": "check-change-classes",
+      "type": "condition",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "change_class_cursor"
+        },
+        "right": {
+          "contextPath": "change_class_total"
+        }
+      },
+      "connections": {
+        "true": "apply-change-class",
+        "false": "review-changes"
+      }
+    },
+    {
+      "id": "apply-change-class",
+      "type": "agent-directive",
+      "directive": "Apply exactly logical mutation class {{change_class_cursor}} of {{change_class_total}} from the currently authorized zero-reviewed {{workspace_path}}/analysis.md recommendation set. Stay inside authorized files and behavior, preserve unrelated work, retain observable value for deletion/merge, and append a one-to-one account to {{workspace_path}}/changes.md. Do not begin the next class or run broad gates yet.",
+      "completionCondition": "Exactly the current authorized logical class is applied and accounted for without unrelated mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "targeted-check-class"
+      }
+    },
+    {
+      "id": "targeted-check-class",
+      "type": "agent-directive",
+      "directive": "Run the project-discovered relevant targeted checks for only logical mutation class {{change_class_cursor}} before any next class starts. Compare with {{workspace_path}}/baseline.md, append exact commands/results and failure attribution to {{workspace_path}}/verification.md, and return pass only when this class introduces no unresolved failure. Do not weaken tests or hide failures.",
+      "completionCondition": "The current class has immediate reproducible targeted evidence that distinguishes it from a post-hoc mixed run",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "check_state": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail"
+            ]
+          }
+        },
+        "required": [
+          "check_state"
+        ]
+      },
+      "connections": {
+        "success": "class-check-pass"
+      }
+    },
+    {
+      "id": "class-check-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "targeted-check-class.check_state"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "increment-change-class",
+        "false": "class-failure-decision"
+      }
+    },
+    {
+      "id": "class-failure-decision",
+      "type": "agent-directive",
+      "directive": "Present the exact targeted failure for logical mutation class {{change_class_cursor}}. Ask for exactly repair or revert. repair may change only the current authorized class and must rerun this same targeted check before cursor advancement. revert restores all audit-owned changes and enters restoration verification. Silence performs neither action.",
+      "completionCondition": "The user explicitly selected repair of the current class or scoped revert",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "repair",
+              "revert"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "class-failure-repair"
+      }
+    },
+    {
+      "id": "class-failure-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "class-failure-decision.decision"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "repair-class-failure",
+        "false": "revert-changes"
+      }
+    },
+    {
+      "id": "repair-class-failure",
+      "type": "agent-directive",
+      "directive": "Repair the reproduced targeted failure only within authorized logical mutation class {{change_class_cursor}}. Preserve unrelated work and update {{workspace_path}}/changes.md. Do not advance the cursor; the same targeted check must pass next.",
+      "completionCondition": "The current class is repaired within exact authority and ready for its same targeted check",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "targeted-check-class"
+      }
+    },
+    {
+      "id": "increment-change-class",
+      "type": "expression",
+      "expressions": [
+        "change_class_cursor = change_class_cursor + 1"
+      ],
+      "connections": {
+        "default": "check-change-classes"
+      }
+    },
+    {
+      "id": "review-changes",
+      "type": "agent-directive",
+      "directive": "Independently review the actual complete audit-owned repository delta against the exact currently authorized recommendation set, {{workspace_path}}/baseline.md, changes.md, primary code/tests and project instructions. Verify one-to-one scope, preserved unrelated work, retained behavior, documentation/coverage obligations and current targeted evidence. Overwrite {{workspace_path}}/change-review.md with every reproducible blocker and whether its earliest repair is contained inside the approved set or scope-changing. Diagnose only. Return exact bounded issues_count; zero is valid.",
+      "completionCondition": "The complete actual changed work has an independent authorization and correctness review with exact issue count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "changes-clean"
+      }
+    },
+    {
+      "id": "changes-clean",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-changes.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "broad-verification",
+        "false": "repair-changes"
+      }
+    },
+    {
+      "id": "repair-changes",
+      "type": "agent-directive",
+      "directive": "Read {{workspace_path}}/change-review.md, reproduce all findings and repair confirmed defects. Return repair_reach contained only when all changes stay inside the exact authorized set and relevant targeted checks pass. Return scope_changing if recommendations/authority must change; first restore any unauthorized delta and verify that restoration, then update {{workspace_path}}/analysis.md with the necessary recommendation change. Preserve unrelated work and update changes.md/verification.md factually.",
+      "completionCondition": "Confirmed changed-work defects are repaired within authority or unauthorized delta is restored before reauthorization",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "contained",
+              "scope_changing"
+            ]
+          }
+        },
+        "required": [
+          "repair_reach"
+        ]
+      },
+      "connections": {
+        "success": "change-repair-contained"
+      }
+    },
+    {
+      "id": "change-repair-contained",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-changes.repair_reach"
+        },
+        "right": "contained"
+      },
+      "connections": {
+        "true": "review-changes",
+        "false": "review-analysis"
+      }
+    },
+    {
+      "id": "broad-verification",
+      "type": "agent-directive",
+      "directive": "Preserve all per-class targeted evidence in {{workspace_path}}/verification.md, then run every applicable broader affected/package/integration/browser/full project gate in discovered project/risk cost order. Compare with {{workspace_path}}/baseline.md, write exact commands/results and attribution to verification.md, and return pass only when the complete authorized delta is verified with no audit-caused failure. Do not mask pre-existing or infrastructure limitations.",
+      "completionCondition": "All applicable broader gates have factual baseline-comparable evidence and one truthful verification state",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "verification_state": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail"
+            ]
+          }
+        },
+        "required": [
+          "verification_state"
+        ]
+      },
+      "connections": {
+        "success": "verification-pass"
+      }
+    },
+    {
+      "id": "verification-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "broad-verification.verification_state"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "set-applied-outcome",
+        "false": "failure-decision"
+      }
+    },
+    {
+      "id": "failure-decision",
+      "type": "agent-directive",
+      "directive": "Present the exact audit-caused targeted or broad failure and current safe options. Ask for exactly repair or revert. repair stays inside current authority and must return through changed-work review and validation. revert restores only audit-owned changes and requires restoration verification. Silence performs neither action.",
+      "completionCondition": "The user explicitly selected contained repair or scoped revert for the observed failure",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "repair",
+              "revert"
+            ]
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "connections": {
+        "success": "failure-repair"
+      }
+    },
+    {
+      "id": "failure-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "failure-decision.decision"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "repair-failure",
+        "false": "revert-changes"
+      }
+    },
+    {
+      "id": "repair-failure",
+      "type": "agent-directive",
+      "directive": "Repair the reproduced audit-caused failure only within the exact authorized recommendation set. Preserve unrelated work, update changes.md, run relevant targeted checks for affected logical classes, and record results in verification.md. Do not broaden scope or claim success. Return through independent changed-work review and all applicable broader gates.",
+      "completionCondition": "The authorized repair is applied with current targeted evidence and ready for independent review",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "review-changes"
+      }
+    },
+    {
+      "id": "revert-changes",
+      "type": "agent-directive",
+      "directive": "Using {{workspace_path}}/baseline.md and changes.md, restore only audit-owned changes to the exact pre-audit state. Preserve unrelated dirty work. Then verify the restoration with project-native diff/status and the smallest relevant checks, recording exact evidence in {{workspace_path}}/verification.md. Return restored only when the audit delta is absent and unrelated state is preserved; otherwise blocked. Do not call an unexecuted revert a success.",
+      "completionCondition": "Scoped restoration has been actually attempted and its observable result is recorded",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "restoration_state": {
+            "type": "string",
+            "enum": [
+              "restored",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "restoration_state"
+        ]
+      },
+      "connections": {
+        "success": "restoration-complete"
+      }
+    },
+    {
+      "id": "set-no-changes-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"no_changes\""
+      ],
+      "connections": {
+        "default": "write-final-report"
+      }
+    },
+    {
+      "id": "restoration-complete",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "revert-changes.restoration_state"
+        },
+        "right": "restored"
+      },
+      "connections": {
+        "true": "set-reverted-outcome",
+        "false": "set-blocked-outcome"
+      }
+    },
+    {
+      "id": "set-applied-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"changes_applied\""
+      ],
+      "connections": {
+        "default": "write-final-report"
+      }
+    },
+    {
+      "id": "set-reverted-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"changes_reverted\""
+      ],
+      "connections": {
+        "default": "write-final-report"
+      }
+    },
+    {
+      "id": "set-blocked-outcome",
+      "type": "expression",
+      "expressions": [
+        "outcome = \"recovery_blocked\""
+      ],
+      "connections": {
+        "default": "end-blocked"
+      }
+    },
+    {
+      "id": "write-final-report",
+      "type": "agent-directive",
+      "directive": "For the current report-producing outcome {{outcome}}, read every current canonical artifact and actual repository state. Overwrite {{workspace_path}}/final-report.md and {{workspace_path}}/report.html with the same truthful account: scope, complete evidence, reviewed conclusions, proposals versus actual work, baseline and final test state, exact incomplete scope/unsupported conclusions for limited outcomes, verified revert state, privacy/licensing/minimization checks, and limitations. Never use success wording for limited or reverted outcomes. The terminal report_path is the registry-fixed relative path final-report.md inside this execution-bound workspace; do not return or alter it. Do not upload or notify here.",
+      "completionCondition": "Both local report artifacts truthfully represent the current canonical outcome at the execution-bound paths",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "review-final-report"
+      }
+    },
+    {
+      "id": "review-final-report",
+      "type": "agent-directive",
+      "directive": "Independently review {{workspace_path}}/final-report.md and report.html against all canonical workspace sources, actual repository state, originating authority and current outcome. Verify complete factual accounting, no stale evidence, no unsupported success, privacy/licensing/minimization, safe publication content and exact terminal discovery paths. Overwrite {{workspace_path}}/final-review.md with every reproducible blocker and earliest repair reach: report, analysis or work. Diagnose only. Return exact bounded issues_count; zero is valid.",
+      "completionCondition": "The complete current final account has an independent review and exact issue count",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "issues_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "issues_count"
+        ]
+      },
+      "connections": {
+        "success": "final-report-clean"
+      }
+    },
+    {
+      "id": "final-report-clean",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-final-report.issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "initialize-delivery-state",
+        "false": "repair-final-report"
+      }
+    },
+    {
+      "id": "repair-final-report",
+      "type": "agent-directive",
+      "directive": "Current outcome: {{outcome}}. Read {{workspace_path}}/final-review.md and reproduce every finding. For report reach, repair only final-report.md/report.html and return report. For analysis reach, repair canonical analysis evidence; if any audit-owned repository delta exists, restore and verify it first, then return analysis. If the finding concerns actual applied work, do not mutate it here: return work_applied only when the current outcome is changes_applied. If it concerns restoration, do not mutate it here: return work_reverted only when the current outcome is changes_reverted. Non-mutating outcomes have no valid work reach and must use report/analysis or expose the factual blocker. Reject false findings. The following route validates outcome before any work repair.",
+      "completionCondition": "Confirmed report/analysis defects are repaired, or a work/restoration defect is classified without premature mutation for outcome validation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_reach": {
+            "type": "string",
+            "enum": [
+              "report",
+              "analysis",
+              "work_applied",
+              "work_reverted"
+            ]
+          }
+        },
+        "required": [
+          "repair_reach"
+        ]
+      },
+      "connections": {
+        "success": "final-repair-report"
+      }
+    },
+    {
+      "id": "final-repair-report",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-final-report.repair_reach"
+        },
+        "right": "report"
+      },
+      "connections": {
+        "true": "review-final-report",
+        "false": "final-repair-analysis"
+      }
+    },
+    {
+      "id": "final-repair-analysis",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-final-report.repair_reach"
+        },
+        "right": "analysis"
+      },
+      "connections": {
+        "true": "review-analysis",
+        "false": "final-repair-applied-kind"
+      }
+    },
+    {
+      "id": "delivery-decision",
+      "type": "agent-directive",
+      "directive": "Reuse an explicit originating delivery choice for this exact reviewed report, otherwise ask once for local, publish or publish_notify. local performs no external side effect. publish uploads only report.html through the authorized Moira static-artifact file/archive API. publish_notify additionally sends Telegram only after a real URL exists. Do not infer external authority.",
+      "completionCondition": "One explicit closed delivery choice is resolved for the zero-reviewed local report",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "local",
+              "publish",
+              "publish_notify"
+            ]
+          }
+        },
+        "required": [
+          "delivery"
+        ]
+      },
+      "connections": {
+        "success": "delivery-local"
+      }
+    },
+    {
+      "id": "delivery-local",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery-decision.delivery"
+        },
+        "right": "local"
+      },
+      "connections": {
+        "true": "end-report",
+        "false": "upload-report"
+      }
+    },
+    {
+      "id": "upload-report",
+      "type": "agent-directive",
+      "directive": "Upload only the zero-reviewed self-contained {{workspace_path}}/report.html using the authorized Moira static-artifact file/archive API. Do not upload raw sources, workspace files or sensitive records. Return uploaded only after observing the real public URL and set report_url to it. On any failure return failed and set report_url to an empty string; never invent a URL and do not notify.",
+      "completionCondition": "The real upload result is observed and report_url is truthful",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "upload_state": {
+            "type": "string",
+            "enum": [
+              "uploaded",
+              "failed"
+            ]
+          }
+        },
+        "globalInputs": [
+          "report_url"
+        ],
+        "required": [
+          "upload_state",
+          "report_url"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "upload_state": {
+                  "const": "uploaded"
+                }
+              },
+              "required": [
+                "upload_state"
+              ]
+            },
+            "then": {
+              "properties": {
+                "report_url": {
+                  "type": "string",
+                  "minLength": 10,
+                  "maxLength": 500,
+                  "pattern": "^https://"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "report_url": {
+                  "const": ""
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "upload-complete"
+      }
+    },
+    {
+      "id": "upload-complete",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "upload-report.upload_state"
+        },
+        "right": "uploaded"
+      },
+      "connections": {
+        "true": "notification-requested",
+        "false": "set-delivery-failed"
+      }
+    },
+    {
+      "id": "notification-requested",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "delivery-decision.delivery"
+        },
+        "right": "publish_notify"
+      },
+      "connections": {
+        "true": "notify-user",
+        "false": "end-report"
+      }
+    },
+    {
+      "id": "notify-user",
+      "type": "agent-directive",
+      "directive": "Send one factual Telegram notification through the configured authorized integration. Include outcome {{outcome}}, report URL {{report_url}}, limitations and exact test result summary; disclose reverted or limited state without success wording. Return sent only after observing delivery confirmation, otherwise failed. Notification failure does not invalidate the reviewed local report or uploaded artifact.",
+      "completionCondition": "The authorized notification attempt has an observed truthful state",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "globalInputs": [
+          "notification_state"
+        ],
+        "required": [
+          "notification_state"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "notification_state": {
+                "type": "string",
+                "enum": [
+                  "sent",
+                  "failed"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-report"
+      }
+    },
+    {
+      "id": "set-delivery-failed",
+      "type": "expression",
+      "expressions": [
+        "notification_state = \"upload_failed\""
+      ],
+      "connections": {
+        "default": "end-report"
+      }
+    },
+    {
+      "id": "end-report",
       "type": "end",
-      "finalOutput": []
+      "finalOutput": [
+        "outcome",
+        "report_path",
+        "report_url",
+        "notification_state"
+      ]
+    },
+    {
+      "id": "end-abort",
+      "type": "end",
+      "finalOutput": [
+        "outcome"
+      ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "outcome"
+      ]
+    },
+    {
+      "id": "initialize-delivery-state",
+      "type": "expression",
+      "expressions": [
+        "report_url = \"\"",
+        "notification_state = \"not_requested\""
+      ],
+      "connections": {
+        "default": "delivery-decision"
+      }
+    },
+    {
+      "id": "final-repair-applied-kind",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-final-report.repair_reach"
+        },
+        "right": "work_applied"
+      },
+      "connections": {
+        "true": "final-outcome-applied",
+        "false": "final-outcome-reverted"
+      }
+    },
+    {
+      "id": "final-outcome-applied",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "outcome"
+        },
+        "right": "changes_applied"
+      },
+      "connections": {
+        "true": "repair-final-applied-work",
+        "false": "set-blocked-outcome"
+      }
+    },
+    {
+      "id": "repair-final-applied-work",
+      "type": "agent-directive",
+      "directive": "Repair the reproduced final-review defect in the actual applied audit-owned work, staying inside the exact authorized recommendation set. Update {{workspace_path}}/changes.md, run affected logical-class targeted checks, and record them in verification.md. Do not broaden scope. Return through independent changed-work review and broader verification.",
+      "completionCondition": "The applied-work defect is repaired within exact authority with current targeted evidence",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "review-changes"
+      }
+    },
+    {
+      "id": "final-outcome-reverted",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "outcome"
+        },
+        "right": "changes_reverted"
+      },
+      "connections": {
+        "true": "repair-final-reverted-work",
+        "false": "set-blocked-outcome"
+      }
+    },
+    {
+      "id": "repair-final-reverted-work",
+      "type": "agent-directive",
+      "directive": "Repair the reproduced restoration defect by restoring only audit-owned changes from {{workspace_path}}/baseline.md and changes.md. Preserve unrelated work, rerun project-native restoration checks, and update verification.md. Return restored only after the audit delta is absent; otherwise blocked.",
+      "completionCondition": "The restoration defect is repaired or remains factually blocked with current evidence",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "restoration_state": {
+            "type": "string",
+            "enum": [
+              "restored",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "restoration_state"
+        ]
+      },
+      "connections": {
+        "success": "final-restoration-complete"
+      }
+    },
+    {
+      "id": "final-restoration-complete",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-final-reverted-work.restoration_state"
+        },
+        "right": "restored"
+      },
+      "connections": {
+        "true": "set-reverted-outcome",
+        "false": "set-blocked-outcome"
+      }
     }
   ],
   "variableRegistry": {
-    "methodology": {
-      "type": "string",
-      "description": "Full methodology for feature-centric test audit",
-      "default": "# Методология автоматизированного Feature Mapping для аудита тестов\n\n## Обзор\n\nМетодология предназначена для LLM-агента (Claude/GPT), работающего через Moira workflow.\nЦель: построить Feature Map проекта и найти реальные дублирования и пробелы в покрытии.\n\n---\n\n## Phase 1: Feature Taxonomy (автоматическая)\n\n### Шаг 1.1: Извлечение features из production code\n\nАгент анализирует проект и строит **Feature Taxonomy** — иерархическое дерево features:\n\n```\nDomain → Feature Group → Feature → Behavior\n```\n\n**Промпт для агента:**\n```\nПрочитай структуру проекта (routes, handlers, services, repositories).\nПострой Feature Taxonomy в формате:\n\n[\n  {\n    \"domain\": \"auth\",\n    \"features\": [\n      {\n        \"id\": \"auth.registration\",\n        \"name\": \"User Registration\", \n        \"behaviors\": [\n          \"auth.registration.email_signup\",\n          \"auth.registration.gdpr_consent\",\n          \"auth.registration.email_verification\",\n          \"auth.registration.duplicate_email_rejection\"\n        ]\n      }\n    ]\n  }\n]\n\nПравила:\n- Behavior = конкретное наблюдаемое поведение системы\n- Behavior формулируется как \"система делает X когда Y\"\n- Один behavior = одна тестируемая вещь\n- НЕ включай implementation details, только observable behavior\n```\n\n**Как избежать галлюцинаций:** Агент ДОЛЖЕН указать конкретный файл/функцию/route для каждого behavior. Если не может — behavior не существует.\n\n### Шаг 1.2: Валидация taxonomy\n\nАгент проверяет taxonomy:\n- Каждый behavior имеет ссылку на production code\n- Нет дубликатов behaviors между feature groups\n- Taxonomy покрывает все основные routes/endpoints проекта\n\n---\n\n## Phase 2: Test-to-Feature Mapping\n\n### Шаг 2.1: Per-file analysis\n\nАгент читает КАЖДЫЙ тест-файл (группируя по файлам, не по отдельным тестам) и для каждого test block определяет:\n\n**Промпт для агента (per-file):**\n```\nПрочитай тестовый файл: {filepath}\n\nДля КАЖДОГО test/it блока определи:\n\n{\n  \"file\": \"{filepath}\",\n  \"test_name\": \"exact name from describe > test\",\n  \"level\": \"unit|workflow|integration|api|mcp|e2e\",\n  \"behavior_id\": \"auth.registration.email_signup\",  // из Feature Taxonomy\n  \"aspect\": \"happy_path|edge_case|error_handling|performance|security\",\n  \"what_verifies\": \"одно предложение: что конкретно этот тест доказывает\",\n  \"assertions\": [\"list of actual expect/assert calls\"],\n  \"confidence\": \"high|medium|low\"  // насколько уверен в маппинге\n}\n\nПравила:\n1. behavior_id ДОЛЖЕН быть из Feature Taxonomy (Phase 1)\n2. Если тест не маппится ни к одному behavior — используй \"UNMAPPED\" + опиши почему\n3. Если тест маппится к нескольким behaviors — создай запись для каждого\n4. confidence: high = тест явно тестирует behavior, low = тест косвенно затрагивает\n5. assertions: перечисли РЕАЛЬНЫЕ expect() вызовы, не описывай абстрактно\n```\n\n### Шаг 2.2: Batch processing\n\n260 файлов обрабатываются батчами по ~10-15 файлов:\n- Группировка по domain (auth/ → один батч, workflow/ → другой)\n- Результаты накапливаются в JSON файл\n- Каждый батч проверяется на UNMAPPED tests (их нужно разрешить)\n\n### Шаг 2.3: UNMAPPED resolution\n\nДля каждого UNMAPPED теста:\n- Если тест реально не маппится — возможно behavior отсутствует в taxonomy → добавить\n- Если тест тестирует infrastructure (helpers, utils) — маркировать как \"INFRA\"\n- Если тест устарел и тестирует удалённый функционал — маркировать как \"ORPHAN\"\n\n---\n\n## Phase 3: Redundancy Analysis\n\n### Шаг 3.1: Behavior Coverage Matrix\n\nСтроим матрицу: behavior × test level.\n\n```\n| Behavior ID                    | Unit | Workflow | Integration | API | MCP | E2E |\n|-------------------------------|------|----------|-------------|-----|-----|-----|\n| auth.registration.email_signup |  2   |    0     |      1      |  1  |  0  |  1  |\n| wf.execution.linear_flow      |  0   |    0     |      2      |  0  |  2  |  0  |\n```\n\n### Шаг 3.2: Redundancy Detection Rules\n\nАгент применяет правила для каждого behavior:\n\n**Rule R1: Same-Level Subset**\nЕсли тест A на том же уровне проверяет строгое подмножество того что проверяет тест B → тест A избыточен.\nПример: 2-step linear (subset) внутри 5-step linear.\n\n**Rule R2: Cross-Level Full Overlap**  \nЕсли тест на уровне L1 проверяет РОВНО то же поведение что тест на L2, но L1 быстрее и надёжнее → тест на L2 потенциально избыточен.\nПример: unit тестирует handler returns pause → integration тестирует executor returns directive (добавляет orchestration слой → НЕ избыточен).\n\n**Rule R3: Incidental Coverage**\nЕсли behavior проверяется только как побочный эффект другого теста (не отдельный test block) → coverage ненадёжна, не считается.\nПример: \"Workflow completed\" проверяется в 6 тестах, но ни один не тестирует конкретно completion logic.\n\n**Rule R4: Aspect Coverage**\nЕсли behavior покрыт только happy_path на всех уровнях, но error_handling только на одном → НЕ redundancy, это gap.\n\n### Шаг 3.3: Redundancy Report\n\nДля каждого найденного redundancy:\n\n```json\n{\n  \"behavior_id\": \"wf.execution.linear_flow\",\n  \"redundancy_type\": \"same_level_subset\",\n  \"tests\": [\n    {\"file\": \"integration/workflow-execution.test.ts\", \"test\": \"2-step linear\", \"role\": \"SUBSET\"},\n    {\"file\": \"integration/essential-cases-split.test.ts\", \"test\": \"3-step linear\", \"role\": \"SUPERSET\"}\n  ],\n  \"recommendation\": \"DELETE subset — 3-step test covers everything 2-step does\",\n  \"confidence\": \"high\",\n  \"evidence\": \"2-step tests: start→step1→complete. 3-step tests: start→step1→step2→step3→complete. 2-step is strict subset.\"\n}\n```\n\n---\n\n## Phase 4: Cross-Verification\n\n### Шаг 4.1: Sampling\n\nСлучайная выборка 15-20% findings для ручной верификации другим агентом (или тем же с другим seed).\n\n**Промпт для верификатора:**\n```\nТебе дан finding:\n- Behavior: {behavior_id}\n- Утверждение: тест A избыточен потому что тест B покрывает то же самое\n- Evidence: {evidence}\n\nПрочитай ОБА теста. Ответь:\n1. AGREE — тест A действительно избыточен\n2. DISAGREE — тест A проверяет что-то что тест B НЕ проверяет\n   Укажи что именно тест A проверяет дополнительно.\n```\n\n### Шаг 4.2: Threshold\n\n- <20% disagreement → findings accepted\n- ≥20% disagreement → пересмотр rules, cleanup false positives, повтор\n\n---\n\n## Phase 5: Gap Analysis (бонус)\n\nFeature Map также показывает GAPS — behaviors без тестов или с тестами только на одном уровне:\n\n```json\n{\n  \"behavior_id\": \"auth.registration.rate_limiting\",\n  \"coverage\": {\"unit\": 0, \"integration\": 0, \"api\": 0, \"e2e\": 0},\n  \"priority\": \"high\",\n  \"recommendation\": \"ADD API test for registration rate limiting\"\n}\n```\n\n---\n\n## Output Schema\n\nФинальный результат — JSON файл с 4 секциями:\n\n```json\n{\n  \"taxonomy\": [...],           // Feature Taxonomy\n  \"test_mapping\": [...],       // Per-test behavior mapping\n  \"redundancies\": [...],       // Confirmed redundancies with recommendations\n  \"gaps\": [...],               // Coverage gaps\n  \"stats\": {\n    \"total_tests\": 3145,\n    \"mapped_tests\": 3100,\n    \"unmapped_tests\": 45,\n    \"redundancy_candidates\": 150,\n    \"confirmed_redundancies\": 80,\n    \"coverage_gaps\": 30\n  }\n}\n```\n\n---\n\n## Ключевые отличия от v2.0\n\n| v2.0 | v3.0 |\n|------|------|\n| 10 метрических алгоритмов | LLM читает каждый тест |\n| Сравнивает тесты МЕЖДУ собой | Маппит тесты к FEATURES |\n| Не видит cross-level | Cross-level — основной фокус |\n| Static parsing (regex) | Semantic understanding |\n| 55% false positive | Ожидается <15% |\n| Находит пустые тесты | Находит реальное дублирование |\n\n---\n\n## Масштабирование\n\n### Для текущего проекта (3145 тестов, 260 файлов):\n- Phase 1 (Taxonomy): ~1 батч, агент читает routes/handlers\n- Phase 2 (Mapping): ~20 батчей по 13 файлов \n- Phase 3 (Analysis): автоматическая матрица + rules\n- Phase 4 (Verification): ~20 samples\n- **Итого: ~25 agent interactions через workflow**\n\n### Для произвольного проекта:\n- Phase 1 адаптируется: агент сам определяет структуру проекта\n- Phase 2-5 универсальны\n- Taxonomy schema может быть pre-defined для типовых проектов (REST API, CLI tool, etc.)\n\n---\n\n## Anti-patterns (что НЕ делать)\n\n1. **НЕ** маппить по import paths — тест может импортить helper но тестировать другой feature\n2. **НЕ** считать describe block = feature — один describe может содержать тесты для разных behaviors  \n3. **НЕ** маппить по имени файла — `auth.test.ts` может тестировать и registration и login\n4. **НЕ** считать одинаковые assertions = дублирование — `expect(status).toBe(200)` в разных контекстах тестирует разное\n5. **НЕ** удалять тесты на высшем уровне только потому что есть unit тест — E2E тестирует интеграцию всех слоёв\n"
-    },
-    "decision_framework": {
-      "type": "string",
-      "description": "Decision tree for DELETE/MERGE/KEEP decisions",
-      "default": "# Decision Framework: Критерии избыточности тестов\n\n## Тестовая пирамида для MCP Moira\n\nПроект MCP Moira — серверное приложение с MCP API, REST API и Web UI.\nТестовые уровни (снизу вверх):\n\n```\n         ┌─────────┐\n         │   E2E   │  Browser + Docker container\n         │  (501)  │  Самый медленный, тестирует UI + API + DB\n         ├─────────┤\n         │   API   │  HTTP requests to Docker container\n         │  (345)  │  Тестирует REST endpoints\n         ├─────────┤\n         │  MCP    │  MCP protocol client → Docker container\n         │  (231)  │  Тестирует MCP tools through full stack\n         ├─────────┤\n         │  Integ  │  Direct code calls + local DB (test-integration.db)\n         │  (386)  │  Тестирует services/repositories together\n         ├─────────┤\n         │Workflow │  Workflow engine + in-process storage\n         │  (641)  │  Тестирует workflow scenarios\n         ├─────────┤\n         │  Unit   │  In-memory, no external deps\n         │ (1018)  │  Тестирует individual functions/classes\n         └─────────┘\n```\n\n### Какой уровень что добавляет\n\n| Уровень | Что тестирует уникально |\n|---------|------------------------|\n| Unit | Алгоритмическую корректность, edge cases, error handling в изоляции |\n| Workflow | Корректность workflow scenarios (проходимость графов, transitions) |\n| Integration | Взаимодействие компонентов, DB persistence, transactions |\n| MCP | MCP protocol layer, message formatting, tool argument parsing |\n| API | HTTP layer, auth middleware, rate limiting, CORS |\n| E2E | UI rendering, browser interactions, full user flows |\n\n---\n\n## Дерево решений\n\n### Step 0: Классификация finding\n\n```\nFinding: тесты T1 и T2 проверяют одно behavior B\n         T1 на уровне L1, T2 на уровне L2\n\nОпредели тип:\n├── L1 == L2 → SAME-LEVEL (go to Step 1)\n├── L1 != L2 → CROSS-LEVEL (go to Step 2)\n└── T1 содержит T2 или наоборот → SUBSET (go to Step 3)\n```\n\n### Step 1: Same-Level Redundancy\n\n```\nДва теста на одном уровне проверяют одно behavior\n\nQ1: Тест T1 проверяет подмножество того что T2?\n├── YES → DELETE T1 (subset)\n│         Пример: 2-step linear test ⊂ 5-step linear test\n│\n├── NO, T1 и T2 проверяют РАЗНЫЕ aspects (happy_path vs error)?\n│   └── KEEP BOTH — разные aspects\n│       Пример: \"login success\" + \"login wrong password\"\n│\n├── NO, T1 и T2 проверяют ОДИНАКОВЫЙ aspect с разными data?\n│   Q2: Разные data покрывают разные code paths?\n│   ├── YES → KEEP BOTH — параметрические вариации\n│   │         Пример: condition(true) + condition(false)\n│   └── NO → MERGE into data-driven test\n│             Пример: slug \"a-b\" + slug \"x-y\" (same code path)\n│\n└── NO, T1 и T2 буквально тестируют то же самое?\n    → DELETE тот что слабее (fewer assertions, less specific)\n```\n\n### Step 2: Cross-Level Redundancy\n\n```\nТесты T1 (level L1) и T2 (level L2) проверяют behavior B\nL1 \"ниже\" L2 (unit < workflow < integration < mcp < api < e2e)\n\nQ1: Тест T2 (higher level) проверяет ЧТО-ТО что T1 НЕ может проверить?\n├── YES → KEEP BOTH\n│   Примеры что НЕЛЬЗЯ проверить на lower level:\n│   - Unit → не проверит HTTP status code (нужен API/MCP)\n│   - Unit → не проверит MCP message formatting (нужен MCP)\n│   - Integration → не проверит browser rendering (нужен E2E)\n│   - Integration → не проверит auth middleware (нужен API)\n│\n├── NO → Q2: T2 (higher) критичен для confidence?\n│   ├── YES → KEEP but MARK as \"smoke test\"\n│   │   Ситуации когда higher-level нужен несмотря на overlap:\n│   │   - Auth flows: ВСЕГДА нужен E2E (security critical)\n│   │   - Payment: ВСЕГДА нужен integration + E2E\n│   │   - Data integrity: ВСЕГДА нужен integration\n│   │\n│   └── NO → DELETE T2 (higher level)\n│       Ситуации когда higher-level можно удалить:\n│       - E2E тестирует internal logic без UI interaction\n│       - API тестирует бизнес-логику без HTTP specifics\n│       - MCP тестирует computation без MCP protocol specifics\n\nQ3 (для KEEP BOTH): Оба теста специфичны для своего уровня?\n├── T1 (lower) тестирует внутреннюю логику → KEEP\n├── T2 (higher) тестирует transport/integration layer → KEEP\n└── T2 (higher) тестирует ту же внутреннюю логику через HTTP → CANDIDATE for DELETE\n```\n\n### Step 3: Subset Redundancy\n\n```\nТест T1 является подмножеством T2 (T1 ⊂ T2)\n\nQ1: T1 и T2 на одном уровне?\n├── YES → DELETE T1\n│         Если T1 содержит уникальный edge case → EXTRACT и добавить к T2\n│\n└── NO → Q2: T1 на lower level?\n    ├── YES → KEEP T1 (быстрее, точнее в failure reporting)\n    │         T2 — smoke test на higher level\n    │\n    └── NO → DELETE T1 (higher level subset of lower level = useless)\n```\n\n---\n\n## Матрица решений: конкретные паттерны\n\n| Паттерн | L1 | L2 | Решение | Обоснование |\n|---------|----|----|---------|-------------|\n| Валидация slug | Unit (validateSlug) | API (POST /workflows) | **KEEP both** | Unit: edge cases (symbols, length). API: HTTP layer, auth, response format |\n| Валидация slug | Unit (validateSlug) | E2E (form submission) | **KEEP both** | E2E: UI validation messages, form behavior |\n| Валидация slug | API (POST /workflows) | E2E (form submission) | **Review** | Если E2E только проверяет \"success message\" → может быть избыточен если API test покрывает |\n| Linear execution | Integration (3-step) | Integration (2-step) | **DELETE 2-step** | Strict subset |\n| Linear execution | Integration | MCP | **KEEP both** | Integration: executor. MCP: protocol+formatting |\n| Condition branch | Unit (handler) | Integration (executor) | **KEEP both** | Разные слои |\n| Condition branch | Integration | MCP | **Review** | Если MCP test не проверяет MCP-specific formatting → DELETE MCP |\n| Auth login | Unit (hash check) | E2E (login form) | **KEEP both** | E2E: UI flow, session, redirect. Unit: crypto |\n| Auth login | API (POST /auth/login) | E2E (login form) | **KEEP both** | API: response codes, tokens. E2E: UI flow |\n| Error message format | Unit (formatError) | MCP (tool returns error) | **KEEP both** | MCP: protocol-specific formatting |\n| Workflow list | Unit (repository) | API (GET /workflows) | **KEEP both** | API: pagination, auth, filtering |\n| Workflow list | API (GET /workflows) | E2E (workflow explorer) | **Review** | E2E нужен если тестирует UI rendering, не нужен если только data display |\n\n---\n\n## Принципы DELETE\n\n### Когда БЕЗОПАСНО удалять тест\n\n1. **Strict subset на том же уровне** — меньший тест ничего не добавляет\n2. **Higher level тестирует internal logic** — E2E тест без UI interactions, API тест без HTTP specifics\n3. **Тест с 0 unique assertions** — всё что он проверяет, проверяется другими тестами\n4. **Orphan test** — тестирует удалённый функционал\n5. **Infrastructure test без value** — тестирует что `expect(true).toBe(true)`\n\n### Когда ОПАСНО удалять тест\n\n1. **Единственный тест для behavior** — даже если избыточен по coverage, он единственный regression guard\n2. **Security-critical behavior** — auth, permissions, rate limiting — лучше overduplicate\n3. **Тест с уникальными edge cases** — даже если \"subset\", edge case может быть уникальным\n4. **E2E smoke тест** — даже если логика покрыта unit, E2E доказывает что система работает end-to-end\n\n### Когда MERGE\n\n1. **Несколько тестов на одном уровне проверяют вариации одного behavior** → data-driven test\n2. **Setup код дублируется** → общий describe block с shared setup\n3. **Assertion списки частично совпадают** → один тест с полным списком assertions\n\n---\n\n## Confidence уровни\n\n| Confidence | Действие | Автоматически? |\n|-----------|----------|----------------|\n| HIGH | DELETE/MERGE | Да, после cross-verify |\n| MEDIUM | DELETE/MERGE | Только с human approval |\n| LOW | KEEP | Пометить для manual review |\n\n**HIGH confidence:**\n- Strict subset (тест A проверяет {x}, тест B проверяет {x, y, z})\n- Identical assertions на одном уровне\n- Test with 0 assertions\n\n**MEDIUM confidence:**\n- Cross-level overlap где оба тестируют \"одно behavior\" но на разных уровнях\n- E2E тест который \"вроде бы\" не добавляет ничего к API тесту\n\n**LOW confidence:**\n- Тесты проверяют \"related\" behaviors (не identical)\n- Трудно определить добавляет ли higher level value\n\n---\n\n## Специфика MCP Moira\n\n### Behaviors где ВСЕГДА нужен multi-level coverage\n\n1. **Auth** (login, registration, sessions) — Unit + API + E2E\n2. **Workflow execution** (start, step) — Unit + Integration + MCP\n3. **Data persistence** (save/load workflows, executions) — Unit + Integration\n4. **Access control** (admin, owner, shared) — Unit + API + E2E\n\n### Behaviors где достаточно одного уровня\n\n1. **Template processing** — Integration (tests actual resolution with real context)\n2. **Condition evaluation** — Unit (pure function, no external deps)\n3. **Slug/handle validation** — Unit (pure function)\n4. **UI layout/styling** — E2E only (no business logic)\n"
-    },
-    "taxonomy_prompt": {
-      "type": "string",
-      "description": "Prompt template for building Feature Taxonomy",
-      "default": "Read the project's production code structure (routes, handlers, services, repositories).\nBuild a Feature Taxonomy as hierarchical tree:\n\nDomain → Feature Group → Feature → Behavior\n\nOutput JSON array:\n[\n  {\n    \"domain\": \"domain_name\",\n    \"features\": [\n      {\n        \"id\": \"domain.feature_name\",\n        \"name\": \"Human-readable Feature Name\",\n        \"behaviors\": [\n          \"domain.feature_name.specific_behavior\"\n        ]\n      }\n    ]\n  }\n]\n\nRules:\n- Behavior = specific observable system behavior\n- Formulated as \"system does X when Y\"\n- One behavior = one testable thing\n- Do NOT include implementation details, only observable behavior\n- MUST reference concrete file/function/route for each behavior\n- If cannot reference production code — behavior does not exist"
-    },
-    "mapping_prompt": {
-      "type": "string",
-      "description": "Prompt template for per-file test mapping",
-      "default": "Read test file: {filepath}\n\nFor EACH test/it block determine:\n\n{\n  \"file\": \"{filepath}\",\n  \"test_name\": \"exact name from describe > test\",\n  \"level\": \"unit|workflow|integration|api|mcp|e2e\",\n  \"behavior_id\": \"domain.feature.behavior\",\n  \"aspect\": \"happy_path|edge_case|error_handling|performance|security\",\n  \"what_verifies\": \"one sentence: what specifically this test proves\",\n  \"assertions\": [\"list of actual expect/assert calls\"],\n  \"confidence\": \"high|medium|low\"\n}\n\nRules:\n1. behavior_id MUST be from Feature Taxonomy\n2. If test maps to no behavior — use \"UNMAPPED\" + describe why\n3. If test maps to multiple behaviors — create entry for each\n4. confidence: high = test explicitly tests behavior, low = test incidentally touches it\n5. assertions: list REAL expect() calls, not abstract descriptions"
-    },
-    "verification_prompt": {
-      "type": "string",
-      "description": "Prompt template for cross-verification",
-      "default": "Given finding:\n- Behavior: {behavior_id}\n- Claim: test A is redundant because test B covers the same\n- Evidence: {evidence}\n\nRead BOTH tests. Answer:\n1. AGREE — test A is truly redundant\n2. DISAGREE — test A verifies something test B does NOT\n   Specify what test A additionally verifies."
-    },
-    "taxonomy_fix_attempts": {
-      "type": "number",
-      "description": "Retry counter for taxonomy fix loop",
-      "default": 0
-    },
-    "batch_fix_attempts": {
-      "type": "number",
-      "description": "Retry counter for batch fix loop",
-      "default": 0
-    },
-    "verify_rounds": {
-      "type": "number",
-      "description": "Retry counter for cross-verification loop",
-      "default": 0
-    },
-    "test_fix_attempts": {
-      "type": "number",
-      "description": "Retry counter for test fix loop",
-      "default": 0
-    },
-    "current_batch": {
-      "type": "number",
-      "description": "Current batch index",
-      "default": 0
-    },
-    "total_batches": {
-      "type": "number",
-      "description": "Total number of batches",
-      "default": 0
-    },
     "workspace_path": {
       "type": "string",
-      "description": "Path to audit workspace directory",
-      "default": ""
+      "const": "./moira-ws/test-suite-audit-{{executionId}}",
+      "default": "./moira-ws/test-suite-audit-{{executionId}}",
+      "description": "Execution-bound canonical workspace; rendered from the current system execution ID"
     },
-    "user_feedback": {
+    "batch_total": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000,
+      "description": "Exact current count of deterministic mapping batches"
+    },
+    "batch_cursor": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000,
+      "description": "Engine-owned zero-based current mapping batch cursor"
+    },
+    "change_class_total": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000,
+      "description": "Exact count of authorized logical mutation classes"
+    },
+    "change_class_cursor": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000,
+      "description": "Engine-owned zero-based current mutation-class cursor"
+    },
+    "outcome": {
       "type": "string",
-      "description": "User feedback from rejected approvals",
-      "default": ""
-    },
-    "anti_patterns": {
-      "type": "string",
-      "description": "Common false positive patterns to avoid",
-      "default": "Common False Positive Patterns — DO NOT flag these as redundant:\n\nFP1: Different Aspects Look Similar\nTests that use similar setup but verify different aspects (happy_path vs error_handling). Same HTTP call but different assertions = NOT redundant.\n\nFP2: Cross-Level Tests Serve Different Purposes\nUnit test for validation logic + API test for HTTP response codes testing the same feature. Unit tests edge cases in isolation, API tests integration. Both needed.\n\nFP3: Similar Names ≠ Same Test\n\"should create workflow\" in unit vs integration — unit tests repository directly, integration tests through service layer with DB. Different layers tested.\n\nFP4: Shared Setup ≠ Shared Test\nTests sharing beforeEach setup but testing different behaviors are NOT redundant even if 80% of code is shared.\n\nFP5: E2E Smoke ≠ Unit Duplicate\nE2E test that clicks through login flow is NOT a duplicate of unit test for password hashing. They test fundamentally different things despite both being \"auth tests\".\n\nFP6: Parameterized Variations\ntest.each with different inputs testing different code paths is NOT redundancy — each parameter hits different branches.\n\nFP7: Incidental Overlap\nTest A checks \"workflow completes\" as part of testing condition branching. Test B checks \"workflow completes\" as part of testing linear execution. Both need completion to run, but test DIFFERENT things.\n\nWhen in doubt: If deleting test A would NOT be caught by test B's failure — they are NOT redundant."
-    },
-    "added_behaviors": {
-      "type": "number",
-      "description": "Workflow-global added_behaviors"
-    },
-    "agree_count": {
-      "type": "number",
-      "description": "Workflow-global agree_count"
-    },
-    "approval": {
-      "type": "string",
-      "description": "Workflow-global approval",
       "enum": [
-        "no",
-        "yes"
-      ]
+        "analysis_only",
+        "limited_analysis",
+        "no_changes",
+        "changes_applied",
+        "changes_reverted",
+        "aborted",
+        "recovery_blocked"
+      ],
+      "description": "Truthful terminal audit outcome"
     },
-    "behavior_count": {
-      "type": "number",
-      "description": "Workflow-global behavior_count"
-    },
-    "by_type": {
-      "type": "object",
-      "description": "Workflow-global by_type"
-    },
-    "checked_count": {
-      "type": "number",
-      "description": "Workflow-global checked_count"
-    },
-    "decision": {
+    "report_path": {
       "type": "string",
-      "description": "Workflow-global decision",
+      "const": "final-report.md",
+      "default": "final-report.md",
+      "description": "Canonical relative report path inside the current execution-bound workspace"
+    },
+    "report_url": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Observed public report URL, empty when no successful upload occurred"
+    },
+    "notification_state": {
+      "type": "string",
       "enum": [
-        "abort",
-        "report_with_warnings",
-        "revert_all",
-        "skip"
-      ]
+        "not_requested",
+        "upload_failed",
+        "sent",
+        "failed"
+      ],
+      "description": "Observed notification or pre-notification delivery state"
     },
-    "delete_count": {
-      "type": "number",
-      "description": "Workflow-global delete_count"
-    },
-    "disagree_count": {
-      "type": "number",
-      "description": "Workflow-global disagree_count"
-    },
-    "domain_count": {
-      "type": "number",
-      "description": "Workflow-global domain_count"
-    },
-    "failed": {
-      "type": "number",
-      "description": "Workflow-global failed"
-    },
-    "feature_count": {
-      "type": "number",
-      "description": "Workflow-global feature_count"
-    },
-    "files_deleted": {
-      "type": "number",
-      "description": "Workflow-global files_deleted"
-    },
-    "files_mapped": {
-      "type": "number",
-      "description": "Workflow-global files_mapped"
-    },
-    "files_modified": {
-      "type": "number",
-      "description": "Workflow-global files_modified"
-    },
-    "fixes_applied": {
-      "type": "number",
-      "description": "Workflow-global fixes_applied"
-    },
-    "gap_count": {
-      "type": "number",
-      "description": "Workflow-global gap_count"
-    },
-    "high_confidence": {
-      "type": "number",
-      "description": "Workflow-global high_confidence"
-    },
-    "infra_tests": {
-      "type": "number",
-      "description": "Workflow-global infra_tests"
-    },
-    "issues_count": {
-      "type": "number",
-      "description": "Workflow-global issues_count"
-    },
-    "issues_summary": {
+    "audit_standard": {
       "type": "string",
-      "description": "Workflow-global issues_summary"
-    },
-    "keep_count": {
-      "type": "number",
-      "description": "Workflow-global keep_count"
-    },
-    "level_counts": {
-      "type": "object",
-      "description": "Workflow-global level_counts"
-    },
-    "low_confidence": {
-      "type": "number",
-      "description": "Workflow-global low_confidence"
-    },
-    "medium_confidence": {
-      "type": "number",
-      "description": "Workflow-global medium_confidence"
-    },
-    "merge_count": {
-      "type": "number",
-      "description": "Workflow-global merge_count"
-    },
-    "multi_level_count": {
-      "type": "number",
-      "description": "Workflow-global multi_level_count"
-    },
-    "orphan_tests": {
-      "type": "number",
-      "description": "Workflow-global orphan_tests"
-    },
-    "passed": {
-      "type": "number",
-      "description": "Workflow-global passed"
-    },
-    "patterns_found": {
-      "type": "string",
-      "description": "Workflow-global patterns_found"
-    },
-    "removed_count": {
-      "type": "number",
-      "description": "Workflow-global removed_count"
-    },
-    "reverted_changes": {
-      "type": "number",
-      "description": "Workflow-global reverted_changes"
-    },
-    "rewrite_count": {
-      "type": "number",
-      "description": "Workflow-global rewrite_count"
-    },
-    "same_level_multi": {
-      "type": "number",
-      "description": "Workflow-global same_level_multi"
-    },
-    "sample_size": {
-      "type": "number",
-      "description": "Workflow-global sample_size"
-    },
-    "source_dirs": {
-      "type": "array",
-      "description": "Workflow-global source_dirs",
-      "items": {
-        "type": "string"
-      }
-    },
-    "still_unmapped": {
-      "type": "number",
-      "description": "Workflow-global still_unmapped"
-    },
-    "test_file_count": {
-      "type": "number",
-      "description": "Workflow-global test_file_count"
-    },
-    "tests_mapped": {
-      "type": "number",
-      "description": "Workflow-global tests_mapped"
-    },
-    "tests_merged": {
-      "type": "number",
-      "description": "Workflow-global tests_merged"
-    },
-    "tests_removed": {
-      "type": "number",
-      "description": "Workflow-global tests_removed"
-    },
-    "tests_rewritten": {
-      "type": "number",
-      "description": "Workflow-global tests_rewritten"
-    },
-    "total_behaviors": {
-      "type": "number",
-      "description": "Workflow-global total_behaviors"
-    },
-    "total_files": {
-      "type": "number",
-      "description": "Workflow-global total_files"
-    },
-    "total_findings": {
-      "type": "number",
-      "description": "Workflow-global total_findings"
-    },
-    "total_tests": {
-      "type": "number",
-      "description": "Workflow-global total_tests"
-    },
-    "unmapped_count": {
-      "type": "number",
-      "description": "Workflow-global unmapped_count"
-    },
-    "regression_detected": {
-      "type": "string",
-      "description": "Whether a regression was detected during change application",
-      "enum": [
-        "yes",
-        "no"
-      ]
+      "minLength": 1000,
+      "maxLength": 20000,
+      "default": "# Test Suite Audit standard\n\n## Authority and scope\n\nAudit only the project, roots, data, commands and side effects supplied by the caller or explicitly authorized by applicable project instructions. Tool availability is not authorization. Never discover credentials, broaden paths, overwrite unrelated work, publish, notify, delete tests, or mutate a repository without the exact authority required by the current route. Record inclusions, exclusions, generated and vendor boundaries, dirty work to preserve, and material limitations before drawing conclusions.\n\n## Complete corpus\n\nDiscover the actual project languages, frameworks, runners, source roots, test roots, commands and policy. Inventory the complete in-scope production and test corpus before deriving counts. Every in-scope test or parameterized case must appear exactly once in the deterministic batch plan. Empty and small corpora are valid and must not be inflated. Unsupported or inaccessible evidence remains explicit.\n\n## Feature-first taxonomy\n\nGround features and behaviors in reproducible production references, not filenames or test names. Preserve test levels only as the project defines them. Represent cross-cutting aspects, infrastructure tests, orphan candidates, multi-behavior tests, incidental coverage, parameterized paths, edge cases, negative paths and defense in depth. A taxonomy gap invalidates affected mappings and downstream analysis.\n\n## Assertion-level mapping\n\nRead each assigned test and its real assertions plus referenced production behavior. Map every test or case to feature and aspect evidence, boundary value, purpose, special category and limitations. Sampling may diagnose quality but never authorize whole-suite conclusions, deletion or mutation. A known-defective or unresolved mapping cannot advance to authoritative recommendations. Irreducible evidence can produce only an explicitly selected limited non-mutating report that names exact incomplete scope and excludes unsupported conclusions.\n\n## Analysis and recommendations\n\nDerive coverage, redundancy, gaps, weak assertions, misplaced tests, costs and risks only from the complete zero-reviewed evidence. Separate production behavior from test implementation. Every proposed creation, rewrite, move, merge or deletion must name affected files, retained observable value, logical mutation class, relevant targeted checks, broader project gates and recovery needs. Deletion requires project permission and retained value. An empty recommendation set is a valid no-changes result.\n\n## Independent review and repair\n\nTaxonomy, each mapping batch, complete analysis, actual changed work and final reports require a genuinely independent review against primary sources. Reviewers diagnose and overwrite the stable review file; they do not repair. Only an exact zero issue count advances to the corresponding authoritative next stage. A repair changes the earliest confirmed owner and returns through every invalidated producer and review. Unchanged loops, fixed retry counts and warning-based success are prohibited.\n\n## Mutation, verification and recovery\n\nRepository mutation requires explicit approval of the exact current zero-reviewed recommendation set. Establish a baseline that distinguishes pre-existing state, audit-owned changes and unrelated work, and prove a scoped recovery method before mutation. Apply one project-discovered logical mutation class at a time and run its relevant targeted checks before the next class. After independent changed-work review, run every applicable affected, package, integration, browser and full project gate in project and risk cost order. An audit-caused failure requires an explicit repair or revert choice. Repair stays within authority and re-enters review and validation. Revert restores only audit-owned changes, preserves unrelated work and is successful only after observable restoration verification. A failing changed suite never becomes successful delivery.\n\n## Reporting, privacy and delivery\n\nCreate truthful local Markdown and self-contained HTML reports before external delivery. Distinguish reviewed analysis, no changes, applied changes, verified revert, limited analysis and recovery blockage. Separate proposals from actual work and state baseline, final checks, incomplete scope and limitations. Minimize sensitive data, respect confidentiality, consent, retention and licensing, and exclude raw private records or secrets. Publication and Telegram require separate explicit delivery authority. Upload only the reviewed self-contained HTML, record only an observed URL, notify only after successful upload, and expose upload or notification failure without invalidating the local report.",
+      "description": "Immutable project-neutral Test Suite Audit policy materialized for every independent reader"
     }
-  }
+  },
+  "slug": "test-suite-audit",
+  "owner": "system-moira",
+  "visibility": "public"
 }

@@ -176,6 +176,18 @@ describe("§14 fragment-var detection (provenance ∪ name convention)", () => {
     expect(processor.processDirective("{{email_body}}", context)).toBe("Hi Bob");
   });
 
+  test("PROVENANCE: a registry fragment can bind a path to the current executionId", async () => {
+    const processor = new GraphTemplateProcessor();
+    const context = ctx({ workspace_path: "./moira-ws/audit-{{executionId}}" });
+    (context as unknown as { _templateFragmentVars: Set<string> })._templateFragmentVars = new Set([
+      "workspace_path",
+    ]);
+
+    await expect(processor.processDirectiveAsync("Use {{workspace_path}}", context)).resolves.toBe(
+      "Use ./moira-ws/audit-test-exec",
+    );
+  });
+
   test("without the fragment set, the same oddly-named var is neutralized (nested template stays literal)", () => {
     const processor = new GraphTemplateProcessor();
     const out = processor.processDirective(

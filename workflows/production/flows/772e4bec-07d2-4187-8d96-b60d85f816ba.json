@@ -1,385 +1,487 @@
 {
-  "slug": "task-breakdown-flow",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "772e4bec-07d2-4187-8d96-b60d85f816ba",
   "metadata": {
     "name": "Task Breakdown Flow",
-    "version": "3.11.0",
-    "description": "Universal workflow for executing any multi-step task with completion guarantee and evidence. Supports two modes: with files (plan saved to disk for context recovery) and without files (optimized in-memory storage). Structured process: ONBOARD → UNDERSTAND → DECOMPOSE → VALIDATE → EXECUTE → VERIFY → DELIVER."
+    "version": "4.0.0",
+    "description": "Turns one already authorized bounded multi-step task into a strict ordered plan and carries it to a verified result without imposing a software-development lifecycle. It reuses the supplied task, resolves autonomous or interactive operation once, and works either in an execution-bound filesystem workspace or with a bounded in-memory fallback that makes no durable-recovery claim. Plan items have stable unique IDs, valid dependencies, actions, and observable expected results. An independent reviewer must clear the complete plan before sequential execution. Each item records concrete evidence and passes an independent primary-source review before the engine advances its cursor. A failed item receives at most two materially changed attempts; exhaustion enters an explicit interactive recovery decision or a truthful autonomous recovery outcome. Guarded process revision replaces only the remaining suffix while preserving the independently verified prefix and its evidence. After all items, an independent final review checks every success criterion, actual result, projections, evidence, and authority; findings return to the earliest stale owner and clean completion requires exactly zero blockers. Interactive mode supports explicit plan approval and result rework, while autonomous mode skips only those human waits. Outcomes distinguish clean, limited, aborted, and recovery states and expose only bounded summaries and safe artifact locations. The originating request is the authority ceiling; approval, retries, recovery, or available tools do not authorize destructive, external, production, publication, financial, administrative, privacy-sensitive, commit, push, deployment, or notification actions. Choose this flow when a task needs decomposition plus per-item retry/recovery and must also work without filesystem access. Choose Simple Plan Execution for the minimal filesystem-backed current-plan executor, Quick Task for immutable decision history, Robust Task for stronger durable checkpoints and recovery, Todo List for an already supplied checklist, or Software Development Flow for one complete implementation lifecycle including tests, documentation, review, release, and deployment. Do not split one development lifecycle across several general task runs."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
-      "initialData": {
-        "variables": {
-          "current_step": {
-            "description": "Index of the current step in the plan",
-            "value": 1
-          },
-          "step_retry": {
-            "description": "Stores step retry",
-            "value": 0
-          },
-          "max_retries": {
-            "description": "Stores max retries",
-            "value": 3
-          },
-          "has_file_access": {
-            "description": "Stores has file access",
-            "value": "no"
-          },
-          "task_name": {
-            "description": "Name of the task being broken down",
-            "value": ""
-          },
-          "task_short_name": {
-            "description": "Stores task short name",
-            "value": ""
-          },
-          "current_step_action": {
-            "description": "Stores current step action",
-            "value": ""
-          },
-          "current_step_expected_output": {
-            "description": "Output or result",
-            "value": ""
-          },
-          "process_requirements": {
-            "description": "Product requirements",
-            "value": "TASK EXECUTION PROCESS REQUIREMENTS:\n\n1. DECOMPOSITION:\n- Break large task into 3-10 specific steps\n- Each step = one action with measurable result\n- Output of each step becomes input for the next\n- Define dependencies between steps\n\n2. STRUCTURED REASONING:\n- Use chain-of-thought for complex steps\n- Explicitly define methods and output formats\n- Document reasoning for each decision\n\n3. CLEAR SUCCESS CRITERIA:\n- Define criteria BEFORE starting work\n- Criteria must be verifiable (measurable)\n- Agent works within these boundaries\n\n4. HUMAN-IN-THE-LOOP:\n- Show plan before execution\n- Escalation for problematic steps\n- User review at critical points"
-          },
-          "validation_criteria": {
-            "description": "Criteria for validation",
-            "value": "EXECUTION VALIDATION CRITERIA:\n\n1. EVIDENCE IS MANDATORY:\n- Each step must have proof of completion\n- Evidence types: screenshot, link, file, detailed text description\n- 'Done' without details = NOT accepted\n\n2. STEP VERIFICATION:\n- Does result match expected_output?\n- Is evidence provided and specific?\n- Are there no missing elements?\n\n3. TASK VERIFICATION:\n- All steps completed (done or skipped with reason)?\n- Success criteria from UNDERSTAND phase met?\n- Deliverable ready and matches expectations?"
-          },
-          "common_mistakes": {
-            "description": "Stores common mistakes",
-            "value": "COMMON MISTAKES AND HOW TO AVOID:\n\n❌ 'Done!' without verification → ✅ Always provide evidence\n❌ Silently skipping steps → ✅ Explicitly mark skip with reason\n❌ 80% complete = done → ✅ Only 100% = done\n❌ Hallucinations ('sent', 'created') → ✅ Only facts with evidence\n❌ Losing context → ✅ Use step structure from plan\n❌ Mixing action and verification → ✅ Separate: first do, then verify"
-          },
-          "plan_writing_requirements": {
-            "description": "Product requirements",
-            "value": "PLAN WRITING REQUIREMENTS:\n\nMain problem: agent loses context (session archival, forgetting). Plan must be written so any item can be given to agent WITHOUT the rest of the plan — and they could execute it.\n\nREQUIREMENTS:\n- Flat linear list — no hierarchy, no nested sub-items, just 1, 2, 3...\n- One item = one task — not a micro-step ('download file'), but a complete task ('update workflow to v2.1.0')\n- Full self-sufficiency of item — contains EVERYTHING for execution: why to do it, what to do, which files to read/modify, where to save, what to commit\n- NO 'global rules' separately — everything needed for item must be IN the item\n- Explicit actions — not 'as usual', but specifically: 'upload to server', 'make commit', 'write issues to file X'\n- Redundancy is allowed — better to repeat 'make commit' in each item than forget\n- Full file paths — not 'in appropriate folder', but /full/path/to/file.json\n- Measurable result — easy to verify item is complete\n\nITEM STRUCTURE:\n```\nN. **Task name** (what we're doing)\n\n   Why: (what problem we're solving)\n\n   What to do:\n   - specific action 1 with file paths\n   - specific action 2\n   - save to /full/path/to/file.json\n   - make commit\n```"
-          },
-          "plan_validation_requirements": {
-            "description": "Product requirements",
-            "value": "PLAN VALIDATION REQUIREMENTS:\n\nPlan must be verified BEFORE showing to user.\n\nVALIDATION CRITERIA:\n1. STEP SELF-SUFFICIENCY:\n   - Each step contains ALL information for execution\n   - No references to 'previous steps' or 'as usual'\n   - Full file paths, not relative\n\n2. EXPLICIT ACTIONS:\n   - Each step starts with action verb\n   - Specific commands, not 'configure' or 'prepare'\n   - Specified where to save result\n\n3. MEASURABLE RESULTS:\n   - expected_output for each step is specific\n   - Easy to verify if step is complete or not\n   - No subjective criteria like 'works well'\n\n4. COMPLETENESS:\n   - All files specified with full paths\n   - All commands specified completely\n   - All dependencies explicitly stated"
-          },
-          "planning_standards": {
-            "description": "No description",
-            "value": "TASK DECOMPOSITION PLANNING STANDARDS:\n\n1. STEP GRANULARITY:\n- Each step = one logical unit of work (not too small, not too large)\n- Step should take 5-30 minutes to execute\n- Avoid micro-steps (\"create file\") and mega-steps (\"implement feature\")\n\n2. DEPENDENCIES:\n- Steps must be in correct execution order\n- Each step's output should enable the next step\n- No circular dependencies\n\n3. VERIFIABILITY:\n- Every step must have clear expected_output\n- Expected output must be objectively verifiable\n- Avoid subjective criteria (\"works well\", \"looks good\")\n\n4. COMPLETENESS:\n- All user requirements must be covered by steps\n- No implicit assumptions about what will be done\n- Each step explicitly states what files/artifacts it produces\n\n5. SELF-SUFFICIENCY:\n- Each step contains ALL information needed for execution\n- No references to \"previous steps\" or \"as mentioned before\"\n- Full file paths, not relative references\n\n6. RESILIENCE:\n- Plan should work even if agent loses context between steps\n- Each step can be executed in isolation with its description"
-          }
-        }
-      },
       "connections": {
-        "default": "check-file-access"
+        "default": "capture_contract"
       }
     },
     {
-      "id": "check-file-access",
+      "id": "end_clean",
+      "type": "end",
+      "finalOutput": [
+        "terminal_outcome",
+        "result_summary",
+        "storage_mode",
+        "artifact_location",
+        "completed_items",
+        "total_steps"
+      ]
+    },
+    {
+      "id": "end_limited",
+      "type": "end",
+      "finalOutput": [
+        "terminal_outcome",
+        "result_summary",
+        "storage_mode",
+        "artifact_location",
+        "completed_items",
+        "total_steps",
+        "limitation_reason"
+      ]
+    },
+    {
+      "id": "end_aborted",
+      "type": "end",
+      "finalOutput": [
+        "terminal_outcome",
+        "result_summary",
+        "storage_mode",
+        "completed_items",
+        "total_steps",
+        "limitation_reason"
+      ]
+    },
+    {
+      "id": "end_recovery",
+      "type": "end",
+      "finalOutput": [
+        "terminal_outcome",
+        "result_summary",
+        "storage_mode",
+        "completed_items",
+        "total_steps",
+        "limitation_reason"
+      ]
+    },
+    {
+      "id": "capture_contract",
       "type": "agent-directive",
-      "directive": "Check your file handling capabilities.\n\nQuestion: Can you create and read files on disk?\n\nCheck for tools:\n- Do you have access to file system (Read, Write, Edit tools)?\n- Can you create directories?\n- Can you save files?\n\nIf YES - this will allow saving plan to disk for recovery after session archival.\nIf NO - plan will be stored only in workflow memory (also works, but without recovery capability).\n\nAnswer honestly based on your actual capabilities.",
-      "completionCondition": "Presence or absence of file access determined",
+      "directive": "Establish the complete bounded task contract from the triggering conversation. Reuse every explicit fact and inspect non-mutating context when useful; ask only for a material unknown that cannot be discovered. Resolve `operating_mode` once (`autonomous` skips only human plan/result waits; `interactive` keeps them). Resolve `storage_mode=filesystem` only when this host can safely create local files, otherwise `memory`; do not run a separate capability-onboarding conversation. Return the canonical task description, observable whole-task expected result, 1..20 measurable success criteria, applicable constraints, and an explicit authority boundary inherited from the originating request and host policy. Do not plan or execute. Approval, mode, retry, recovery, and tool availability never authorize destructive, external, production, publication, financial, administrative, privacy-sensitive, commit, push, deployment, or communication actions absent from the original authority.",
+      "completionCondition": "A bounded canonical task, one operating mode, one storage mode, and the originating authority ceiling are established without re-asking known facts",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "has_file_access"
-        ],
-        "globalInputs": [
-          "has_file_access"
-        ]
-      },
-      "connections": {
-        "success": "understand-task"
-      }
-    },
-    {
-      "id": "understand-task",
-      "type": "agent-directive",
-      "directive": "Gather complete understanding of the task from user.\n\nAsk:\n1. What needs to be done? (task description)\n2. What is the expected end result? (deliverable)\n3. What constraints exist? (time, resources, dependencies)\n4. How will we know the task is complete? (success criteria - must be specific and verifiable)\n\nRules:\n{{process_requirements}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until user explicitly responds\n- Record in user_response_text exactly what user wrote\n\n⚠️ AFTER RECEIVING RESPONSE:\n- Formulate short task name (2-5 words) for task_short_name\n- This name will be used for progress tracking",
-      "completionCondition": "User EXPLICITLY answered questions (response text exists in user_response_text)",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_response_text": {
-            "type": "string",
-            "minLength": 10,
-            "description": "MANDATORY: Verbatim text of user's response"
-          },
-          "execution_note": {
-            "type": "string",
-            "description": "Short task name for executions list"
-          }
-        },
-        "required": [
+          "operating_mode",
+          "storage_mode",
           "task_description",
-          "task_short_name",
-          "expected_deliverable",
+          "expected_result",
           "success_criteria",
-          "user_response_text",
-          "execution_note"
-        ],
-        "globalInputs": [
-          "task_description",
-          "task_short_name",
-          "expected_deliverable",
           "constraints",
-          "success_criteria"
+          "authority_boundary"
+        ],
+        "globalInputs": [
+          "operating_mode",
+          "storage_mode",
+          "task_description",
+          "expected_result",
+          "success_criteria",
+          "constraints",
+          "authority_boundary"
         ]
       },
       "connections": {
-        "success": "route-file-access"
+        "success": "route_storage"
       }
     },
     {
-      "id": "route-file-access",
+      "id": "route_storage",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "has_file_access"
+          "contextPath": "storage_mode"
         },
-        "right": "yes"
+        "right": "filesystem"
       },
       "connections": {
-        "true": "suggest-task-name",
-        "false": "decompose-into-steps"
+        "true": "materialize_workspace",
+        "false": "create_plan"
       }
     },
     {
-      "id": "suggest-task-name",
+      "id": "materialize_workspace",
+      "type": "materialize",
+      "basePath": "./moira-ws/task-breakdown-{{executionId}}",
+      "files": [
+        {
+          "path": "task.md",
+          "content": ""
+        },
+        {
+          "path": "plan.json",
+          "content": ""
+        },
+        {
+          "path": "execution-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "plan-review.md",
+          "content": ""
+        },
+        {
+          "path": "item-review.md",
+          "content": ""
+        },
+        {
+          "path": "final-review.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "project_task",
+        "error": "fallback_memory"
+      }
+    },
+    {
+      "id": "fallback_memory",
+      "type": "expression",
+      "expressions": [
+        "storage_mode = \"memory\""
+      ],
+      "connections": {
+        "default": "create_plan"
+      }
+    },
+    {
+      "id": "project_task",
       "type": "agent-directive",
-      "directive": "Choose the most appropriate workspace name based on task description.\n\nTask: {{task_description}}\n\nNaming rules:\n- kebab-case: only lowercase letters, numbers and hyphens\n- starts with letter, ends with letter or number\n- describes task essence briefly (2-4 words)\n- not too long (maximum 30 characters)\n\nExamples of good names:\n- api-optimization\n- user-auth-fix\n- dashboard-charts\n- email-templates\n\n**IMPORTANT:** Choose the best name yourself based on the task description. DO NOT ask the user to choose — make the decision independently.",
-      "completionCondition": "Task name chosen by agent",
+      "directive": "Write `./moira-ws/task-breakdown-{{executionId}}/task.md` as the exact durable projection of the canonical task_description, expected_result, success_criteria, constraints, and authority_boundary supplied by workflow state. Use labeled sections and preserve every string exactly; no second task authority. Read it back and verify equality. Return {} only.",
+      "completionCondition": "task.md exactly projects the complete canonical task contract in the current execution workspace",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "create_plan"
+      }
+    },
+    {
+      "id": "create_plan",
+      "type": "agent-directive",
+      "directive": "Create one proportionate ordered plan for the canonical task. Return 1..32 items with pairwise-unique stable IDs, nonblank actions, observable expected results, and dependencies containing only earlier item IDs. Cover every success criterion without fixed counts, estimates, absolute paths, named tools, commits, tests, or duplicated cross-cutting work unless this task requires them. Do not execute. In filesystem mode, write `./moira-ws/task-breakdown-{{executionId}}/plan.json` as exactly the returned JSON array and verify deep equality; in memory mode, the bounded returned array is canonical. Return only steps.",
+      "completionCondition": "A complete strict plan with unique identities and valid dependencies exists as the single canonical plan and exact file projection when applicable",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "task_name"
+          "steps"
         ],
         "globalInputs": [
-          "task_name"
+          "steps"
         ]
       },
       "connections": {
-        "success": "setup-workspace"
+        "success": "initialize_plan_state"
       }
     },
     {
-      "id": "setup-workspace",
-      "type": "agent-directive",
-      "directive": "Create workspace for task execution {{task_name}}.\n\nPath format: ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}\nExample: ./moira-ws/auth-fix-20251212-1030\n\n1) Create workspace folder with current date and time\n2) Save current workflow process ID to file {workspace}/process-id.txt for recovery after archival\n3) Create file {workspace}/task-requirements.md with:\n   - Task description: {{task_description}}\n   - Expected result: {{expected_deliverable}}\n   - Success criteria: {{success_criteria}}\n   - Constraints: {{constraints}}\n4) Create file {workspace}/planning-standards.md with:\n   {{planning_standards}}\n\nConfirm workspace creation.",
-      "completionCondition": "Workspace created, process ID and requirements saved",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "process_id_saved": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation of process-id.txt saved"
-          },
-          "requirements_saved": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation of task-requirements.md saved"
-          }
-        },
-        "required": [
-          "workspace_path",
-          "process_id_saved",
-          "requirements_saved"
-        ],
-        "globalInputs": [
-          "workspace_path"
-        ]
-      },
+      "id": "initialize_plan_state",
+      "type": "expression",
+      "expressions": [
+        "total_steps = steps.length",
+        "current_step = 0",
+        "completed_items = 0",
+        "retry_count = 0"
+      ],
       "connections": {
-        "success": "decompose-into-steps"
+        "default": "review_plan"
       }
     },
     {
-      "id": "decompose-into-steps",
+      "id": "review_plan",
       "type": "agent-directive",
-      "directive": "Break down task '{{task_description}}' into specific executable steps.\n\nRequirements:\n- As many steps as the task genuinely needs — small tasks may have a few, large tasks may have 20-40. Do NOT pad or truncate the plan to hit a target number; let the task's real scope decide.\n- Each step = one specific action\n- For each step specify expected_output (how to verify step is complete)\n- Steps should lead to deliverable: {{expected_deliverable}}\n\nDecomposition rules:\n{{process_requirements}}\n\nPlan writing requirements:\n{{plan_writing_requirements}}\n\n{{#if has_file_access}}⚠️ ADDITIONALLY: After creating plan, save it to file {{workspace_path}}/plan.md in readable markdown format.{{/if}}",
-      "completionCondition": "Plan created with one action per step, each step has expected_output{{#if has_file_access}}, plan saved to file{{/if}}",
+      "directive": "Delegate a complete plan review to an independent host-supported context; do not self-review or require a named client tool. The reviewer must inspect the current execution's canonical task and steps directly. In filesystem mode also read task.md and plan.json and block on any projection mismatch. Verify full task/criteria coverage, pairwise-unique IDs, dependency existence/order, observable results, proportionality, authority, and absence of unjustified universal process rules. In filesystem mode overwrite `./moira-ws/task-breakdown-{{executionId}}/plan-review.md` with detailed findings; in memory mode return bounded findings_summary. Diagnose only. Return exact plan_issues_count and findings_summary, which must be empty exactly at zero and nonempty at nonzero.",
+      "completionCondition": "An independent current plan review reports every reproducible blocker and exact count without repairing",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "plan_saved_to_file": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ],
-            "description": "Plan saved to file (if file access available)"
-          }
-        },
-        "required": [
-          "steps",
-          "total_steps",
-          "current_step_action",
-          "current_step_expected_output"
-        ],
-        "globalInputs": [
-          "steps",
-          "total_steps",
-          "current_step_action",
-          "current_step_expected_output"
-        ]
-      },
-      "connections": {
-        "success": "validate-plan"
-      }
-    },
-    {
-      "id": "validate-plan",
-      "type": "agent-directive",
-      "directive": "Re-validation pass {{validation_round}} of up to {{max_validation_rounds}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user. Just validate the current plan.\n\nDelegate plan validation to subagent via Task tool.\n\nCRITICALLY IMPORTANT: DO NOT validate plan yourself - delegate to independent subagent.\n\n1) Pass to subagent ONLY necessary:\n   {{#if has_file_access}}- Path to plan: {{workspace_path}}/plan.md\n   - Path to requirements: {{workspace_path}}/task-requirements.md\n   - Path to standards: {{workspace_path}}/planning-standards.md{{else}}- Plan from context: {{steps}}\n   - Requirements: {{task_description}}, {{expected_deliverable}}, {{success_criteria}}\n   - Standards: {{planning_standards}}{{/if}}\n\n2) Prompt for subagent (pass verbatim):\n   YOU ARE plan validator. Your assessment determines if plan can proceed.\n\n   {{#if has_file_access}}READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}/plan.md\n   - Requirements: {{workspace_path}}/task-requirements.md\n   - Planning standards: {{workspace_path}}/planning-standards.md{{/if}}\n\n   CHECK each step against criteria:\n   - Is step self-contained? (executable without other steps)\n   - Are actions explicit? (concrete commands, not \"configure\")\n   - Is expected_output measurable? (easy to verify completion)\n   - Are file paths complete?\n\n   CHECK REQUIREMENTS COVERAGE:\n   - Does plan address ALL user requirements?\n   - Is every requirement from task-requirements.md covered by at least one step?\n   - Are there gaps in coverage?\n\n   CHECK STANDARDS COMPLIANCE:\n   - Does plan follow ALL planning standards from planning-standards.md?\n   - Step granularity appropriate?\n   - Dependencies correct?\n   - Verifiability ensured?\n\n   COUNT issues found. RETURN issues_count (0 = valid) and list of specific issues.\n\n3) Save subagent result:\n   - issues_count: number of issues found\n   - validation_issues: list of issues (if any)\n\n{{#if has_file_access}}4) Save validation issues to file {{workspace_path}}/plan-validation-issues.md:\n   # Plan Validation Issues\n\n   Total issues: [count]\n\n   ## Issues Found\n\n   ### 1. [issue description]\n   Category: [structure/requirements/standards]\n   Recommendation: [how to fix]\n\n   ### 2. [issue description]\n   ...\n{{/if}}\n\nHonestly pass subagent result. Your opinion doesn't matter - reviewer findings matter.",
-      "completionCondition": "Plan validated, issues_count specified",
-      "inputSchema": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "issues_count"
+          "plan_issues_count",
+          "findings_summary"
         ],
         "globalInputs": [
-          "issues_count",
-          "validation_issues"
+          "plan_issues_count",
+          "findings_summary"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "plan_issues_count": {
+                  "type": "integer",
+                  "const": 0
+                }
+              },
+              "required": [
+                "plan_issues_count"
+              ]
+            },
+            "then": {
+              "properties": {
+                "findings_summary": {
+                  "type": "array",
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "findings_summary": {
+                  "type": "array",
+                  "minItems": 1
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-plan-validation"
+        "success": "route_plan_review"
       }
     },
     {
-      "id": "route-plan-validation",
+      "id": "route_plan_review",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "issues_count"
+          "contextPath": "plan_issues_count"
         },
         "right": 0
       },
       "connections": {
-        "true": "notify-plan-ready",
-        "false": "fix-plan-issues"
+        "true": "route_plan_mode",
+        "false": "repair_plan"
       }
     },
     {
-      "id": "fix-plan-issues",
+      "id": "repair_plan",
       "type": "agent-directive",
-      "directive": "CRITICAL: FIX THE ISSUES - NO REPORTS!\n\nFix all plan validation issues completely.\n\n{{#if has_file_access}}READ {{workspace_path}}/plan-validation-issues.md{{else}}Issues from context: {{validation_issues}}{{/if}}\n\nFor EACH issue found by reviewer:\n1. Understand the issue and recommendation\n2. Apply the fix completely - no partial fixes\n3. Verify the issue is resolved\n4. Document what was done\n\nCurrent plan:\n{{steps}}\n\nPlan writing requirements:\n{{plan_writing_requirements}}\n\nDO NOT skip any issue. ALL reviewer findings must be addressed.\nIf issue seems minor - still address it explicitly.\nReviewer findings are authoritative - your opinion doesn't override them.\n\n{{#if has_file_access}}After fixing, update file {{workspace_path}}/plan.md{{/if}}\n\nFix each issue and return updated plan.",
-      "completionCondition": "Issues fixed, plan updated",
+      "directive": "Read and reproduce every current plan finding from workflow state and, in filesystem mode, plan-review.md. If a meaningful authorized repair exists, materially repair the canonical plan at its earliest source; preserve the exact evidenced prefix before current_step, change only the remaining suffix, keep pairwise-unique IDs and valid earlier-only dependencies, and in filesystem mode atomically project the exact returned array to plan.json. Return repair_status=`changed` with steps. If no authorized meaningful change exists, return repair_status=`blocked` with a bounded nonblank blocked_reason and do not mutate the plan.",
+      "completionCondition": "The plan is materially repaired or the inability to repair is represented explicitly without an unchanged loop",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "fixes_applied": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "What fixes were applied"
-          }
+        "additionalProperties": false,
+        "xPreservePlanPrefix": {
+          "planProperty": "steps",
+          "boundaryContextProperty": "current_step"
         },
-        "required": [
-          "steps",
-          "total_steps",
-          "fixes_applied"
-        ],
-        "globalInputs": [
-          "steps",
-          "total_steps"
-        ]
-      },
-      "connections": {
-        "success": "expr-inc-validation-round"
-      }
-    },
-    {
-      "id": "notify-plan-ready",
-      "type": "telegram-notification",
-      "message": "Plan ready for review\n\nTask: {{task_short_name}}\nSteps: {{total_steps}}\n\nPlease confirm the plan to continue.",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "present-plan",
-        "error": "present-plan"
-      }
-    },
-    {
-      "id": "present-plan",
-      "type": "agent-directive",
-      "directive": "Show user the task execution plan.\n\nTask: {{task_description}}\nExpected result: {{expected_deliverable}}\n\nPlan ({{total_steps}} steps):\n{{steps}}\n\nSuccess will be measured by criteria:\n{{success_criteria}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Do you confirm the plan? (yes/no)'\n- STOP and wait until user writes response\n- DO NOT fill plan_approved until user explicitly says yes or no\n- Showing plan ≠ getting confirmation\n- Record in user_response_text exactly what user answered\n\n⚠️ HANDLING FEEDBACK:\n- If user gives comments, suggests changes, or says anything other than pure 'yes' → plan_approved: 'no'\n- Record comments in revision_feedback\n- 'Yes, but...' = NO (there are comments)\n- 'Good, just change...' = NO (there are comments)\n- Only pure 'yes'/'ok'/'confirm' without reservations = YES\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User EXPLICITLY answered yes or no (response text exists in user_response_text)",
-      "inputSchema": {
-        "type": "object",
         "properties": {
-          "user_response_text": {
+          "repair_status": {
             "type": "string",
-            "minLength": 2,
-            "description": "MANDATORY: Verbatim text of user's response"
+            "enum": [
+              "changed",
+              "blocked"
+            ]
+          },
+          "blocked_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
           }
         },
         "required": [
-          "plan_approved",
-          "user_response_text"
+          "repair_status"
         ],
         "globalInputs": [
-          "plan_approved",
-          "revision_feedback"
+          "steps"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "repair_status": {
+                "const": "changed"
+              }
+            },
+            "required": [
+              "repair_status",
+              "steps"
+            ],
+            "not": {
+              "required": [
+                "blocked_reason"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "repair_status": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "repair_status",
+              "blocked_reason"
+            ],
+            "not": {
+              "required": [
+                "steps"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-plan-approval"
+        "success": "route_plan_repair_status"
       }
     },
     {
-      "id": "route-plan-approval",
+      "id": "recompute_plan",
+      "type": "expression",
+      "expressions": [
+        "total_steps = steps.length",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "check_revision_cursor"
+      }
+    },
+    {
+      "id": "route_plan_mode",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "plan_approved"
+          "contextPath": "operating_mode"
         },
-        "right": "yes"
+        "right": "autonomous"
       },
       "connections": {
-        "true": "check-all-steps-done",
-        "false": "revise-plan"
+        "true": "check_remaining",
+        "false": "present_plan"
       }
     },
     {
-      "id": "revise-plan",
+      "id": "present_plan",
       "type": "agent-directive",
-      "directive": "Revise plan based on user comments.\n\nComments: {{revision_feedback}}\n\nCurrent plan:\n{{steps}}\n\nFix plan considering feedback.\n\n{{#if has_file_access}}⚠️ After fixing, update file {{workspace_path}}/plan.md{{/if}}",
-      "completionCondition": "Plan revised considering comments",
+      "directive": "Present the complete current plan and explain that items before zero-based current_step are already independently verified. Ask for an explicit decision. Return `accept` only for acceptance; return `revise` with complete nonblank feedback otherwise. Do not revise or execute.",
+      "completionCondition": "The interactive user accepted the current zero-reviewed plan or supplied bounded revision feedback",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "revise"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          }
+        },
         "required": [
-          "steps",
-          "total_steps"
+          "decision"
         ],
-        "globalInputs": [
-          "steps",
-          "total_steps"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "accept"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "reinitialize-after-revision"
+        "success": "route_plan_decision"
       }
     },
     {
-      "id": "check-all-steps-done",
+      "id": "route_plan_decision",
       "type": "condition",
       "condition": {
-        "operator": "gt",
+        "operator": "eq",
+        "left": {
+          "contextPath": "present_plan.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "check_remaining",
+        "false": "revise_plan"
+      }
+    },
+    {
+      "id": "revise_plan",
+      "type": "agent-directive",
+      "directive": "Materially revise the current plan from `{{present_plan.feedback}}`. Preserve exact IDs, content, order, and evidence for every item before current_step; replace only the remaining suffix, retain unique IDs and valid dependencies, and do not broaden authority. In filesystem mode atomically project the returned steps to plan.json. Return changed steps only.",
+      "completionCondition": "The plan materially addresses user feedback and preserves the verified prefix",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "xPreservePlanPrefix": {
+          "planProperty": "steps",
+          "boundaryContextProperty": "current_step"
+        },
+        "properties": {},
+        "required": [
+          "steps"
+        ],
+        "globalInputs": [
+          "steps"
+        ]
+      },
+      "connections": {
+        "success": "recompute_plan"
+      }
+    },
+    {
+      "id": "check_remaining",
+      "type": "condition",
+      "condition": {
+        "operator": "lt",
         "left": {
           "contextPath": "current_step"
         },
@@ -388,926 +490,1945 @@
         }
       },
       "connections": {
-        "true": "verify-criteria",
-        "false": "execute-current-step"
+        "true": "execute_item",
+        "false": "assemble_result"
       }
     },
     {
-      "id": "execute-current-step",
+      "id": "execute_item",
       "type": "agent-directive",
-      "directive": "Execute step {{current_step}} of {{total_steps}}.\n\n{{#if has_file_access}}Read current step from file {{workspace_path}}/plan.md (step number {{current_step}}).{{else}}Step text: {{current_step_action}}{{/if}}\n\nMANDATORY provide EVIDENCE of completion:\n- Screenshot, link, file\n- Or detailed text description of EXACTLY what was done\n\nRules:\n{{validation_criteria}}\n\nAvoid mistakes:\n{{common_mistakes}}",
-      "completionCondition": "Step completed with evidence",
+      "directive": "Execute only current item `{{steps[current_step].id}}`: {{steps[current_step].action}}. Expected result: {{steps[current_step].expected_result}}. Honor its earlier dependencies, canonical task, constraints, and authority_boundary. {{#if retry_count}}Use the materially changed retry approach: {{prepare_retry.retry_approach}}. Do not repeat unchanged work.{{/if}} Perform discriminating verification. Update evidence_ledger without altering or dropping earlier entries: append or replace only the current item record with its stable ID, status (`verified` only when proved, otherwise `failed`), bounded actual result, and concrete verification. In filesystem mode append the detailed attempt and primary evidence to execution-evidence.md. Return execution_status and the complete bounded ledger; never claim success when blocked, failed, or unevidenced.",
+      "completionCondition": "One authorized current-item attempt has an observed status and bounded evidence without corrupting the verified prefix",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "step_completed": {
+          "execution_status": {
             "type": "string",
             "enum": [
-              "yes",
-              "no"
-            ],
-            "description": "Step completed successfully"
-          },
-          "notes": {
-            "type": "string",
-            "description": "Additional notes"
+              "verified",
+              "failed"
+            ]
           }
         },
         "required": [
-          "step_completed"
+          "execution_status",
+          "evidence_ledger"
         ],
         "globalInputs": [
-          "evidence"
+          "evidence_ledger"
         ]
       },
       "connections": {
-        "success": "verify-step-execution"
+        "success": "route_execution_status"
       }
     },
     {
-      "id": "verify-step-execution",
-      "type": "agent-directive",
-      "directive": "Delegate step execution verification to subagent via Task tool.\n\nCRITICALLY IMPORTANT: DO NOT verify execution yourself - delegate to independent subagent.\n\n1) Pass to subagent:\n   {{#if has_file_access}}- Path to plan: {{workspace_path}}/plan.md, step: {{current_step}}{{else}}- Expected step output: {{current_step_expected_output}}{{/if}}\n   - Evidence from execution: {{evidence}}\n\n2) Prompt for subagent (pass verbatim):\n   YOU ARE step execution verifier.\n   COMPARE expected_output with provided evidence.\n   CHECK: Does evidence FULLY match expected_output?\n   - 80% match = NOT verified (partial completion)\n   - No concrete evidence = NOT verified\n   - Missing elements = NOT verified\n   RETURN step_verified (yes/no) and verification_details explaining your assessment.\n\n3) Save subagent result:\n   - step_verified: yes or no\n   - verification_details: verification details\n\n{{#if has_file_access}}4) If step_verified = no, save issues to file {{workspace_path}}/step-{{current_step}}/verification-issues.md:\n   # Step {{current_step}} Verification Issues\n\n   Step verified: no\n\n   ## Issues Found\n\n   ### 1. [issue description]\n   Expected: [what was expected]\n   Actual: [what was found]\n   Gap: [what's missing]\n\n   ### 2. [issue description]\n   ...\n{{/if}}\n\nHonestly pass subagent result. If reviewer said no - pass no.",
-      "completionCondition": "Verification complete, verdict delivered",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "verification_details": {
-            "type": "string",
-            "description": "Verification details: what was checked, what was found"
-          }
-        },
-        "required": [
-          "step_verified",
-          "verification_details",
-          "issues_found"
-        ],
-        "globalInputs": [
-          "step_verified",
-          "issues_found"
-        ]
-      },
-      "connections": {
-        "success": "route-step-verification"
-      }
-    },
-    {
-      "id": "route-step-verification",
+      "id": "route_execution_status",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "step_verified"
+          "contextPath": "execute_item.execution_status"
         },
-        "right": "yes"
+        "right": "verified"
       },
       "connections": {
-        "true": "complete-step",
-        "false": "increment-retry"
+        "true": "review_item",
+        "false": "check_retry_limit"
       }
     },
     {
-      "id": "complete-step",
+      "id": "review_item",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} completed successfully.\n\nEvidence: {{evidence}}\n\n1. Record step result\n2. Increment counter: current_step = {{current_step}} + 1, step_retry = 0\n3. {{#if has_file_access}}Read next step data from file {{workspace_path}}/plan.md and fill current_step_action and current_step_expected_output.{{else}}Find step with id = ({{current_step}} + 1) in steps array and fill current_step_action (its action) and current_step_expected_output (its expected_output). If no next step - leave empty.{{/if}}\n4. Update execution_note to: \"{{task_short_name}}. Step ({{current_step}}+1)/{{total_steps}}\"",
-      "completionCondition": "Result recorded, counter incremented, next step data extracted",
+      "directive": "In an independent host-supported context, review only current item `{{steps[current_step].id}}` against its action, expected result, dependencies, actual state, and primary evidence. Verify that evidence_ledger preserves the exact verified prefix with one unambiguous record per stable ID and that the current verified claim is real and authorized. In filesystem mode directly read execution-evidence.md and overwrite item-review.md with details. Diagnose only. Return exact item_issues_count and findings_summary, empty exactly at zero and nonempty at nonzero; only when nonzero also return item_repair_reach=`work` for execution/evidence defects or `plan` when the remaining plan itself is wrong.",
+      "completionCondition": "An independent primary-source item review returns the exact current blockers and earliest repair owner",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "step_result_saved": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ]
-          },
-          "execution_note": {
-            "type": "string",
-            "description": "Updated progress: 'Task name. Step X/Y'"
-          }
-        },
-        "required": [
-          "step_result_saved",
-          "current_step",
-          "step_retry",
-          "execution_note"
-        ],
-        "globalInputs": [
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output"
-        ]
-      },
-      "connections": {
-        "success": "check-all-steps-done"
-      }
-    },
-    {
-      "id": "increment-retry",
-      "type": "agent-directive",
-      "directive": "Step not completed. Increment retry counter.\n\nCurrent attempt: {{step_retry}}\nMaximum attempts: {{max_retries}}\n\nSet step_retry = {{step_retry}} + 1.",
-      "completionCondition": "Retry counter incremented",
-      "inputSchema": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "step_retry"
+          "item_issues_count",
+          "findings_summary"
         ],
         "globalInputs": [
-          "step_retry"
-        ]
-      },
-      "connections": {
-        "success": "check-retry-limit"
-      }
-    },
-    {
-      "id": "check-retry-limit",
-      "type": "condition",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "step_retry"
-        },
-        "right": {
-          "contextPath": "max_retries"
-        }
-      },
-      "connections": {
-        "true": "notify-escalation",
-        "false": "retry-step-feedback"
-      }
-    },
-    {
-      "id": "retry-step-feedback",
-      "type": "agent-directive",
-      "directive": "Attempt {{step_retry}} of {{max_retries}} failed.\n\n{{#if has_file_access}}READ {{workspace_path}}/step-{{current_step}}/verification-issues.md{{else}}Issues from context: {{issues_found}}{{/if}}\n\nFor EACH issue found by verifier:\n1. Understand what was missing or incorrect\n2. Determine a different approach to address the gap\n3. Plan specific actions to fix\n\nAnalyze why step was not completed and try again with different approach.\n\nDO NOT skip any issue. ALL verification findings must be addressed.\n\nAvoid mistakes:\n{{common_mistakes}}",
-      "completionCondition": "Feedback given, ready for retry",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "retry_approach": {
-            "type": "string",
-            "description": "What we'll try differently"
-          }
-        },
-        "required": [
-          "retry_approach"
-        ]
-      },
-      "connections": {
-        "success": "execute-current-step"
-      }
-    },
-    {
-      "id": "notify-escalation",
-      "type": "telegram-notification",
-      "message": "Decision required\n\nTask: {{task_short_name}}\nStep {{current_step}} failed after {{max_retries}} attempts.\n\nOptions:\n- Skip step\n- Complete manually",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "ask-user-skip-or-escalate",
-        "error": "ask-user-skip-or-escalate"
-      }
-    },
-    {
-      "id": "ask-user-skip-or-escalate",
-      "type": "agent-directive",
-      "directive": "Step {{current_step}} cannot be completed after {{max_retries}} attempts.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'What to do?\n  1. skip - skip step and continue\n  2. escalate - you will complete this step yourself\n  3. revise_plan - revise plan considering problems'\n- STOP and wait until user writes response\n- DO NOT fill user_decision until user explicitly responds\n- Record in user_response_text exactly what user answered\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User EXPLICITLY chose action (response text exists in user_response_text)",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_response_text": {
-            "type": "string",
-            "minLength": 2,
-            "description": "MANDATORY: Verbatim text of user's response"
-          }
-        },
-        "required": [
-          "user_decision",
-          "user_response_text"
+          "item_issues_count",
+          "findings_summary",
+          "item_repair_reach"
         ],
-        "globalInputs": [
-          "user_decision",
-          "skip_reason"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "item_issues_count": {
+                  "type": "integer",
+                  "const": 0
+                }
+              },
+              "required": [
+                "item_issues_count"
+              ]
+            },
+            "then": {
+              "properties": {
+                "findings_summary": {
+                  "type": "array",
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "required": [
+                "item_repair_reach"
+              ],
+              "properties": {
+                "findings_summary": {
+                  "type": "array",
+                  "minItems": 1
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-user-decision"
+        "success": "route_item_review"
       }
     },
     {
-      "id": "route-user-decision",
+      "id": "route_item_review",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "user_decision"
+          "contextPath": "item_issues_count"
+        },
+        "right": 0
+      },
+      "connections": {
+        "true": "increment_item",
+        "false": "route_item_repair"
+      }
+    },
+    {
+      "id": "route_item_repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "item_repair_reach"
+        },
+        "right": "plan"
+      },
+      "connections": {
+        "true": "revise_suffix",
+        "false": "check_retry_limit"
+      }
+    },
+    {
+      "id": "check_retry_limit",
+      "type": "condition",
+      "condition": {
+        "operator": "lt",
+        "left": {
+          "contextPath": "retry_count"
+        },
+        "right": 2
+      },
+      "connections": {
+        "true": "prepare_retry",
+        "false": "route_recovery_mode"
+      }
+    },
+    {
+      "id": "prepare_retry",
+      "type": "agent-directive",
+      "directive": "Reproduce the current failure and review findings from primary evidence. If one authorized materially different attempt exists, return retry_status=`changed` and a bounded nonblank retry_approach that addresses the confirmed cause; do not perform work here. If no meaningful changed attempt exists within authority, return retry_status=`blocked` and a bounded nonblank blocked_reason. Never invent an approach to keep the loop alive.",
+      "completionCondition": "A changed retry approach or explicit blocker is represented in a closed schema",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "retry_status": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "blocked"
+            ]
+          },
+          "retry_approach": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocked_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "retry_status"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "retry_status": {
+                "const": "changed"
+              }
+            },
+            "required": [
+              "retry_status",
+              "retry_approach"
+            ],
+            "not": {
+              "required": [
+                "blocked_reason"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "retry_status": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "retry_status",
+              "blocked_reason"
+            ],
+            "not": {
+              "required": [
+                "retry_approach"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route_retry_status"
+      }
+    },
+    {
+      "id": "increment_retry",
+      "type": "expression",
+      "expressions": [
+        "retry_count = retry_count + 1"
+      ],
+      "connections": {
+        "default": "execute_item"
+      }
+    },
+    {
+      "id": "route_recovery_mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "autonomous_recovery",
+        "false": "ask_recovery"
+      }
+    },
+    {
+      "id": "autonomous_recovery",
+      "type": "agent-directive",
+      "directive": "Bounded changed retries are exhausted. Do not guess a skip or expand authority. Return a concise factual result_summary and a nonblank limitation_reason naming the stopped stable item, verified attempts, blocker, and safe next decision. Do not claim completion.",
+      "completionCondition": "The autonomous run has a bounded truthful recovery summary and reason",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary",
+          "limitation_reason"
+        ],
+        "globalInputs": [
+          "result_summary",
+          "limitation_reason"
+        ]
+      },
+      "connections": {
+        "success": "mark_recovery"
+      }
+    },
+    {
+      "id": "ask_recovery",
+      "type": "agent-directive",
+      "directive": "Explain the current item, attempts, and blocker. Ask the interactive user to choose: `assist` with nonblank guidance, `skip` with nonblank accepted limitation, `revise` with nonblank plan feedback, `stop` with nonblank recovery reason, or `abort` with nonblank reason. The decision cannot expand originating authority. Return only the closed decision shape; do not perform work.",
+      "completionCondition": "The user made one explicit bounded recovery decision with route-required data",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "assist",
+              "skip",
+              "revise",
+              "stop",
+              "abort"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "decision",
+          "reason"
+        ]
+      },
+      "connections": {
+        "success": "route_recovery_abort"
+      }
+    },
+    {
+      "id": "route_recovery_abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask_recovery.decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "record_abort",
+        "false": "route_recovery_stop"
+      }
+    },
+    {
+      "id": "route_recovery_stop",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask_recovery.decision"
+        },
+        "right": "stop"
+      },
+      "connections": {
+        "true": "record_recovery",
+        "false": "route_recovery_skip"
+      }
+    },
+    {
+      "id": "route_recovery_skip",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "ask_recovery.decision"
         },
         "right": "skip"
       },
       "connections": {
-        "true": "mark-step-skipped",
-        "false": "route-escalate-or-revise"
+        "true": "record_skip",
+        "false": "route_recovery_revise"
       }
     },
     {
-      "id": "route-escalate-or-revise",
+      "id": "route_recovery_revise",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "user_decision"
+          "contextPath": "ask_recovery.decision"
         },
-        "right": "escalate"
+        "right": "revise"
       },
       "connections": {
-        "true": "user-handles-step",
-        "false": "revise-plan-from-escalation"
+        "true": "revise_suffix",
+        "false": "apply_assistance"
       }
     },
     {
-      "id": "revise-plan-from-escalation",
+      "id": "apply_assistance",
       "type": "agent-directive",
-      "directive": "Revise plan considering execution problems.\n\nStep {{current_step}} could not be completed after {{max_retries}} attempts.\n\nCurrent plan:\n{{steps}}\n\nAnalyze why step cannot be executed and revise plan:\n- Maybe step needs to be split into smaller ones?\n- Maybe different approach is needed?\n- Maybe dependencies weren't considered?\n\nRequirements for new plan:\n{{plan_writing_requirements}}\n\n{{#if has_file_access}}⚠️ After revision, update file {{workspace_path}}/plan.md{{/if}}",
-      "completionCondition": "Plan revised considering problems",
+      "directive": "Use the user's bounded guidance at `{{ask_recovery.reason}}` to materially change only the current authorized work. Perform discriminating verification; update only the current item record in evidence_ledger while preserving the verified prefix, and append detailed evidence in filesystem mode. Return the complete ledger only after the expected result is actually proved. User guidance never bypasses independent review.",
+      "completionCondition": "User-assisted changed work has current evidence and is ready for independent item review",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "revision_reason": {
-            "type": "string",
-            "description": "Why plan was revised"
-          }
-        },
-        "required": [
-          "steps",
-          "total_steps",
-          "revision_reason"
-        ],
-        "globalInputs": [
-          "steps",
-          "total_steps"
-        ]
-      },
-      "connections": {
-        "success": "reinitialize-after-revision"
-      }
-    },
-    {
-      "id": "reinitialize-after-revision",
-      "type": "agent-directive",
-      "directive": "Plan revised. Reset counters and start execution from first step of new plan.\n\nSet current_step = 1, step_retry = 0.\n\nExtract first step data:\n{{#if has_file_access}}Read from file {{workspace_path}}/plan.md{{else}}From steps array{{/if}} - fill current_step_action and current_step_expected_output.",
-      "completionCondition": "Counters reset, first step data extracted",
-      "inputSchema": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output"
+          "evidence_ledger"
         ],
         "globalInputs": [
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output"
+          "evidence_ledger"
         ]
       },
       "connections": {
-        "success": "validate-plan"
+        "success": "review_item"
       }
     },
     {
-      "id": "mark-step-skipped",
+      "id": "record_skip",
       "type": "agent-directive",
-      "directive": "Step {{current_step}} skipped.\n\nReason: {{skip_reason}}\n\nRecord that step is skipped and move to next.\n\n1. Increment counter: current_step = {{current_step}} + 1, step_retry = 0\n2. {{#if has_file_access}}Read next step data from file {{workspace_path}}/plan.md.{{else}}Find step with id = ({{current_step}} + 1) in steps array.{{/if}}\n3. Update execution_note.",
-      "completionCondition": "Step marked as skipped, counter incremented",
+      "directive": "Record the explicit skipped current stable item and exact accepted limitation `{{ask_recovery.reason}}` in evidence_ledger, preserving the verified prefix. In filesystem mode append the decision to execution-evidence.md. Return the cumulative nonblank limitation_reason and the complete ledger. Do not claim the item verified.",
+      "completionCondition": "The skip and its limitation are durably and truthfully preserved",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "limitation_reason",
+          "evidence_ledger"
+        ],
+        "globalInputs": [
+          "limitation_reason",
+          "evidence_ledger"
+        ]
+      },
+      "connections": {
+        "success": "mark_limited"
+      }
+    },
+    {
+      "id": "record_abort",
+      "type": "agent-directive",
+      "directive": "Return a concise factual result_summary and the exact nonblank limitation_reason from `{{ask_recovery.reason}}`. Include completed versus total count; do not claim completion.",
+      "completionCondition": "The explicit abort reason and partial result are represented truthfully",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary",
+          "limitation_reason"
+        ],
+        "globalInputs": [
+          "result_summary",
+          "limitation_reason"
+        ]
+      },
+      "connections": {
+        "success": "mark_aborted"
+      }
+    },
+    {
+      "id": "record_recovery",
+      "type": "agent-directive",
+      "directive": "Return a concise factual result_summary and the exact nonblank limitation_reason from `{{ask_recovery.reason}}`, naming the current stable item and safe next decision. Do not claim completion.",
+      "completionCondition": "The explicit stop reason and partial result are represented truthfully",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary",
+          "limitation_reason"
+        ],
+        "globalInputs": [
+          "result_summary",
+          "limitation_reason"
+        ]
+      },
+      "connections": {
+        "success": "mark_recovery"
+      }
+    },
+    {
+      "id": "increment_item",
+      "type": "expression",
+      "expressions": [
+        "current_step = current_step + 1",
+        "completed_items = current_step",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "check_remaining"
+      }
+    },
+    {
+      "id": "revise_suffix",
+      "type": "agent-directive",
+      "directive": "Revise the process because the current remaining plan is demonstrably wrong or because the interactive recovery decision requested revision. Return one complete strict replacement steps array. Preserve exact IDs, content, order, and evidence correspondence before the engine-owned current_step; replace only the remaining suffix, retain unique IDs and valid earlier-only dependencies, and stay within authority. In filesystem mode atomically project steps to plan.json. Do not return or choose a cursor, and do not use revision to bypass ordinary failed work or review findings owned by work repair.",
+      "completionCondition": "A strict replacement plan preserves the verified prefix while the engine retains its cursor",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "xPreservePlanPrefix": {
+          "planProperty": "steps",
+          "boundaryContextProperty": "current_step"
+        },
+        "properties": {},
+        "required": [
+          "steps"
+        ],
+        "globalInputs": [
+          "steps"
+        ]
+      },
+      "connections": {
+        "success": "apply_revision"
+      }
+    },
+    {
+      "id": "apply_revision",
+      "type": "expression",
+      "expressions": [
+        "completed_items = current_step",
+        "total_steps = steps.length",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "check_revision_cursor"
+      }
+    },
+    {
+      "id": "assemble_result",
+      "type": "agent-directive",
+      "directive": "Assemble a bounded current result from the canonical task, plan, evidence_ledger, actual state, and declared limitations. In filesystem mode write a current draft into final-report.md for review; in memory mode retain the bounded result_summary. Return result_summary only. Do not claim clean completion or ask for acceptance before independent final review.",
+      "completionCondition": "A bounded truthful current result is available for independent final review",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary"
+        ],
+        "globalInputs": [
+          "result_summary"
+        ]
+      },
+      "connections": {
+        "success": "review_final"
+      }
+    },
+    {
+      "id": "review_final",
+      "type": "agent-directive",
+      "directive": "In an independent host-supported context, inspect the complete canonical task, plan, evidence_ledger, actual result, primary evidence, authority, and current report. In filesystem mode directly read task.md, plan.json, execution-evidence.md, and final-report.md, verify all projections belong to execution `{{executionId}}`, and overwrite final-review.md. Check every success criterion, stable-ID correspondence, sequential completeness, current skip/limitation state, actual outcome truth, and authority. Diagnose only. Return exact final_issues_count and findings_summary, empty exactly at zero and nonempty at nonzero. At zero also return reviewed_outcome=`clean` only when the current ledger contains no unresolved skipped item, otherwise `limited` with a current nonblank limitation_reason. Only when nonzero return final_repair_reach plus repair_from for task/plan/work.",
+      "completionCondition": "An independent primary-source final review records every blocker and derives the current truthful outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "skipped_recorded": {
+          "repair_from": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32
+          },
+          "reviewed_outcome": {
             "type": "string",
             "enum": [
-              "yes"
+              "clean",
+              "limited"
             ]
-          },
-          "execution_note": {
-            "type": "string"
           }
         },
         "required": [
-          "skipped_recorded",
-          "current_step",
-          "step_retry",
-          "execution_note"
+          "final_issues_count",
+          "findings_summary"
         ],
         "globalInputs": [
-          "current_step",
-          "step_retry",
-          "current_step_action",
-          "current_step_expected_output"
-        ]
-      },
-      "connections": {
-        "success": "check-all-steps-done"
-      }
-    },
-    {
-      "id": "user-handles-step",
-      "type": "agent-directive",
-      "directive": "User takes over step {{current_step}} execution.\n\n{{#if has_file_access}}Read step information from file {{workspace_path}}/plan.md{{else}}Step text: {{current_step_action}}{{/if}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Wait until user completes step and provides evidence\n- DO NOT fill user_completed until user explicitly confirms completion\n- Record in user_response_text exactly what user answered",
-      "completionCondition": "User EXPLICITLY confirmed completion with evidence (response text exists in user_response_text)",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_completed": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ]
-          },
-          "user_response_text": {
-            "type": "string",
-            "minLength": 5,
-            "description": "MANDATORY: Verbatim text of user's response"
-          }
-        },
-        "required": [
-          "user_completed",
-          "evidence",
-          "user_response_text"
+          "final_issues_count",
+          "findings_summary",
+          "final_repair_reach",
+          "limitation_reason"
         ],
-        "globalInputs": [
-          "evidence"
-        ]
-      },
-      "connections": {
-        "success": "complete-step"
-      }
-    },
-    {
-      "id": "verify-criteria",
-      "type": "agent-directive",
-      "directive": "Re-verification pass {{criteria_round}} of up to {{max_criteria_rounds}} — this is a normal completeness loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nCOMPLETENESS SELF-REVIEW (verify ONLY — DO NOT fix here).\n\nVerify that EVERY success criterion is ACTUALLY satisfied by the REAL deliverable — check the actual artifact (code, files, command output, tests), NOT documentation, NOT claims, NOT your own memory.\n\nSuccess criteria (the frozen source of truth):\n{{success_criteria}}\n\nExpected deliverable: {{expected_deliverable}}\n\nRules:\n- ONE check per success criterion — go through them one at a time, do not batch-approve.\n- For each criterion: find the concrete EVIDENCE in the real artifact (file path + what proves it; for code tasks read the real code and/or run the tests). If you cannot point to concrete evidence, it is a GAP.\n- \"Looks done\" / \"should work\" / \"documented as complete\" is NOT evidence.\n\nFor each criterion specify:\n- Completed? (yes/no)\n- Evidence of completion (concrete: file path, output, test result)\n\nVerification rules:\n{{validation_criteria}}\n\n{{#if has_file_access}}Save a coverage report to {{workspace_path}}/requirements-coverage-report-v{{validation_attempt_count}}.md AND gaps to {{workspace_path}}/criteria-gaps.md:\n# Success Criteria Coverage (attempt {{validation_attempt_count}})\n\n## Summary\nTotal criteria: [count]\nCompleted: [count]\nGaps: [count]\n\n## Per-criterion\n### 1. [criterion]\nStatus: MET | NOT MET\nEvidence: [concrete evidence OR what is missing]\n{{/if}}",
-      "completionCondition": "All success criteria verified against the real deliverable with concrete evidence",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "criteria_results": {
-            "type": "array",
-            "items": {
-              "type": "object",
+        "allOf": [
+          {
+            "if": {
               "properties": {
-                "criterion": {
-                  "type": "string"
-                },
-                "met": {
-                  "type": "boolean"
-                },
-                "evidence": {
-                  "type": "string"
+                "final_issues_count": {
+                  "type": "integer",
+                  "const": 0
+                }
+              },
+              "required": [
+                "final_issues_count"
+              ]
+            },
+            "then": {
+              "required": [
+                "reviewed_outcome"
+              ],
+              "properties": {
+                "findings_summary": {
+                  "type": "array",
+                  "maxItems": 0
+                }
+              }
+            },
+            "else": {
+              "required": [
+                "final_repair_reach"
+              ],
+              "properties": {
+                "findings_summary": {
+                  "type": "array",
+                  "minItems": 1
                 }
               }
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "final_issues_count": {
+                  "const": 0
+                },
+                "reviewed_outcome": {
+                  "const": "limited"
+                }
+              },
+              "required": [
+                "final_issues_count",
+                "reviewed_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "limitation_reason"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "final_repair_reach": {
+                  "type": "string",
+                  "enum": [
+                    "task",
+                    "plan",
+                    "work"
+                  ]
+                }
+              },
+              "required": [
+                "final_repair_reach"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_from"
+              ]
+            }
           }
-        },
-        "required": [
-          "all_criteria_met",
-          "criteria_results"
-        ],
-        "globalInputs": [
-          "all_criteria_met",
-          "gaps"
         ]
       },
       "connections": {
-        "success": "route-criteria-check"
+        "success": "route_final_review"
       }
     },
     {
-      "id": "route-criteria-check",
+      "id": "route_final_review",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "all_criteria_met"
+          "contextPath": "final_issues_count"
         },
-        "right": "yes"
+        "right": 0
       },
       "connections": {
-        "true": "deliver-result",
-        "false": "fix-gaps"
+        "true": "route_reviewed_outcome",
+        "false": "repair_final"
       }
     },
     {
-      "id": "fix-gaps",
+      "id": "repair_final",
       "type": "agent-directive",
-      "directive": "CRITICAL: FIX THE GAPS - NO REPORTS!\n\nFix incomplete success criteria.\n\n{{#if has_file_access}}READ {{workspace_path}}/criteria-gaps.md{{else}}Gaps from context: {{gaps}}{{/if}}\n\nFor EACH gap found:\n1. Understand what's missing\n2. Complete the required work\n3. Gather evidence of completion\n4. Document what was done\n\nDO NOT skip any gap. ALL incomplete criteria must be addressed.\n\nComplete what's missing and provide evidence for each fix.",
-      "completionCondition": "Gaps fixed with evidence",
+      "directive": "Read and reproduce every independent final finding. If no meaningful authorized repair exists, return repair_status=`blocked` with bounded nonblank blocked_reason and mutate nothing. Otherwise materially repair the complete current set at its earliest source and return repair_status=`changed` plus final_repair_reach. For projection, change the bounded result_summary and, in filesystem mode, synchronize final-report.md, then return the changed summary. For task/plan return repair_from and exactly the ordered proven evidence before that index; for work return the prior prefix plus the corrected verified record at that index. Return the required canonical fields only for their declared reach. In filesystem mode synchronize projections and remove stale detailed evidence from repair_from onward. Do not edit the review or loop unchanged.",
+      "completionCondition": "Every finding is materially repaired with exclusive outputs and deterministic evidence invalidation, or a blocked repair is explicit",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "xEvidenceBoundary": {
+          "reachProperty": "final_repair_reach",
+          "boundaryProperty": "repair_from",
+          "planProperty": "steps",
+          "ledgerProperty": "evidence_ledger",
+          "workReach": "work",
+          "checkedReaches": [
+            "task",
+            "plan",
+            "work"
+          ]
+        },
         "properties": {
-          "gaps_fixed": {
+          "repair_status": {
             "type": "string",
             "enum": [
-              "yes"
+              "changed",
+              "blocked"
             ]
           },
-          "fix_evidence": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "gap": {
-                  "type": "string"
-                },
-                "fix": {
-                  "type": "string"
-                },
-                "evidence": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        },
-        "required": [
-          "gaps_fixed",
-          "fix_evidence"
-        ]
-      },
-      "connections": {
-        "success": "expr-inc-criteria-round"
-      }
-    },
-    {
-      "id": "deliver-result",
-      "type": "agent-directive",
-      "directive": "Compile final result.\n\nTask: {{task_description}}\nDeliverable: {{expected_deliverable}}\n\nPrepare:\n1. Final deliverable\n2. Summary of what was done (by steps)\n3. List of artifacts (files, links, results)\n4. Recommendations (if any)",
-      "completionCondition": "Final result compiled and presented",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "summary": {
+          "blocked_reason": {
             "type": "string",
-            "description": "Brief description of work completed"
+            "minLength": 1,
+            "maxLength": 4000
           },
-          "artifacts": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of artifacts"
-          },
-          "recommendations": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Recommendations (if any)"
+          "repair_from": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32
           }
         },
         "required": [
-          "deliverable",
-          "summary"
+          "repair_status"
         ],
         "globalInputs": [
-          "deliverable"
+          "final_repair_reach",
+          "result_summary",
+          "task_description",
+          "expected_result",
+          "success_criteria",
+          "constraints",
+          "authority_boundary",
+          "steps",
+          "evidence_ledger"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "repair_status": {
+                "const": "blocked"
+              }
+            },
+            "required": [
+              "repair_status",
+              "blocked_reason"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "repair_from"
+                  ]
+                },
+                {
+                  "required": [
+                    "final_repair_reach"
+                  ]
+                },
+                {
+                  "required": [
+                    "result_summary"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                },
+                {
+                  "required": [
+                    "steps"
+                  ]
+                },
+                {
+                  "required": [
+                    "evidence_ledger"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "repair_status": {
+                "const": "changed"
+              },
+              "final_repair_reach": {
+                "const": "projection"
+              }
+            },
+            "required": [
+              "repair_status",
+              "final_repair_reach",
+              "result_summary"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "blocked_reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "repair_from"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                },
+                {
+                  "required": [
+                    "steps"
+                  ]
+                },
+                {
+                  "required": [
+                    "evidence_ledger"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "repair_status": {
+                "const": "changed"
+              },
+              "final_repair_reach": {
+                "const": "task"
+              }
+            },
+            "required": [
+              "repair_status",
+              "final_repair_reach",
+              "repair_from",
+              "task_description",
+              "expected_result",
+              "success_criteria",
+              "constraints",
+              "authority_boundary",
+              "steps",
+              "evidence_ledger"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "blocked_reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "result_summary"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "repair_status": {
+                "const": "changed"
+              },
+              "final_repair_reach": {
+                "const": "plan"
+              }
+            },
+            "required": [
+              "repair_status",
+              "final_repair_reach",
+              "repair_from",
+              "steps",
+              "evidence_ledger"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "blocked_reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "result_summary"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "repair_status": {
+                "const": "changed"
+              },
+              "final_repair_reach": {
+                "const": "work"
+              }
+            },
+            "required": [
+              "repair_status",
+              "final_repair_reach",
+              "repair_from",
+              "evidence_ledger"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "blocked_reason"
+                  ]
+                },
+                {
+                  "required": [
+                    "result_summary"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                },
+                {
+                  "required": [
+                    "steps"
+                  ]
+                }
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "notify-completion"
+        "success": "route_final_repair_status"
       }
     },
     {
-      "id": "notify-completion",
-      "type": "telegram-notification",
-      "message": "Task completed\n\n{{task_short_name}}\n\nResult: {{deliverable}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "end",
-        "error": "end"
-      }
-    },
-    {
-      "id": "end",
-      "type": "end",
-      "finalOutput": [
-        "deliverable",
-        "summary",
-        "artifacts",
-        "recommendations",
-        "criteria_results"
-      ]
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-validation-round",
-      "expressions": [
-        "validation_round = validation_round + 1"
-      ],
-      "connections": {
-        "default": "check-validation-round-limit"
-      }
-    },
-    {
+      "id": "route_final_projection",
       "type": "condition",
-      "id": "check-validation-round-limit",
       "condition": {
-        "operator": "gte",
+        "operator": "eq",
         "left": {
-          "contextPath": "validation_round"
+          "contextPath": "final_repair_reach"
         },
-        "right": {
-          "contextPath": "max_validation_rounds"
-        }
+        "right": "projection"
       },
       "connections": {
-        "true": "ask-user-validation-limit-reached",
-        "false": "reinitialize-after-revision"
+        "true": "review_final",
+        "false": "route_final_work"
       }
     },
     {
-      "id": "ask-user-validation-limit-reached",
+      "id": "route_final_work",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "final_repair_reach"
+        },
+        "right": "work"
+      },
+      "connections": {
+        "true": "apply_work_repair",
+        "false": "apply_plan_repair"
+      }
+    },
+    {
+      "id": "apply_work_repair",
+      "type": "expression",
+      "expressions": [
+        "current_step = repair_final.repair_from",
+        "completed_items = current_step",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "review_item"
+      }
+    },
+    {
+      "id": "apply_plan_repair",
+      "type": "expression",
+      "expressions": [
+        "current_step = repair_final.repair_from",
+        "completed_items = current_step",
+        "total_steps = steps.length",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "review_plan"
+      }
+    },
+    {
+      "id": "finalize_result",
       "type": "agent-directive",
-      "directive": "Plan validation has run {{validation_round}} rounds (limit {{max_validation_rounds}}) and the plan may still have unresolved issues.\n\n⚠️ This is the BOUND on the normal re-validation loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — present the plan as-is and proceed (any remaining issues are accepted)\n  2. reset — zero the round counter and keep fixing the plan\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
-      "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
+      "directive": "Do not modify the zero-reviewed final-report.md, result_summary, evidence, plan, task, or actual work. Verify that the exact reviewed artifact remains current. In filesystem mode return artifact_location exactly `./moira-ws/task-breakdown-{{executionId}}/final-report.md`; in memory mode return exactly `in-memory execution context`. Return only that non-substantive discovery location.",
+      "completionCondition": "The exact independently reviewed result remains unchanged and has a safe caller-facing location",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_location"
+        ],
+        "globalInputs": [
+          "artifact_location"
+        ]
+      },
+      "connections": {
+        "success": "route_result_mode"
+      }
+    },
+    {
+      "id": "route_result_mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "route_terminal",
+        "false": "present_result"
+      }
+    },
+    {
+      "id": "present_result",
+      "type": "agent-directive",
+      "directive": "Present the complete current zero-reviewed result and ask for explicit acceptance. Return `accept` only for acceptance; return `rework` with complete bounded nonblank feedback otherwise. Do not change work here.",
+      "completionCondition": "The interactive user accepted the current result or supplied rework feedback",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
         "properties": {
           "decision": {
             "type": "string",
             "enum": [
-              "continue",
-              "reset"
-            ],
-            "description": "User's decision: continue (accept and proceed) or reset (keep fixing)"
+              "accept",
+              "rework"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
           }
         },
         "required": [
-          "decision",
-          "user_response_text"
+          "decision"
         ],
-        "globalInputs": [
-          "user_response_text"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "accept"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "check-reset-validation-round"
+        "success": "route_result_decision"
       }
     },
     {
+      "id": "route_result_decision",
       "type": "condition",
-      "id": "check-reset-validation-round",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "ask-user-validation-limit-reached.decision"
+          "contextPath": "present_result.decision"
         },
-        "right": "reset"
+        "right": "accept"
       },
       "connections": {
-        "true": "expr-reset-validation-round",
-        "false": "notify-plan-ready"
+        "true": "route_terminal",
+        "false": "rework_result"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-validation-round",
-      "expressions": [
-        "validation_round = 0"
-      ],
-      "connections": {
-        "default": "reinitialize-after-revision"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-criteria-round",
-      "expressions": [
-        "criteria_round = criteria_round + 1"
-      ],
-      "connections": {
-        "default": "check-criteria-round-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-criteria-round-limit",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "criteria_round"
-        },
-        "right": {
-          "contextPath": "max_criteria_rounds"
-        }
-      },
-      "connections": {
-        "true": "ask-user-criteria-limit-reached",
-        "false": "verify-criteria"
-      }
-    },
-    {
-      "id": "ask-user-criteria-limit-reached",
+      "id": "rework_result",
       "type": "agent-directive",
-      "directive": "The success-criteria gap-fixing loop has run {{criteria_round}} rounds (limit {{max_criteria_rounds}}) and some criteria may still be unmet.\n\n⚠️ This is the BOUND on the normal re-verification loop — a safety stop after many passes, NOT a flow bug and NOT a stuck loop.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\nAsk the user:\n  1. continue — deliver the result as-is (any remaining gaps are explicitly accepted)\n  2. reset — zero the round counter and keep closing the gaps\n- STOP and wait until the user explicitly responds.\n- Record exactly what the user answered in user_response_text.\n- DO NOT decide yourself. All routing is done by the workflow based on decision.",
-      "completionCondition": "User EXPLICITLY chose continue or reset (response text exists in user_response_text)",
+      "directive": "Reproduce feedback `{{present_result.feedback}}` and apply it at the earliest authorized source. Return final_repair_reach matching the actual mutation. For projection, change and return bounded result_summary and, in filesystem mode, synchronize final-report.md. For task/plan return repair_from and exactly the ordered evidence before that index; for work return the prior prefix plus the corrected verified record at that index. Return task/plan fields only for their declared reach. In filesystem mode remove stale detailed evidence from repair_from onward. Do not claim acceptance; every affected independent gate is stale.",
+      "completionCondition": "Result feedback is materially applied with an exclusive changed projection or canonical/work reach",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "xEvidenceBoundary": {
+          "reachProperty": "final_repair_reach",
+          "boundaryProperty": "repair_from",
+          "planProperty": "steps",
+          "ledgerProperty": "evidence_ledger",
+          "workReach": "work",
+          "checkedReaches": [
+            "task",
+            "plan",
+            "work"
+          ]
+        },
         "properties": {
-          "decision": {
-            "type": "string",
-            "enum": [
-              "continue",
-              "reset"
-            ],
-            "description": "User's decision: continue (accept and deliver) or reset (keep fixing gaps)"
+          "repair_from": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32
           }
         },
         "required": [
-          "decision",
-          "user_response_text"
+          "final_repair_reach"
         ],
         "globalInputs": [
-          "user_response_text"
+          "final_repair_reach",
+          "result_summary",
+          "task_description",
+          "expected_result",
+          "success_criteria",
+          "constraints",
+          "authority_boundary",
+          "steps",
+          "evidence_ledger"
+        ],
+        "oneOf": [
+          {
+            "properties": {
+              "final_repair_reach": {
+                "const": "projection"
+              }
+            },
+            "required": [
+              "final_repair_reach",
+              "result_summary"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "repair_from"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                },
+                {
+                  "required": [
+                    "steps"
+                  ]
+                },
+                {
+                  "required": [
+                    "evidence_ledger"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "final_repair_reach": {
+                "const": "task"
+              }
+            },
+            "required": [
+              "final_repair_reach",
+              "repair_from",
+              "task_description",
+              "expected_result",
+              "success_criteria",
+              "constraints",
+              "authority_boundary",
+              "steps",
+              "evidence_ledger"
+            ],
+            "not": {
+              "required": [
+                "result_summary"
+              ]
+            }
+          },
+          {
+            "properties": {
+              "final_repair_reach": {
+                "const": "plan"
+              }
+            },
+            "required": [
+              "final_repair_reach",
+              "repair_from",
+              "steps",
+              "evidence_ledger"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "result_summary"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "properties": {
+              "final_repair_reach": {
+                "const": "work"
+              }
+            },
+            "required": [
+              "final_repair_reach",
+              "repair_from",
+              "evidence_ledger"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "result_summary"
+                  ]
+                },
+                {
+                  "required": [
+                    "task_description"
+                  ]
+                },
+                {
+                  "required": [
+                    "expected_result"
+                  ]
+                },
+                {
+                  "required": [
+                    "success_criteria"
+                  ]
+                },
+                {
+                  "required": [
+                    "constraints"
+                  ]
+                },
+                {
+                  "required": [
+                    "authority_boundary"
+                  ]
+                },
+                {
+                  "required": [
+                    "steps"
+                  ]
+                }
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "check-reset-criteria-round"
+        "success": "route_rework_projection"
       }
     },
     {
+      "id": "route_terminal",
       "type": "condition",
-      "id": "check-reset-criteria-round",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "ask-user-criteria-limit-reached.decision"
+          "contextPath": "terminal_outcome"
         },
-        "right": "reset"
+        "right": "clean"
       },
       "connections": {
-        "true": "expr-reset-criteria-round",
-        "false": "deliver-result"
+        "true": "end_clean",
+        "false": "end_limited"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-criteria-round",
-      "expressions": [
-        "criteria_round = 0"
-      ],
-      "connections": {
-        "default": "verify-criteria"
-      }
-    },
-    {
+      "id": "teleport_revise_process",
       "type": "teleport",
-      "id": "teleport-replan",
-      "hint": "Use when you realize the current plan needs restructuring — jumps to rebuild the plan with all loop counters reset. Appropriate when: the current approach is fundamentally wrong, new requirements emerged that invalidate the plan, or steps must be added/removed/reordered.",
-      "directive": "Assess what needs to change in the task plan.\n\n1. Review the current plan{{#if has_file_access}} at {{workspace_path}}/plan.md{{/if}}.\n2. Identify what went wrong or what changed.\n3. Describe the required plan modifications in revision_reason.\n4. All loop counters will be reset — you start fresh after replanning.\n\nCurrent state: step {{current_step}} of {{total_steps}}.",
-      "completionCondition": "Required plan changes documented in revision_reason",
+      "hint": "Use only when the remaining process is demonstrably wrong, incomplete, or obsolete; never to bypass a failed item, independent finding, authority, or evidence gate.",
+      "directive": "Return a complete strict replacement steps array. Preserve exact IDs, content, order, and evidence for every verified item before the engine-owned current_step; replace only the remaining suffix with unique IDs and valid earlier-only dependencies. Stay within original authority. In filesystem mode atomically project the returned array to plan.json. Do not return or choose a cursor, execute work, or edit completed evidence.",
+      "completionCondition": "The revised process preserves the verified prefix while the engine retains the explicit current cursor",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "xPreservePlanPrefix": {
+          "planProperty": "steps",
+          "boundaryContextProperty": "current_step"
+        },
         "properties": {},
         "required": [
-          "revision_reason"
+          "steps"
         ],
         "globalInputs": [
-          "revision_reason"
+          "steps"
         ]
       },
       "connections": {
-        "success": "expr-reset-for-replan"
+        "success": "apply_teleport_revision"
       }
     },
     {
+      "id": "apply_teleport_revision",
       "type": "expression",
-      "id": "expr-reset-for-replan",
       "expressions": [
-        "validation_round = 0",
-        "criteria_round = 0",
-        "step_retry = 0",
-        "current_step = 1"
+        "completed_items = current_step",
+        "total_steps = steps.length",
+        "retry_count = 0"
       ],
       "connections": {
-        "default": "decompose-into-steps"
+        "default": "check_revision_cursor"
+      }
+    },
+    {
+      "id": "mark_limited",
+      "type": "expression",
+      "expressions": [
+        "terminal_outcome = \"limited\""
+      ],
+      "connections": {
+        "default": "increment_item"
+      }
+    },
+    {
+      "id": "mark_aborted",
+      "type": "expression",
+      "expressions": [
+        "terminal_outcome = \"aborted\""
+      ],
+      "connections": {
+        "default": "end_aborted"
+      }
+    },
+    {
+      "id": "mark_recovery",
+      "type": "expression",
+      "expressions": [
+        "terminal_outcome = \"recovery\""
+      ],
+      "connections": {
+        "default": "end_recovery"
+      }
+    },
+    {
+      "id": "route_plan_repair_status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair_plan.repair_status"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "recompute_plan",
+        "false": "record_plan_blocked"
+      }
+    },
+    {
+      "id": "record_plan_blocked",
+      "type": "agent-directive",
+      "directive": "Return a bounded factual result_summary and limitation_reason copied from the blocked plan repair at `{{repair_plan.blocked_reason}}`. Do not claim execution or completion.",
+      "completionCondition": "The blocked plan repair becomes a truthful recovery result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary",
+          "limitation_reason"
+        ],
+        "globalInputs": [
+          "result_summary",
+          "limitation_reason"
+        ]
+      },
+      "connections": {
+        "success": "mark_recovery"
+      }
+    },
+    {
+      "id": "check_revision_cursor",
+      "type": "condition",
+      "condition": {
+        "operator": "lte",
+        "left": {
+          "contextPath": "current_step"
+        },
+        "right": {
+          "contextPath": "total_steps"
+        }
+      },
+      "connections": {
+        "true": "review_plan",
+        "false": "record_invalid_revision"
+      }
+    },
+    {
+      "id": "record_invalid_revision",
+      "type": "agent-directive",
+      "directive": "The changed plan is shorter than the engine-owned verified prefix. Return a factual bounded result_summary and nonblank limitation_reason; do not execute, rewind, skip, or claim completion.",
+      "completionCondition": "An invalid revision stops as a truthful recovery outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary",
+          "limitation_reason"
+        ],
+        "globalInputs": [
+          "result_summary",
+          "limitation_reason"
+        ]
+      },
+      "connections": {
+        "success": "mark_recovery"
+      }
+    },
+    {
+      "id": "route_retry_status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "prepare_retry.retry_status"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "increment_retry",
+        "false": "route_recovery_mode"
+      }
+    },
+    {
+      "id": "route_final_repair_status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair_final.repair_status"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "route_final_projection",
+        "false": "record_final_blocked"
+      }
+    },
+    {
+      "id": "record_final_blocked",
+      "type": "agent-directive",
+      "directive": "Return a bounded factual result_summary and limitation_reason copied from the blocked final repair at `{{repair_final.blocked_reason}}`. Preserve the last verified partial result and do not claim clean completion.",
+      "completionCondition": "A blocked final repair becomes a truthful recovery outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_summary",
+          "limitation_reason"
+        ],
+        "globalInputs": [
+          "result_summary",
+          "limitation_reason"
+        ]
+      },
+      "connections": {
+        "success": "mark_recovery"
+      }
+    },
+    {
+      "id": "route_reviewed_outcome",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review_final.reviewed_outcome"
+        },
+        "right": "clean"
+      },
+      "connections": {
+        "true": "mark_clean",
+        "false": "mark_current_limited"
+      }
+    },
+    {
+      "id": "mark_clean",
+      "type": "expression",
+      "expressions": [
+        "terminal_outcome = \"clean\""
+      ],
+      "connections": {
+        "default": "finalize_result"
+      }
+    },
+    {
+      "id": "mark_current_limited",
+      "type": "expression",
+      "expressions": [
+        "terminal_outcome = \"limited\""
+      ],
+      "connections": {
+        "default": "finalize_result"
+      }
+    },
+    {
+      "id": "route_rework_projection",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "final_repair_reach"
+        },
+        "right": "projection"
+      },
+      "connections": {
+        "true": "review_final",
+        "false": "route_rework_work"
+      }
+    },
+    {
+      "id": "route_rework_work",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "final_repair_reach"
+        },
+        "right": "work"
+      },
+      "connections": {
+        "true": "apply_rework_work",
+        "false": "apply_rework_plan"
+      }
+    },
+    {
+      "id": "apply_rework_work",
+      "type": "expression",
+      "expressions": [
+        "current_step = rework_result.repair_from",
+        "completed_items = current_step",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "review_item"
+      }
+    },
+    {
+      "id": "apply_rework_plan",
+      "type": "expression",
+      "expressions": [
+        "current_step = rework_result.repair_from",
+        "completed_items = current_step",
+        "total_steps = steps.length",
+        "retry_count = 0"
+      ],
+      "connections": {
+        "default": "check_revision_cursor"
       }
     }
   ],
+  "slug": "task-breakdown-flow",
   "variableRegistry": {
-    "current_step": {
-      "type": "number",
-      "description": "Index of the current step in the plan",
-      "default": 1
-    },
-    "step_retry": {
-      "type": "number",
-      "description": "Stores step retry",
-      "default": 0
-    },
-    "max_retries": {
-      "type": "number",
-      "description": "Stores max retries",
-      "default": 3
-    },
-    "has_file_access": {
+    "operating_mode": {
       "type": "string",
-      "description": "Stores has file access",
-      "default": "no",
+      "description": "Execution-wide interaction mode",
       "enum": [
-        "no",
-        "yes"
+        "autonomous",
+        "interactive"
       ]
     },
-    "task_name": {
+    "storage_mode": {
       "type": "string",
-      "description": "Name of the task being broken down",
-      "default": ""
-    },
-    "task_short_name": {
-      "type": "string",
-      "description": "Stores task short name",
-      "default": ""
-    },
-    "current_step_action": {
-      "type": "string",
-      "description": "Stores current step action",
-      "default": ""
-    },
-    "current_step_expected_output": {
-      "type": "string",
-      "description": "Output or result",
-      "default": ""
-    },
-    "process_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "TASK EXECUTION PROCESS REQUIREMENTS:\n\n1. DECOMPOSITION:\n- Break large task into 3-10 specific steps\n- Each step = one action with measurable result\n- Output of each step becomes input for the next\n- Define dependencies between steps\n\n2. STRUCTURED REASONING:\n- Use chain-of-thought for complex steps\n- Explicitly define methods and output formats\n- Document reasoning for each decision\n\n3. CLEAR SUCCESS CRITERIA:\n- Define criteria BEFORE starting work\n- Criteria must be verifiable (measurable)\n- Agent works within these boundaries\n\n4. HUMAN-IN-THE-LOOP:\n- Show plan before execution\n- Escalation for problematic steps\n- User review at critical points"
-    },
-    "validation_criteria": {
-      "type": "string",
-      "description": "Criteria for validation",
-      "default": "EXECUTION VALIDATION CRITERIA:\n\n1. EVIDENCE IS MANDATORY:\n- Each step must have proof of completion\n- Evidence types: screenshot, link, file, detailed text description\n- 'Done' without details = NOT accepted\n\n2. STEP VERIFICATION:\n- Does result match expected_output?\n- Is evidence provided and specific?\n- Are there no missing elements?\n\n3. TASK VERIFICATION:\n- All steps completed (done or skipped with reason)?\n- Success criteria from UNDERSTAND phase met?\n- Deliverable ready and matches expectations?"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Stores common mistakes",
-      "default": "COMMON MISTAKES AND HOW TO AVOID:\n\n❌ 'Done!' without verification → ✅ Always provide evidence\n❌ Silently skipping steps → ✅ Explicitly mark skip with reason\n❌ 80% complete = done → ✅ Only 100% = done\n❌ Hallucinations ('sent', 'created') → ✅ Only facts with evidence\n❌ Losing context → ✅ Use step structure from plan\n❌ Mixing action and verification → ✅ Separate: first do, then verify"
-    },
-    "plan_writing_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "PLAN WRITING REQUIREMENTS:\n\nMain problem: agent loses context (session archival, forgetting). Plan must be written so any item can be given to agent WITHOUT the rest of the plan — and they could execute it.\n\nREQUIREMENTS:\n- Flat linear list — no hierarchy, no nested sub-items, just 1, 2, 3...\n- One item = one task — not a micro-step ('download file'), but a complete task ('update workflow to v2.1.0')\n- Full self-sufficiency of item — contains EVERYTHING for execution: why to do it, what to do, which files to read/modify, where to save, what to commit\n- NO 'global rules' separately — everything needed for item must be IN the item\n- Explicit actions — not 'as usual', but specifically: 'upload to server', 'make commit', 'write issues to file X'\n- Redundancy is allowed — better to repeat 'make commit' in each item than forget\n- Full file paths — not 'in appropriate folder', but /full/path/to/file.json\n- Measurable result — easy to verify item is complete\n\nITEM STRUCTURE:\n```\nN. **Task name** (what we're doing)\n\n   Why: (what problem we're solving)\n\n   What to do:\n   - specific action 1 with file paths\n   - specific action 2\n   - save to /full/path/to/file.json\n   - make commit\n```\n\n9. ATOMICITY & REDUNDANCY (no \"global scope\"):\n- An agent often receives ONE plan item's directive in isolation — other items and any \"general rules\" stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every implementation nuance it needs, even if obvious.\n- Repeat the original task requirements relevant to the item INSIDE the item.\n- DUPLICATE cross-cutting actions into EVERY item (e.g. \"append a progress report to /full/path/report.md\", \"run the tests\", \"make a commit\").\n- There is NO shared/global scope — redundancy across items is REQUIRED, not a smell.\n- Every item carries: why (problem + original requirement), what to do (explicit actions + full paths), the cross-cutting actions, and a measurable expected_output."
-    },
-    "plan_validation_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "PLAN VALIDATION REQUIREMENTS:\n\nPlan must be verified BEFORE showing to user.\n\nVALIDATION CRITERIA:\n1. STEP SELF-SUFFICIENCY:\n   - Each step contains ALL information for execution\n   - No references to 'previous steps' or 'as usual'\n   - Full file paths, not relative\n\n2. EXPLICIT ACTIONS:\n   - Each step starts with action verb\n   - Specific commands, not 'configure' or 'prepare'\n   - Specified where to save result\n\n3. MEASURABLE RESULTS:\n   - expected_output for each step is specific\n   - Easy to verify if step is complete or not\n   - No subjective criteria like 'works well'\n\n4. COMPLETENESS:\n   - All files specified with full paths\n   - All commands specified completely\n   - All dependencies explicitly stated"
-    },
-    "planning_standards": {
-      "type": "string",
-      "description": "No description",
-      "default": "TASK DECOMPOSITION PLANNING STANDARDS:\n\n1. STEP GRANULARITY:\n- Each step = one logical unit of work (not too small, not too large)\n- Step should take 5-30 minutes to execute\n- Avoid micro-steps (\"create file\") and mega-steps (\"implement feature\")\n\n2. DEPENDENCIES:\n- Steps must be in correct execution order\n- Each step's output should enable the next step\n- No circular dependencies\n\n3. VERIFIABILITY:\n- Every step must have clear expected_output\n- Expected output must be objectively verifiable\n- Avoid subjective criteria (\"works well\", \"looks good\")\n\n4. COMPLETENESS:\n- All user requirements must be covered by steps\n- No implicit assumptions about what will be done\n- Each step explicitly states what files/artifacts it produces\n\n5. SELF-SUFFICIENCY:\n- Each step contains ALL information needed for execution\n- No references to \"previous steps\" or \"as mentioned before\"\n- Full file paths, not relative references\n\n6. RESILIENCE:\n- Plan should work even if agent loses context between steps\n- Each step can be executed in isolation with its description\n\n9. ATOMICITY & REDUNDANCY (no \"global scope\"):\n- An agent often receives ONE plan item's directive in isolation — other items and any \"general rules\" stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every implementation nuance it needs, even if obvious.\n- Repeat the original task requirements relevant to the item INSIDE the item.\n- DUPLICATE cross-cutting actions into EVERY item (e.g. \"append a progress report to /full/path/report.md\", \"run the tests\", \"make a commit\").\n- There is NO shared/global scope — redundancy across items is REQUIRED, not a smell.\n- Every item carries: why (problem + original requirement), what to do (explicit actions + full paths), the cross-cutting actions, and a measurable expected_output."
+      "description": "Execution-wide storage capability",
+      "enum": [
+        "filesystem",
+        "memory"
+      ]
     },
     "task_description": {
       "type": "string",
-      "description": "Task description"
+      "description": "Canonical bounded task",
+      "minLength": 1,
+      "maxLength": 8000
     },
-    "expected_deliverable": {
+    "expected_result": {
       "type": "string",
-      "description": "Expected result"
+      "description": "Observable whole-task expected result",
+      "minLength": 1,
+      "maxLength": 4000
     },
     "success_criteria": {
       "type": "array",
-      "description": "Success criteria (specific and verifiable)"
+      "description": "Canonical measurable success criteria",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
     },
     "constraints": {
       "type": "array",
-      "description": "Constraints (time, resources, dependencies)"
+      "description": "Applicable bounded task constraints",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
     },
-    "workspace_path": {
+    "authority_boundary": {
       "type": "string",
-      "description": "Path to created working directory ./moira-ws/{task-name}-{YYYYMMDD}-{HHMM}/"
+      "description": "Explicit originating authority ceiling",
+      "minLength": 1,
+      "maxLength": 4000
     },
     "steps": {
       "type": "array",
-      "description": "Global variable steps",
-      "minItems": 1
-    },
-    "issues_count": {
-      "type": "number",
-      "description": "Number of issues found (0 = plan is valid)"
-    },
-    "validation_issues": {
-      "type": "array",
-      "description": "Issues found (if any)"
+      "description": "Canonical strict ordered plan",
+      "minItems": 1,
+      "maxItems": 32,
+      "xOrderedUniqueReferences": {
+        "idProperty": "id",
+        "referencesProperty": "dependencies"
+      },
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$",
+            "maxLength": 64
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          },
+          "expected_result": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "dependencies": {
+            "type": "array",
+            "maxItems": 31,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$",
+              "maxLength": 64
+            }
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "expected_result",
+          "dependencies"
+        ]
+      }
     },
     "total_steps": {
-      "type": "number",
-      "description": "Global variable total_steps"
+      "type": "integer",
+      "description": "Engine-derived canonical plan length",
+      "minimum": 0,
+      "maximum": 32,
+      "default": 0
     },
-    "plan_approved": {
-      "type": "string",
-      "description": "User confirmed the plan",
-      "enum": [
-        "no",
-        "yes"
-      ]
+    "current_step": {
+      "type": "integer",
+      "description": "Engine-owned zero-based next-item cursor",
+      "minimum": 0,
+      "maximum": 32,
+      "default": 0
     },
-    "revision_feedback": {
-      "type": "string",
-      "description": "User comments (if not confirmed)"
+    "completed_items": {
+      "type": "integer",
+      "description": "Engine-owned verified or explicitly limited prefix count",
+      "minimum": 0,
+      "maximum": 32,
+      "default": 0
     },
-    "evidence": {
-      "type": "string",
-      "description": "Proof of completion (detailed)"
+    "retry_count": {
+      "type": "integer",
+      "description": "Engine-owned changed-attempt count for current item",
+      "minimum": 0,
+      "maximum": 2,
+      "default": 0
     },
-    "step_verified": {
-      "type": "string",
-      "description": "Step passed verification",
-      "enum": [
-        "no",
-        "yes"
-      ]
-    },
-    "issues_found": {
+    "evidence_ledger": {
       "type": "array",
-      "description": "Issues found (if step_verified=no)"
+      "description": "Bounded stable-ID evidence acknowledgements for the completed/current prefix",
+      "maxItems": 32,
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "failed",
+              "skipped"
+            ]
+          },
+          "actual_result": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "verification": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "item_id",
+          "status",
+          "actual_result",
+          "verification"
+        ]
+      }
     },
-    "user_decision": {
-      "type": "string",
-      "description": "User's decision",
-      "enum": [
-        "escalate",
-        "revise_plan",
-        "skip"
-      ]
+    "plan_issues_count": {
+      "type": "integer",
+      "description": "Exact current independent plan blocker count",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
     },
-    "skip_reason": {
-      "type": "string",
-      "description": "Skip reason (if skip)"
+    "item_issues_count": {
+      "type": "integer",
+      "description": "Exact current independent item blocker count",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
     },
-    "all_criteria_met": {
-      "type": "string",
-      "description": "All criteria met",
-      "enum": [
-        "no",
-        "yes"
-      ]
+    "final_issues_count": {
+      "type": "integer",
+      "description": "Exact current independent final blocker count",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 0
     },
-    "gaps": {
+    "findings_summary": {
       "type": "array",
-      "description": "What is not completed (if any)"
+      "description": "Bounded routing summary of current independent findings",
+      "maxItems": 20,
+      "default": [],
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
     },
-    "deliverable": {
+    "item_repair_reach": {
       "type": "string",
-      "description": "Final result"
+      "description": "Earliest owner for a failed item review",
+      "enum": [
+        "work",
+        "plan"
+      ]
     },
-    "validation_round": {
-      "type": "number",
-      "description": "Plan-validation fix-loop round counter (flow-incremented)",
-      "default": 0
-    },
-    "max_validation_rounds": {
-      "type": "number",
-      "description": "Max plan-validation rounds before user escalation",
-      "default": 5
-    },
-    "criteria_round": {
-      "type": "number",
-      "description": "Criteria-gap fix-loop round counter (flow-incremented)",
-      "default": 0
-    },
-    "max_criteria_rounds": {
-      "type": "number",
-      "description": "Max criteria-gap rounds before user escalation",
-      "default": 5
-    },
-    "validation_attempt_count": {
-      "type": "number",
-      "description": "Completeness self-review attempt counter (report versioning)",
-      "default": 1
-    },
-    "plan_change_target": {
+    "final_repair_reach": {
       "type": "string",
-      "description": "Replan dispatch target (refine|extend|update)",
-      "default": ""
+      "description": "Earliest owner for final findings",
+      "enum": [
+        "projection",
+        "task",
+        "plan",
+        "work"
+      ]
     },
-    "plan_iteration": {
-      "type": "number",
-      "description": "Plan revision iteration counter",
-      "default": 0
-    },
-    "user_response_text": {
+    "terminal_outcome": {
       "type": "string",
-      "description": "User free-text response captured at an ask-user gate"
+      "description": "Truthful terminal outcome",
+      "enum": [
+        "clean",
+        "limited",
+        "aborted",
+        "recovery"
+      ],
+      "default": "clean"
     },
-    "revision_reason": {
+    "result_summary": {
       "type": "string",
-      "description": "Reason / description of required plan changes (replan)"
+      "description": "Bounded caller-facing result summary",
+      "minLength": 1,
+      "maxLength": 3000
+    },
+    "limitation_reason": {
+      "type": "string",
+      "description": "Required factual reason for non-clean outcome",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "artifact_location": {
+      "type": "string",
+      "description": "Safe current result location or explicit in-memory location",
+      "minLength": 1,
+      "maxLength": 240,
+      "pattern": "^(?:\\./moira-ws/task-breakdown-[A-Za-z0-9-]+/final-report\\.md|in-memory execution context)$"
     }
-  }
+  },
+  "owner": "system-moira",
+  "visibility": "public"
 }
