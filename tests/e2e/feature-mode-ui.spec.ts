@@ -2,9 +2,10 @@
  * Feature-mode UI gating E2E.
  *
  * The frontend reads GET /api/features and hides SaaS-specific UI in self-host:
- * registration legal-consent checkboxes, the beta modal/banner, and multi-user
- * admin pages. In saas these are shown. These tests mock /api/features to assert
- * the frontend reacts to each mode without rebuilding the container.
+ * registration legal-consent checkboxes and the beta modal/banner. Self-host
+ * retains the narrow Users approval surface while hiding broader multi-user
+ * administration; SaaS shows both. These tests mock /api/features to assert the
+ * frontend reacts to each mode without rebuilding the container.
  *
  * Note: the registration form is rendered by the Better Auth UI library, which
  * renders boolean consent fields as `button[role="checkbox"]` (not plain
@@ -21,16 +22,28 @@ const BASE_URL = getTestBaseUrl();
 
 const ALL_FLAGS = [
   "openRegistration",
+  "accountApproval",
   "emailVerificationGate",
   "verificationEmailOnSignup",
   "legalConsents",
   "betaNotices",
   "multiUserAdmin",
+  "userManagement",
+  "socialLogin",
 ] as const;
 
 function featuresPayload(mode: "self-host" | "saas") {
-  const value = mode === "saas";
-  const features = Object.fromEntries(ALL_FLAGS.map((f) => [f, value]));
+  const selfHost = mode === "self-host";
+  const features = Object.fromEntries(
+    ALL_FLAGS.map((feature) => [
+      feature,
+      feature === "openRegistration" || feature === "userManagement"
+        ? true
+        : feature === "accountApproval"
+          ? selfHost
+          : !selfHost,
+    ]),
+  );
   return {
     success: true,
     data: { deploymentMode: mode, features },
@@ -39,12 +52,20 @@ function featuresPayload(mode: "self-host" | "saas") {
 }
 
 /** Force GET /api/features to report the given mode for this page. */
-async function mockFeatures(page: Page, mode: "self-host" | "saas") {
+async function mockFeatures(
+  page: Page,
+  mode: "self-host" | "saas",
+  overrides: Record<string, boolean> = {},
+) {
   await page.route("**/api/features", async (route) => {
+    const payload = featuresPayload(mode);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(featuresPayload(mode)),
+      body: JSON.stringify({
+        ...payload,
+        data: { ...payload.data, features: { ...payload.data.features, ...overrides } },
+      }),
     });
   });
 }
@@ -73,7 +94,9 @@ test.describe("Feature-mode UI gating", () => {
     await expect(page.locator("text=/Terms of Service/i")).toBeVisible();
   });
 
-  test("self-host: admin nav hides multi-user pages", async ({ page }) => {
+  test("self-host: admin nav exposes Users but hides broader multi-user pages", async ({
+    page,
+  }) => {
     await mockFeatures(page, "self-host");
     await loginAsAdmin(page, false);
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "commit" });
@@ -82,11 +105,23 @@ test.describe("Feature-mode UI gating", () => {
     const sidebarLink = (href: string) =>
       page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
     await expect(sidebarLink("/admin/settings")).toBeVisible({ timeout: 30000 });
-    // Multi-user nav items are hidden from the sidebar.
-    await expect(sidebarLink("/admin/users")).toHaveCount(0);
+    // The narrow user-management capability remains available for approvals.
+    await expect(sidebarLink("/admin/users")).toBeVisible();
+    // Broader multi-user operations remain hidden from the sidebar.
     await expect(sidebarLink("/admin/executions")).toHaveCount(0);
     await expect(sidebarLink("/admin/workflows")).toHaveCount(0);
     await expect(sidebarLink("/admin/artifacts")).toHaveCount(0);
+
+    const dashboardLink = (href: string) =>
+      page.locator(`a[href="${href}"]:not([data-sidebar="menu-button"])`);
+    await expect(dashboardLink("/admin/users")).toBeVisible();
+    await expect(dashboardLink("/admin/executions")).toHaveCount(0);
+
+    await page.unroute("**/api/features");
+    await mockFeatures(page, "self-host", { userManagement: false });
+    await page.goto(`${BASE_URL}/admin/users`, { waitUntil: "commit" });
+    await page.waitForURL(`${BASE_URL}/admin`, { timeout: 30000 });
+    await expect(page).toHaveURL(`${BASE_URL}/admin`);
   });
 
   test("saas: admin nav shows multi-user pages", async ({ page }) => {
@@ -99,12 +134,12 @@ test.describe("Feature-mode UI gating", () => {
     await expect(sidebarLink("/admin/executions")).toBeVisible();
   });
 
-  test("self-host: direct nav to a multi-user admin page redirects to dashboard", async ({
+  test("self-host: direct nav to a broader multi-user admin page redirects to dashboard", async ({
     page,
   }) => {
     await mockFeatures(page, "self-host");
     await loginAsAdmin(page, false);
-    await page.goto(`${BASE_URL}/admin/users`, { waitUntil: "commit" });
+    await page.goto(`${BASE_URL}/admin/executions`, { waitUntil: "commit" });
     // Multi-user gating redirects back to the admin dashboard.
     await page.waitForURL(`${BASE_URL}/admin`, { timeout: 30000 });
     await expect(page).toHaveURL(`${BASE_URL}/admin`);

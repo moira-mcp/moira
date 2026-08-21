@@ -162,7 +162,8 @@ When an unauthenticated user visits a protected route (e.g., `/app/admin/audit-l
 
 ## Registration Consent Requirements
 
-Registration requires explicit consent for GDPR compliance:
+SaaS registration requires explicit consent for GDPR compliance. Self-host
+registration does not request or validate these consent fields.
 
 **Required Checkboxes:**
 
@@ -207,6 +208,69 @@ those paths.
 | ------------------------- | ------------------------------------- |
 | `TERMS_NOT_ACCEPTED`      | Terms checkbox not checked            |
 | `RESIDENCY_NOT_CONFIRMED` | Russian resident checkbox not checked |
+
+## Self-Host Account Approval
+
+Self-host registration is public, but a new account is pending until an
+administrator approves it. Approval is stored in `user.approvedAt` and is
+independent from `emailVerified`, `blocked`, and `isAdmin`.
+
+- `GET /api/user/me` is the session-only status endpoint. It returns
+  `approvedAt`, `accountApproved`, and `accountApprovalRequired` for pending users.
+- `POST /api/auth/sign-out` remains available through Better Auth.
+- Product APIs, API-token creation, OAuth authorization and token issuance, and MCP
+  requests return 403 with `ACCOUNT_APPROVAL_REQUIRED` while approval is required
+  and absent.
+- `POST /api/admin/users/:id/approve` performs a conditional transition and the
+  `admin:approve_user` audit insert in one SQLite transaction. Repeated or
+  overlapping requests return the original timestamp and create one audit event.
+- Migration `0014_account_approval` marks existing users approved. Bootstrap and
+  recovery administrators are explicitly created or repaired as approved.
+
+SaaS has `accountApproval` disabled, so a null `approvedAt` does not change its
+existing email-verification and legal-consent flow. A blocked account is always
+denied before approval or email state is considered.
+
+### Recover Administrator Access
+
+Run the recovery command from the directory containing `docker-compose.yml`.
+Read the new password without echoing it or storing it in shell history:
+
+```bash
+read -s ADMIN_PASSWORD
+export ADMIN_PASSWORD
+docker compose exec -e ADMIN_PASSWORD moira npx tsx scripts/create-admin-user.ts
+unset ADMIN_PASSWORD
+```
+
+`ADMIN_PASSWORD` is required. The optional `ADMIN_EMAIL` and `ADMIN_ID`
+environment variables default to `admin@moira.local` and `system-admin`; pass
+overrides with additional `docker compose exec -e NAME` arguments. `DB_PATH`
+defaults to `./data/moira.db`. The command creates or repairs the administrator,
+marks its email verified and account approved, clears any account block, and
+replaces its credential with the supplied password. It prints the email and user
+ID, never the password.
+
+### Roll Back to a Version Without Account Approval
+
+An older binary does not understand `user.approvedAt`. Before pinning an image
+that predates account approval, put the instance into maintenance or otherwise
+stop external traffic, back up the database, and run this command on the current
+approval-aware image:
+
+```bash
+docker compose exec moira npm run prepare:account-approval-downgrade -- \
+  --confirm-block-pending-users
+```
+
+The command refuses to run without the confirmation argument or without the
+`approvedAt` column. In one database transaction it marks every pending account
+with the legacy `blocked` control and revokes its sessions, API tokens, OAuth
+tokens, and OAuth consents. Verify the printed counts before stopping the current
+container and starting the older image. Do not roll back first: the old image
+cannot perform this conversion and would otherwise admit pending users. If the
+approval-aware version is restored later, review each converted account before
+approving it and explicitly unblocking it.
 
 ## MCP Authentication
 
@@ -262,6 +326,7 @@ Bearer token received
   → DB lookup in apiToken table
   → validateTokenRecord() (exists, not revoked, not expired)
   → user blocked check
+  → account approval check when accountApproval is enabled
   → fire-and-forget lastUsedAt update
   → build userContext
   → MCP execution
@@ -280,7 +345,7 @@ All client setup pages (landing QuickStart, docs quickstart, docs MCP clients) i
 **Error responses:**
 
 - `401 Unauthorized` — invalid, expired, or revoked token
-- `403 Forbidden` — user account blocked
+- `403 Forbidden` — user account blocked or awaiting required approval
 
 **Token management APIs:**
 
@@ -294,7 +359,8 @@ All client setup pages (landing QuickStart, docs quickstart, docs MCP clients) i
 
 ## Email Verification
 
-Users must verify their email address before accessing protected pages.
+SaaS users must verify their email address before sensitive access. Self-host
+keeps email verification separate and does not use it as an access gate.
 
 **Architecture:**
 
@@ -366,22 +432,31 @@ Blocked users cannot access the system through any method.
 - Throws "Account is blocked" error before session creation
 - Error displays in login form via AuthErrorDisplay component
 
-**MCP OAuth Authorization:**
+**MCP OAuth Token Issuance:**
 
-- `databaseHooks.oauthAccessToken.create.before` hook checks `user.blocked` flag
-- Throws "Account is blocked" error before token creation
-- Prevents OAuth authorization for blocked users
+- The Better Auth `before` hook resolves the owner of authorization-code and refresh-token grants
+  before the MCP plugin consumes either credential. The plugin writes through its adapter and does
+  not invoke `databaseHooks.oauthAccessToken.create.before`.
+- The shared admission decision rejects blocked accounts first, pending self-host accounts second,
+  and unverified SaaS accounts third, with `ACCOUNT_BLOCKED`, `ACCOUNT_APPROVAL_REQUIRED`, or
+  `EMAIL_NOT_VERIFIED` respectively.
 
 **MCP Requests with Existing OAuth Tokens:**
 
-- MCP server checks `user.blocked` flag after session validation
-- Returns 403 with "Account is blocked" error if user blocked
-- Prevents blocked users from executing MCP tools even with valid OAuth tokens
+- After session validation, the MCP server applies the same shared admission decision to the token
+  owner. This prevents blocked, pending, and unverified identities from using already-issued or
+  legacy OAuth tokens after policy/state changes.
+- Better Auth's `/mcp/get-session` bearer introspection applies the same owner-state decision before
+  returning the stored OAuth token record, including its refresh token.
+- Rejections are HTTP 403 with the same stable machine error codes used at token issuance.
 
 **Existing Sessions:**
 
 - `requireAuth` middleware checks `user.blocked` flag on every request
 - Returns 403 Forbidden and invalidates current session
+- Non-public Better Auth session operations apply the same blocked-first decision in both deployment
+  modes and return `ACCOUNT_BLOCKED`; public sign-in/out and one-time-token lifecycle operations keep
+  their own authentication semantics
 - Immediate logout on next API call
 
 ## API Client Error Handling

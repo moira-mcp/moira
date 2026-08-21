@@ -15,6 +15,7 @@ const ADMIN_CREDENTIALS = getAdminCredentials();
 let targetUserEmail: string;
 let targetUserPassword: string;
 let adminCookie: string;
+let adminUserId: string;
 let targetCookie: string;
 let targetUserId: string;
 
@@ -46,6 +47,11 @@ describe("Admin User Security API", () => {
     });
     const adminCookies = adminLoginRes.headers.get("set-cookie");
     adminCookie = adminCookies || "";
+    const adminStatusRes = await fetch(`${BASE_URL}/api/user/me`, {
+      headers: { Cookie: adminCookie },
+    });
+    expect(adminStatusRes.status).toBe(200);
+    adminUserId = ((await adminStatusRes.json()) as { data: { id: string } }).data.id;
 
     // Verify test user email via admin API
     await fetch(`${BASE_URL}/api/admin/users/${targetUserId}/verify-email`, {
@@ -82,7 +88,7 @@ describe("Admin User Security API", () => {
       expect(json.data).toHaveProperty("userId", targetUserId);
       expect(json.data).toHaveProperty("passwordResetRequired", true);
       expect(json.data).toHaveProperty("requestedAt");
-      // requestedBy is optional (may be undefined if admin user ID not available)
+      expect(json.data).toHaveProperty("requestedBy", adminUserId);
     });
 
     test("force password reset revokes all user sessions", async () => {

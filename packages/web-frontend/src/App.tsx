@@ -165,7 +165,7 @@ const App: React.FC = () => {
                   <Route
                     path="users"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireUserManagement>
                         <UserManagement />
                       </ProtectedRoute>
                     }
@@ -173,7 +173,7 @@ const App: React.FC = () => {
                   <Route
                     path="users/:id"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireUserManagement>
                         <AdminUserDetail />
                       </ProtectedRoute>
                     }

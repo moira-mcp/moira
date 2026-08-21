@@ -7,6 +7,7 @@
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { requireAdmin } from "../middleware/admin-middleware.js";
+import type { AuthenticatedRequest } from "../types/express-types.js";
 import {
   logAuditEvent,
   AuditAction,
@@ -36,8 +37,7 @@ router.post(
     const db = getDatabase();
 
     // Get current admin user ID
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
 
     // Get user
     const [userData] = await db.select().from(user).where(eq(user.id, id)).limit(1);
@@ -205,8 +205,7 @@ router.delete(
     await db.delete(session).where(and(eq(session.id, sessionId), eq(session.userId, id)));
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_REVOKE_SESSION,
@@ -267,8 +266,7 @@ router.delete(
     await db.delete(oauthConsent).where(eq(oauthConsent.userId, id));
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_REVOKE_ALL_SESSIONS,
@@ -395,8 +393,7 @@ router.delete(
       .where(and(eq(oauthAccessToken.userId, id), eq(oauthAccessToken.clientId, provider)));
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_REVOKE_OAUTH_PROVIDER,
@@ -459,8 +456,7 @@ router.delete(
     await db.delete(oauthAccessToken).where(eq(oauthAccessToken.userId, id));
 
     // Audit logging
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentUserId = (req as any).user?.userId;
+    const currentUserId = (req as AuthenticatedRequest).userId;
     await logAuditEvent(repository, req, {
       userId: currentUserId,
       action: AuditAction.ADMIN_REVOKE_ALL_OAUTH,

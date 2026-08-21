@@ -3,7 +3,7 @@
  * Admin panel for managing users at /admin/users
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Users } from "lucide-react";
@@ -11,6 +11,7 @@ import { apiClient } from "../services/api-client";
 import { ROUTES } from "../constants/routes";
 import { useDynamicPageSize } from "../hooks/useDynamicPageSize";
 import { useDebounce } from "../hooks/useDebounce";
+import { useFeatures } from "../hooks/useFeatures";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,6 +35,7 @@ interface User {
   name: string | null;
   isAdmin: boolean;
   emailVerified: boolean;
+  approvedAt: string | null;
   blocked: boolean;
   createdAt: string;
   workflowsCount: number;
@@ -42,6 +44,8 @@ interface User {
 export const UserManagement: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { isEnabled } = useFeatures();
+  const accountApprovalEnabled = isEnabled("accountApproval");
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -51,6 +55,9 @@ export const UserManagement: React.FC = () => {
   const debouncedSearch = useDebounce(searchTerm, 300);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState<{ id: string; email: string } | null>(null);
+  const [userToApprove, setUserToApprove] = useState<{ id: string; email: string } | null>(null);
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const approvalStatusRef = useRef<HTMLSpanElement>(null);
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -130,6 +137,28 @@ export const UserManagement: React.FC = () => {
     }
   };
 
+  const handleApproveClick = (userId: string, email: string) => {
+    if (!accountApprovalEnabled) return;
+    setUserToApprove({ id: userId, email });
+    setApproveDialogOpen(true);
+  };
+
+  const handleApproveConfirm = async () => {
+    if (!accountApprovalEnabled || !userToApprove) return;
+    try {
+      const result = await apiClient.approveUser(userToApprove.id);
+      setUsers((current) =>
+        current.map((user) =>
+          user.id === userToApprove.id ? { ...user, approvedAt: result.approvedAt } : user,
+        ),
+      );
+      toast.success(t("admin.userManagement.approvalSuccess", { email: userToApprove.email }));
+    } catch (err: unknown) {
+      toast.error(t("admin.userManagement.approvalError"));
+      throw err;
+    }
+  };
+
   const totalPages = Math.ceil(total / pageSize);
 
   if (loading && users.length === 0) {
@@ -163,6 +192,11 @@ export const UserManagement: React.FC = () => {
             onView={() => navigate(`${ROUTES.ADMIN_USERS}/${user.id}`)}
             onEdit={() => handleEdit(user.id)}
             onDelete={() => handleDeleteClick(user.id, user.email)}
+            onApprove={
+              accountApprovalEnabled ? () => handleApproveClick(user.id, user.email) : undefined
+            }
+            accountApprovalEnabled={accountApprovalEnabled}
+            approvalStatusRef={userToApprove?.id === user.id ? approvalStatusRef : undefined}
           />
         )}
         keyExtractor={(u) => u.id}
@@ -223,6 +257,20 @@ export const UserManagement: React.FC = () => {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={accountApprovalEnabled && approveDialogOpen}
+        onOpenChange={setApproveDialogOpen}
+        title={t("admin.userManagement.actions.approve")}
+        description={t("admin.userManagement.confirmApprove", { email: userToApprove?.email })}
+        confirmLabel={t("admin.userManagement.actions.approve")}
+        cancelLabel={t("common.cancel")}
+        onConfirm={handleApproveConfirm}
+        onReturnFocus={() => {
+          approvalStatusRef.current?.focus();
+          setUserToApprove(null);
+        }}
+      />
+
       <ConfirmDialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}

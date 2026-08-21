@@ -43,7 +43,7 @@ const ActionsGroup: React.FC<{
   <div
     className={cn(
       "flex items-center gap-0.5 transition-opacity flex-shrink-0",
-      !alwaysVisible && "opacity-0 group-hover:opacity-100",
+      !alwaysVisible && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
       className,
     )}
   >

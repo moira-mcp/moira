@@ -26,6 +26,7 @@
     "docker:restart": "./scripts/docker-build-and-run.sh --local",
     "docker:restart:remote": "./scripts/docker-build-and-run.sh --remote",
     "docker:stop": ". ./.env.local && docker stop ${DOCKER_CONTAINER_NAME} || true",
+    "prepare:account-approval-downgrade": "tsx scripts/prepare-account-approval-downgrade.ts",
     "fix": "eslint . --fix && prettier --write ."
   },
   "lint-staged": {

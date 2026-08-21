@@ -4,7 +4,7 @@
 
 import { betterAuth } from "better-auth";
 import type { BetterAuthOptions } from "better-auth";
-import { createAuthMiddleware, APIError } from "better-auth/api";
+import { createAuthMiddleware, APIError, getSessionFromCtx } from "better-auth/api";
 import { mcp } from "better-auth/plugins";
 import { timingSafeEqual } from "crypto";
 import geoip from "geoip-lite";
@@ -29,6 +29,8 @@ import {
 } from "../config/env.js";
 import { getMcpServerVersion } from "../config/mcp-version.js";
 import { getFeatureResolver } from "../services/index.js";
+import { ACCOUNT_APPROVAL_REQUIRED_CODE, getAccountAccessDenial } from "./account-admission.js";
+import { generateHandleFromEmail, generateRandomHandleSuffix } from "../validation/slug-handle.js";
 
 const logger = createLogger({ component: "BetterAuth" });
 
@@ -36,49 +38,77 @@ const logger = createLogger({ component: "BetterAuth" });
 // when X-Load-Test header matches LOAD_TEST_SECRET
 const LOAD_TEST_DOMAIN = "load-testing-noverify.local";
 
-/**
- * Generate a handle from email prefix
- * Rules:
- * - Extract part before @
- * - Replace invalid chars with hyphens
- * - Convert to lowercase
- * - Pad to min 4 chars if needed
- * - Truncate to max 40 chars
- * - Remove leading/trailing hyphens
- * @param email User email address
- * @returns Base handle (may need collision suffix)
- */
-function generateHandleFromEmail(email: string): string {
-  // Extract email prefix (before @)
-  const prefix = email.split("@")[0] || "";
+// These configured Better Auth endpoints establish identity or are authorized
+// by a one-time token, not by an existing browser session. An incidental pending
+// cookie must not turn signup, login, email verification, or password recovery
+// into an approval-gated capability. All unlisted paths remain denied by default.
+const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
+  "/sign-up/email",
+  "/sign-in/email",
+  "/sign-in/social",
+  "/forget-password",
+  "/request-password-reset",
+  "/reset-password",
+  "/verify-email",
+  "/send-verification-email",
+  "/get-session",
+  "/sign-out",
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/oauth-protected-resource",
+  "/mcp/register",
+  "/ok",
+  "/error",
+]);
 
-  // Replace any non-alphanumeric chars with hyphens, convert to lowercase
-  let handle = prefix.toLowerCase().replace(/[^a-z0-9]/g, "-");
-
-  // Remove consecutive hyphens
-  handle = handle.replace(/-+/g, "-");
-
-  // Remove leading/trailing hyphens
-  handle = handle.replace(/^-+|-+$/g, "");
-
-  // Pad to minimum 4 chars if needed
-  while (handle.length < 4) {
-    handle += Math.random().toString(36).charAt(2);
-  }
-
-  // Truncate to max 40 chars (leaving room for collision suffix)
-  if (handle.length > 35) {
-    handle = handle.substring(0, 35);
-  }
-
-  return handle;
+function isPublicAccountLifecyclePath(path: string): boolean {
+  return (
+    PUBLIC_ACCOUNT_LIFECYCLE_PATHS.has(path) ||
+    /^\/callback\/[^/]+$/.test(path) ||
+    /^\/reset-password\/[^/]+$/.test(path)
+  );
 }
 
-/**
- * Generate a random 4-char suffix for handle collision resolution
- */
-function generateRandomSuffix(): string {
-  return Math.random().toString(36).substring(2, 6);
+/** Enforce persisted owner state before an MCP OAuth credential is consumed or disclosed. */
+async function assertMcpOAuthAccountAccess(userId: string): Promise<void> {
+  const [userData] = await getDatabase()
+    .select({
+      approvedAt: user.approvedAt,
+      blocked: user.blocked,
+      blockedReason: user.blockedReason,
+      emailVerified: user.emailVerified,
+    })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+
+  const denial = getAccountAccessDenial(
+    {
+      userId,
+      approvedAt: userData?.approvedAt,
+      blocked: !!userData?.blocked,
+      emailVerified: !!userData?.emailVerified,
+    },
+    { requireEmailVerified: true },
+  );
+  if (denial === "blocked") {
+    const reason = userData?.blockedReason ? `: ${userData.blockedReason}` : "";
+    throw new APIError("FORBIDDEN", {
+      message: `Account is blocked${reason}`,
+      code: "ACCOUNT_BLOCKED",
+    });
+  }
+  if (denial === "approval") {
+    throw new APIError("FORBIDDEN", {
+      message: "Account is awaiting administrator approval",
+      code: ACCOUNT_APPROVAL_REQUIRED_CODE,
+    });
+  }
+  if (denial === "email-verification") {
+    throw new APIError("FORBIDDEN", {
+      message: "Email verification required before authorizing applications",
+      code: "EMAIL_NOT_VERIFIED",
+    });
+  }
 }
 
 /**
@@ -145,6 +175,11 @@ const baseConfig = {
         type: "string" as const,
         required: false,
         input: true,
+      },
+      approvedAt: {
+        type: "string" as const,
+        required: false,
+        input: false,
       },
     },
   },
@@ -294,7 +329,7 @@ const baseConfig = {
             }
 
             // Collision detected - add random suffix
-            handle = `${baseHandle}-${generateRandomSuffix()}`;
+            handle = `${baseHandle}-${generateRandomHandleSuffix()}`;
             attempts++;
           }
 
@@ -322,7 +357,14 @@ const baseConfig = {
             .where(eq(user.id, session.userId))
             .limit(1);
 
-          if (userData?.blocked) {
+          const denial = getAccountAccessDenial({
+            userId: session.userId,
+            blocked: !!userData?.blocked,
+            approvedAt: userData?.approvedAt,
+            emailVerified: !!userData?.emailVerified,
+          });
+
+          if (denial === "blocked") {
             // Log blocked login attempt
             const auditRepo = new AuditRepository(db);
             const ip =
@@ -382,7 +424,17 @@ const baseConfig = {
           const db = getDatabase();
           const [userData] = await db.select().from(user).where(eq(user.id, token.userId)).limit(1);
 
-          if (userData?.blocked) {
+          const denial = getAccountAccessDenial(
+            {
+              userId: token.userId,
+              blocked: !!userData?.blocked,
+              approvedAt: userData?.approvedAt,
+              emailVerified: !!userData?.emailVerified,
+            },
+            { requireEmailVerified: true },
+          );
+
+          if (denial === "blocked") {
             // Log blocked OAuth token creation attempt
             const auditRepo = new AuditRepository(db);
             const ip =
@@ -419,10 +471,21 @@ const baseConfig = {
             });
           }
 
+          if (denial === "approval") {
+            logger.warn("Pending user attempted OAuth token creation", {
+              userId: token.userId,
+              clientId: token.clientId,
+            });
+            throw new APIError("FORBIDDEN", {
+              message: "Account is awaiting administrator approval",
+              code: ACCOUNT_APPROVAL_REQUIRED_CODE,
+            });
+          }
+
           // Check email verification - required for OAuth access (saas only).
           // In self-host the email-verification gate is off so an MCP client can
           // authorize without a configured mail server.
-          if (!userData?.emailVerified && getFeatureResolver().isEnabled("emailVerificationGate")) {
+          if (denial === "email-verification") {
             logger.warn("Unverified user attempted OAuth authorization", {
               userId: token.userId,
               email: userData?.email,
@@ -443,9 +506,8 @@ const baseConfig = {
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
-      // Public self-service registration is open only in saas. In self-host the
-      // admin creates users (seeded at migration time), so the sign-up endpoint
-      // is closed. Load-test sign-ups bypass via the X-Load-Test path.
+      // Registration is deployment-configurable. Self-host enables it together
+      // with the independent account-approval gate.
       if (
         ctx.path === "/sign-up/email" &&
         !getFeatureResolver().isEnabled("openRegistration") &&
@@ -455,6 +517,86 @@ const baseConfig = {
           message: "Open registration is disabled. Contact your administrator for an account.",
           code: "REGISTRATION_DISABLED",
         });
+      }
+
+      // Better Auth endpoints bypass the Express product middleware. Apply the
+      // same persisted account-state boundary to every authenticated endpoint.
+      // Public and token-authorized identity lifecycle operations remain
+      // independent from an incidental browser session.
+      if (!isPublicAccountLifecyclePath(ctx.path)) {
+        const session = await getSessionFromCtx(ctx);
+        if (session?.user.id) {
+          const [userData] = await getDatabase()
+            .select({ approvedAt: user.approvedAt, blocked: user.blocked })
+            .from(user)
+            .where(eq(user.id, session.user.id))
+            .limit(1);
+          const denial = getAccountAccessDenial({
+            userId: session.user.id,
+            approvedAt: userData?.approvedAt,
+            blocked: !!userData?.blocked,
+            emailVerified: true,
+          });
+          if (denial === "blocked") {
+            throw new APIError("FORBIDDEN", {
+              message: "Account is blocked",
+              code: "ACCOUNT_BLOCKED",
+            });
+          }
+          if (denial === "approval") {
+            throw new APIError("FORBIDDEN", {
+              message: "Account is awaiting administrator approval",
+              code: ACCOUNT_APPROVAL_REQUIRED_CODE,
+            });
+          }
+        }
+      }
+
+      // The MCP plugin writes tokens through its adapter and bypasses
+      // databaseHooks.oauthAccessToken. Resolve the owner from the refresh token
+      // or authorization code before the plugin consumes either credential.
+      if (ctx.path.endsWith("/mcp/token") && ctx.method === "POST") {
+        const body = ctx.body as
+          | { grant_type?: string; refresh_token?: string; code?: string }
+          | undefined;
+        let userId: string | undefined;
+
+        if (body?.grant_type === "refresh_token" && body.refresh_token) {
+          const [tokenData] = await getDatabase()
+            .select({ userId: oauthAccessToken.userId })
+            .from(oauthAccessToken)
+            .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
+            .limit(1);
+          userId = tokenData?.userId;
+        } else if (body?.code) {
+          const verificationValue = await ctx.context.internalAdapter.findVerificationValue(
+            body.code,
+          );
+          if (verificationValue) {
+            try {
+              userId = (JSON.parse(verificationValue.value) as { userId?: string }).userId;
+            } catch {
+              // The plugin will return its normal invalid-code response.
+            }
+          }
+        }
+
+        if (userId) await assertMcpOAuthAccountAccess(userId);
+      }
+
+      // The plugin's bearer introspection endpoint reads oauthAccessToken
+      // directly and otherwise bypasses both cookie-session and token-exchange
+      // checks. Recheck the persisted owner state before disclosing token data.
+      if (ctx.path.endsWith("/mcp/get-session") && ctx.method === "GET") {
+        const accessToken = ctx.headers?.get("authorization")?.replace(/^Bearer\s+/i, "");
+        if (accessToken) {
+          const [tokenData] = await getDatabase()
+            .select({ userId: oauthAccessToken.userId })
+            .from(oauthAccessToken)
+            .where(eq(oauthAccessToken.accessToken, accessToken))
+            .limit(1);
+          if (tokenData?.userId) await assertMcpOAuthAccountAccess(tokenData.userId);
+        }
       }
 
       // Validate legal consent on sign-up (saas only). In self-host registration
@@ -529,10 +671,11 @@ const baseConfig = {
           const isLoadTest = isValidLoadTestRequest(email, ctx.headers);
 
           if (isLoadTest) {
-            // Mark user as email verified
+            // Load-test identities are an explicit test-only exception to both
+            // verification and approval so existing load suites remain usable.
             await db
               .update(user)
-              .set({ emailVerified: true })
+              .set({ emailVerified: true, approvedAt: new Date().toISOString() })
               .where(eq(user.id, newSession.user.id));
 
             logger.info("Load test user auto-verified", {

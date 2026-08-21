@@ -34,6 +34,8 @@ import {
   isPersistentToken,
   hashToken,
   validateTokenRecord,
+  getAccountAccessDenial,
+  ACCOUNT_APPROVAL_REQUIRED_CODE,
   type McpPromptContext,
 } from "@mcp-moira/shared";
 
@@ -972,7 +974,13 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
 
       // Check if user is blocked
       const [userData] = await db
-        .select({ blocked: user.blocked, blockedReason: user.blockedReason, email: user.email })
+        .select({
+          blocked: user.blocked,
+          blockedReason: user.blockedReason,
+          email: user.email,
+          approvedAt: user.approvedAt,
+          emailVerified: user.emailVerified,
+        })
         .from(user)
         .where(eq(user.id, tokenRecord.userId))
         .limit(1);
@@ -984,15 +992,33 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
         });
       }
 
-      if (userData.blocked) {
+      const denial = getAccountAccessDenial({
+        userId: tokenRecord.userId,
+        blocked: !!userData.blocked,
+        approvedAt: userData.approvedAt,
+        emailVerified: !!userData.emailVerified,
+      });
+
+      if (denial === "blocked") {
         logger.warn("Blocked user attempted MCP access via persistent token", {
           userId: tokenRecord.userId,
         });
-        const reason = userData.blockedReason ? `: ${userData.blockedReason}` : "";
+        const reason = userData?.blockedReason ? `: ${userData.blockedReason}` : "";
         return res.status(403).json({
           error: "access_denied",
           error_description: `Account is blocked${reason}`,
           hint: `Contact support at ${getContactEmail()} if you believe this is an error.`,
+        });
+      }
+
+      if (denial === "approval") {
+        logger.warn("Pending user attempted MCP access via persistent token", {
+          userId: tokenRecord.userId,
+        });
+        return res.status(403).json({
+          error: "access_denied",
+          error_code: ACCOUNT_APPROVAL_REQUIRED_CODE,
+          error_description: "Account is awaiting administrator approval.",
         });
       }
 
@@ -1075,18 +1101,54 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
     if (userId) {
       const db = getDatabase();
       const [userData] = await db
-        .select({ blocked: user.blocked, blockedReason: user.blockedReason })
+        .select({
+          blocked: user.blocked,
+          blockedReason: user.blockedReason,
+          approvedAt: user.approvedAt,
+          emailVerified: user.emailVerified,
+        })
         .from(user)
         .where(eq(user.id, userId))
         .limit(1);
 
-      if (userData?.blocked) {
+      const denial = userData
+        ? getAccountAccessDenial(
+            {
+              userId,
+              blocked: !!userData.blocked,
+              approvedAt: userData.approvedAt,
+              emailVerified: !!userData.emailVerified,
+            },
+            { requireEmailVerified: true },
+          )
+        : "approval";
+
+      if (denial === "blocked") {
         logger.warn("Blocked user attempted MCP access", { userId, email });
-        const reason = userData.blockedReason ? `: ${userData.blockedReason}` : "";
+        const reason = userData?.blockedReason ? `: ${userData.blockedReason}` : "";
         return res.status(403).json({
           error: "access_denied",
+          error_code: "ACCOUNT_BLOCKED",
           error_description: `Account is blocked${reason}`,
           hint: `Contact support at ${getContactEmail()} if you believe this is an error.`,
+        });
+      }
+
+      if (denial === "approval") {
+        logger.warn("Pending user attempted MCP access", { userId, email });
+        return res.status(403).json({
+          error: "access_denied",
+          error_code: ACCOUNT_APPROVAL_REQUIRED_CODE,
+          error_description: "Account is awaiting administrator approval.",
+        });
+      }
+
+      if (denial === "email-verification") {
+        logger.warn("Unverified user attempted MCP access", { userId, email });
+        return res.status(403).json({
+          error: "access_denied",
+          error_code: "EMAIL_NOT_VERIFIED",
+          error_description: "Email verification is required before accessing MCP.",
         });
       }
     }

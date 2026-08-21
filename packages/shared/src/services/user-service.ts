@@ -17,6 +17,10 @@ import type {
   OAuthConsentListResult,
 } from "../database/repositories/user-repository.js";
 import type { AuditRepository } from "../database/repositories/audit-repository.js";
+import type {
+  AccountApprovalRepository,
+  AccountApprovalTransitionResult,
+} from "../database/repositories/account-approval-repository.js";
 import { getAuditSource } from "../logging/context.js";
 import { createLogger, Component } from "../logging/logger.js";
 import { AuditAction } from "../audit/actions.js";
@@ -27,13 +31,25 @@ import {
 } from "../errors/domain-errors.js";
 import { validateHandle, normalizeHandle } from "../validation/slug-handle.js";
 
+export type ApproveAccountResult = AccountApprovalTransitionResult;
+
 export class UserService {
   private logger = createLogger({ component: Component.Auth });
 
   constructor(
     private userRepo: UserRepository,
     private auditRepo: AuditRepository,
+    private accountApprovalRepo: AccountApprovalRepository,
   ) {}
+
+  /**
+   * Approve a pending account and write exactly one audit event in the same
+   * SQLite transaction. The conditional update is the concurrency boundary:
+   * only the request that changes NULL to a timestamp owns the audit write.
+   */
+  async approveAccount(adminUserId: string, targetUserId: string): Promise<ApproveAccountResult> {
+    return this.accountApprovalRepo.approve(adminUserId, targetUserId);
+  }
 
   /**
    * Get user profile (now includes handle)

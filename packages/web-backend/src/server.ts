@@ -350,7 +350,9 @@ class MoiraApiServer {
     this.app.use("/api/telegram/webhook", apiLimiter, telegramWebhookRoutes);
 
     // Protected API routes (require authentication + rate limiting)
-    this.app.use("/api/user", apiLimiter, requireAuth, userInfoRoutes);
+    // Each route declares its admission level. `/me` is the sole session-only
+    // status endpoint available while an account is pending approval.
+    this.app.use("/api/user", apiLimiter, userInfoRoutes);
     this.app.use("/api/user", userProfileRoutes); // Already has apiLimiter and requireAuth inside
     this.app.use("/api/user", userOAuthSessionsRoutes); // Already has apiLimiter and requireAuth inside
     // Workflow sharing routes MUST be before main workflow routes (more specific patterns first)

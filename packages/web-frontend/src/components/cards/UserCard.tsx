@@ -4,9 +4,20 @@
  * Handles 2 data interfaces via normalizeUser()
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { Shield, CheckCircle, XCircle, Ban, GitBranch, Eye, Edit2, Trash2 } from "lucide-react";
+import {
+  Shield,
+  CheckCircle,
+  XCircle,
+  Ban,
+  GitBranch,
+  Eye,
+  Edit2,
+  Trash2,
+  UserCheck,
+  Clock3,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -20,6 +31,9 @@ interface UserCardProps {
   onView?: (user: NormalizedUser) => void;
   onEdit?: (user: NormalizedUser) => void;
   onDelete?: (user: NormalizedUser) => void;
+  onApprove?: (user: NormalizedUser) => void;
+  accountApprovalEnabled?: boolean;
+  approvalStatusRef?: RefObject<HTMLSpanElement | null>;
   compact?: boolean;
 }
 
@@ -38,6 +52,9 @@ export const UserCard: React.FC<UserCardProps> = ({
   onView,
   onEdit,
   onDelete,
+  onApprove,
+  accountApprovalEnabled = false,
+  approvalStatusRef,
   compact = false,
 }) => {
   const { t } = useTranslation();
@@ -63,8 +80,16 @@ export const UserCard: React.FC<UserCardProps> = ({
         onClick: () => onDelete(user),
         variant: "destructive",
       });
+    if (accountApprovalEnabled && onApprove && user.approvedAt === null)
+      list.unshift({
+        icon: <UserCheck className="w-3.5 h-3.5" />,
+        label: t("admin.userManagement.actions.approveAccessible", { email: user.email }),
+        onClick: () => onApprove(user),
+        variant: "success",
+        testId: "approve-user-action",
+      });
     return list;
-  }, [onView, onEdit, onDelete, user, t]);
+  }, [onView, onEdit, onDelete, onApprove, accountApprovalEnabled, user, t]);
 
   if (compact) {
     return (
@@ -123,6 +148,34 @@ export const UserCard: React.FC<UserCardProps> = ({
               {t("common.blocked", { defaultValue: "Blocked" })}
             </Badge>
           )}
+          {accountApprovalEnabled && user.approvedAt !== undefined && (
+            <span
+              ref={approvalStatusRef}
+              tabIndex={-1}
+              data-testid="approval-list-focus-target"
+              className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            >
+              {user.approvedAt === null ? (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1 py-0 h-4 border-warning/30 text-warning"
+                  data-testid="approval-status-pending"
+                >
+                  <Clock3 className="w-3 h-3 mr-0.5" />
+                  {t("admin.userManagement.status.pendingApproval")}
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1 py-0 h-4 border-success/30 text-success"
+                  data-testid="approval-status-approved"
+                >
+                  <UserCheck className="w-3 h-3 mr-0.5" />
+                  {t("admin.userManagement.status.approved")}
+                </Badge>
+              )}
+            </span>
+          )}
           <span className="text-[10px] text-muted-foreground ml-auto flex items-center gap-0.5">
             <GitBranch className="w-3 h-3" />
             {user.workflowsCount}
@@ -169,6 +222,36 @@ export const UserCard: React.FC<UserCardProps> = ({
           >
             <Ban className="w-3 h-3" />
           </Badge>
+        )}
+        {accountApprovalEnabled && user.approvedAt !== undefined && (
+          <span
+            ref={approvalStatusRef}
+            tabIndex={-1}
+            data-testid="approval-list-focus-target"
+            className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            {user.approvedAt === null ? (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1 py-0 h-4 border-warning/30 text-warning"
+                data-testid="approval-status-pending"
+              >
+                <Clock3 className="w-3 h-3 mr-0.5" />
+                <span className="hidden sm:inline">
+                  {t("admin.userManagement.status.pendingApproval")}
+                </span>
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className="text-[10px] px-1 py-0 h-4 border-success/30 text-success"
+                data-testid="approval-status-approved"
+              >
+                <UserCheck className="w-3 h-3" />
+                <span className="sr-only">{t("admin.userManagement.status.approved")}</span>
+              </Badge>
+            )}
+          </span>
         )}
         <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
           <GitBranch className="w-3 h-3" />

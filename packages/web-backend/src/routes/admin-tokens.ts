@@ -14,6 +14,7 @@ import {
   createLogger,
 } from "@mcp-moira/shared";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
+import type { AuthenticatedRequest } from "../types/express-types.js";
 import { requireAdmin } from "../middleware/admin-middleware.js";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
@@ -165,8 +166,7 @@ router.delete(
     if (!token.revokedAt) {
       await db.update(apiToken).set({ revokedAt: now }).where(eq(apiToken.id, id));
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const adminUserId = (req as any).userId || (req as any).user?.userId;
+      const adminUserId = (req as AuthenticatedRequest).userId;
 
       const repository = new DatabaseRepository();
       await logAuditEvent(repository, req, {

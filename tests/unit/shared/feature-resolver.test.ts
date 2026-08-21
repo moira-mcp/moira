@@ -18,16 +18,17 @@ function restore(): void {
   }
 }
 
-// All SaaS-gated features, with expected on/off per mode.
-const SAAS_FEATURES = [
-  "openRegistration",
-  "emailVerificationGate",
-  "verificationEmailOnSignup",
-  "legalConsents",
-  "betaNotices",
-  "multiUserAdmin",
-  "socialLogin",
-] as const;
+const FEATURE_EXPECTATIONS = {
+  openRegistration: { "self-host": true, saas: true },
+  accountApproval: { "self-host": true, saas: false },
+  emailVerificationGate: { "self-host": false, saas: true },
+  verificationEmailOnSignup: { "self-host": false, saas: true },
+  legalConsents: { "self-host": false, saas: true },
+  betaNotices: { "self-host": false, saas: true },
+  multiUserAdmin: { "self-host": false, saas: true },
+  userManagement: { "self-host": true, saas: true },
+  socialLogin: { "self-host": false, saas: true },
+} as const;
 
 describe("FeatureResolver", () => {
   afterEach(async () => {
@@ -37,21 +38,25 @@ describe("FeatureResolver", () => {
   });
 
   describe("ModeFeatureResolver default behavior", () => {
-    it("disables every SaaS feature in self-host mode", async () => {
+    it("resolves the complete self-host feature set", async () => {
       process.env.DEPLOYMENT_MODE = "self-host";
       const { ModeFeatureResolver } = await importResolverModule();
       const resolver = new ModeFeatureResolver();
-      for (const feature of SAAS_FEATURES) {
-        expect(resolver.isEnabled(feature)).toBe(false);
+      for (const [feature, expected] of Object.entries(FEATURE_EXPECTATIONS)) {
+        expect(resolver.isEnabled(feature as keyof typeof FEATURE_EXPECTATIONS)).toBe(
+          expected["self-host"],
+        );
       }
     });
 
-    it("enables every SaaS feature in saas mode", async () => {
+    it("resolves the complete saas feature set", async () => {
       process.env.DEPLOYMENT_MODE = "saas";
       const { ModeFeatureResolver } = await importResolverModule();
       const resolver = new ModeFeatureResolver();
-      for (const feature of SAAS_FEATURES) {
-        expect(resolver.isEnabled(feature)).toBe(true);
+      for (const [feature, expected] of Object.entries(FEATURE_EXPECTATIONS)) {
+        expect(resolver.isEnabled(feature as keyof typeof FEATURE_EXPECTATIONS)).toBe(
+          expected.saas,
+        );
       }
     });
 
@@ -59,7 +64,8 @@ describe("FeatureResolver", () => {
       delete process.env.DEPLOYMENT_MODE;
       const { ModeFeatureResolver } = await importResolverModule();
       const resolver = new ModeFeatureResolver();
-      expect(resolver.isEnabled("openRegistration")).toBe(false);
+      expect(resolver.isEnabled("openRegistration")).toBe(true);
+      expect(resolver.isEnabled("accountApproval")).toBe(true);
       expect(resolver.isEnabled("emailVerificationGate")).toBe(false);
     });
 

@@ -3,7 +3,7 @@
  * Detailed user management with actions
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { PageShell } from "../components/PageShell";
 import { ROUTES } from "../constants/routes";
@@ -22,6 +22,8 @@ import {
   HardDrive,
   FileText,
   RotateCcw,
+  UserCheck,
+  Clock3,
 } from "lucide-react";
 import { formatSize } from "@/components/cards/format-utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +41,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { apiClient } from "../services/api-client";
+import { useFeatures } from "../hooks/useFeatures";
 
 interface UserDetails {
   user: {
@@ -47,6 +51,7 @@ interface UserDetails {
     name: string | null;
     isAdmin: boolean;
     emailVerified: boolean;
+    approvedAt: string | null;
     blocked: boolean;
     blockedAt: string | null;
     blockedReason: string | null;
@@ -86,6 +91,8 @@ interface UserDetails {
 export const AdminUserDetail: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
+  const { isEnabled } = useFeatures();
+  const accountApprovalEnabled = isEnabled("accountApproval");
   const [data, setData] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +147,8 @@ export const AdminUserDetail: React.FC = () => {
   }>({ quotaMb: "", maxFiles: "" });
   const [quotaSaving, setQuotaSaving] = useState(false);
   const [blockDialogOpen, setBlockDialogOpen] = useState(false);
+  const approveButtonRef = useRef<HTMLButtonElement>(null);
+  const approvalStatusRef = useRef<HTMLSpanElement>(null);
   const [blockReason, setBlockReason] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -147,6 +156,7 @@ export const AdminUserDetail: React.FC = () => {
     description: string;
     confirmLabel: string;
     variant?: "default" | "destructive";
+    returnFocusToApproval?: boolean;
     onConfirm: () => void | Promise<void>;
   }>({ open: false, title: "", description: "", confirmLabel: "", onConfirm: () => {} });
 
@@ -362,6 +372,25 @@ export const AdminUserDetail: React.FC = () => {
     handleAction("verify email", `/api/admin/users/${id}/verify-email`);
   };
 
+  const handleApprove = async () => {
+    if (!id || !accountApprovalEnabled) return;
+    setActionLoading("approve");
+    try {
+      const result = await apiClient.approveUser(id);
+      setData((current) =>
+        current
+          ? { ...current, user: { ...current.user, approvedAt: result.approvedAt } }
+          : current,
+      );
+      toast.success(t("admin.userDetail.actions.approveSuccess", { email: data?.user.email }));
+    } catch (err) {
+      toast.error(t("admin.userDetail.actions.approveError"));
+      throw err;
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleSendReset = () => {
     handleAction("send reset", `/api/admin/users/${id}/send-reset`);
   };
@@ -510,6 +539,38 @@ export const AdminUserDetail: React.FC = () => {
                 {t("admin.userDetail.status.admin")}
               </Badge>
             )}
+            {accountApprovalEnabled &&
+              (user.approvedAt === null ? (
+                <span
+                  ref={approvalStatusRef}
+                  tabIndex={-1}
+                  data-testid="approval-focus-target"
+                  className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <Badge
+                    className="border-transparent bg-warning/10 text-warning"
+                    data-testid="user-approval-pending"
+                  >
+                    <Clock3 className="h-4 w-4 mr-1" />
+                    {t("admin.userDetail.status.pendingApproval")}
+                  </Badge>
+                </span>
+              ) : (
+                <span
+                  ref={approvalStatusRef}
+                  tabIndex={-1}
+                  data-testid="approval-focus-target"
+                  className="rounded-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <Badge
+                    className="border-transparent bg-success/10 text-success"
+                    data-testid="user-approval-approved"
+                  >
+                    <UserCheck className="h-4 w-4 mr-1" />
+                    {t("admin.userDetail.status.approved")}
+                  </Badge>
+                </span>
+              ))}
             {user.passwordResetRequired && (
               <Badge className="border-transparent bg-chart-4/20 text-chart-4 flex items-center gap-1">
                 <AlertTriangle className="h-4 w-4" />
@@ -553,6 +614,31 @@ export const AdminUserDetail: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-3">
+            {accountApprovalEnabled && user.approvedAt === null && (
+              <Button
+                ref={approveButtonRef}
+                variant="default"
+                disabled={actionLoading === "approve"}
+                data-testid="approve-user-button"
+                onClick={() =>
+                  setConfirmDialog({
+                    open: true,
+                    title: t("admin.userDetail.actions.approveUser"),
+                    description: t("admin.userDetail.actions.confirmApprove", {
+                      email: user.email,
+                    }),
+                    confirmLabel: t("admin.userDetail.actions.approveUser"),
+                    onConfirm: handleApprove,
+                    returnFocusToApproval: true,
+                  })
+                }
+              >
+                <UserCheck className="h-4 w-4 mr-2" />
+                {actionLoading === "approve"
+                  ? t("admin.userDetail.actions.approving")
+                  : t("admin.userDetail.actions.approveUser")}
+              </Button>
+            )}
             {user.blocked ? (
               <Button
                 variant="outline"
@@ -835,6 +921,20 @@ export const AdminUserDetail: React.FC = () => {
               </dt>
               <dd>{new Date(user.updatedAt).toLocaleString()}</dd>
             </div>
+            {accountApprovalEnabled && (
+              <div>
+                <dt className="text-sm text-muted-foreground">
+                  {t("admin.userDetail.userInfo.approval")}
+                </dt>
+                <dd>
+                  {user.approvedAt
+                    ? `${t("admin.userDetail.userInfo.approvedAt")} ${new Date(
+                        user.approvedAt,
+                      ).toLocaleString()}`
+                    : t("admin.userDetail.status.pendingApproval")}
+                </dd>
+              </div>
+            )}
           </dl>
         </CardContent>
       </Card>
@@ -1261,6 +1361,11 @@ export const AdminUserDetail: React.FC = () => {
         confirmLabel={confirmDialog.confirmLabel}
         variant={confirmDialog.variant}
         onConfirm={confirmDialog.onConfirm}
+        onReturnFocus={
+          confirmDialog.returnFocusToApproval
+            ? () => (approveButtonRef.current ?? approvalStatusRef.current)?.focus()
+            : undefined
+        }
       />
     </PageShell>
   );

@@ -48,9 +48,62 @@ On first start, Moira generates the missing secrets and a one-time admin passwor
 
 ## Configuration
 
-`DEPLOYMENT_MODE=self-host` (the default) runs a single-user / private-team install:
-no open registration, no email-verification gate, and missing secrets are generated
-on first start.
+`DEPLOYMENT_MODE=self-host` (the default) runs a private-team install with open
+registration and administrator approval. A newly registered account can inspect its
+approval status and sign out, but cannot use workflows, API tokens, OAuth, or MCP until
+an administrator approves it. Email verification is a separate gate and is not required
+in self-host mode. Missing secrets are generated on first start.
+
+### Approve new accounts
+
+In the Web UI, sign in as an administrator, open **Admin Panel → Users**, and select an
+account marked **Pending approval**. Choose **Approve account** and confirm the dialog.
+The action shows progress while it is running and changes the account badge to **Approved**;
+the registrant's waiting page detects that transition and opens Moira without another login.
+On a narrow screen, open the Admin Panel navigation with the menu button first.
+
+The equivalent API operation is `POST /api/admin/users/:id/approve`;
+`GET /api/admin/users` lists the approval timestamp. Approval is idempotent, so retrying a
+request after an uncertain response does not replace the first approval time or create a second
+transition.
+Existing users are marked approved during the database migration; the bootstrap administrator
+is always created as approved. Blocking and email verification remain independent controls:
+a blocked account is denied even when approved.
+
+### Recover administrator access
+
+From the directory containing `docker-compose.yml`, supply a new password without putting it
+in shell history:
+
+```bash
+read -s ADMIN_PASSWORD
+export ADMIN_PASSWORD
+docker compose exec -e ADMIN_PASSWORD moira npx tsx scripts/create-admin-user.ts
+unset ADMIN_PASSWORD
+```
+
+`ADMIN_PASSWORD` is required. `ADMIN_EMAIL` and `ADMIN_ID` default to
+`admin@moira.local` and `system-admin`; `DB_PATH` defaults to `./data/moira.db`. Add
+`-e ADMIN_EMAIL`, `-e ADMIN_ID`, or `-e DB_PATH` to `docker compose exec` when overriding
+them. The command creates or repairs the administrator, marks it verified and approved, clears any
+account block, and replaces its credential. It never prints the password.
+
+### Roll back to a version without account approval
+
+An older image ignores `approvedAt`. Before pinning such an image, stop external traffic,
+back up the database, and run the conversion on the current image:
+
+```bash
+docker compose exec moira npm run prepare:account-approval-downgrade -- \
+  --confirm-block-pending-users
+```
+
+The command refuses to run without the confirmation argument. It blocks every pending user
+with the legacy `blocked` control and revokes that user's sessions, API tokens, OAuth tokens,
+and OAuth consents in one transaction. Verify the printed counts before stopping the current
+container. Do not roll back first, because the old image cannot make this conversion. If you
+later restore the approval-aware version, review each converted account before approving and
+explicitly unblocking it.
 
 ### Host-dependent variables
 

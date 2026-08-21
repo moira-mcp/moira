@@ -737,7 +737,7 @@ export class MoiraApiClient {
   }
 
   /**
-   * Get current user info (including admin status, password reset flag, blocked status, and email verification)
+   * Get current user info, including independent account-approval status.
    */
   async getUserInfo(): Promise<{
     id: string;
@@ -747,6 +747,9 @@ export class MoiraApiClient {
     passwordResetRequired: boolean;
     blocked: boolean;
     emailVerified: boolean;
+    approvedAt: string | null;
+    accountApproved: boolean;
+    accountApprovalRequired: boolean;
   }> {
     try {
       const response = await this.client.get<
@@ -758,6 +761,9 @@ export class MoiraApiClient {
           passwordResetRequired: boolean;
           blocked: boolean;
           emailVerified: boolean;
+          approvedAt: string | null;
+          accountApproved: boolean;
+          accountApprovalRequired: boolean;
         }>
       >("/user/me");
       return response.data.data!;
@@ -930,6 +936,7 @@ export class MoiraApiClient {
       name: string | null;
       isAdmin: boolean;
       emailVerified: boolean;
+      approvedAt: string | null;
       blocked: boolean;
       createdAt: string;
       workflowsCount: number;
@@ -946,6 +953,7 @@ export class MoiraApiClient {
           name: string | null;
           isAdmin: boolean;
           emailVerified: boolean;
+          approvedAt: string | null;
           blocked: boolean;
           createdAt: string;
           workflowsCount: number;
@@ -975,6 +983,17 @@ export class MoiraApiClient {
       await this.client.put(`/admin/users/${userId}`, updates);
     } catch (error) {
       throw new ApiClientError("Failed to update user", ApiErrorCode.INTERNAL_ERROR);
+    }
+  }
+
+  async approveUser(userId: string): Promise<{ approvedAt: string; alreadyApproved: boolean }> {
+    try {
+      const response = await this.client.post<
+        ApiResponse<{ approvedAt: string; alreadyApproved: boolean }>
+      >(`/admin/users/${userId}/approve`);
+      return response.data.data!;
+    } catch {
+      throw new ApiClientError("Failed to approve user", ApiErrorCode.INTERNAL_ERROR);
     }
   }
 

@@ -18,11 +18,13 @@ const BASE_URL = getTestBaseUrl();
 
 const EXPECTED_FEATURES = [
   "openRegistration",
+  "accountApproval",
   "emailVerificationGate",
   "verificationEmailOnSignup",
   "legalConsents",
   "betaNotices",
   "multiUserAdmin",
+  "userManagement",
   "socialLogin",
 ] as const;
 

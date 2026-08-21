@@ -16,11 +16,13 @@ export type DeploymentMode = "self-host" | "saas";
 
 export type FeatureFlag =
   | "openRegistration"
+  | "accountApproval"
   | "emailVerificationGate"
   | "verificationEmailOnSignup"
   | "legalConsents"
   | "betaNotices"
   | "multiUserAdmin"
+  | "userManagement"
   | "socialLogin";
 
 export interface FeaturesResponse {

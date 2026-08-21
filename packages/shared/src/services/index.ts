@@ -2,13 +2,14 @@
  * Services export index for shared package
  */
 
-import { getDatabase } from "../database/connection.js";
+import { getDatabase, getSqliteInstance } from "../database/connection.js";
 import { WorkflowRepository } from "../database/repositories/workflow-repository.js";
 import { ExecutionRepository } from "../database/repositories/execution-repository.js";
 import { SettingsRepository } from "../database/repositories/settings-repository.js";
 import { GlobalSettingsRepository } from "../database/repositories/global-settings-repository.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { UserRepository } from "../database/repositories/user-repository.js";
+import { AccountApprovalRepository } from "../database/repositories/account-approval-repository.js";
 import { NoteRepository } from "../database/repositories/note-repository.js";
 import { ArtifactRepository } from "../database/repositories/artifact-repository.js";
 import { WorkflowSharingRepository } from "../database/repositories/workflow-sharing-repository.js";
@@ -361,7 +362,8 @@ export function getUserService(): UserService {
     const db = getDatabase();
     const userRepo = new UserRepository(db);
     const auditRepo = new AuditRepository(db);
-    userServiceInstance = new UserService(userRepo, auditRepo);
+    const accountApprovalRepo = new AccountApprovalRepository(getSqliteInstance());
+    userServiceInstance = new UserService(userRepo, auditRepo, accountApprovalRepo);
   }
   return userServiceInstance;
 }

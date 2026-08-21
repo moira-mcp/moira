@@ -25,6 +25,8 @@ export const user = sqliteTable("user", {
   emailVerified: integer("emailVerified", { mode: "boolean" }).default(false),
   image: text("image"),
   isAdmin: integer("isAdmin", { mode: "boolean" }).default(false),
+  // Independent account-admission decision. null means pending approval.
+  approvedAt: text("approvedAt"),
   blocked: integer("blocked", { mode: "boolean" }).default(false),
   blockedAt: text("blockedAt"),
   blockedReason: text("blockedReason"),

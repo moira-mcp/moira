@@ -6,13 +6,17 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { CheckCircle, Mail, Loader2, RefreshCw } from "lucide-react";
+import { CheckCircle, Clock3, LogOut, Mail, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AuthLayout } from "@/components/AuthLayout";
 import { validateReturnUrl } from "../utils/return-url";
 import { ROUTES } from "../constants/routes";
+import { useFeatures } from "../hooks/useFeatures";
+import { apiClient } from "../services/api-client";
+import { authClient } from "../auth/better-auth-client";
+import { getRegistrationCompletionMode } from "../auth/admission-routing";
 
 // Buffer seconds to add to server cooldown for network latency
 const COOLDOWN_BUFFER_SECONDS = 2;
@@ -20,9 +24,19 @@ const COOLDOWN_BUFFER_SECONDS = 2;
 export const RegistrationSuccess: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const {
+    loaded: featuresLoaded,
+    error: featuresError,
+    retry: retryFeatures,
+    isEnabled: isFeatureEnabled,
+  } = useFeatures();
   const [searchParams] = useSearchParams();
   const [isPolling, setIsPolling] = useState(true);
   const [isVerified, setIsVerified] = useState(false);
+  const [isApproved, setIsApproved] = useState(false);
+  const [approvalCheckFailed, setApprovalCheckFailed] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutFailed, setSignOutFailed] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Resend email state
@@ -31,6 +45,10 @@ export const RegistrationSuccess: React.FC = () => {
   const [countdown, setCountdown] = useState(0);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
   const [userEmail, setUserEmail] = useState("");
+  const completionMode = getRegistrationCompletionMode(
+    featuresLoaded && !featuresError,
+    isFeatureEnabled("accountApproval"),
+  );
 
   // Check if there are OAuth params to continue after verification
   const hasOAuthFlow = searchParams.has("client_id") || searchParams.has("redirect_uri");
@@ -129,6 +147,7 @@ export const RegistrationSuccess: React.FC = () => {
   }, [userEmail]);
 
   useEffect(() => {
+    if (completionMode !== "email-verification") return;
     // Poll for email verification every 2 seconds
     pollingRef.current = setInterval(checkVerificationStatus, 2000);
     // Also check immediately
@@ -139,13 +158,39 @@ export const RegistrationSuccess: React.FC = () => {
         clearInterval(pollingRef.current);
       }
     };
-  }, [checkVerificationStatus]);
+  }, [checkVerificationStatus, completionMode]);
+
+  const checkApprovalStatus = useCallback(async () => {
+    try {
+      const userInfo = await apiClient.getUserInfo();
+      setApprovalCheckFailed(false);
+      if (!userInfo.accountApprovalRequired || userInfo.accountApproved) {
+        setIsApproved(true);
+        setIsPolling(false);
+      } else {
+        setIsPolling(true);
+      }
+    } catch {
+      setApprovalCheckFailed(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (completionMode !== "approval" || isApproved) return;
+    checkApprovalStatus();
+    const interval = setInterval(checkApprovalStatus, 2000);
+    return () => clearInterval(interval);
+  }, [checkApprovalStatus, completionMode, isApproved]);
 
   // When email is verified, redirect
   useEffect(() => {
-    if (isVerified) {
+    const registrationComplete =
+      completionMode === "approval"
+        ? isApproved
+        : completionMode === "email-verification" && isVerified;
+    if (registrationComplete) {
       // Small delay to show verified state
-      setTimeout(() => {
+      const redirectTimer = setTimeout(() => {
         if (hasOAuthFlow) {
           // Continue OAuth flow - redirect to authorize with preserved params
           const params = new URLSearchParams();
@@ -160,34 +205,132 @@ export const RegistrationSuccess: React.FC = () => {
           navigate(validated || ROUTES.DASHBOARD);
         }
       }, 1500);
+      return () => clearTimeout(redirectTimer);
     }
-  }, [isVerified, navigate, hasOAuthFlow, searchParams]);
+  }, [completionMode, isApproved, isVerified, navigate, hasOAuthFlow, searchParams]);
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true);
+    setSignOutFailed(false);
+    try {
+      const result = await authClient.signOut();
+      if (result.error) throw result.error;
+      navigate(ROUTES.LOGIN, { replace: true });
+    } catch {
+      setSignOutFailed(true);
+      setIsSigningOut(false);
+    }
+  };
+
+  const registrationComplete = completionMode === "approval" ? isApproved : isVerified;
 
   return (
     <AuthLayout showLanguageSwitcher={false}>
       <Card className="w-full">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-chart-2/10">
-            {isVerified ? (
+            {featuresError ? (
+              <RefreshCw className="h-8 w-8 text-destructive" />
+            ) : registrationComplete ? (
               <CheckCircle className="h-8 w-8 text-chart-2" />
+            ) : completionMode === "approval" ? (
+              <Clock3 className="h-8 w-8 text-warning" />
             ) : (
               <Mail className="h-8 w-8 text-chart-2" />
             )}
           </div>
           <CardTitle className="text-2xl">
-            {isVerified
-              ? t("pages.registrationSuccess.verifiedTitle")
-              : t("pages.registrationSuccess.title")}
+            {featuresError
+              ? t("pages.registrationSuccess.featuresLoadTitle")
+              : registrationComplete
+                ? completionMode === "approval"
+                  ? t("pages.registrationSuccess.approvedTitle")
+                  : t("pages.registrationSuccess.verifiedTitle")
+                : completionMode === "approval"
+                  ? t("pages.registrationSuccess.pendingTitle")
+                  : t("pages.registrationSuccess.title")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {isVerified ? (
-            <div className="flex items-center justify-center gap-2 p-4 bg-chart-2/10 rounded-lg">
+          {featuresError ? (
+            <Alert variant="destructive" role="alert">
+              <AlertDescription className="space-y-3">
+                <p>{t("pages.registrationSuccess.featuresLoadError")}</p>
+                <Button variant="outline" onClick={retryFeatures}>
+                  {t("pages.registrationSuccess.retryFeatures")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : completionMode === "loading" ? (
+            <div className="flex items-center justify-center gap-2 p-4" aria-live="polite">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <p className="text-sm text-muted-foreground">
+                {t("pages.registrationSuccess.loading")}
+              </p>
+            </div>
+          ) : registrationComplete ? (
+            <div
+              className="flex items-center justify-center gap-2 p-4 bg-chart-2/10 rounded-lg"
+              role="status"
+              aria-live="polite"
+            >
               <Loader2 className="h-4 w-4 animate-spin text-chart-2" />
               <p className="text-sm text-foreground">
                 {t("pages.registrationSuccess.redirecting")}
               </p>
             </div>
+          ) : completionMode === "approval" ? (
+            <>
+              <div
+                className="flex items-start gap-3 p-4 bg-warning/10 rounded-lg"
+                data-testid="pending-approval-status"
+              >
+                <Clock3 className="h-5 w-5 text-warning mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    {t("pages.registrationSuccess.pendingMessage")}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {t("pages.registrationSuccess.pendingDetails")}
+                  </p>
+                </div>
+              </div>
+              <div
+                className="flex items-center justify-center gap-2 text-sm text-muted-foreground"
+                role="status"
+                aria-live="polite"
+              >
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>{t("pages.registrationSuccess.waitingApproval")}</span>
+              </div>
+              {approvalCheckFailed && (
+                <Alert variant="destructive" role="alert">
+                  <AlertDescription>
+                    {t("pages.registrationSuccess.approvalCheckError")}
+                  </AlertDescription>
+                </Alert>
+              )}
+              {signOutFailed && (
+                <Alert variant="destructive" role="alert">
+                  <AlertDescription>{t("pages.registrationSuccess.signOutError")}</AlertDescription>
+                </Alert>
+              )}
+              <Button
+                onClick={handleSignOut}
+                disabled={isSigningOut}
+                variant="outline"
+                className="w-full"
+              >
+                {isSigningOut ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <LogOut className="h-4 w-4 mr-2" />
+                )}
+                {isSigningOut
+                  ? t("pages.registrationSuccess.signingOut")
+                  : t("pages.registrationSuccess.signOut")}
+              </Button>
+            </>
           ) : (
             <>
               <div className="flex items-start gap-3 p-4 bg-primary/10 rounded-lg">
@@ -257,29 +400,31 @@ export const RegistrationSuccess: React.FC = () => {
               )}
             </>
           )}
-          <Button
-            onClick={() => {
-              // Preserve OAuth params or returnUrl when navigating to login
-              if (hasOAuthFlow) {
-                const params = new URLSearchParams();
-                searchParams.forEach((value, key) => {
-                  params.set(key, value);
-                });
-                navigate(`${ROUTES.LOGIN}?${params.toString()}`);
-              } else {
-                const returnUrl = searchParams.get("returnUrl");
-                navigate(
-                  returnUrl
-                    ? `${ROUTES.LOGIN}?returnUrl=${encodeURIComponent(returnUrl)}`
-                    : ROUTES.LOGIN,
-                );
-              }
-            }}
-            className="w-full"
-            variant={isVerified ? "default" : "outline"}
-          >
-            {t("pages.registrationSuccess.goToLogin")}
-          </Button>
+          {completionMode === "email-verification" && (
+            <Button
+              onClick={() => {
+                // Preserve OAuth params or returnUrl when navigating to login
+                if (hasOAuthFlow) {
+                  const params = new URLSearchParams();
+                  searchParams.forEach((value, key) => {
+                    params.set(key, value);
+                  });
+                  navigate(`${ROUTES.LOGIN}?${params.toString()}`);
+                } else {
+                  const returnUrl = searchParams.get("returnUrl");
+                  navigate(
+                    returnUrl
+                      ? `${ROUTES.LOGIN}?returnUrl=${encodeURIComponent(returnUrl)}`
+                      : ROUTES.LOGIN,
+                  );
+                }
+              }}
+              className="w-full"
+              variant={isVerified ? "default" : "outline"}
+            >
+              {t("pages.registrationSuccess.goToLogin")}
+            </Button>
+          )}
         </CardContent>
       </Card>
     </AuthLayout>

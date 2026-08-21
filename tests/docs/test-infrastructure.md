@@ -2,18 +2,18 @@
 
 ## Architecture
 
-All test suites are managed by **testfold** — a unified test runner configured in `test-runner.config.ts`.
+All test suites are managed by **testfold** — a unified test runner configured in `test-runner.config.mjs`.
 
 ### How It Works
 
-1. `test-runner.config.ts` defines 6 suites with commands, env vars, and environment routing
+1. `test-runner.config.mjs` defines the Jest and Playwright suite commands, environment variables, and environment routing
 2. `testfold` CLI orchestrates execution: runs suites (parallel or sequential), captures output, parses results
 3. Built-in parsers (Jest, Playwright) extract structured results from JSON output
 4. Built-in reporters generate console output, JSON summary, failure reports, timing stats
 
 ### Why testfold
 
-- **10 scripts (~2000 lines JS) → 1 config file (~180 lines TS)**
+- One declarative ESM configuration replaces imperative per-suite orchestration
 - Declarative suite configuration instead of imperative scripts
 - Built-in artifact cleanup, failure reports, timing stats
 - CLI features: `--grep`, `--file`, `--dry-run`, `--fail-fast`, environment routing
@@ -23,22 +23,26 @@ All test suites are managed by **testfold** — a unified test runner configured
 ## Running Tests
 
 ```bash
-# All suites (parallel, remote env)
+# All suites (parallel, local env)
 npm test
 
-# All suites (local env)
-npm run test:local
+# All suites (remote env)
+npm run test:remote
 
 # Individual suites
 npm run test:unit
 npm run test:workflow
 npm run test:integration
 
-# Environment-routed suites
-npm run test:api              # remote (default)
-npm run test:api:local        # local Docker
-npm run test:api:staging      # staging server
-npm run test:api:prod         # production
+# Environment-routed suites (local Docker by default)
+npm run test:api
+npm run test:mcp-tools
+npm run test:e2e
+
+# Environment-routed suites against the configured remote host/tunnel
+npm run test:api:remote
+npm run test:mcp-tools:remote
+npm run test:e2e:remote
 
 # Direct testfold usage
 npx testfold unit             # single suite
@@ -126,7 +130,7 @@ SQLite uses **WAL mode** with `synchronous=NORMAL` for better concurrent access.
 
 ### Test Runner Config
 
-- `test-runner.config.ts` — testfold config with all 6 suites, environment routing, hooks
+- `test-runner.config.mjs` — central testfold config for the Jest and Playwright suites, environment routing, and hooks. The `.mjs` format is directly loadable by the Node 20 process that runs testfold; no TypeScript loader flag is required.
 
 ### Jest/Playwright Configs
 
@@ -158,16 +162,17 @@ SQLite uses **WAL mode** with `synchronous=NORMAL` for better concurrent access.
 
 Suites that require a running server (api, mcp-tools, e2e) support environment routing:
 
-| Environment | Env File     | URL Source                |
-| ----------- | ------------ | ------------------------- |
-| local       | `.env.local` | `DOCKER_PORT` → localhost |
+| Environment | Env files                    | API/MCP URL source                  | E2E URL source               |
+| ----------- | ---------------------------- | ----------------------------------- | ---------------------------- |
+| local       | `.env.local`                 | `DOCKER_PORT` → localhost           | `DOCKER_PORT` → localhost    |
+| remote      | `.env.remote` + `.env.local` | `REMOTE_HOST` + local `DOCKER_PORT` | local `DOCKER_PORT` (tunnel) |
 
-Usage: `npx testfold api -e staging` or `npm run test:api:staging`
+Usage: `npx testfold api -e local`, `npx testfold api -e remote`, `npm run test:api`, or `npm run test:api:remote`.
 
 ---
 
 ## Adding New Test Category
 
 1. Create config in `tests/config/jest.{category}.config.js`
-2. Add suite entry to `test-runner.config.ts`
+2. Add suite entry to `test-runner.config.mjs`
 3. Add npm scripts to `package.json`

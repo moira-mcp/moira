@@ -24,6 +24,7 @@ import type { TopWorkflow } from "../components/TopWorkflowsTable";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LogOut } from "lucide-react";
 import { StatCard } from "../components/stat-card";
+import { useFeatures } from "../hooks/useFeatures";
 
 type TimeRange = "today" | "week" | "month" | "year" | "all";
 
@@ -89,6 +90,7 @@ const statusBadgeClass = (status: string): string => {
 
 export const AdminDashboard: React.FC = () => {
   const { t } = useTranslation();
+  const { isEnabled: isFeatureEnabled } = useFeatures();
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -470,28 +472,50 @@ export const AdminDashboard: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {(
               [
-                { to: ROUTES.ADMIN_USERS, icon: "👥", key: "userManagement" },
-                { to: ROUTES.ADMIN_DELETED_WORKFLOWS, icon: "🗑️", key: "deletedWorkflows" },
-                { to: ROUTES.ADMIN_SETTINGS, icon: "⚙️", key: "systemSettings" },
-                { to: ROUTES.ADMIN_EXECUTIONS, icon: "🔄", key: "allExecutions" },
+                {
+                  to: ROUTES.ADMIN_USERS,
+                  icon: "👥",
+                  key: "userManagement",
+                  capability: "userManagement",
+                },
+                {
+                  to: ROUTES.ADMIN_DELETED_WORKFLOWS,
+                  icon: "🗑️",
+                  key: "deletedWorkflows",
+                  capability: undefined,
+                },
+                {
+                  to: ROUTES.ADMIN_SETTINGS,
+                  icon: "⚙️",
+                  key: "systemSettings",
+                  capability: undefined,
+                },
+                {
+                  to: ROUTES.ADMIN_EXECUTIONS,
+                  icon: "🔄",
+                  key: "allExecutions",
+                  capability: "multiUserAdmin",
+                },
               ] as const
-            ).map(({ to, icon, key }) => (
-              <Link
-                key={key}
-                to={to}
-                className="flex items-center gap-3 p-4 border border-border rounded-lg hover:bg-muted transition-colors"
-              >
-                <div className="text-2xl">{icon}</div>
-                <div>
-                  <div className="font-medium text-foreground">
-                    {t(`admin.dashboard.quickLinks.${key}`)}
+            )
+              .filter(({ capability }) => !capability || isFeatureEnabled(capability))
+              .map(({ to, icon, key }) => (
+                <Link
+                  key={key}
+                  to={to}
+                  className="flex items-center gap-3 p-4 border border-border rounded-lg hover:bg-muted transition-colors"
+                >
+                  <div className="text-2xl">{icon}</div>
+                  <div>
+                    <div className="font-medium text-foreground">
+                      {t(`admin.dashboard.quickLinks.${key}`)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {t(`admin.dashboard.quickLinks.${key}Desc`)}
+                    </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {t(`admin.dashboard.quickLinks.${key}Desc`)}
-                  </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              ))}
           </div>
         </CardContent>
       </Card>

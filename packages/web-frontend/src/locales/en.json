@@ -723,7 +723,22 @@
     "registrationSuccess": {
       "title": "Registration Successful!",
       "verifiedTitle": "Email Verified!",
+      "pendingTitle": "Waiting for administrator approval",
+      "approvedTitle": "Account approved",
+      "loading": "Loading registration status...",
+      "featuresLoadTitle": "Registration status unavailable",
+      "featuresLoadError": "We could not load the deployment settings needed to check your account.",
+      "retryFeatures": "Try loading settings again",
       "redirecting": "Redirecting...",
+      "pendingMessage": "Your account was created and is awaiting approval.",
+      "pendingDetails": "An administrator must approve your account before you can use Moira. You can leave this page open; access will unlock automatically.",
+      "waitingApproval": "Checking approval status...",
+      "approvalCheckError": "We could not check your approval status. We will keep trying.",
+      "statusLoadError": "We could not load your account status.",
+      "retryStatus": "Try again",
+      "signOut": "Sign out",
+      "signingOut": "Signing out...",
+      "signOutError": "We could not sign you out. Try again.",
       "emailSent": "We've sent a verification email to your address.",
       "checkInbox": "Please check your inbox and click the verification link to activate your account.",
       "waitingVerification": "Waiting for email verification...",
@@ -1156,7 +1171,9 @@
         "blocked": "Blocked",
         "verified": "Verified",
         "unverified": "Unverified",
-        "admin": "Admin"
+        "admin": "Admin",
+        "pendingApproval": "Pending approval",
+        "approved": "Approved"
       },
       "stats": {
         "workflows": "Workflows",
@@ -1171,6 +1188,11 @@
         "sendVerification": "Send Verification",
         "sendPasswordReset": "Send Password Reset",
         "revokeAllSessions": "Revoke All Sessions",
+        "approveUser": "Approve account",
+        "approving": "Approving...",
+        "confirmApprove": "Approve {{email}} and grant access to Moira?",
+        "approveSuccess": "{{email}} is approved and can now access Moira.",
+        "approveError": "Failed to approve account",
         "processing": "Processing...",
         "sending": "Sending...",
         "revoking": "Revoking...",
@@ -1190,7 +1212,9 @@
         "userId": "User ID",
         "email": "Email",
         "created": "Created",
-        "updated": "Updated"
+        "updated": "Updated",
+        "approval": "Account approval",
+        "approvedAt": "Approved"
       },
       "sessions": {
         "title": "Active Sessions",
@@ -1409,7 +1433,9 @@
       "status": {
         "blocked": "Blocked",
         "verified": "Verified",
-        "unverified": "Unverified"
+        "unverified": "Unverified",
+        "pendingApproval": "Pending approval",
+        "approved": "Approved"
       },
       "role": {
         "admin": "Admin",
@@ -1420,8 +1446,13 @@
         "edit": "Edit",
         "delete": "Delete",
         "save": "Save",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "approve": "Approve account",
+        "approveAccessible": "Approve {{email}}"
       },
+      "confirmApprove": "Approve {{email}} and grant access to Moira?",
+      "approvalSuccess": "{{email}} is approved and can now access Moira.",
+      "approvalError": "Failed to approve account",
       "confirmDelete": "Delete user \"{{email}}\"? This will also delete all their workflows.",
       "noUsers": "No users found",
       "noSearchResults": "No users match your search",

@@ -20,8 +20,8 @@ const logger = createLogger({ component: "config" });
 /**
  * Deployment mode.
  *
- * - `self-host`: single-user or private-team install without SaaS scaffolding
- *   (open registration, email-verification gate, legal consents are off by default).
+ * - `self-host`: private-team install with administrator-approved registration;
+ *   SaaS email-verification and legal-consent gates are off by default.
  * - `saas`: hosted multi-tenant deployment with the full SaaS behavior.
  *
  * Default is `self-host` so the open-source build runs out of the box.
@@ -35,9 +35,9 @@ export const DEFAULT_DEPLOYMENT_MODE: DeploymentMode = "self-host";
 /** Message shown when DEPLOYMENT_MODE is unset on a public host. */
 export const UNSET_MODE_PUBLIC_HOST_MESSAGE =
   "DEPLOYMENT_MODE is unset on a non-localhost host. It defaults to 'self-host', which " +
-  "DISABLES the SaaS auth gates (email verification, legal consents, open-registration closure). " +
+  "enables public registration with administrator approval and disables the SaaS email/legal gates. " +
   "Set DEPLOYMENT_MODE=saas for a hosted multi-tenant deployment, or =self-host to confirm a " +
-  "single-user/private install.";
+  "private-team installation with narrow user management.";
 
 /**
  * Pure decision for the unset-DEPLOYMENT_MODE safeguard, extracted for testing.
@@ -383,10 +383,10 @@ class ConfigSingleton {
       type.push(message);
     }
 
-    // Defense-in-depth: DEPLOYMENT_MODE defaults to the LESS strict mode
-    // (self-host), so it must never SILENTLY downgrade a hosted deployment. On a
-    // public (non-localhost) host with an unset mode, the SaaS auth gates (email
-    // verification, legal consents, open-registration closure) would be OFF.
+    // Defense-in-depth: DEPLOYMENT_MODE defaults to self-host, which is not a
+    // safe implicit choice for the hosted service. On a public (non-localhost)
+    // host with an unset mode, SaaS-specific email-verification and legal-consent
+    // gates would be disabled even though self-host account approval is enabled.
     //   - production: REFUSE TO BOOT — force the operator to choose explicitly.
     //     A legitimate public self-host sets DEPLOYMENT_MODE=self-host (one line);
     //     a SaaS host sets =saas. Either way the choice is intentional, not silent.

@@ -20,7 +20,7 @@ export const AdminLayout: React.FC = () => {
       path: ROUTES.ADMIN_USERS,
       label: t("layout.adminNav.users"),
       icon: "👥",
-      multiUserAdmin: true,
+      userManagement: true,
     },
     {
       path: ROUTES.ADMIN_EXECUTIONS,

@@ -5,30 +5,21 @@
 import { Request } from "express";
 
 /**
- * Better Auth user object added to request
- */
-export interface BetterAuthUser {
-  userId: string;
-  email: string;
-  name?: string;
-  image?: string | null;
-  emailVerified: boolean;
-  isAdmin?: boolean;
-  createdAt?: Date;
-  updatedAt?: Date;
-}
-
-/**
  * Extended Request with authenticated user data from better-auth middleware
  * This is used for routes that only work with authenticated requests
  */
 export interface AuthenticatedRequest extends Request {
-  user?: BetterAuthUser;
   userId: string;
   userEmail: string;
   emailVerified?: boolean;
+  approvedAt?: string | null;
+  accountApproved?: boolean;
+  accountApprovalRequired?: boolean;
   userInfo?: {
     isAdmin: boolean;
+    handle: string;
+    passwordResetRequired: boolean;
+    blocked: boolean;
   };
   session?: {
     token: string;

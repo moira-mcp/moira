@@ -132,6 +132,27 @@ export function normalizeHandle(handle: string): string {
 // ===== Generation Functions =====
 
 /**
+ * Generate a valid base handle from an email address. The caller remains
+ * responsible for checking global uniqueness and adding a collision suffix.
+ */
+export function generateHandleFromEmail(email: string): string {
+  const prefix = email.split("@")[0] || "";
+  let handle = prefix.toLowerCase().replace(/[^a-z0-9]/g, "-");
+  handle = handle.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+
+  while (handle.length < HANDLE_MIN_LENGTH) {
+    handle += Math.random().toString(36).charAt(2);
+  }
+
+  return handle.substring(0, HANDLE_MAX_LENGTH - 5);
+}
+
+/** Generate a short suffix for resolving a globally unique handle collision. */
+export function generateRandomHandleSuffix(): string {
+  return Math.random().toString(36).substring(2, 6);
+}
+
+/**
  * Generate a random slug suffix
  * @returns 8-character random alphanumeric string
  */
