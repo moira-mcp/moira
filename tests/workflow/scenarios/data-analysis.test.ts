@@ -8,7 +8,11 @@ import {
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
-import { runScenario, type ScenarioResult, type TestScenario } from "../../helpers/scenario-runner.js";
+import {
+  runScenario,
+  type ScenarioResult,
+  type TestScenario,
+} from "../../helpers/scenario-runner.js";
 
 type Delivery = "filesystem" | "inline";
 type Mode = "autonomous" | "interactive";
@@ -60,7 +64,8 @@ function evidence(outcome: Outcome = "usable") {
       outcome === "usable" ? "available" : outcome === "unavailable" ? "unavailable" : "unknown",
     access_outcome: outcome,
     sanitized_provenance: "Aggregate supplied by the authorized release owner.",
-    limitation: outcome === "usable" ? "One release-candidate sample." : `Source outcome: ${outcome}.`,
+    limitation:
+      outcome === "usable" ? "One release-candidate sample." : `Source outcome: ${outcome}.`,
   };
 }
 
@@ -113,9 +118,8 @@ function contractRevision(decision = initialDecision, contract = source()) {
 }
 
 function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {
-  const handlers = (
-    engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> }
-  ).nodeHandlers;
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> })
+    .nodeHandlers;
   handlers.set(
     "materialize",
     new MaterializeHandler(
@@ -224,7 +228,11 @@ describe("data-analysis", () => {
   });
 
   test("preserves public identity and implements the accepted graph", async () => {
-    expect(catalogEntry).toMatchObject({ owner: "system-moira", slug: "data-analysis", visibility: "public" });
+    expect(catalogEntry).toMatchObject({
+      owner: "system-moira",
+      slug: "data-analysis",
+      visibility: "public",
+    });
     expect(workflow.id).toBe("5dd9c5c3-1176-4967-9d6c-798134b769df");
     expect(workflow.metadata.version).toBe("2.0.0");
     expect(workflow.nodes).toHaveLength(40);
@@ -244,20 +252,35 @@ describe("data-analysis", () => {
       "never broadens access",
       "Verified Research",
       "Iterative Research",
-    ]) expect(workflow.metadata.description).toContain(claim);
+    ])
+      expect(workflow.metadata.description).toContain(claim);
   });
 
   test("separates authority, acquisition evidence, and owner-specific repair reach", () => {
     const registry = workflow.variableRegistry!;
     expect(Object.keys(registry).sort()).toEqual([
-      "analysis_result", "audience", "confidentiality_policy", "constraints",
-      "decision_context", "deliverables", "delivery_mode", "operating_mode", "question",
-      "readiness_repair_reach", "result_repair_reach", "resume_stage", "scope",
-      "source_contract", "source_evidence", "success_criteria", "usable_source_count",
+      "analysis_result",
+      "audience",
+      "confidentiality_policy",
+      "constraints",
+      "decision_context",
+      "deliverables",
+      "delivery_mode",
+      "operating_mode",
+      "question",
+      "readiness_repair_reach",
+      "result_repair_reach",
+      "resume_stage",
+      "scope",
+      "source_contract",
+      "source_evidence",
+      "success_criteria",
+      "usable_source_count",
       "workspace_path",
     ]);
     expect(node(workflow, "acquire-sources").inputSchema.globalInputs).toEqual([
-      "source_evidence", "usable_source_count",
+      "source_evidence",
+      "usable_source_count",
     ]);
     expect(registry.readiness_repair_reach.enum).toEqual(["contained", "source", "limited"]);
     expect(registry.result_repair_reach.enum).toEqual(["contained", "data", "source", "contract"]);
@@ -266,17 +289,31 @@ describe("data-analysis", () => {
   test("keeps unique source IDs and one-to-one projection as semantic invariants", () => {
     for (const id of ["capture-context", "revise-problem", "revise-analysis-process"])
       expect(node(workflow, id).directive).toMatch(/pairwise.unique/i);
-    for (const id of ["acquire-sources", "review-data-inline", "analyze-and-synthesize", "review-result-inline"])
+    for (const id of [
+      "acquire-sources",
+      "review-data-inline",
+      "analyze-and-synthesize",
+      "review-result-inline",
+    ])
       expect(node(workflow, id).directive).toMatch(/one-to-one|one matching unique/i);
   });
 
   test("types truthful source outcomes in the terminal projection", () => {
     const evidenceItem = workflow.variableRegistry!.source_evidence.items;
-    expect(evidenceItem.properties.actual_availability.enum).toEqual(["available", "unavailable", "unknown"]);
+    expect(evidenceItem.properties.actual_availability.enum).toEqual([
+      "available",
+      "unavailable",
+      "unknown",
+    ]);
     const resultItem = workflow.variableRegistry!.analysis_result.properties.sources.items;
-    expect(resultItem.required).toEqual(expect.arrayContaining([
-      "initial_availability", "actual_availability", "access_outcome", "sanitized_provenance",
-    ]));
+    expect(resultItem.required).toEqual(
+      expect.arrayContaining([
+        "initial_availability",
+        "actual_availability",
+        "access_outcome",
+        "sanitized_provenance",
+      ]),
+    );
     expect(resultItem.properties).not.toHaveProperty("availability");
   });
 
@@ -331,26 +368,51 @@ describe("data-analysis", () => {
     const result = await runScenario(workflow, {
       name: "inline clean",
       mockInputs: cleanInputs(),
-      expect: { status: "completed", avoids: ["approve-problem", "approve-final", "materialize-workspace"] },
+      expect: {
+        status: "completed",
+        avoids: ["approve-problem", "approve-final", "materialize-workspace"],
+      },
     });
     expect(result.passed).toBe(true);
     expect(compactRoute(result)).toEqual([
-      "start", "capture-context", "delivery-mode-file", "frame-problem", "problem-approval-mode",
-      "resume-stage-gate", "acquire-sources", "usable-sources-gate", "prepare-data",
-      "readiness-review-mode", "review-data-inline", "review-data-inline-gate",
-      "analyze-and-synthesize", "final-review-mode", "review-result-inline",
-      "review-result-inline-gate", "final-approval-mode", "end",
+      "start",
+      "capture-context",
+      "delivery-mode-file",
+      "frame-problem",
+      "problem-approval-mode",
+      "resume-stage-gate",
+      "acquire-sources",
+      "usable-sources-gate",
+      "prepare-data",
+      "readiness-review-mode",
+      "review-data-inline",
+      "review-data-inline-gate",
+      "analyze-and-synthesize",
+      "final-review-mode",
+      "review-result-inline",
+      "review-result-inline-gate",
+      "final-approval-mode",
+      "end",
     ]);
   });
 
   test("filesystem delivery materializes and reviews the current workspace", async () => {
-    const result = await runScenario(workflow, {
-      name: "filesystem clean", mockInputs: cleanInputs("filesystem"),
-      expect: { status: "completed", reaches: ["materialize-workspace", "review-data-file", "review-result-file"] },
-    }, { engineSetup: useScenarioMaterializeGrant });
+    const result = await runScenario(
+      workflow,
+      {
+        name: "filesystem clean",
+        mockInputs: cleanInputs("filesystem"),
+        expect: {
+          status: "completed",
+          reaches: ["materialize-workspace", "review-data-file", "review-result-file"],
+        },
+      },
+      { engineSetup: useScenarioMaterializeGrant },
+    );
     expect(result.passed).toBe(true);
     expect(result.finalContext.analysis_result).toMatchObject({
-      delivery_mode: "filesystem", report_path: `${workspace}/analysis-report.md`,
+      delivery_mode: "filesystem",
+      report_path: `${workspace}/analysis-report.md`,
     });
   });
 
@@ -378,7 +440,10 @@ describe("data-analysis", () => {
       name: "contained readiness",
       mockInputs: {
         ...cleanInputs(),
-        "review-data-inline": [{ issues_count: 1, findings: "Add sampling limit." }, { issues_count: 0 }],
+        "review-data-inline": [
+          { issues_count: 1, findings: "Add sampling limit." },
+          { issues_count: 0 },
+        ],
         "repair-data-inline": {
           readiness_repair_reach: "contained",
           readiness_record: readiness().readiness_record + " Sampling limit added.",
@@ -393,7 +458,10 @@ describe("data-analysis", () => {
         ...cleanInputs(),
         "acquire-sources": [acquisition(), acquisition()],
         "prepare-data": [readiness(), readiness()],
-        "review-data-inline": [{ issues_count: 1, findings: "Reacquire provenance." }, { issues_count: 0 }],
+        "review-data-inline": [
+          { issues_count: 1, findings: "Reacquire provenance." },
+          { issues_count: 0 },
+        ],
         "repair-data-inline": {
           readiness_repair_reach: "source",
           readiness_record: readiness().readiness_record + " Reacquisition required.",
@@ -431,7 +499,15 @@ describe("data-analysis", () => {
         "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
         "analyze-and-synthesize": [
           { analysis_result: analysisResult() },
-          { analysis_result: analysisResult("inline", "complete", source(), "usable", revisedDecision) },
+          {
+            analysis_result: analysisResult(
+              "inline",
+              "complete",
+              source(),
+              "usable",
+              revisedDecision,
+            ),
+          },
         ],
         "review-result-inline": [
           { issues_count: 1, findings: "The canonical decision context is stale." },
@@ -459,18 +535,28 @@ describe("data-analysis", () => {
         "frame-problem": [framing("Initial"), framing("Problem revised"), framing("Final revised")],
         "approve-problem": [
           { decision: "revise", feedback: "Clarify the launch boundary." },
-          { decision: "accepted" }, { decision: "accepted" },
+          { decision: "accepted" },
+          { decision: "accepted" },
         ],
         "revise-problem": {
           revision_summary: "Clarified the launch boundary in the canonical contract.",
-          ...contractRevision(), resume_stage: "acquisition",
+          ...contractRevision(),
+          resume_stage: "acquisition",
         },
         "acquire-sources": [acquisition(), acquisition()],
         "prepare-data": [readiness(), readiness()],
         "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
         "analyze-and-synthesize": [
           { analysis_result: analysisResult() },
-          { analysis_result: analysisResult("inline", "complete", source(), "usable", revisedDecision) },
+          {
+            analysis_result: analysisResult(
+              "inline",
+              "complete",
+              source(),
+              "usable",
+              revisedDecision,
+            ),
+          },
         ],
         "review-result-inline": [{ issues_count: 0 }, { issues_count: 0 }],
         "approve-final": [
@@ -504,7 +590,9 @@ describe("data-analysis", () => {
         },
       },
       teleportAfter: {
-        afterNode: "review-data-inline", visitNumber: 1, teleportTo: "revise-analysis-process",
+        afterNode: "review-data-inline",
+        visitNumber: 1,
+        teleportTo: "revise-analysis-process",
       },
       expect: { status: "completed", reaches: ["revise-analysis-process"] },
     });
@@ -530,7 +618,8 @@ describe("data-analysis", () => {
           repair_summary: "Changed the reproduced provenance defect.",
           analysis_result: analysisResult("filesystem"),
         },
-      }, expect: { status: "completed" },
+      },
+      expect: { status: "completed" },
     };
     const dataRepair: TestScenario = {
       name: "inline final data repair",
@@ -539,20 +628,27 @@ describe("data-analysis", () => {
         "prepare-data": [readiness(), readiness()],
         "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
         "analyze-and-synthesize": [
-          { analysis_result: analysisResult() }, { analysis_result: analysisResult() },
+          { analysis_result: analysisResult() },
+          { analysis_result: analysisResult() },
         ],
         "review-result-inline": [
-          { issues_count: 1, findings: "Preparation evidence is stale." }, { issues_count: 0 },
+          { issues_count: 1, findings: "Preparation evidence is stale." },
+          { issues_count: 0 },
         ],
         "repair-result-inline": {
           result_repair_reach: "data",
           repair_summary: "Changed the reproduced stale preparation evidence.",
           analysis_result: analysisResult(),
         },
-      }, expect: { status: "completed" },
+      },
+      expect: { status: "completed" },
     };
     const results = await Promise.all([
-      runScenario(workflow, { name: "coverage inline", mockInputs: cleanInputs(), expect: { status: "completed" } }),
+      runScenario(workflow, {
+        name: "coverage inline",
+        mockInputs: cleanInputs(),
+        expect: { status: "completed" },
+      }),
       runScenario(workflow, fileRepair, { engineSetup: useScenarioMaterializeGrant }),
       runScenario(workflow, dataRepair),
       runScenario(workflow, {
@@ -566,7 +662,8 @@ describe("data-analysis", () => {
             repair_summary: "Confirmed a limited result is required.",
           },
           "produce-limited-result": { analysis_result: analysisResult("inline", "limited") },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       }),
       runScenario(workflow, {
         name: "coverage interactive revision",
@@ -574,30 +671,34 @@ describe("data-analysis", () => {
           ...cleanInputs("inline", "interactive"),
           "frame-problem": [framing(), framing("Revised")],
           "approve-problem": [
-            { decision: "revise", feedback: "Clarify scope." }, { decision: "accepted" },
+            { decision: "revise", feedback: "Clarify scope." },
+            { decision: "accepted" },
           ],
           "revise-problem": {
             revision_summary: "Clarified scope in the canonical contract.",
-            ...contractRevision(), resume_stage: "acquisition",
+            ...contractRevision(),
+            resume_stage: "acquisition",
           },
           "approve-final": { decision: "accepted" },
-        }, expect: { status: "completed" },
-      }),
-      runScenario(workflow, {
-        name: "coverage file readiness repair",
-        mockInputs: {
-          ...cleanInputs("filesystem"),
-          "review-data-file": [
-            { issues_count: 1 },
-            { issues_count: 0 },
-          ],
-          "repair-data-file": {
-            readiness_repair_reach: "contained",
-            repair_summary: "Corrected the reproduced file-readiness finding.",
-          },
         },
         expect: { status: "completed" },
-      }, { engineSetup: useScenarioMaterializeGrant }),
+      }),
+      runScenario(
+        workflow,
+        {
+          name: "coverage file readiness repair",
+          mockInputs: {
+            ...cleanInputs("filesystem"),
+            "review-data-file": [{ issues_count: 1 }, { issues_count: 0 }],
+            "repair-data-file": {
+              readiness_repair_reach: "contained",
+              repair_summary: "Corrected the reproduced file-readiness finding.",
+            },
+          },
+          expect: { status: "completed" },
+        },
+        { engineSetup: useScenarioMaterializeGrant },
+      ),
       runScenario(workflow, {
         name: "coverage final feedback revision",
         mockInputs: {
@@ -609,7 +710,15 @@ describe("data-analysis", () => {
           "review-data-inline": [{ issues_count: 0 }, { issues_count: 0 }],
           "analyze-and-synthesize": [
             { analysis_result: analysisResult() },
-            { analysis_result: analysisResult("inline", "complete", source(), "usable", revisedDecision) },
+            {
+              analysis_result: analysisResult(
+                "inline",
+                "complete",
+                source(),
+                "usable",
+                revisedDecision,
+              ),
+            },
           ],
           "review-result-inline": [{ issues_count: 0 }, { issues_count: 0 }],
           "approve-final": [
@@ -646,11 +755,7 @@ describe("data-analysis", () => {
       runScenario(workflow, {
         name: "coverage zero usable sources",
         mockInputs: {
-          "capture-context": capture(
-            "inline",
-            "autonomous",
-            source("not_authorized", "unknown"),
-          ),
+          "capture-context": capture("inline", "autonomous", source("not_authorized", "unknown")),
           "frame-problem": framing(),
           "acquire-sources": acquisition("not_authorized"),
           "produce-limited-result": {

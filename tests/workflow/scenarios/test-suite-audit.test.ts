@@ -14,11 +14,7 @@ import {
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
-import {
-  runScenario,
-  type MockInput,
-  type TestScenario,
-} from "../../helpers/scenario-runner.js";
+import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
 const catalogEntry = findSystemCatalogEntry("test-suite-audit", "public")!;
 
@@ -33,9 +29,8 @@ function node(workflow: WorkflowGraph, id: string): any {
 }
 
 function useMaterializeGrant(engine: GraphExecutionEngine): void {
-  const handlers = (
-    engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> }
-  ).nodeHandlers;
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> })
+    .nodeHandlers;
   handlers.set(
     "materialize",
     new MaterializeHandler(
@@ -45,12 +40,14 @@ function useMaterializeGrant(engine: GraphExecutionEngine): void {
   );
 }
 
-function cleanInputs(options: {
-  batches?: number;
-  decision?: "analysis_only" | "apply" | "abort";
-  changeClasses?: number;
-  delivery?: "local" | "publish" | "publish_notify";
-} = {}): Record<string, MockInput> {
+function cleanInputs(
+  options: {
+    batches?: number;
+    decision?: "analysis_only" | "apply" | "abort";
+    changeClasses?: number;
+    delivery?: "local" | "publish" | "publish_notify";
+  } = {},
+): Record<string, MockInput> {
   const batches = options.batches ?? 1;
   const decision = options.decision ?? "analysis_only";
   const changeClasses = options.changeClasses ?? 1;
@@ -126,23 +123,32 @@ describe("test-suite-audit", () => {
       "Test Generation",
       "Data Analysis",
       "Software Development Flow",
-    ]) expect(description).toContain(phrase);
+    ])
+      expect(description).toContain(phrase);
     expect(description).not.toContain("3,122");
     expect(description).not.toContain("Jest");
   });
 
   test("materializes one registry standard into an execution-bound workspace", async () => {
     expect(Object.keys(workflow.variableRegistry!).sort()).toEqual([
-      "audit_standard", "batch_cursor", "batch_total", "change_class_cursor",
-      "change_class_total", "notification_state", "outcome", "report_path",
-      "report_url", "workspace_path",
+      "audit_standard",
+      "batch_cursor",
+      "batch_total",
+      "change_class_cursor",
+      "change_class_total",
+      "notification_state",
+      "outcome",
+      "report_path",
+      "report_url",
+      "workspace_path",
     ]);
     expect(workflow.variableRegistry!.workspace_path).toMatchObject({
       const: "./moira-ws/test-suite-audit-{{executionId}}",
       default: "./moira-ws/test-suite-audit-{{executionId}}",
     });
     expect(workflow.variableRegistry!.report_path).toMatchObject({
-      const: "final-report.md", default: "final-report.md",
+      const: "final-report.md",
+      default: "final-report.md",
     });
     expect(String(workflow.variableRegistry!.audit_standard.default)).toContain(
       "## Mutation, verification and recovery",
@@ -157,10 +163,18 @@ describe("test-suite-audit", () => {
       node(workflow, "discover-corpus").directive,
       {
         variables: Object.fromEntries(
-          Object.entries(workflow.variableRegistry!).map(([key, definition]) => [key, definition.default]),
+          Object.entries(workflow.variableRegistry!).map(([key, definition]) => [
+            key,
+            definition.default,
+          ]),
         ),
-        nodeStates: {}, executionId, workflowId: workflow.id, userId: "workflow-test-user",
-        _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(workflow.variableRegistry),
+        nodeStates: {},
+        executionId,
+        workflowId: workflow.id,
+        userId: "workflow-test-user",
+        _templateFragmentVars: GraphTemplateProcessor.computeFragmentVars(
+          workflow.variableRegistry,
+        ),
       },
     );
     expect(rendered).toContain(`./moira-ws/test-suite-audit-${executionId}/audit-standard.md`);
@@ -177,21 +191,31 @@ describe("test-suite-audit", () => {
       "confirm-scope-taxonomy.correction_target",
     );
     expect(node(workflow, "present-recommendations").inputSchema.properties.decision.enum).toEqual([
-      "analysis_only", "apply", "revise", "abort",
+      "analysis_only",
+      "apply",
+      "revise",
+      "abort",
     ]);
     expect(node(workflow, "failure-decision").inputSchema.properties.decision.enum).toEqual([
-      "repair", "revert",
+      "repair",
+      "revert",
     ]);
   });
 
   test("keeps report, abort, and recovery-blocked terminals distinct", () => {
     expect(node(workflow, "end-report").finalOutput).toEqual([
-      "outcome", "report_path", "report_url", "notification_state",
+      "outcome",
+      "report_path",
+      "report_url",
+      "notification_state",
     ]);
     expect(node(workflow, "end-abort").finalOutput).toEqual(["outcome"]);
     expect(node(workflow, "end-blocked").finalOutput).toEqual(["outcome"]);
     expect(node(workflow, "repair-final-report").inputSchema.properties.repair_reach.enum).toEqual([
-      "report", "analysis", "work_applied", "work_reverted",
+      "report",
+      "analysis",
+      "work_applied",
+      "work_reverted",
     ]);
   });
 
@@ -228,7 +252,8 @@ describe("test-suite-audit", () => {
       mockInputs: {
         ...cleanInputs({ batches: 0 }),
         "discover-corpus": [
-          { batch_total: 2, batch_cursor: 0 }, { batch_total: 0, batch_cursor: 0 },
+          { batch_total: 2, batch_cursor: 0 },
+          { batch_total: 0, batch_cursor: 0 },
         ],
         "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
         "confirm-scope-taxonomy": [
@@ -248,7 +273,11 @@ describe("test-suite-audit", () => {
         ...cleanInputs({ batches: 0 }),
         "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
         "confirm-scope-taxonomy": [
-          { decision: "correct", correction_target: "taxonomy", feedback: "Split billing behavior." },
+          {
+            decision: "correct",
+            correction_target: "taxonomy",
+            feedback: "Split billing behavior.",
+          },
           { decision: "accept" },
         ],
         "apply-user-correction": { batch_cursor: 0 },
@@ -262,7 +291,11 @@ describe("test-suite-audit", () => {
 
   test("combined discriminating scenarios cover every executable node and branch", async () => {
     const scenarios: TestScenario[] = [
-      { name: "analysis zero local", mockInputs: cleanInputs({ batches: 0 }), expect: { status: "completed" } },
+      {
+        name: "analysis zero local",
+        mockInputs: cleanInputs({ batches: 0 }),
+        expect: { status: "completed" },
+      },
       {
         name: "user scope correction regenerates derived evidence",
         mockInputs: {
@@ -286,7 +319,12 @@ describe("test-suite-audit", () => {
       },
       {
         name: "apply batches classes publish notify",
-        mockInputs: cleanInputs({ batches: 2, decision: "apply", changeClasses: 2, delivery: "publish_notify" }),
+        mockInputs: cleanInputs({
+          batches: 2,
+          decision: "apply",
+          changeClasses: 2,
+          delivery: "publish_notify",
+        }),
         expect: { status: "completed" },
       },
       {
@@ -295,7 +333,8 @@ describe("test-suite-audit", () => {
           ...cleanInputs({ batches: 0, decision: "apply", changeClasses: 0 }),
           "review-taxonomy": [{ issues_count: 2 }, { issues_count: 0 }],
           "repair-taxonomy": { repair_reach: "taxonomy", batch_total: 0, batch_cursor: 0 },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "taxonomy repair discovers stale scope",
@@ -335,22 +374,27 @@ describe("test-suite-audit", () => {
           "repair-taxonomy": { repair_reach: "irreducible", batch_total: 0, batch_cursor: 0 },
           "irreducible-decision": { decision: "limited_report" },
           "upload-report": { upload_state: "failed", report_url: "" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "irreducible mapping abort",
         mockInputs: {
-          ...cleanInputs(), "review-mapping": { issues_count: 1 },
+          ...cleanInputs(),
+          "review-mapping": { issues_count: 1 },
           "repair-mapping": { repair_reach: "irreducible" },
           "irreducible-decision": { decision: "abort" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "mapping contained",
         mockInputs: {
-          ...cleanInputs(), "review-mapping": [{ issues_count: 1 }, { issues_count: 0 }],
+          ...cleanInputs(),
+          "review-mapping": [{ issues_count: 1 }, { issues_count: 0 }],
           "repair-mapping": { repair_reach: "mapping" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "mapping taxonomy",
@@ -361,38 +405,58 @@ describe("test-suite-audit", () => {
           "map-batch": [{}, {}],
           "review-mapping": [{ issues_count: 1 }, { issues_count: 0 }],
           "repair-mapping": { repair_reach: "taxonomy" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "mapping scope",
         mockInputs: {
           ...cleanInputs(),
-          "discover-corpus": [{ batch_total: 1, batch_cursor: 0 }, { batch_total: 0, batch_cursor: 0 }],
+          "discover-corpus": [
+            { batch_total: 1, batch_cursor: 0 },
+            { batch_total: 0, batch_cursor: 0 },
+          ],
           "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }],
           "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }],
-          "review-mapping": { issues_count: 1 }, "repair-mapping": { repair_reach: "scope" },
-        }, expect: { status: "completed" },
+          "review-mapping": { issues_count: 1 },
+          "repair-mapping": { repair_reach: "scope" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "analysis repair reaches and revise",
         mockInputs: {
           ...cleanInputs({ batches: 0 }),
           "review-taxonomy": [{ issues_count: 0 }, { issues_count: 0 }, { issues_count: 0 }],
-          "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }, { decision: "accept" }],
-          "discover-corpus": [{ batch_total: 0, batch_cursor: 0 }, { batch_total: 0, batch_cursor: 0 }],
+          "confirm-scope-taxonomy": [
+            { decision: "accept" },
+            { decision: "accept" },
+            { decision: "accept" },
+          ],
+          "discover-corpus": [
+            { batch_total: 0, batch_cursor: 0 },
+            { batch_total: 0, batch_cursor: 0 },
+          ],
           "analyze-suite": [{}, {}, {}, {}],
           "review-analysis": [
-            { issues_count: 1 }, { issues_count: 1 }, { issues_count: 1 },
-            { issues_count: 0 }, { issues_count: 0 },
+            { issues_count: 1 },
+            { issues_count: 1 },
+            { issues_count: 1 },
+            { issues_count: 0 },
+            { issues_count: 0 },
           ],
           "repair-analysis": [
-            { repair_reach: "analysis" }, { repair_reach: "taxonomy" }, { repair_reach: "scope" },
+            { repair_reach: "analysis" },
+            { repair_reach: "taxonomy" },
+            { repair_reach: "scope" },
           ],
           "present-recommendations": [
-            { decision: "revise", feedback: "Narrow the recommendation." }, { decision: "analysis_only" },
+            { decision: "revise", feedback: "Narrow the recommendation." },
+            { decision: "analysis_only" },
           ],
           "revise-recommendations": { repair_reach: "analysis" },
-        }, expect: { status: "completed", maxSteps: 180 },
+        },
+        expect: { status: "completed", maxSteps: 180 },
       },
       {
         name: "recommendation taxonomy revision abort",
@@ -402,10 +466,12 @@ describe("test-suite-audit", () => {
           "confirm-scope-taxonomy": [{ decision: "accept" }, { decision: "accept" }],
           "review-analysis": [{ issues_count: 0 }, { issues_count: 0 }],
           "present-recommendations": [
-            { decision: "revise", feedback: "Correct taxonomy." }, { decision: "abort" },
+            { decision: "revise", feedback: "Correct taxonomy." },
+            { decision: "abort" },
           ],
           "revise-recommendations": { repair_reach: "taxonomy" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "recommendation scope revision regenerates corpus",
@@ -430,17 +496,24 @@ describe("test-suite-audit", () => {
         name: `baseline ${decision}`,
         mockInputs: {
           ...cleanInputs({ batches: 0, decision: "apply" }),
-          "establish-baseline": { baseline_state: "limited", change_class_total: 0, change_class_cursor: 0 },
+          "establish-baseline": {
+            baseline_state: "limited",
+            change_class_total: 0,
+            change_class_cursor: 0,
+          },
           "baseline-limited-decision": { decision },
-        }, expect: { status: "completed" as const },
+        },
+        expect: { status: "completed" as const },
       })),
       {
         name: "class failure repair",
         mockInputs: {
           ...cleanInputs({ batches: 0, decision: "apply" }),
           "targeted-check-class": [{ check_state: "fail" }, { check_state: "pass" }],
-          "class-failure-decision": { decision: "repair" }, "repair-class-failure": {},
-        }, expect: { status: "completed" },
+          "class-failure-decision": { decision: "repair" },
+          "repair-class-failure": {},
+        },
+        expect: { status: "completed" },
       },
       {
         name: "class failure revert",
@@ -449,7 +522,8 @@ describe("test-suite-audit", () => {
           "targeted-check-class": { check_state: "fail" },
           "class-failure-decision": { decision: "revert" },
           "revert-changes": { restoration_state: "restored" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "changed review contained",
@@ -457,24 +531,29 @@ describe("test-suite-audit", () => {
           ...cleanInputs({ batches: 0, decision: "apply" }),
           "review-changes": [{ issues_count: 1 }, { issues_count: 0 }],
           "repair-changes": { repair_reach: "contained" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "changed review scope changing",
         mockInputs: {
           ...cleanInputs({ batches: 0, decision: "apply" }),
-          "review-changes": { issues_count: 1 }, "repair-changes": { repair_reach: "scope_changing" },
+          "review-changes": { issues_count: 1 },
+          "repair-changes": { repair_reach: "scope_changing" },
           "review-analysis": [{ issues_count: 0 }, { issues_count: 0 }],
           "present-recommendations": [{ decision: "apply" }, { decision: "analysis_only" }],
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "broad repair",
         mockInputs: {
           ...cleanInputs({ batches: 0, decision: "apply" }),
           "broad-verification": [{ verification_state: "fail" }, { verification_state: "pass" }],
-          "failure-decision": { decision: "repair" }, "repair-failure": {},
-        }, expect: { status: "completed" },
+          "failure-decision": { decision: "repair" },
+          "repair-failure": {},
+        },
+        expect: { status: "completed" },
       },
       {
         name: "broad revert blocked",
@@ -483,7 +562,8 @@ describe("test-suite-audit", () => {
           "broad-verification": { verification_state: "fail" },
           "failure-decision": { decision: "revert" },
           "revert-changes": { restoration_state: "blocked" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "final report repair publish",
@@ -491,7 +571,8 @@ describe("test-suite-audit", () => {
           ...cleanInputs({ batches: 0, delivery: "publish" }),
           "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
           "repair-final-report": { repair_reach: "report" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "final analysis repair",
@@ -501,27 +582,32 @@ describe("test-suite-audit", () => {
           "present-recommendations": [{ decision: "analysis_only" }, { decision: "analysis_only" }],
           "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
           "repair-final-report": { repair_reach: "analysis" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "final applied work repair",
         mockInputs: {
           ...cleanInputs({ batches: 0, decision: "apply" }),
           "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
-          "repair-final-report": { repair_reach: "work_applied" }, "repair-final-applied-work": {},
-        }, expect: { status: "completed" },
+          "repair-final-report": { repair_reach: "work_applied" },
+          "repair-final-applied-work": {},
+        },
+        expect: { status: "completed" },
       },
       {
         name: "final reverted work repair notify failure",
         mockInputs: {
           ...cleanInputs({ batches: 0, decision: "apply", delivery: "publish_notify" }),
           "broad-verification": { verification_state: "fail" },
-          "failure-decision": { decision: "revert" }, "revert-changes": { restoration_state: "restored" },
+          "failure-decision": { decision: "revert" },
+          "revert-changes": { restoration_state: "restored" },
           "review-final-report": [{ issues_count: 1 }, { issues_count: 0 }],
           "repair-final-report": { repair_reach: "work_reverted" },
           "repair-final-reverted-work": { restoration_state: "restored" },
           "notify-user": { notification_state: "failed" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "final reverted repair remains restoration blocked",
@@ -539,9 +625,11 @@ describe("test-suite-audit", () => {
       {
         name: "impossible nonmutating work blocks",
         mockInputs: {
-          ...cleanInputs({ batches: 0 }), "review-final-report": { issues_count: 1 },
+          ...cleanInputs({ batches: 0 }),
+          "review-final-report": { issues_count: 1 },
           "repair-final-report": { repair_reach: "work_applied" },
-        }, expect: { status: "completed" },
+        },
+        expect: { status: "completed" },
       },
       {
         name: "impossible nonmutating revert repair blocks",
@@ -557,16 +645,24 @@ describe("test-suite-audit", () => {
     const results = [];
     for (const value of scenarios) results.push(await run(workflow, value));
     const failed = results.filter((result) => !result.passed);
-    if (failed.length) console.error(failed.map((result) => ({
-      scenario: result.scenario, error: result.error,
-      expectations: result.failedExpectations, last: result.visitedNodes.slice(-12),
-    })));
+    if (failed.length)
+      console.error(
+        failed.map((result) => ({
+          scenario: result.scenario,
+          error: result.error,
+          expectations: result.failedExpectations,
+          last: result.visitedNodes.slice(-12),
+        })),
+      );
     expect(failed).toEqual([]);
     const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });
-    if (coverage.nodeCoverage !== 100 || coverage.branchCoverage !== 100) console.error({
-      nodeCoverage: coverage.nodeCoverage, branchCoverage: coverage.branchCoverage,
-      unvisitedNodes: coverage.unvisitedNodes, uncoveredBranches: coverage.uncoveredBranches,
-    });
+    if (coverage.nodeCoverage !== 100 || coverage.branchCoverage !== 100)
+      console.error({
+        nodeCoverage: coverage.nodeCoverage,
+        branchCoverage: coverage.branchCoverage,
+        unvisitedNodes: coverage.unvisitedNodes,
+        uncoveredBranches: coverage.uncoveredBranches,
+      });
     expect(coverage.unvisitedNodes).toEqual([]);
     expect(coverage.uncoveredBranches).toEqual([]);
     expect(coverage.nodeCoverage).toBe(100);

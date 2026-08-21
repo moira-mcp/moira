@@ -13,10 +13,7 @@ import {
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
-import {
-  runScenario,
-  type TestScenario,
-} from "../../helpers/scenario-runner.js";
+import { runScenario, type TestScenario } from "../../helpers/scenario-runner.js";
 
 const catalogEntry = findSystemCatalogEntry("infinite-task-loop", "public")!;
 const taskA = "Prepare the release-readiness note for service A";
@@ -37,11 +34,7 @@ function node(workflow: WorkflowGraph, id: string): any {
   return found;
 }
 
-function acceptedTask(
-  taskDescription = taskA,
-  executionPlan = planA,
-  executionSummary = resultA,
-) {
+function acceptedTask(taskDescription = taskA, executionPlan = planA, executionSummary = resultA) {
   return {
     "ask-task": { task_description: taskDescription },
     "understand-and-plan": { execution_plan: executionPlan },
@@ -300,7 +293,8 @@ describe("infinite-task-loop", () => {
 
   test("plan revision and result rework both return through explicit plan approval", async () => {
     const revisedPlan = "Add the requested evidence check, then produce the verified note.";
-    const reworkPlan = "Correct the rejected result, verify it again, and present the changed work.";
+    const reworkPlan =
+      "Correct the rejected result, verify it again, and present the changed work.";
     const result = await runScenario(workflow, {
       name: "plan revision and result rework",
       mockInputs: {
@@ -312,10 +306,7 @@ describe("infinite-task-loop", () => {
           { plan_decision: "approve" },
         ],
         "revise-plan": { execution_plan: revisedPlan },
-        "execute-task": [
-          { execution_summary: resultA },
-          { execution_summary: resultB },
-        ],
+        "execute-task": [{ execution_summary: resultA }, { execution_summary: resultB }],
         "report-results": [
           { result_decision: "rework", user_feedback: "Correct the reported outcome." },
           { result_decision: "accept" },
@@ -372,10 +363,7 @@ describe("infinite-task-loop", () => {
         mockInputs: {
           ...acceptedTask(),
           "present-plan": [{ plan_decision: "approve" }, { plan_decision: "approve" }],
-          "execute-task": [
-            { execution_summary: resultA },
-            { execution_summary: resultB },
-          ],
+          "execute-task": [{ execution_summary: resultA }, { execution_summary: resultB }],
           "report-results": [
             { result_decision: "rework", user_feedback: "Correct the result." },
             { result_decision: "accept" },

@@ -192,18 +192,9 @@ describe("workflow schema keywords", () => {
   });
 
   test.each([
-    [
-      [{ id: "changed", action: "first", expected_result: "one" }],
-      "stable identity",
-    ],
-    [
-      [{ id: "a", action: "changed", expected_result: "one" }],
-      "completed action",
-    ],
-    [
-      [{ id: "a", action: "first", expected_result: "changed" }],
-      "completed expected result",
-    ],
+    [[{ id: "changed", action: "first", expected_result: "one" }], "stable identity"],
+    [[{ id: "a", action: "changed", expected_result: "one" }], "completed action"],
+    [[{ id: "a", action: "first", expected_result: "changed" }], "completed expected result"],
   ])("rejects replacement of protected %s", (steps) => {
     const schema = {
       type: "object",
@@ -234,7 +225,7 @@ describe("workflow schema keywords", () => {
         { steps: [prefix, { id: "b", action: "new", expected_result: "two" }] },
         schema,
         { current_step: 1, steps: [prefix, { id: "old" }] },
-    ).isValid,
+      ).isValid,
     ).toBe(true);
   });
 
@@ -251,11 +242,10 @@ describe("workflow schema keywords", () => {
     };
 
     expect(
-      SchemaValidator.validate(
-        { repair_status: "blocked" },
-        schema,
-        { current_step: 1, steps: [{ id: "a" }] },
-      ).isValid,
+      SchemaValidator.validate({ repair_status: "blocked" }, schema, {
+        current_step: 1,
+        steps: [{ id: "a" }],
+      }).isValid,
     ).toBe(true);
   });
 
@@ -291,12 +281,14 @@ describe("workflow schema keywords", () => {
     });
     const validator = new GraphValidator();
 
-    expect((await validator.validateUnified(workflow(orderedPlanSchema.xOrderedUniqueReferences) as never)).valid).toBe(
-      true,
-    );
-    const invalid = await validator.validateUnified(
-      workflow({ idProperty: "id" }) as never,
-    );
+    expect(
+      (
+        await validator.validateUnified(
+          workflow(orderedPlanSchema.xOrderedUniqueReferences) as never,
+        )
+      ).valid,
+    ).toBe(true);
+    const invalid = await validator.validateUnified(workflow({ idProperty: "id" }) as never);
     expect(invalid.valid).toBe(false);
     expect(invalid.issues.some((issue) => issue.message.includes("referencesProperty"))).toBe(true);
   });

@@ -116,7 +116,7 @@ describe("user-onboarding", () => {
 
   test("requires complete total-driven pagination before catalog absence is concluded", () => {
     const welcome = node(workflow, "welcome");
-    expect(welcome.directive).toContain('limit: 100, offset: 0');
+    expect(welcome.directive).toContain("limit: 100, offset: 0");
     expect(welcome.directive).toContain("read both workflows and total");
     expect(welcome.directive).toContain("offsets 100, 200, and so on");
     expect(welcome.directive).toContain("distinct observed workflows reaches total");

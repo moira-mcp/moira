@@ -224,12 +224,14 @@ describe("task-breakdown-flow", () => {
   });
 
   test("requires a materially changed retry, then re-verifies the same current item", async () => {
-    const failedFirst = [{
-      item_id: first.id,
-      status: "failed",
-      actual_result: "Initial inspection was incomplete",
-      verification: "Required readiness source was not checked",
-    }];
+    const failedFirst = [
+      {
+        item_id: first.id,
+        status: "failed",
+        actual_result: "Initial inspection was incomplete",
+        verification: "Required readiness source was not checked",
+      },
+    ];
     const result = await runScenario(workflow, {
       name: "changed retry",
       mockInputs: {
