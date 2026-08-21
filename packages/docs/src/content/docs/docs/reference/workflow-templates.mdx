@@ -19,13 +19,13 @@ mcp__moira__start({ workflowId: "<workflow-id>" })
 
 ### software-development-flow
 
-Filesystem-first feature development with source-grounded planning, complete implementation units, independent semantic gates, impact-based validation, accepted-unit checkpoints, and explicit side-effect authority.
+Filesystem-first delivery of a complete software change: source-grounded planning, implementation, tests, applicable permanent documentation, semantic and mechanical validation, user acceptance, and authorized VCS finalization. The flow classifies the cause of every finding, replans invalid or mechanically undecidable criteria, and prevents supporting validation from becoming a second product.
 
 ```mermaid
 flowchart LR
     A[Requirements] --> B[Plan and approve] --> C[Implement unit]
-    C --> D[Test adequacy and architecture]
-    D --> E[Impact-based validation]
+    C --> D[Cheap checks and test adequacy]
+    D --> E[Architecture and impact-based validation]
     E --> G[Conditional acceptance and checkpoint]
     G -->|more units| C
     G --> F[Docs, final coverage, and report]
@@ -40,7 +40,12 @@ flowchart LR
 | Complete implementation units | Each approved unit owns dependencies, tests, applicable permanent docs, and focused evidence |
 | Layered review | Test adequacy and project-grounded architecture are judged from the diff and primary sources by the implementing agent; a single delegated reviewer then judges the completed unit for completeness and quality, and never re-runs linters, type checks or suites |
 | Agent-triggered replan | A teleport entry lets the agent restart planning the moment the plan itself is wrong, instead of waiting for a gate to notice |
+| Cause-aware repair | Every finding is classified as a product, test/validation, evidence, documentation/process, or upstream plan/criterion defect before mutation; only the owning artifact is repaired |
+| Decidable acceptance evidence | A planned check must distinguish the required state from a plausible wrong state; semantic completeness, architecture, and business provenance remain review judgments when no reliable mechanical observation exists |
+| Meta-validation stop | Repeated same-root findings or validation-only changes while product evidence stays green force reassessment and `replan` instead of another proxy, guard, harness, metatest, or proof layer |
+| Bounded class-wide repair | A confirmed root is repaired across its real manifestations inside the original task, without inventing a universal scanner for a contextual property |
 | Impact-based validation | Runtime, browser, security, performance, broad builds, and full suites run only when project policy or actual risk makes them applicable |
+| Mutation-aware cycles | Verification-only repairs rerun cheap checks, test adequacy, and the affected downstream gates while retaining current architecture evidence; any product or test-intent change advances the product iteration and reruns architecture and the full validation suffix |
 | Conditional visual evidence | A plan unit explicitly opts into screenshot inspection and a portable self-contained HTML report; incidental UI changes do not enable it automatically |
 | Incremental history | With approved VCS authority, each accepted unit checkpoints only its own changes before the next unit starts; unrelated work and workflow artifacts are excluded |
 | Explicit authority | Checkpoints and final project-native VCS reconciliation are conditional; final user acceptance occurs before reconciliation, and tool availability never authorizes a side effect |

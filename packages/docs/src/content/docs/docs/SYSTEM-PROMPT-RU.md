@@ -61,20 +61,20 @@ flowchart TD
 
 ### Доступные публичные Workflow
 
-| Workflow                               | Применение                                                       |
-| -------------------------------------- | ---------------------------------------------------------------- |
-| `moira/software-development-flow`      | Полный цикл разработки фичи с планированием и валидацией         |
-| `moira/software-development-flow-lite` | Облегчённый процесс разработки для небольших фич (1-5 шагов)     |
-| `moira/robust-task`                    | Многошаговые задачи с верифицированным завершением               |
-| `moira/content-creation`               | Статьи, блог-посты, документация                                 |
-| `moira/verified-research`              | Исследования с верифицированными источниками (анти-галлюцинация) |
-| `moira/prd-creation`                   | Product Requirements Documents                                   |
-| `moira/ux-design`                      | UX/UI дизайн с проверкой accessibility                           |
-| `moira/test-generation`                | Генерация unit/integration/e2e тестов                            |
-| `moira/test-planning`                  | Создание тест-планов с приоритизацией P0-P3                      |
-| `moira/data-analysis`                  | Анализ данных от постановки до выводов                           |
-| `moira/marketing-campaign`             | Маркетинговые материалы с дифференциацией                        |
-| `moira/workflow-management-flow`       | Создание, редактирование, деплой workflow                        |
+| Workflow                               | Применение                                                                                                                         |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `moira/software-development-flow`      | Полная поставка изменения: план, реализация, тесты, документация, cause-aware review/repair, приёмка и разрешённая VCS-финализация |
+| `moira/software-development-flow-lite` | Облегчённый процесс разработки для небольших фич (1-5 шагов)                                                                       |
+| `moira/robust-task`                    | Многошаговые задачи с верифицированным завершением                                                                                 |
+| `moira/content-creation`               | Статьи, блог-посты, документация                                                                                                   |
+| `moira/verified-research`              | Исследования с верифицированными источниками (анти-галлюцинация)                                                                   |
+| `moira/prd-creation`                   | Product Requirements Documents                                                                                                     |
+| `moira/ux-design`                      | UX/UI дизайн с проверкой accessibility                                                                                             |
+| `moira/test-generation`                | Генерация unit/integration/e2e тестов                                                                                              |
+| `moira/test-planning`                  | Создание тест-планов с приоритизацией P0-P3                                                                                        |
+| `moira/data-analysis`                  | Анализ данных от постановки до выводов                                                                                             |
+| `moira/marketing-campaign`             | Маркетинговые материалы с дифференциацией                                                                                          |
+| `moira/workflow-management-flow`       | Создание, редактирование, деплой workflow                                                                                          |
 
 Запуск workflow: `mcp__moira__start({ workflowId: "moira/test-planning" })`
 

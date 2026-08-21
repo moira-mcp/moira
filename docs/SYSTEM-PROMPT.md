@@ -93,23 +93,23 @@ Use `moira/robust-task` only when reliability is required:
 
 ### Workflow Catalog with Intent Examples
 
-| Workflow                               | Purpose                                     | Example Intents (EN/RU)                                                                       |
-| -------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `moira/software-development-flow`      | Full feature development cycle              | "develop feature", "implement feature", "build feature", "fix bug", "code task"               |
-| `moira/software-development-flow-lite` | Lightweight development process             | "small feature", "quick fix", "simple task with tests", "лёгкая фича", "простая задача"       |
-| `moira/quick-task` ⭐                  | Fast execution of tasks with 2+ steps       | "сделай X", "реализуй Y", "implement auth", "refactor the module"                             |
-| `moira/robust-task`                    | Reliable execution of complex tasks         | "большая задача", "критичная фича", "complex feature", "multi-day task"                       |
-| `moira/user-onboarding`                | Introduction to Moira for new users         | "what can you do?", "getting started", "как начать?", "что ты умеешь?"                        |
-| `moira/workflow-management-flow`       | Create or edit workflows                    | "create a flow", "new workflow", "давай сделаем флоу", "создать воркфлоу"                     |
-| `moira/test-generation`                | Generate test code with coverage            | "write tests", "add unit tests", "напиши тесты", "добавь покрытие"                            |
-| `moira/test-planning`                  | Create QA strategy and test plans           | "test plan", "QA strategy", "план тестирования", "что тестировать?"                           |
-| `moira/content-creation`               | Write articles, docs, posts                 | "write a post", "create documentation", "напиши статью", "нужна документация"                 |
-| `moira/verified-research`              | Research with verified sources              | "research this", "find out about", "исследуй", "найди информацию о"                           |
-| `moira/iterative-research`             | Research with iterative quality improvement | "deep research", "improve research quality", "глубокое исследование"                          |
-| `moira/prd-creation`                   | Product Requirements Documents              | "create PRD", "requirements for feature", "требования к фиче", "опиши что нужно сделать"      |
-| `moira/ux-design`                      | UX/UI design with accessibility             | "design the UI", "mockup", "wireframe", "как это должно выглядеть?", "дизайн интерфейса"      |
-| `moira/data-analysis`                  | Analyze data and draw conclusions           | "analyze metrics", "what does the data show?", "проанализируй данные", "что говорит метрика"  |
-| `moira/marketing-campaign`             | Marketing materials and campaigns           | "marketing content", "promotional materials", "маркетинговые материалы", "рекламная кампания" |
+| Workflow                               | Purpose                                                                                                                            | Example Intents (EN/RU)                                                                       |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `moira/software-development-flow`      | Complete software delivery: planning, implementation, tests, docs, cause-aware review, acceptance, and authorized VCS finalization | "develop feature", "implement feature", "build feature", "fix bug", "code task"               |
+| `moira/software-development-flow-lite` | Lightweight development process                                                                                                    | "small feature", "quick fix", "simple task with tests", "лёгкая фича", "простая задача"       |
+| `moira/quick-task` ⭐                  | Fast execution of tasks with 2+ steps                                                                                              | "сделай X", "реализуй Y", "implement auth", "refactor the module"                             |
+| `moira/robust-task`                    | Reliable execution of complex tasks                                                                                                | "большая задача", "критичная фича", "complex feature", "multi-day task"                       |
+| `moira/user-onboarding`                | Introduction to Moira for new users                                                                                                | "what can you do?", "getting started", "как начать?", "что ты умеешь?"                        |
+| `moira/workflow-management-flow`       | Create or edit workflows                                                                                                           | "create a flow", "new workflow", "давай сделаем флоу", "создать воркфлоу"                     |
+| `moira/test-generation`                | Generate test code with coverage                                                                                                   | "write tests", "add unit tests", "напиши тесты", "добавь покрытие"                            |
+| `moira/test-planning`                  | Create QA strategy and test plans                                                                                                  | "test plan", "QA strategy", "план тестирования", "что тестировать?"                           |
+| `moira/content-creation`               | Write articles, docs, posts                                                                                                        | "write a post", "create documentation", "напиши статью", "нужна документация"                 |
+| `moira/verified-research`              | Research with verified sources                                                                                                     | "research this", "find out about", "исследуй", "найди информацию о"                           |
+| `moira/iterative-research`             | Research with iterative quality improvement                                                                                        | "deep research", "improve research quality", "глубокое исследование"                          |
+| `moira/prd-creation`                   | Product Requirements Documents                                                                                                     | "create PRD", "requirements for feature", "требования к фиче", "опиши что нужно сделать"      |
+| `moira/ux-design`                      | UX/UI design with accessibility                                                                                                    | "design the UI", "mockup", "wireframe", "как это должно выглядеть?", "дизайн интерфейса"      |
+| `moira/data-analysis`                  | Analyze data and draw conclusions                                                                                                  | "analyze metrics", "what does the data show?", "проанализируй данные", "что говорит метрика"  |
+| `moira/marketing-campaign`             | Marketing materials and campaigns                                                                                                  | "marketing content", "promotional materials", "маркетинговые материалы", "рекламная кампания" |
 
 ### Proactive Behavior
 
