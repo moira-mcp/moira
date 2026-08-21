@@ -34,8 +34,8 @@ mcp__moira__start({
 Select "edit" when prompted for action.
 
 <Aside type="tip">
-  Use workflow-management-flow for complex edits. It guides through the process and validates
-  changes.
+  Use workflow-management-flow for complex edits. It reviews the design before mutation, validates
+  the resulting graph, and independently reviews the completed workflow.
 </Aside>
 
 ### Via the Workflow CLI
@@ -93,16 +93,21 @@ from the requested change and the available evidence, and leaves the findings it
 the audit report. When the audit is skipped, the analysis remains limited to the requested change
 and its necessary dependencies.
 
-The plan describes outcomes, affected contracts, invariants, acceptance criteria, and risks. It
-does not prescribe an exhaustive file list, exact commands, pseudocode, or a fixed sequence of
-local edits unless an external contract requires them. This leaves the implementing agent free to
-follow the dependencies it discovers without changing the approved goal or scope.
+The plan describes outcomes, affected contracts, invariants, acceptance criteria, evidence methods,
+and risks. Before it requires a validation or proof mechanism, it must identify the required state,
+a plausible wrong state, and an observation that reliably distinguishes them. An unprovable derived
+criterion is revised instead of being replaced with a surrogate signal. The plan does not prescribe
+an exhaustive file list, exact commands, pseudocode, or a fixed sequence of local edits unless an
+external contract requires them.
 
-Plan and workflow reviews use a simple file-backed loop: the reviewer overwrites a known report
-file and returns only an issue count for routing. A non-zero count returns to the repair step and
-then to the same reviewer; zero is a normal successful result. Structural validation is performed
-with Moira's official validator by the node that creates or changes the workflow, rather than by a
-second validation state machine in the graph.
+Create and edit use the same independent pre-mutation design review. Reviews record detailed
+findings in a stable workspace file and return only `pass`, `repair`, or `replan` for routing.
+`repair` is reserved for a confirmed defect owned by the reviewed artifact; an invalid criterion,
+evidence model, requirement interpretation, plan, or process returns to its earliest contract owner.
+After a real repair, the reviewer receives the bounded root class and changed knowledge. A repeated
+same-root finding without stronger evidence and validation-only work both trigger reassessment rather
+than another validation layer. Structural validation remains the responsibility of the node that
+creates or changes the workflow and uses Moira's official validator.
 
 ## Change Types
 

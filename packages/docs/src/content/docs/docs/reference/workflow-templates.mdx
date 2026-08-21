@@ -346,12 +346,23 @@ flowchart LR
     E -->|yes| F[Audit and choose scope]
     E -->|no| G[Analyze requested scope]
     F --> G
-    C --> H[Build and validate]
-    G --> I[Plan and approve]
-    I --> H
-    H --> J[Semantic review]
-    J --> K[User review]
-    K --> L{Publish?}
+    C --> H[Design contract]
+    G --> I[Edit design contract]
+    H --> J[Independent design review]
+    I --> J
+    J -->|create repair| H
+    J -->|edit repair| I
+    J -->|create replan| H
+    J -->|edit replan| G
+    J -->|pass| K[Optional user approval]
+    K --> L[Build and validate]
+    L --> M[Independent artifact review]
+    M -->|repair| P[Repair artifact]
+    P --> M
+    M -->|create replan| H
+    M -->|edit replan| G
+    M -->|pass| N[User report or review]
+    N --> O{Publish?}
 ```
 
 <Aside type="tip">
@@ -363,9 +374,11 @@ Use this workflow to create custom workflows or modify existing templates.
 | Disk-backed artifacts | Requirements, analysis, plans, and review reports stay in the workspace |
 | Embedded authoring reference | Engine rules, patterns, anti-patterns, review criteria, cost ordering, and authority rules are shipped inside the workflow |
 | Identity-aware editing | The edit path reconciles local and server provenance before semantic planning |
-| Optional source audit | A full anti-pattern audit runs only with user consent |
-| Outcome-oriented plans | Plans preserve executor freedom while fixing scope and acceptance criteria |
-| Simple review loops | Review reports stay on disk; only issue counts are used for routing |
+| Optional source audit | Interactive mode asks for consent; autonomous mode chooses from the requested change and available evidence |
+| Evidence-aware design | Every proposed proof must distinguish the required state from a plausible wrong state using an appropriate evidence method |
+| Pre-mutation design review | Create and edit share an independent semantic gate before artifact mutation; human approval remains a separate decision |
+| Cause-aware review | Reviews route to pass, artifact repair, or contract replan; repeated same-root findings without stronger evidence cannot grow another validator layer |
+| Bounded class-wide repair | A confirmed root is repaired across its real manifestations in the agreed scope, not converted into a universal contextual detector |
 | Validation | The creating or editing node runs the official schema and graph validator |
 | Context-aware handoff | Stable file paths are referenced without forcing unchanged rereads or copying file bodies through workflow state |
 | Publication gate | Standard, copy-new, and admin-override semantics require an explicit user decision; a real local target is synchronized separately |

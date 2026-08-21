@@ -794,7 +794,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/universal-research-workflow.test.ts` — public identity/version and neighboring-flow selection description; filesystem and bounded-memory state; execution-bound workspace; authority and evidence-truth boundaries; independent reviews and repair reaches; publication and notification authority; correction, process revision, abort, and materialization fallback
 - `tests/workflow/scenarios/ux-design.test.ts` — public identity/version and neighboring-flow selection description; execution workspace; correlated intake, artifact-path, reviewer, repair, feedback, and authority contracts; foreign-path rejection; accepted, limited, blocked, aborted, repair, feedback, and process-revision outcomes
 - `tests/workflow/scenarios/verified-research.test.ts`
-- `tests/workflow/scenarios/workflow-management-flow.test.ts` — embedded authoring policy, minimal state and operating-mode routing; create, edit, audit, review, publication, error, local-sync, autonomous, and process-revision routes; addressed-reference pattern and antipattern
+- `tests/workflow/scenarios/workflow-management-flow.test.ts` — embedded authoring policy, minimal state and operating-mode routing; shared pre-mutation design review; pass/repair/replan and changed/reassess routing; Proxy, scanner, metatest, guard, and proof-token regression fixtures; create, edit, audit, publication, error, local-sync, autonomous, and process-revision routes; complete node and branch coverage
 - `tests/workflow/scenarios/workflow-presentation-generator.test.ts`
 
 ## Agent Instructions
