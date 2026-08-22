@@ -1225,6 +1225,23 @@ describe("software-development-flow v14.1", () => {
         "product",
       ]);
     }
+
+    const closure = workflow.nodes.find((node) => node.id === "approve-current-unit-closure") as {
+      directive: string;
+    };
+    expect(closure.directive).toContain(
+      "mixed earliest causes cross paired repair responsibilities",
+    );
+    expect(closure.directive).toContain("In `autonomous` mode do not ask the user");
+    expect(closure.directive).toContain("return `closure_decision=approved` whenever");
+    expect(closure.directive).toContain("approved unit outcome may remain sound");
+    expect(closure.directive).toContain(
+      "do not refuse closure merely because that outcome can still be delivered",
+    );
+    expect(closure.directive).toContain("exactly one must state the current `replan` disposition");
+    expect(closure.directive).toContain(
+      "`closure_decision=refused` remains the user's explicit refusal",
+    );
   });
 
   test("uses one product-review cursor instead of a validation resume stack", () => {
