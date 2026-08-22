@@ -12,6 +12,7 @@ describe("SQLite online backup", () => {
     const source = fs.readFileSync(script, "utf8");
     expect(source).toContain("insufficient free space for backup");
     expect(source).toContain("destination directory is not writable");
+    expect(source).toContain(".timeout 5000");
   });
 
   test("captures one coherent state while WAL writes continue", async () => {
@@ -22,11 +23,11 @@ describe("SQLite online backup", () => {
     try {
       execFileSync("sqlite3", [
         source,
-        "PRAGMA journal_mode=WAL; CREATE TABLE items(id INTEGER PRIMARY KEY); CREATE TABLE totals(value INTEGER NOT NULL); INSERT INTO totals VALUES(0);",
+        "PRAGMA journal_mode=WAL; CREATE TABLE items(id INTEGER PRIMARY KEY); CREATE TABLE totals(value INTEGER NOT NULL); INSERT INTO items VALUES(1); INSERT INTO totals VALUES(1);",
       ]);
       const writer = spawn("sh", [
         "-c",
-        `i=1; while [ $i -le 150 ]; do sqlite3 '${source}' "BEGIN IMMEDIATE; INSERT INTO items VALUES($i); UPDATE totals SET value=value+1; COMMIT;"; [ $i -ne 1 ] || touch '${writerReady}'; i=$((i+1)); done`,
+        `{ printf '%s\n' 'BEGIN IMMEDIATE;' 'INSERT INTO items VALUES(2);' 'UPDATE totals SET value=value+1;' ".shell touch '${writerReady}'"; sleep 1; printf '%s\n' 'COMMIT;'; i=3; while [ $i -le 150 ]; do printf '%s\n' "BEGIN IMMEDIATE; INSERT INTO items VALUES($i); UPDATE totals SET value=value+1; COMMIT;"; i=$((i+1)); done; } | sqlite3 '${source}'`,
       ]);
       await new Promise<void>((resolve, reject) => {
         const deadline = Date.now() + 2000;
