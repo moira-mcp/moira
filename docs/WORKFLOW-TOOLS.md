@@ -138,9 +138,9 @@ Basic structure:
 
 With `--graph`:
 
-- A visual graph of flows between nodes
-- Shows how nodes are connected to each other
-- Marks conditional transitions (true/false)
+- The same deterministic plain-text schema as `schema`, appended after the basic structure
+- Every node and labelled connection, including condition branches and dangling targets
+- Basic blocks, cycles, reachability classes, declared data flow, and a coverage footer
 
 With `--detailed`:
 
@@ -328,7 +328,7 @@ fails, the destination remains byte-for-byte unchanged.
 # 1. Look at the overall structure
 moira-workflow ./workflows/production/flows/<flow>.json structure
 
-# 2. Visualize the graph
+# 2. Inspect the complete control-flow schema after the structure summary
 moira-workflow ./workflows/production/flows/<flow>.json structure --graph
 
 # 3. Inspect a specific node
@@ -376,7 +376,7 @@ moira-workflow ./workflows/production/flows/<flow>.json list --type condition
 # Find all nodes related to a specific feature
 moira-workflow ./workflows/production/flows/<flow>.json search "validation"
 
-# Look at the connection graph to understand the flow
+# Append the deterministic control-flow schema to the structure summary
 moira-workflow ./workflows/production/flows/<flow>.json structure --graph
 ```
 

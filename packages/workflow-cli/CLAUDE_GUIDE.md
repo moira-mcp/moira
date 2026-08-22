@@ -87,7 +87,7 @@ writing. Validation errors leave the destination byte-for-byte unchanged.
 # Find nodes containing text
 moira-workflow dev-flow.json search "validation"
 
-# Show structure with the flow graph
+# Show structure followed by the deterministic control-flow schema
 moira-workflow dev-flow.json structure --graph --detailed
 
 # Print the complete deterministic control-flow schema for agent inspection
