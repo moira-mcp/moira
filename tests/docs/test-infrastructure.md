@@ -115,14 +115,16 @@ Tests use **@swc/jest** instead of ts-jest for faster TypeScript compilation.
 | Category    | Workers | Notes                                 |
 | ----------- | ------- | ------------------------------------- |
 | Unit        | 2       | Memory-optimized for large test count |
-| Integration | 5       | globalSetup creates DB once           |
+| Integration | 1       | Sequential files share one SQLite DB  |
 | API         | 5       | Parallel HTTP requests                |
 | MCP Tools   | 1       | Sequential (shared MCP state)         |
 | E2E         | 1       | Sequential (browser context)          |
 
 ### Database
 
-SQLite uses **WAL mode** with `synchronous=NORMAL` for better concurrent access.
+SQLite uses **WAL mode** with `synchronous=NORMAL`. Integration files run sequentially because they
+share one migrated database and write transactions; parallel workers would contend for the same
+SQLite writer lock. Tests inside a file still exercise WAL read/write behavior where required.
 
 ---
 
@@ -137,7 +139,7 @@ SQLite uses **WAL mode** with `synchronous=NORMAL` for better concurrent access.
 - `tests/config/jest.base.config.js` - shared config with @swc/jest transform
 - `tests/config/jest.unit.config.js`
 - `tests/config/jest.workflow.config.js`
-- `tests/config/jest.integration.config.js` - 5 workers + globalSetup
+- `tests/config/jest.integration.config.js` - 1 worker + one shared globalSetup database
 - `tests/config/jest.api.config.js` - 5 workers
 - `tests/config/jest.mcp-tools.config.js`
 - `tests/config/playwright.config.ts`

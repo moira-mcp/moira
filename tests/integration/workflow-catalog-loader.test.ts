@@ -541,23 +541,30 @@ describe("Workflow Catalog Loader Integration", () => {
     const firstSlug = `loader-atomic-first-${stamp}`;
     const secondSlug = `loader-atomic-second-${stamp}`;
     await installCatalogEntries(
-      [entry(OWNER_A, firstSlug, "1.0.0"), entry(OWNER_A, secondSlug, "1.0.0")],
+      [
+        entry(OWNER_A, firstSlug, "1.0.0", "public", "first-v1"),
+        entry(OWNER_A, secondSlug, "1.0.0", "public", "second-v1"),
+      ],
       deps,
     );
     const sqlite = getSqliteInstance();
     sqlite.exec(
-      `CREATE TRIGGER fail_catalog_second_update BEFORE UPDATE OF graph ON workflow
-       WHEN NEW.slug = '${secondSlug}' BEGIN SELECT RAISE(ABORT, 'injected apply failure'); END`,
+      `CREATE TRIGGER fail_catalog_second_baseline_update BEFORE UPDATE ON managedWorkflowBaseline
+       WHEN NEW.ownerId = '${OWNER_A}' AND NEW.slug = '${secondSlug}'
+       BEGIN SELECT RAISE(ABORT, 'injected apply failure'); END`,
     );
     try {
       await expect(
         installCatalogEntries(
-          [entry(OWNER_A, firstSlug, "2.0.0"), entry(OWNER_A, secondSlug, "2.0.0")],
+          [
+            entry(OWNER_A, firstSlug, "2.0.0", "public", "first-v2"),
+            entry(OWNER_A, secondSlug, "2.0.0", "public", "second-v2"),
+          ],
           deps,
         ),
       ).rejects.toThrow("injected apply failure");
     } finally {
-      sqlite.exec("DROP TRIGGER fail_catalog_second_update");
+      sqlite.exec("DROP TRIGGER fail_catalog_second_baseline_update");
     }
     for (const slug of [firstSlug, secondSlug]) {
       const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);

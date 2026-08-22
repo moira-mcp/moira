@@ -9,7 +9,10 @@ export default {
     "<rootDir>/tests/functional/**/*.test.ts",
   ],
   testTimeout: 90000,
-  maxWorkers: 5, // WAL mode allows concurrent reads + serialized writes with busy_timeout
+  // Every integration file shares one migrated SQLite database. Run files in
+  // one worker so write transactions are isolated by test order instead of
+  // racing until busy_timeout expires; WAL still benefits reads within a file.
+  maxWorkers: 1,
   workerIdleMemoryLimit: "4GB",
   globalSetup: "<rootDir>/tests/config/jest-integration-global-setup.js",
   setupFiles: [
