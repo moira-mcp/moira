@@ -138,9 +138,9 @@ Basic structure:
 
 With `--graph`:
 
-- A visual graph of flows between nodes
-- Shows how nodes are connected to each other
-- Marks conditional transitions (true/false)
+- The same deterministic plain-text schema as `schema`, appended after the basic structure
+- Every node and labelled connection, including condition branches and dangling targets
+- Basic blocks, cycles, reachability classes, declared data flow, and a coverage footer
 
 With `--detailed`:
 
@@ -170,6 +170,20 @@ Outputs:
 
 The command exits with a non-zero status when errors exist, so scripts and agents can use it as a
 real gate. Warnings alone do not make the command fail.
+
+### schema - Read-only control-flow schema
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json schema
+```
+
+Prints one deterministic plain-text control-flow schema derived only from the workflow JSON. It
+expands real node IDs, canonically ordered labelled connections, conditions, declared local/global
+outputs, final outputs, subgraph mappings, automatic-node output variables, context references,
+basic blocks, and cyclic regions. It distinguishes normal start reachability, explicit teleport-only
+regions, and disconnected roots/components. Every source node and connection is emitted exactly
+once; the coverage footer makes omissions visible. The command does not interpret workflow-specific
+meaning, execute workflow content, or write the source file.
 
 ### Variables - Working with workflow variables
 
@@ -314,7 +328,7 @@ fails, the destination remains byte-for-byte unchanged.
 # 1. Look at the overall structure
 moira-workflow ./workflows/production/flows/<flow>.json structure
 
-# 2. Visualize the graph
+# 2. Inspect the complete control-flow schema after the structure summary
 moira-workflow ./workflows/production/flows/<flow>.json structure --graph
 
 # 3. Inspect a specific node
@@ -362,7 +376,7 @@ moira-workflow ./workflows/production/flows/<flow>.json list --type condition
 # Find all nodes related to a specific feature
 moira-workflow ./workflows/production/flows/<flow>.json search "validation"
 
-# Look at the connection graph to understand the flow
+# Append the deterministic control-flow schema to the structure summary
 moira-workflow ./workflows/production/flows/<flow>.json structure --graph
 ```
 

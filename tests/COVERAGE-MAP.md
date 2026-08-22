@@ -371,6 +371,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/workflow-cli/workflow-schema.test.ts` — deterministic complete workflow control-flow schemas: locale-independent canonical edge/mapping order, basic blocks, conditions, many independent cycles, separate start/teleport/disconnected reachability, dangling edges, current node data-flow declarations including batch write-note and materialize registry reads, context references, deep iterative traversal, terminal-control-safe structural tokens, non-mutation, and duplicate-ID rejection
 - `tests/unit/scripts/workflow-tool-identity.test.ts` — set-name and set-slug: exact replacement, kebab-case validation, catalog-entry warning, version bump, and no collateral change to slug/owner/description/nodes
 - `tests/unit/scripts/workflow-tool-variables.test.ts` — incl. registry-backed globals, metadata, file-backed arguments, source diagnostics, fail-fast validation, atomic replace/sync, End projection/path qualification, and inert-retry migration
 - `tests/unit/services/mcp-text-service.test.ts`
@@ -378,6 +379,7 @@ level headings classify the tracked test paths listed beneath them.
 **integration**
 
 - `tests/integration/cli-mcp-parity.test.ts`
+- `tests/integration/workflow-schema-cli.test.ts` — public schema command output, shared `structure --graph` rendering, canonical equivalence across permuted JSON object keys, terminal-control-safe decoded JSON, source-byte preservation, and non-zero ambiguous-graph failure
 - `tests/integration/essential-cases-split.test.ts`
 - `tests/integration/get-current-step-enhanced.test.ts` — including read-only materialize re-presentation versus empty public `step()` completion
 - `tests/integration/mcp-text-service.test.ts`

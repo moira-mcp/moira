@@ -22,6 +22,7 @@
  *   search <text>                    Search nodes (supports regex: "a|b")
  *   list [--type <type>]             List all nodes (with type filter)
  *   structure [--graph]              Show workflow structure and connections
+ *   schema                           Print one deterministic control-flow schema
  *   validate                         Validate workflow
  *   get-variable <name>              Get declared global from variableRegistry
  *   set-variable <name> <value>      Set declared global in variableRegistry
@@ -36,6 +37,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
+import { renderWorkflowSchema } from "./workflow-schema.js";
 // Import GraphValidator directly to avoid auth dependencies from shared index
 import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
 // Import directly from workflow-query-service to avoid auth dependencies
@@ -46,7 +48,6 @@ import {
   getWorkflowVariables,
   setWorkflowVariable,
   deleteWorkflowVariable,
-  buildFlowGraph,
   // Shared functions for CLI/MCP parity
   listNodesCompact,
   analyzeVariableUsage,
@@ -998,8 +999,7 @@ function showStructure(workflow: WorkflowGraph, config: StructureConfig): void {
     console.log(c("bright", "─".repeat(80)));
     console.log(c("cyan", "Flow Graph:"));
     console.log("");
-    const graphLines = buildFlowGraph(workflow);
-    graphLines.forEach((line) => console.log(line));
+    console.log(renderWorkflowSchema(workflow));
   }
 }
 
@@ -1312,6 +1312,7 @@ ${c("cyan", "Commands:")}
   search <text>                    Search nodes (supports regex: "a|b")
   list [--type <type>]             List all nodes (with type filter)
   structure [--graph] [--detailed] Show workflow structure
+  schema                           Print one deterministic control-flow schema
   validate                         Validate workflow
   variables [--usage]              Analyze all workflow variables
   get-variable <name>              Get declared global from variableRegistry
@@ -1356,6 +1357,7 @@ ${c("cyan", "Examples:")}
   moira-workflow dev-flow.json search "restart|verify"
   moira-workflow dev-flow.json list --type agent-directive
   moira-workflow dev-flow.json structure --graph
+  moira-workflow dev-flow.json schema
   moira-workflow dev-flow.json validate
 `);
     process.exit(0);
@@ -1591,6 +1593,15 @@ async function main(): Promise<void> {
 
     case "structure":
       showStructure(workflow, config);
+      break;
+
+    case "schema":
+      try {
+        console.log(renderWorkflowSchema(workflow));
+      } catch (error) {
+        console.error(c("red", `ERROR: ${(error as Error).message}`));
+        process.exitCode = 1;
+      }
       break;
 
     case "list-variables":

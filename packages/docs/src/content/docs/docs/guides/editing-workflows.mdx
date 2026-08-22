@@ -65,6 +65,18 @@ moira-workflow ./workspace/workflow.json sync ./workflows/production/flows/<flow
 moira-workflow ./workflows/production/flows/<flow>.json validate
 ```
 
+Before reviewing or changing a large graph, print its complete deterministic control-flow schema:
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json schema
+```
+
+The schema names every real node and labelled connection, conditions, cycles, declared outputs and
+mappings, context references, normal start paths, explicit teleport-only regions, and disconnected
+components. It is a read-only structural projection for agent or human reasoning; it does not run
+the workflow, interpret workflow-specific meaning, or claim that a structurally visible route is
+semantically correct.
+
 ### How workflow-management-flow handles edits
 
 For an edit, the management workflow loads the complete current workflow and records the edit
