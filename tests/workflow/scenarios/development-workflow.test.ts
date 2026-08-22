@@ -1,11 +1,17 @@
 /**
- * Observable scenarios for the filesystem-first Software Development Flow v13.
+ * Observable scenarios for Software Development Flow v14.1.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
-import { GraphValidator, detectCycles, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  detectCycles,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
@@ -15,6 +21,18 @@ function loadWorkflow(): WorkflowGraph {
   return structuredClone(
     findSystemCatalogEntry("software-development-flow", "public")!.graph,
   ) as WorkflowGraph;
+}
+
+function useScenarioMaterializeGrant(engine: GraphExecutionEngine): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> })
+    .nodeHandlers;
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "software-development-scenario-token" },
+      () => "https://moira.example",
+    ),
+  );
 }
 
 function ordinaryInputs(): Record<string, MockInput> {
@@ -37,7 +55,9 @@ function ordinaryInputs(): Record<string, MockInput> {
       vcs_commits_authorized: false,
     },
     "revise-plan-after-rejection": {},
+    "prepare-plan-unit-implementation": { preparation_outcome: "ready" },
     "implement-plan-unit": {},
+    "complete-plan-unit": { completion_outcome: "ready" },
     "validate-cheap": { issues_count: 0 },
     "repair-cheap-validation": { repair_outcome: "changed", mutation_scope: "product" },
     "review-test-adequacy": { review_outcome: "pass" },
@@ -48,6 +68,7 @@ function ordinaryInputs(): Record<string, MockInput> {
     "repair-architecture": { repair_outcome: "changed", mutation_scope: "product" },
     "approve-current-unit-closure": { closure_decision: "approved" },
     "revise-plan-for-replan": {},
+    "revise-plan-for-teleport": {},
     "validate-runtime": { validation_outcome: "not_applicable" },
     "repair-runtime": { repair_outcome: "changed", mutation_scope: "product" },
     "wait-for-runtime-state-change": { blocker_decision: "retry" },
@@ -73,6 +94,9 @@ function ordinaryInputs(): Record<string, MockInput> {
     "resolve-finalization-blocker": { blocker_decision: "retry" },
     "report-and-accept-feature": { feature_decision: "accepted" },
     "revise-plan-after-feedback": {},
+    "teleport-replan": {
+      replan_rationale: "Repository facts invalidate the approved plan; preserve completed outcomes",
+    },
   };
 }
 
@@ -151,17 +175,61 @@ const scenarios: TestScenario[] = [
           vcs_commits_authorized: false,
         },
       ],
-      "revise-plan-for-replan": {},
+      "teleport-replan": {
+        replan_rationale: "R".repeat(8000),
+      },
     },
-    ["teleport-replan", "revise-plan-for-replan", "review-plan", "implement-plan-unit", "end"],
-    [],
+    [
+      "teleport-replan",
+      "advance-plan-revision-for-teleport",
+      "revise-plan-for-teleport",
+      "review-plan",
+      "implement-plan-unit",
+      "end",
+    ],
+    ["revise-plan-for-replan"],
     { teleportAfter: { afterNode: "implement-plan-unit", teleportTo: "teleport-replan" } },
   ),
   flow(
     "ordinary code task without VCS side effects",
     {},
-    ["validate-cheap", "review-test-adequacy", "review-architecture", "end"],
+    [
+      "prepare-plan-unit-implementation",
+      "implement-plan-unit",
+      "complete-plan-unit",
+      "validate-cheap",
+      "review-test-adequacy",
+      "review-architecture",
+      "end",
+    ],
     ["finalize-feature", "end-aborted"],
+  ),
+  flow(
+    "preparation replans before implementation or validation",
+    {
+      "prepare-plan-unit-implementation": [
+        { preparation_outcome: "replan" },
+        { preparation_outcome: "ready" },
+      ],
+      "approve-plan": [approvedPlan, approvedPlan],
+    },
+    ["route-implementation-preparation", "approve-current-unit-closure", "review-plan", "end"],
+  ),
+  flow(
+    "producer completion can replan before cheap validation",
+    {
+      "complete-plan-unit": [
+        { completion_outcome: "replan" },
+        { completion_outcome: "ready" },
+      ],
+      "approve-plan": [approvedPlan, approvedPlan],
+    },
+    ["route-plan-unit-completion", "approve-current-unit-closure", "review-plan", "end"],
+  ),
+  flow(
+    "producer completion creates a correction opportunity before cheap validation",
+    {},
+    ["implement-plan-unit", "complete-plan-unit", "validate-cheap", "end"],
   ),
   flow(
     "requirements rejection and plan repair remain durable",
@@ -878,7 +946,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v13", () => {
+describe("software-development-flow v14.1", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -889,7 +957,7 @@ describe("software-development-flow v13", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("13.0.0");
+    expect(workflow.metadata.version).toBe("14.1.1");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -910,8 +978,34 @@ describe("software-development-flow v13", () => {
     ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
 
-    // The standards are a document the run consults: the workspace owner renders them once and
-    // writes them down, and every other reader — including a delegated reviewer — is given the path.
+    const sharedReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-replan");
+    const teleportReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-teleport");
+    expect(sharedReplan?.directive).not.toContain("{{teleport-replan.replan_rationale}}");
+    expect(teleportReplan?.directive).toContain("{{teleport-replan.replan_rationale}}");
+    expect(workflow.nodes.find((node) => node.id === "teleport-replan")?.connections).toEqual({
+      success: "advance-plan-revision-for-teleport",
+    });
+    const teleportSchema = workflow.nodes.find((node) => node.id === "teleport-replan")
+      ?.inputSchema as {
+      additionalProperties: boolean;
+      required: string[];
+      properties: { replan_rationale: { type: string; minLength: number; maxLength: number } };
+    };
+    expect(teleportSchema.additionalProperties).toBe(false);
+    expect(teleportSchema.required).toEqual(["replan_rationale"]);
+    expect(teleportSchema.properties.replan_rationale).toEqual({
+      type: "string",
+      minLength: 1,
+      maxLength: 8000,
+    });
+
+    const completion = workflow.nodes.find((node) => node.id === "complete-plan-unit");
+    expect(completion?.directive).toContain(
+      "Directly finish every reproducible foreseeable in-scope omission",
+    );
+    expect(completion?.directive).toContain("Do not emit a findings-only handoff");
+
+    // The engine materializes standards once, and every reader receives the canonical path.
     const standardsVars = [
       "planning_standards",
       "engineering_standards",
@@ -921,22 +1015,21 @@ describe("software-development-flow v13", () => {
     ];
     for (const name of standardsVars) {
       expect(String(workflow.variableRegistry?.[name]?.default ?? "")).toContain("*Why.*");
-      const rendering = workflow.nodes.filter((node) =>
-        JSON.stringify(node).includes(`{{${name}}}`),
-      );
-      expect(rendering.map((node) => node.id)).toEqual(["capture-task-and-context"]);
+      expect(JSON.stringify(workflow.nodes)).not.toContain(`{{${name}}}`);
     }
+    const materializer = workflow.nodes.find((node) => node.id === "materialize-development-standards") as {
+      files: Array<{ path: string; from: string }>;
+    };
+    expect(materializer.files.map(({ path, from }) => ({ path, from }))).toEqual([
+      { path: "standards/planning.md", from: "planning_standards" },
+      { path: "standards/engineering.md", from: "engineering_standards" },
+      { path: "standards/tests.md", from: "test_standards" },
+      { path: "standards/documentation.md", from: "documentation_standards" },
+      { path: "standards/review.md", from: "review_standards" },
+    ]);
     const owner = workflow.nodes.find((node) => node.id === "capture-task-and-context");
     expect(owner?.directive).toContain("./moira-ws/software-development-flow-{task-name}");
-    for (const file of [
-      "planning.md",
-      "engineering.md",
-      "tests.md",
-      "documentation.md",
-      "review.md",
-    ]) {
-      expect(owner?.directive).toContain(file);
-    }
+    expect(owner?.connections).toEqual({ success: "materialize-development-standards" });
 
     // The reviewer contract has one home: the finding format no longer repeats across directives.
     expect(JSON.stringify(workflow)).not.toContain("do not stop after the first");
@@ -955,7 +1048,7 @@ describe("software-development-flow v13", () => {
     expect(
       (workflow.nodes.find((node) => node.id === "validate-cheap") as { directive: string })
         .directive,
-    ).toContain("tests are not a substitute for them");
+    ).toContain("tests are not substitutes for them");
 
     // Exactly one delegated review per plan unit: the per-unit gates judge locally, and only the
     // completeness review obtains independence.
@@ -968,7 +1061,9 @@ describe("software-development-flow v13", () => {
       expect(gate.completionCondition).not.toContain("Independent");
       expect(`${gate.directive} ${gate.completionCondition}`).not.toContain("fallback");
       // Still a gate: report path and routing count survive.
-      expect(gate.directive).toContain("{{workspace_path}}/step-{{current_step_index}}");
+      expect(gate.directive).toContain(
+        "{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}",
+      );
     }
     expect(
       (
@@ -1067,6 +1162,26 @@ describe("software-development-flow v13", () => {
     expect(review).toContain("Class-wide means bounded real manifestations");
   });
 
+  test.each([
+    ["missing", {}],
+    ["empty", { replan_rationale: "" }],
+    ["over maximum", { replan_rationale: "R".repeat(8001) }],
+  ])("rejects %s teleport replan rationale at the actual input boundary", async (_, input) => {
+    const result = await runScenario(
+      workflow,
+      {
+        name: "invalid teleport rationale",
+        mockInputs: { ...ordinaryInputs(), "teleport-replan": input },
+        expect: { status: "completed", maxSteps: 220 },
+        teleportAfter: { afterNode: "implement-plan-unit", teleportTo: "teleport-replan" },
+      },
+      { engineSetup: useScenarioMaterializeGrant },
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'teleport-replan'");
+    expect(result.visitedNodes).not.toContain("revise-plan-for-teleport");
+  });
+
   test("classifies causes and exposes replan before mutation", () => {
     const review = String(workflow.variableRegistry?.review_standards?.default ?? "");
     for (const cause of [
@@ -1146,7 +1261,7 @@ describe("software-development-flow v13", () => {
         "repair-runtime": { repair_outcome: "changed", mutation_scope: "verification_only" },
       },
       expect: { status: "completed", maxSteps: 220 },
-    });
+    }, { engineSetup: useScenarioMaterializeGrant });
     expect(result.passed).toBe(true);
     const route = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
     const suffix = route.slice(route.indexOf("repair-runtime"));
@@ -1169,7 +1284,7 @@ describe("software-development-flow v13", () => {
         "repair-runtime": { repair_outcome: "changed", mutation_scope: "product" },
       },
       expect: { status: "completed", maxSteps: 220 },
-    });
+    }, { engineSetup: useScenarioMaterializeGrant });
     expect(result.passed).toBe(true);
     expect(result.finalContext.current_iteration).toBe(2);
     const route = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
@@ -1184,7 +1299,7 @@ describe("software-development-flow v13", () => {
         "approve-plan": { ...approvedPlan, total_steps: 2 },
       },
       expect: { status: "completed", maxSteps: 220 },
-    });
+    }, { engineSetup: useScenarioMaterializeGrant });
     expect(result.passed).toBe(true);
     const route = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
     expect(route.filter((id) => id === "review-architecture")).toHaveLength(2);
@@ -1195,7 +1310,11 @@ describe("software-development-flow v13", () => {
   });
 
   test("all representative routes complete and cover every node and branch", async () => {
-    const results = await Promise.all(scenarios.map((item) => runScenario(workflow, item)));
+    const results = await Promise.all(
+      scenarios.map((item) =>
+        runScenario(workflow, item, { engineSetup: useScenarioMaterializeGrant }),
+      ),
+    );
     const failed = results.filter((result) => !result.passed);
     if (failed.length > 0) {
       throw new Error(
@@ -1211,6 +1330,258 @@ describe("software-development-flow v13", () => {
           2,
         ),
       );
+    }
+
+    const routeFor = (scenarioName: string): string[] => {
+      const result = results.find((candidate) => candidate.scenario === scenarioName);
+      expect(result).toBeDefined();
+      return result!.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
+    };
+    const expectOrdered = (route: string[], nodes: readonly string[], after = -1): number => {
+      let cursor = after;
+      for (const nodeId of nodes) {
+        const next = route.indexOf(nodeId, cursor + 1);
+        expect(next).toBeGreaterThan(cursor);
+        cursor = next;
+      }
+      return cursor;
+    };
+    const positions = (route: string[], nodeId: string): number[] =>
+      route.flatMap((candidate, index) => (candidate === nodeId ? [index] : []));
+
+    const ordinary = routeFor("ordinary code task without VCS side effects");
+    expectOrdered(ordinary, [
+      "prepare-plan-unit-implementation",
+      "implement-plan-unit",
+      "complete-plan-unit",
+      "validate-cheap",
+    ]);
+
+    const multipleUnits = routeFor("multiple approved units advance without a report-only turn");
+    const unitPreparation = positions(multipleUnits, "prepare-plan-unit-implementation");
+    const unitImplementation = positions(multipleUnits, "implement-plan-unit");
+    const unitCompletion = positions(multipleUnits, "complete-plan-unit");
+    const unitCheapValidation = positions(multipleUnits, "validate-cheap");
+    for (const occurrences of [
+      unitPreparation,
+      unitImplementation,
+      unitCompletion,
+      unitCheapValidation,
+    ]) {
+      expect(occurrences).toHaveLength(2);
+    }
+    for (let unit = 0; unit < 2; unit++) {
+      expect(unitPreparation[unit]).toBeLessThan(unitImplementation[unit]);
+      expect(unitImplementation[unit]).toBeLessThan(unitCompletion[unit]);
+      expect(unitCompletion[unit]).toBeLessThan(unitCheapValidation[unit]);
+    }
+    expect(unitCheapValidation[0]).toBeLessThan(unitPreparation[1]);
+
+    const preparationReplan = routeFor("preparation replans before implementation or validation");
+    const firstPreparation = preparationReplan.indexOf("prepare-plan-unit-implementation");
+    const preparationClosure = preparationReplan.indexOf("approve-current-unit-closure");
+    expect(firstPreparation).toBeGreaterThanOrEqual(0);
+    expect(preparationClosure).toBeGreaterThan(firstPreparation);
+    const prematurePreparationSuffix = preparationReplan.slice(
+      firstPreparation,
+      preparationClosure,
+    );
+    for (const forbiddenNode of [
+      "implement-plan-unit",
+      "complete-plan-unit",
+      "validate-cheap",
+    ]) {
+      expect(prematurePreparationSuffix).not.toContain(forbiddenNode);
+    }
+    const preparationReview = preparationReplan.indexOf("review-plan", preparationClosure + 1);
+    expectOrdered(
+      preparationReplan,
+      [
+        "prepare-plan-unit-implementation",
+        "implement-plan-unit",
+        "complete-plan-unit",
+        "validate-cheap",
+      ],
+      preparationReview,
+    );
+
+    const completionReplan = routeFor("producer completion can replan before cheap validation");
+    const firstCompletion = completionReplan.indexOf("complete-plan-unit");
+    const completionClosure = completionReplan.indexOf("approve-current-unit-closure");
+    expect(firstCompletion).toBeGreaterThanOrEqual(0);
+    expect(completionClosure).toBeGreaterThan(firstCompletion);
+    expect(completionReplan.slice(firstCompletion, completionClosure)).not.toContain(
+      "validate-cheap",
+    );
+    const completionReview = completionReplan.indexOf("review-plan", completionClosure + 1);
+    expectOrdered(
+      completionReplan,
+      [
+        "prepare-plan-unit-implementation",
+        "implement-plan-unit",
+        "complete-plan-unit",
+        "validate-cheap",
+      ],
+      completionReview,
+    );
+
+    const productRepairOrigins = [
+      [
+        "cheap test and architecture repairs invalidate all later evidence",
+        "repair-cheap-validation",
+      ],
+      [
+        "cheap test and architecture repairs invalidate all later evidence",
+        "repair-test-adequacy",
+      ],
+      ["cheap test and architecture repairs invalidate all later evidence", "repair-architecture"],
+      [
+        "delegated completeness review sends an incomplete unit back through the cheap gate",
+        "repair-unit-completeness",
+      ],
+      ["runtime repository failure repairs and runtime external blocker retries", "repair-runtime"],
+      ["expensive repository failure repairs and external blocker retries", "repair-expensive"],
+      ["per-unit rejection can repair within the approved plan", "repair-user-feedback"],
+      [
+        "authorized checkpoint repository failure repairs before cursor advance",
+        "repair-checkpoint-repository",
+      ],
+    ] as const;
+    for (const [scenarioName, repairNode] of productRepairOrigins) {
+      const route = routeFor(scenarioName);
+      const repairIndex = route.indexOf(repairNode);
+      const completionIndex = route.indexOf("complete-plan-unit", repairIndex + 1);
+      const cheapValidationIndex = route.indexOf("validate-cheap", repairIndex + 1);
+      expect(repairIndex).toBeGreaterThanOrEqual(0);
+      expect(completionIndex).toBeGreaterThan(repairIndex);
+      expect(cheapValidationIndex).toBeGreaterThan(completionIndex);
+    }
+
+    const verificationTailWithArchitecture = [
+      "mark-verification-only-iteration",
+      "validate-cheap",
+      "route-cheap-validation",
+      "review-test-adequacy",
+      "route-test-adequacy-replan",
+      "route-test-adequacy",
+      "route-current-verification-only",
+      "review-architecture",
+      "route-architecture-replan",
+      "route-architecture-review",
+      "mark-product-review-current",
+      "validate-runtime",
+      "route-runtime-external",
+      "route-runtime-repository",
+      "validate-expensive",
+      "route-expensive-external",
+      "route-expensive-repository",
+      "review-unit-completeness",
+    ] as const;
+    const verificationTailWithoutArchitecture = [
+      "mark-verification-only-iteration",
+      "validate-cheap",
+      "route-cheap-validation",
+      "review-test-adequacy",
+      "route-test-adequacy-replan",
+      "route-test-adequacy",
+      "route-current-verification-only",
+      "validate-runtime",
+      "route-runtime-external",
+      "route-runtime-repository",
+      "validate-expensive",
+      "route-expensive-external",
+      "route-expensive-repository",
+      "review-unit-completeness",
+    ] as const;
+    const boundedRepairSegments = [
+      [
+        "a contained test repair goes back to the gate that raised it",
+        [
+          "repair-test-adequacy",
+          "route-test-repair-outcome",
+          "route-test-adequacy-reach",
+          ...verificationTailWithArchitecture,
+        ],
+      ],
+      [
+        "a contained architecture repair goes back to the architecture gate",
+        [
+          "repair-architecture",
+          "route-architecture-repair-outcome",
+          "route-architecture-reach",
+          "review-architecture",
+        ],
+      ],
+      [
+        "a contained completeness repair goes back to the same reviewer",
+        [
+          "repair-unit-completeness",
+          "route-completeness-repair-outcome",
+          "route-completeness-repair-gate-local",
+          "mark-current-evidence-iteration",
+          "review-unit-completeness",
+        ],
+      ],
+      [
+        "cheap verification-only repair restarts verification without a new product iteration",
+        [
+          "repair-cheap-validation",
+          "route-cheap-repair-replan",
+          "route-cheap-repair-scope",
+          ...verificationTailWithArchitecture,
+        ],
+      ],
+      [
+        "runtime verification-only repair reruns downstream gates without architecture",
+        [
+          "repair-runtime",
+          "route-runtime-repair-replan",
+          "route-runtime-repair-scope",
+          ...verificationTailWithoutArchitecture,
+        ],
+      ],
+      [
+        "expensive verification-only repair reruns runtime and expensive validation",
+        [
+          "repair-expensive",
+          "route-expensive-repair-replan",
+          "route-expensive-repair-scope",
+          ...verificationTailWithoutArchitecture,
+        ],
+      ],
+      [
+        "completeness verification repair reruns the validation chain",
+        [
+          "repair-unit-completeness",
+          "route-completeness-repair-outcome",
+          "route-completeness-repair-gate-local",
+          "route-unit-completeness-reach",
+          ...verificationTailWithoutArchitecture,
+        ],
+      ],
+      [
+        "a contained checkpoint repair returns to the checkpoint instead of the whole chain",
+        [
+          "repair-checkpoint-repository",
+          "route-checkpoint-repair-replan",
+          "route-checkpoint-repair-reach",
+          ...verificationTailWithoutArchitecture,
+          "route-completeness-review-replan",
+          "route-unit-completeness",
+          "review-plan-unit-with-user",
+          "route-plan-unit-user-review",
+          "route-checkpoint-authority",
+          "checkpoint-plan-unit",
+        ],
+      ],
+    ] as const;
+    for (const [scenarioName, expectedCone] of boundedRepairSegments) {
+      const route = routeFor(scenarioName);
+      const repairIndex = route.indexOf(expectedCone[0]);
+      expect(repairIndex).toBeGreaterThanOrEqual(0);
+      const boundaryIndex = route.indexOf(expectedCone[expectedCone.length - 1], repairIndex + 1);
+      expect(boundaryIndex).toBeGreaterThan(repairIndex);
+      expect(route.slice(repairIndex, boundaryIndex + 1)).toEqual(expectedCone);
     }
 
     const coverage = calculateCoverage(workflow, results, { includeGapAnalysis: true });

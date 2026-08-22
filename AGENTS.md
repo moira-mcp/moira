@@ -173,6 +173,23 @@ names/parameters/descriptions, the client must reconnect to pick them up.
 
 ## Workflow Authoring
 
+The **Workflow Management Flow (WMF)** is Moira's primary executable knowledge base
+for creating and editing workflows correctly. Its nodes, directives, design and
+review gates, patterns, and antipatterns carry the team's accumulated workflow-
+authoring experience; this is a core product capability and differentiator, not
+just one workflow among others. The engine and its CLI/MCP APIs must expose the
+primitives and evidence WMF needs, while WMF applies the semantic authoring
+judgment.
+
+Documentation supports that contract but cannot be its only delivery mechanism:
+agents do not reliably discover or read optional documentation on their own. A
+repeated authoring lesson or regression class is not incorporated merely because
+it was documented. Encode it in WMF's executable responsibilities, review gates,
+or required evidence, adding reusable engine/tooling support when WMF cannot
+observe or enforce the distinction reliably. Keep documentation aligned for human
+and API reference, but treat WMF as the path that must carry the knowledge into an
+actual workflow creation or edit run.
+
 - Edit workflow JSON with the `moira-workflow` CLI (`moira-workflow --help`). Do not
   hand-edit workflow JSON with `jq`/`sed`.
 - Bump `metadata.version` (semver) when changing a bundled workflow — workflows

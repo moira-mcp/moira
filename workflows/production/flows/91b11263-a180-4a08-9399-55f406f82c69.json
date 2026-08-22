@@ -2,8 +2,8 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "14.0.0",
-    "description": "Implements a complete software change as independently accepted outcome-oriented units, including source-grounded requirements, architecture-aware planning, production code, tests and coverage artifacts, permanent documentation, generated/runtime/integration obligations, conditional browser and visual evidence, project-native validation, VCS checkpoints, final cross-unit review, requirements coverage, and authorized reconciliation. Planning must choose evidence that distinguishes the required state from a plausible wrong state before implementation. Reviews classify product, test/validation, evidence, documentation/projection, criterion, and upstream plan/process causes and route them to pass, owned repair, or quality-preserving replan. Repairs inspect the confirmed defect class across real in-scope manifestations, stop same-root or validation-only drift without stronger knowledge, and revalidate only conclusions made stale by the actual mutation: bounded verification-only cycles skip unchanged product judgments but expand immediately when product truth changes. Late semantic defects become new plan units before mutation. Choose this flow for repository implementation that must finish code, tests, documentation, verification, review, and authorized VCS delivery together; use Quick Task for bounded non-development work, Robust Task for durable retry/recovery work, or planning/research flows when implementation is not requested.",
+    "version": "14.1.1",
+    "description": "Implements a complete software change as independently accepted vertical units, including source-grounded requirements, architecture-aware planning, repository-grounded preparation before mutation, complete production across code, tests, coverage, documentation and integration consequences, and a fresh producer completion pass before deterministic validation and semantic review. Product-scope repairs return through producer completion; bounded verification-only and gate-local repairs revalidate only conclusions made stale by their actual reach. Reviews classify product, test/validation, evidence, documentation/projection, criterion and upstream plan/process causes and route them to owned repair or quality-preserving material replan. The flow includes conditional runtime and visual evidence, checkpoints, final documentation reconciliation, feature-wide validation, final semantic review, requirements coverage and authority-bound VCS reconciliation. Choose it for repository implementation that must finish the complete result and evidence together; use Quick Task for bounded non-development work, Robust Task for durable retry/recovery, or planning/research flows when implementation is not requested.",
     "author": "mcp-moira-team",
     "tags": [
       "development",
@@ -425,28 +425,28 @@
         "product_review_iteration = 0"
       ],
       "connections": {
-        "default": "implement-plan-unit"
+        "default": "prepare-plan-unit-implementation"
       }
     },
     {
       "id": "implement-plan-unit",
       "type": "agent-directive",
-      "directive": "Implement approved plan unit {{current_step_index}} of {{total_steps}} from {{workspace_path}}/plans/{{plan_revision}}/plan.md. Use the complete current plan when not already available or when it may have changed. Own the complete approved outcome: inspect real dependencies and surrounding contracts, change the repository, preserve unrelated work, add or update necessary tests and coverage artifacts, update applicable permanent documentation, and run useful focused checks. Inventory every changed or at-risk behavior and contract and map it to concrete automated evidence or an explicit manual verification reason. Write the unit's account to {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md in this turn. It is the account of the unit, not of your turn: it states what the unit now delivers and the evidence for it — task-owned files, commands and outcomes, behavior/evidence mappings, documentation impact — together with which earlier behaviour of this unit the change could have disturbed, unresolved facts, and unrelated changes that must remain excluded. Carry the decisive output itself instead of prose retelling it. You are its first owner and not its only one: every later responsibility that changes this unit leaves it true, so write the present state rather than the story of this round. Open it with the unit's baseline in one line — the checkpoint of the previous unit where the project's version control provides one, the state in {{workspace_path}}/vcs-baseline.md for the first unit, otherwise the repository state as it stands at the start of this unit — because every later gate and repair of this unit judges against that line. Do not commit or publish here.\n\nWork to `{{workspace_path}}/standards/engineering.md` and `{{workspace_path}}/standards/tests.md`; the paths are canonical and unchanged content need not be reread when already present and certain. Where the surrounding code is wrong, implement correctly, say where you diverged, and report the defect rather than repairing unrelated areas.\n\nBefore handoff, reread the complete approved unit outcome and deliberately check that every foreseeable affected responsibility, dependency, contract, test, coverage artifact, permanent documentation, generated output, runtime/integration behavior, and applicable security/performance/UI obligation is implemented and evidenced. Reviewer discovery is not a substitute for this producer-owned completeness pass. Before adding validation machinery, name the required and plausible wrong states and use it only when its observation differs or it is itself the requested result with a consumer. Do not create a mechanism whose purpose is proving that another check ran.",
-      "completionCondition": "The complete approved unit and foreseeable dependencies, tests, docs, behavior inventory, focused evidence, and truthful current unit account are in place before review",
+      "directive": "Implement approved plan unit {{current_step_index}} of {{total_steps}} from {{workspace_path}}/plans/{{plan_revision}}/plan.md, using the complete current plan when it may have changed and the repository-grounded preparation at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md. Own the complete approved vertical outcome: inspect real dependencies and surrounding contracts, change the repository, preserve unrelated work, add or update necessary tests and coverage artifacts, update applicable permanent documentation, and complete configuration, schemas, migrations, generated output, runtime/integration behavior, and applicable security, performance or UI obligations. Run useful focused checks. Do not intentionally defer a known artifact class or integration consequence to the completion turn.\n\nWrite the unit's initial account to {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md in this turn. It is the account of the unit, not of your turn: state what the unit now delivers and the evidence for it — task-owned files, commands and outcomes, behavior/evidence mappings, documentation impact — together with which earlier behavior the change could have disturbed, unresolved facts, and unrelated changes that remain excluded. Carry decisive output instead of prose retelling. Later responsibilities that change the unit leave this same account true, so write present state rather than round history. Open it with the unit baseline in one line: the previous-unit checkpoint where project version control provides one, the state in {{workspace_path}}/vcs-baseline.md for the first unit, otherwise repository state at the start of this unit. Do not commit or publish here.\n\nWork to {{workspace_path}}/standards/engineering.md and {{workspace_path}}/standards/tests.md; when permanent documentation is affected, also use {{workspace_path}}/standards/documentation.md. The paths are canonical and unchanged content need not be reread when already present and certain. Where surrounding code is wrong, implement correctly, say where you diverged, and report the defect rather than repairing unrelated areas. Before adding or elevating validation machinery, name the required and plausible wrong states and use it only when its observation differs or it is itself the requested result with a consumer. Do not create a mechanism whose purpose is proving that another check ran.",
+      "completionCondition": "The complete approved vertical unit, its initial truthful account, applicable tests and documentation, and focused evidence exist before the fresh producer completion pass",
       "inputSchema": {
         "type": "object",
         "properties": {},
         "required": []
       },
       "connections": {
-        "success": "validate-cheap"
+        "success": "complete-plan-unit"
       }
     },
     {
       "id": "validate-cheap",
       "type": "agent-directive",
-      "directive": "Inspect the actual repository changes for plan unit {{current_step_index}}, standing project instructions, the approved outcome, the unit's account at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md, the record of the round just closed at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md when this is not the unit's first pass, and the affected behavior inventory. Run the smallest project-native deterministic checks that diagnose the affected scope; this mechanical gate does not require a separate reviewer context. Explicitly consider formatting, lint, static analysis, scoped type checking or compilation, targeted/unit tests, need for new or changed tests and coverage-map updates, permanent documentation, public contracts, shared schemas/configuration, migrations, concurrency, generated artifacts, infrastructure, and project checklists. For every applicable area provide exact evidence; for every materially plausible omitted area give a concrete N/A reason. Overwrite {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/cheap-validation.md with commands/outcomes and every reproducible repository defect. Do not rerun broad checks whose evidence is current, and do not treat unrelated or external failures as success. Return only the blocking issue count.\n\nThe subject is the unit as it now stands against its baseline — the line that opens {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md — not the diff of the latest repair. Rerun what the latest change could have invalidated, leave current the evidence it could not reach, and say which is which.\n\nThe linter, the type system and the compiler are what run here; tests are not a substitute for them, and a test that asserts what those tools already guarantee adds maintenance without protection.",
-      "completionCondition": "Current independent cheap-validation evidence covers every materially applicable affected area and its issue count matches reproducible repository defects",
+      "directive": "Inspect the actual repository changes for plan unit {{current_step_index}}, standing project instructions, the approved outcome, the current unit account at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md, and the record of the round just closed at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md when this is not the unit's first pass. Run the smallest applicable project-native deterministic checks that diagnose the affected scope; this mechanical gate does not require a separate reviewer context. Use formatting, lint, static analysis, scoped type checking or compilation, targeted tests, generated-output consistency, explicit registry/schema/identifier checks, and project checklists only where their established output observes a relevant current property. Record exact commands, outcomes, current versus stale evidence, and every reproducible repository defect by overwriting {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/cheap-validation.md. Do not rerun broad checks whose evidence the latest mutation could not invalidate, and do not treat unrelated or external failures as success. Return only the exact blocking issue count.\n\nThe subject is the unit as it now stands against the baseline line in unit-report.md, not only the latest repair diff. This gate does not decide semantic completeness of scenarios, tests, documentation, business contracts, migrations, concurrency treatment, infrastructure or product meaning. Producer completion and the applicable semantic review own those judgments. A deterministic check for such an area belongs here only when its observation actually distinguishes the relevant states. Before adding or newly elevating a validator, harness, adapter, proxy, guard, scanner, coverage mechanism or metatest, or when a signal's applicability is disputed, name the required state, a plausible wrong state and the observation that differs. If no observation differs, do not create surrogate proof. Established project-native lint, type, compile, format and targeted-test commands rely on their existing contracts and need no repeated proof-model recital.\n\nThe linter, type system and compiler are what run here; tests are not substitutes for them, and a test that asserts only what those tools already guarantee adds maintenance without protection.",
+      "completionCondition": "Current deterministic evidence covers every applicable mechanically observable property and the issue count matches reproducible repository defects without claiming semantic completeness",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -731,8 +731,8 @@
     {
       "id": "approve-current-unit-closure",
       "type": "agent-directive",
-      "directive": "A current cause-aware review or repair proves that a material plan revision is required before safe mutation. Present what plan unit {{current_step_index}} completed, what remains, which derived contract must change, and how unfinished work would be carried forward. Ask whether the current unit may be closed for a new plan revision. Save the explicit decision and verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/closure-feedback.md. Do not revise the plan here.\n\nIn `autonomous` mode do not ask the user. Decide from the unique current replan diagnosis and the approved plan, and return `closure_decision=approved` whenever the diagnosis satisfies the cause-aware replan contract: an upstream requirements interpretation, plan outcome, architecture decision fixed by the plan, criterion, evidence model, or process contract is invalid, or mixed earliest causes cross paired repair responsibilities and require the responsibility model to be revised before repair. The approved unit outcome may remain sound in the mixed-cause case; do not refuse closure merely because that outcome can still be delivered. If the unique diagnosis does not establish a valid replan, expose the contradiction as a blocker rather than inventing a repair route or mutating product content here.\n\nThe replan source may be the current test-adequacy, architecture, completeness, or repair report, not only architecture review. Read only fixed reports beneath {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}} for the current evidence iteration; exactly one must state the current `replan` disposition. Zero or multiple current sources is a blocker. Preserve completed valid outcomes and every unfinished obligation. In `interactive` mode, `closure_decision=refused` remains the user's explicit refusal and must not advance the plan revision.",
-      "completionCondition": "The unique current replan diagnosis is verified and the unit is explicitly closed or kept open without product mutation",
+      "directive": "A current cause-aware preparation, producer completion, review or repair proves that a material plan revision is required before safe further mutation. Present what plan unit {{current_step_index}} has completed, if anything, what remains, which derived contract must change, and how unfinished work will be carried forward. Ask whether the current unit may be closed for a new plan revision. Save the explicit decision and verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/closure-feedback.md. Do not revise the plan or mutate product content here.\n\nIn `autonomous` mode do not ask the user. Decide from the unique current replan diagnosis and the approved plan, and return `closure_decision=approved` whenever the diagnosis satisfies the cause-aware replan contract: an upstream requirements interpretation, plan outcome, architecture decision fixed by the plan, criterion, evidence model or process contract is invalid, or mixed earliest causes cross paired repair responsibilities and require the responsibility model to be revised before repair. The approved unit outcome may remain sound in the mixed-cause case; do not refuse closure merely because that outcome can still be delivered. If the unique diagnosis does not establish a valid replan, expose the contradiction as a blocker rather than inventing a repair route or mutating product content here.\n\nRead only the source applicable to the route that reached this node. Before implementation, {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md may be the unique current source. Immediately after producer completion, {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md may be the unique source. Otherwise the source may be the current iteration-qualified test-adequacy, architecture, completeness or repair report beneath that same step directory. Exactly one applicable source must state the current `replan` disposition; zero or multiple current sources is a blocker. Preserve completed valid outcomes and every unfinished obligation. In `interactive` mode, `closure_decision=refused` remains the user's explicit refusal and must not advance the plan revision.",
+      "completionCondition": "Exactly one route-current replan diagnosis is verified and the unit is explicitly closed or kept open without product mutation",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -770,8 +770,8 @@
     {
       "id": "revise-plan-for-replan",
       "type": "agent-directive",
-      "directive": "Write material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md from {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md, the actual completed work, and exactly one source that caused the engine to advance from {{previous_plan_revision}} to {{plan_revision}}. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions, the original user outcome and authority, every still-valid completed outcome, and all unfinished obligations. For every accepted completed outcome carried forward, record its exact originating plan revision and originating unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Close a current unit only when its closure was actually approved, and keep executor tactics open.\n\nMap the transition to its source explicitly. A plan review or plan repair reads {{workspace_path}}/plans/{{previous_plan_revision}}/review.md or {{workspace_path}}/plans/{{previous_plan_revision}}/repair.md. A current-unit test, architecture, completeness, or repair replan reads its fixed report beneath {{workspace_path}}/plans/{{previous_plan_revision}}/step-{{current_step_index}} for the current evidence iteration together with {{workspace_path}}/plans/{{previous_plan_revision}}/closure-feedback.md. Documentation reconciliation, documentation review/repair, feature-wide validation/repair, final semantic review/repair, finalization repair, and user feedback read their existing fixed current report paths. A teleport revision reads the teleport rationale and needs no report. Inspect only the applicable source class; exactly one source must declare the transition's current `replan` disposition. Do not reject the plan-review source merely because it belongs to {{previous_plan_revision}}: that reviewed revision is necessarily the source of the newly numbered plan.\n\nPlan-review replan may occur before any unit approval. A late replan after completed units must add an explicit new repair unit before any product, permanent-documentation, contract, schema, executable/generated-behavior, configuration, or test-intent mutation. A change to the original task boundary still requires the user.\n\nFollow `{{workspace_path}}/standards/planning.md`.",
-      "completionCondition": "A new material plan revision consumes exactly the source that advanced the previous revision, preserves valid completed outcomes, and carries every unfinished or newly required repair outcome",
+      "directive": "Write material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md from {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md, actual completed work, and exactly one non-teleport source that caused the engine to advance from {{previous_plan_revision}} to {{plan_revision}}. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions, the original user outcome and authority, every still-valid completed outcome, and all unfinished obligations. For every accepted completed outcome carried forward, record its exact originating plan revision and unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Close a current unit only when closure was actually approved, and keep executor tactics open.\n\nMap the transition to its source explicitly and inspect only that source class. A plan review or plan repair reads {{workspace_path}}/plans/{{previous_plan_revision}}/review.md or repair.md. A preparation replan reads {{workspace_path}}/plans/{{previous_plan_revision}}/step-{{current_step_index}}/implementation-preparation.md plus {{workspace_path}}/plans/{{previous_plan_revision}}/closure-feedback.md. A producer-completion replan reads {{workspace_path}}/plans/{{previous_plan_revision}}/step-{{current_step_index}}/unit-report.md plus closure-feedback.md. A current-unit test, architecture, completeness or repair replan reads its fixed current iteration-qualified report beneath that originating step plus closure-feedback.md. Documentation reconciliation, documentation review/repair, feature-wide validation/repair, final semantic review/repair, finalization repair and user feedback read their existing fixed current report paths. Exactly one applicable source must declare the transition's current `replan` disposition. Do not reject a plan-review source because it belongs to {{previous_plan_revision}}: that reviewed revision is necessarily the source of the newly numbered plan.\n\nPlan-review replan may occur before unit approval. A late replan after completed units must add an explicit new repair unit before any product, permanent-documentation, contract, schema, executable/generated-behavior, configuration or test-intent mutation. A change to the original task boundary still requires the user. Follow {{workspace_path}}/standards/planning.md.",
+      "completionCondition": "A new material plan revision consumes exactly the route-current source, preserves valid completed outcomes, and carries every unfinished or newly required repair outcome",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -1272,7 +1272,7 @@
         "product_review_iteration = 0"
       ],
       "connections": {
-        "default": "implement-plan-unit"
+        "default": "prepare-plan-unit-implementation"
       }
     },
     {
@@ -1980,14 +1980,49 @@
       "id": "teleport-replan",
       "type": "teleport",
       "hint": "Jump here when the plan itself is wrong: the approach is fundamentally mistaken, new facts or requirements invalidate the agreed plan, or units must be added, removed or reordered. Not for a failing check, a flaky test or an inconvenient review finding — those belong to their repair owners.",
-      "directive": "You jumped here because the current plan no longer fits reality. State plainly what changed or what was wrong, and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid. Do not repair code here and do not restate review findings that belong to a repair owner.\n\nThe next responsibility creates the new plan revision from the current approved plan and the actual completed work, so carry forward every unfinished obligation rather than dropping it.",
-      "completionCondition": "The reason for replanning and the required plan change are stated for the revision that follows",
+      "directive": "You jumped here because the current plan no longer fits reality. State plainly in `replan_rationale` what changed or what was wrong and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid. Do not repair code here and do not restate review findings that belong to a repair owner.\n\nThe next responsibility creates the new plan revision from the current approved plan and actual completed work, so carry forward every unfinished obligation rather than dropping it. Return only the bounded rationale.",
+      "completionCondition": "A bounded rationale states the plan-invalidating fact, required plan change, preserved completed outcomes, and unfinished obligations",
       "inputSchema": {
         "type": "object",
-        "properties": {}
+        "additionalProperties": false,
+        "properties": {
+          "replan_rationale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000
+          }
+        },
+        "required": [
+          "replan_rationale"
+        ]
       },
       "connections": {
-        "success": "advance-plan-revision-for-replan"
+        "success": "advance-plan-revision-for-teleport"
+      }
+    },
+    {
+      "id": "advance-plan-revision-for-teleport",
+      "type": "expression",
+      "expressions": [
+        "previous_plan_revision = plan_revision",
+        "plan_revision = plan_revision + 1"
+      ],
+      "connections": {
+        "default": "revise-plan-for-teleport"
+      }
+    },
+    {
+      "id": "revise-plan-for-teleport",
+      "type": "agent-directive",
+      "directive": "Write material plan revision {{plan_revision}} to {{workspace_path}}/plans/{{plan_revision}}/plan.md from {{workspace_path}}/plans/{{previous_plan_revision}}/plan.md, actual completed work, and the bounded teleport rationale `{{teleport-replan.replan_rationale}}`. The engine has already advanced the revision number; do not renumber it. Preserve prior revisions, the original user outcome and authority, every still-valid completed outcome, and all unfinished obligations. For every accepted completed outcome carried forward, record its exact originating plan revision and unit index and cite evidence beneath that origin; never relabel it as evidence of its new array position. Keep executor tactics open.\n\nThis route is entered only from `teleport-replan`; the rationale is its sole transition source and needs no review report or closure feedback. State explicitly how the plan-invalidating fact changes, adds, removes, or reorders units while preserving completed outcomes and unfinished obligations. A late replan after completed units must add an explicit new repair unit before any product, permanent-documentation, contract, schema, executable/generated-behavior, configuration or test-intent mutation. A change to the original task boundary still requires the user. Follow {{workspace_path}}/standards/planning.md.",
+      "completionCondition": "A new material plan revision consumes the bounded teleport rationale, preserves valid completed outcomes, and carries every unfinished or newly required repair outcome",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "connections": {
+        "success": "review-plan"
       }
     },
     {
@@ -2043,7 +2078,7 @@
         "current_iteration = current_iteration + 1"
       ],
       "connections": {
-        "default": "validate-cheap"
+        "default": "complete-plan-unit"
       }
     },
     {
@@ -2516,6 +2551,86 @@
       ],
       "connections": {
         "default": "validate-runtime"
+      }
+    },
+    {
+      "id": "prepare-plan-unit-implementation",
+      "type": "agent-directive",
+      "directive": "Prepare approved plan unit {{current_step_index}} of {{total_steps}} for implementation against the repository as it actually stands. Read the complete current unit from {{workspace_path}}/plans/{{plan_revision}}/plan.md, standing project instructions, primary repository sources, affected dependencies, consumers and contracts, and the acceptance evidence the unit relies on. Use {{workspace_path}}/standards/planning.md when judging plan or evidence assumptions; consult another materialized standard only when the repository fact under assessment makes it applicable. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md with the repository-grounded contracts, integration boundaries, constraints, risks and evidence facts needed to begin the complete vertical outcome. Do not copy the plan into microsteps, prescribe an exhaustive file list, constrain implementation tactics without evidence, mutate product artifacts, revise the plan, or create validation machinery.\n\nReturn `preparation_outcome=ready` only when the approved outcome, architecture fixed by the plan, criterion, evidence model and task boundary remain sound in the actual repository. Normal uncertainty that implementation exploration can resolve is not replan. Return `preparation_outcome=replan` before product mutation when a primary source proves an upstream assumption materially invalid; record the current `replan` disposition, invalid assumption, repository evidence and required kind of plan correction in the preparation artifact. Return only the outcome.",
+      "completionCondition": "The approved unit is grounded in current repository contracts and is either ready for unconstrained vertical implementation or has a concrete pre-mutation replan diagnosis",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "preparation_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan"
+            ]
+          }
+        },
+        "required": [
+          "preparation_outcome"
+        ]
+      },
+      "connections": {
+        "success": "route-implementation-preparation"
+      }
+    },
+    {
+      "id": "route-implementation-preparation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "prepare-plan-unit-implementation.preparation_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "implement-plan-unit",
+        "false": "approve-current-unit-closure"
+      }
+    },
+    {
+      "id": "complete-plan-unit",
+      "type": "agent-directive",
+      "directive": "Complete plan unit {{current_step_index}} as its current producer before validation or review. Read the complete approved unit, {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md, the actual current repository diff and affected artifacts, standing project instructions, and the current {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md. Work to {{workspace_path}}/standards/engineering.md and {{workspace_path}}/standards/tests.md; when permanent documentation is affected, also use {{workspace_path}}/standards/documentation.md. On initial completion `previous_iteration` is 0 and no repair record is expected. When `previous_iteration` is greater than 0 after product repair, also read {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md to identify the latest mutation and every earlier behavior it could have disturbed; do not reduce this pass to that repair.\n\nReassess the whole current unit against the baseline that opens unit-report.md. Directly finish every reproducible foreseeable in-scope omission or integration correction across product behavior, dependencies, tests, coverage artifacts, permanent documentation, contracts, schemas, configuration, migrations, generated output, runtime/integration behavior, and applicable security, performance or UI obligations. Recheck dependencies exposed by the actual diff, run useful focused checks, and rewrite the existing unit report to the unit's current truth. Do not emit a findings-only handoff, create a second account or validation ledger, rerun broad checks without an invalidation reason, widen class-wide repair beyond real manifestations of a confirmed root in the original scope, or build proof machinery whose signal cannot distinguish the claimed property.\n\nReturn `completion_outcome=ready` only when no known producer-owned omission remains. If the produced state proves that an upstream plan outcome, architecture decision fixed by the plan, criterion, evidence model or process contract cannot deliver the original requirement, do not invent a workaround or continue product mutation: record the concrete current cause and `replan` disposition in unit-report.md and return `completion_outcome=replan`. Return only the outcome.",
+      "completionCondition": "A fresh producer pass has completed the whole current unit and its truthful account before validation, or has routed a concrete upstream plan defect without surrogate repair",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completion_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan"
+            ]
+          }
+        },
+        "required": [
+          "completion_outcome"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-unit-completion"
+      }
+    },
+    {
+      "id": "route-plan-unit-completion",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "complete-plan-unit.completion_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "validate-cheap",
+        "false": "approve-current-unit-closure"
       }
     }
   ],
