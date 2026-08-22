@@ -26,6 +26,7 @@ multiple Moira checkouts exist: the path makes a stale global link immediately v
 moira-workflow flow.json get <node-id>
 moira-workflow flow.json list [--type <type>]
 moira-workflow flow.json structure [--graph] [--detailed]
+moira-workflow flow.json schema
 moira-workflow flow.json search <text>
 moira-workflow flow.json validate
 
@@ -88,6 +89,9 @@ moira-workflow dev-flow.json search "validation"
 
 # Show structure with the flow graph
 moira-workflow dev-flow.json structure --graph --detailed
+
+# Print the complete deterministic control-flow schema for agent inspection
+moira-workflow dev-flow.json schema
 
 # Update a directive from a file
 moira-workflow dev-flow.json update analyze-step --directive-file ./new-directive.md

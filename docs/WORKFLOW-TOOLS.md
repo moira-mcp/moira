@@ -171,6 +171,20 @@ Outputs:
 The command exits with a non-zero status when errors exist, so scripts and agents can use it as a
 real gate. Warnings alone do not make the command fail.
 
+### schema - Read-only control-flow schema
+
+```bash
+moira-workflow ./workflows/production/flows/<flow>.json schema
+```
+
+Prints one deterministic plain-text control-flow schema derived only from the workflow JSON. It
+expands real node IDs, canonically ordered labelled connections, conditions, declared local/global
+outputs, final outputs, subgraph mappings, automatic-node output variables, context references,
+basic blocks, and cyclic regions. It distinguishes normal start reachability, explicit teleport-only
+regions, and disconnected roots/components. Every source node and connection is emitted exactly
+once; the coverage footer makes omissions visible. The command does not interpret workflow-specific
+meaning, execute workflow content, or write the source file.
+
 ### Variables - Working with workflow variables
 
 ```bash
