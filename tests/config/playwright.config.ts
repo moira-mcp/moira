@@ -9,13 +9,14 @@ const projectRoot = join(__dirname, "../..");
 
 const resolved = resolveTestUrls();
 const isRemote = process.env.PLAYWRIGHT_REMOTE === "true";
+const isCi = process.env.CI === "true";
 
 export default defineConfig({
   testDir: join(projectRoot, "tests/e2e"),
   testMatch: "**/*.spec.ts",
   testIgnore: ["**/auth-mvp/**", "**/packages/**"],
   timeout: isRemote ? 60000 : 30000,
-  globalTimeout: isRemote ? 1800000 : 300000,
+  globalTimeout: isRemote ? 1800000 : isCi ? 900000 : 300000,
   retries: 1,
   workers: isRemote ? 4 : 5,
   fullyParallel: true,
