@@ -91,6 +91,12 @@ Response:
       socialLogin: boolean;
     }
     mcpUrl: string;
+    emailDelivery: {
+      state: "real" | "test" | "unavailable" | "configuration-error";
+      provider: "smtp" | "brevo" | "test" | null;
+      available: boolean;
+      reason: string | null;
+    }
   }
   timestamp: string;
 }
@@ -105,6 +111,10 @@ and leaves `accountApproval` disabled.
 server's host configuration at request time. The frontend uses it as the MCP
 endpoint shown in the Web UI so the value matches the actual host/port the
 instance is served from.
+
+`emailDelivery` is the sanitized runtime delivery capability; it contains no credentials.
+`available` is true only for `state: "real"`. The `test` state writes messages to the explicit
+test log and does not deliver them.
 
 Authentication: Not required.
 
@@ -924,6 +934,7 @@ Response:
 Errors:
 
 - 400: Email already verified
+- 400: Real email delivery is unavailable (`details.code: "EMAIL_DELIVERY_UNAVAILABLE"`)
 
 Authentication: Required
 
@@ -1574,7 +1585,20 @@ Authentication: Required
 
 Admin-only endpoints for settings definition management.
 
-All endpoints require admin role (403 if non-admin).
+All endpoints require an authenticated administrator (403 if non-admin). The following route
+families also require a deployment capability before their handlers read data or perform actions:
+
+| Route family                                                                | Required capability     | Default self-host policy |
+| --------------------------------------------------------------------------- | ----------------------- | ------------------------ |
+| `/api/admin/stats` and `/api/admin/analytics/*` except `/operational`       | `adminAnalytics`        | denied                   |
+| `/api/admin/analytics/operational`                                          | `adminOperations`       | denied                   |
+| `/api/admin/workflows*`, `/executions*`, `/artifacts*`, and `/sessions/all` | `multiUserAdmin`        | denied                   |
+| `/api/admin/users/:id/artifacts/takedown` and `/artifact-quota`             | `multiUserAdmin`        | denied                   |
+| `/api/admin/monitoring-test/*`                                              | `operationsDevelopment` | denied                   |
+
+Administrator user management, settings, audit, tokens, database maintenance, and
+`/api/admin/system-status` are capability-neutral. A disabled named capability returns
+`403 ACCESS_DENIED` before the protected handler runs.
 
 ### GET /api/admin/settings/definitions
 
@@ -1985,6 +2009,53 @@ Errors:
 
 Authentication: Required (admin role).
 
+### POST /api/admin/users/:id/temporary-password
+
+Recover an ordinary user when real email delivery is unavailable. The administrator supplies a
+temporary password through the API and must send it to the user through a separate secure channel.
+
+Request:
+
+```typescript
+{
+  temporaryPassword: string; // 8-128 characters
+}
+```
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: {
+    userId: string;
+    passwordResetRequired: true;
+    requestedAt: string;
+    requestedBy: string;
+    sessionsRevoked: number;
+    oauthTokensRevoked: number;
+    oauthConsentsRevoked: number;
+    apiTokensRevoked: number;
+  }
+  timestamp: string;
+}
+```
+
+The operation is one serialized SQLite transaction. It creates or replaces the credential,
+requires password replacement on the next login, revokes sessions, OAuth tokens and consents,
+revokes persistent API tokens, clears linked-provider token material, and writes the success audit
+event. A concurrent promotion to administrator or any late database failure rolls the complete
+operation back.
+
+Errors:
+
+- 400: password length is invalid, the target is the requesting administrator, or the target is an
+  administrator
+- 404: target user does not exist
+
+Authentication: Required (admin role). This endpoint is capability-neutral and never accepts an
+administrator target; administrator recovery uses the command-line recovery procedure.
+
 ### POST /api/admin/users/:id/force-password-reset
 
 Mark user for forced password reset and revoke all sessions.
@@ -2088,7 +2159,7 @@ Errors:
 - 401: Not authenticated
 - 403: Non-admin user
 
-Authentication: Required (admin role)
+Authentication: Required (admin role and `multiUserAdmin` capability)
 
 ### GET /api/admin/users/:id/security-activity
 
@@ -2256,6 +2327,9 @@ Errors:
 Authentication: Required (admin role)
 
 ### GET /api/admin/executions
+
+This route and every `/api/admin/executions/*` route require the `multiUserAdmin` capability. The
+default self-host policy denies the family before execution data is read.
 
 List all executions with user information.
 
@@ -2489,6 +2563,9 @@ Authentication: Required
 
 ### GET /api/admin/workflows
 
+This route family requires the `multiUserAdmin` capability and is denied by the default self-host
+policy.
+
 List all workflows across all users with filters.
 
 Query parameters:
@@ -2538,9 +2615,13 @@ Response:
 }
 ```
 
-Authentication: Required (admin role)
+Authentication: Required (admin role and `multiUserAdmin` capability)
 
 ### POST /api/admin/monitoring-test/error
+
+Every `/api/admin/monitoring-test/*` route requires the `operationsDevelopment` capability and is
+denied by the default self-host policy before deliberate errors, delays, logs, or synthetic events
+can be emitted.
 
 Generate test 500 error for monitoring validation.
 
@@ -2680,7 +2761,10 @@ Authentication: Required (admin role)
 
 ## Admin Artifacts API
 
-Admin endpoints for artifact management and per-user quota configuration.
+Admin endpoints for artifact management and per-user quota configuration. Every route in this
+section requires the `multiUserAdmin` capability, including the two `/api/admin/users/:id/*`
+artifact aliases. The default self-host policy denies them before artifact data or mutations are
+entered.
 
 ### GET /api/admin/artifacts
 
@@ -2886,7 +2970,10 @@ Authentication: Required (admin role)
 
 ## Admin Analytics API
 
-Analytics endpoints for audit data aggregation and dashboards. All endpoints support `range` query parameter: `today`, `week`, `month`, `year`, `all` (default: `all`).
+Analytics endpoints for audit data aggregation and dashboards. Every route in this section requires
+`adminAnalytics`, except `/api/admin/analytics/operational`, which requires `adminOperations`. Both
+capabilities are denied by the default self-host policy. All endpoints support the `range` query
+parameter: `today`, `week`, `month`, `year`, `all` (default: `all`).
 
 ### GET /api/admin/analytics/overview
 

@@ -115,10 +115,21 @@ single bundled directory (default).
 
 At Docker container startup, `scripts/migrate-workflows-in-docker.ts` runs:
 
-1. Enumerates the merged catalog via `readWorkflowCatalogs(getWorkflowsDirs())` (see "Multiple catalog directories" above — one or more base directories, merged and de-duplicated by `(owner, slug)`)
-2. Installs each flow under its catalog `owner` with its `visibility`
-3. Skips and reports a flow whose `owner` does not exist on the target (never reassigns to a system owner)
-4. Version-aware and idempotent; non-destructive (only touches flows it owns)
+1. Enumerates and validates the complete merged catalog via
+   `readWorkflowCatalogs(getWorkflowsDirs())`.
+2. Compares each incoming entry with the persistent previous bundled baseline and the current
+   database state, including removals, lifecycle state, graph, visibility, and declared previous
+   slugs.
+3. Plans every identity before writing. Upstream-only changes advance the managed workflow; user-only
+   changes are preserved; two-sided changes retain previous/current/incoming candidates for Workflow
+   Management Flow recovery.
+4. Applies a conflict-free plan and all baseline changes in one SQLite transaction after verifying
+   that the captured workflow and baseline inputs are still current.
+5. Keeps self-host available with structured reconciliation evidence. SaaS exits non-zero on the
+   same unresolved conflict so deployment preflight stops before production swap.
+
+See `docs/WORKFLOWS.md` for candidate resolution, stale-evidence checks, removal/tombstone behavior,
+and the destructive `--force` escape hatch.
 
 ### Prompt Migration
 
@@ -135,26 +146,31 @@ Manifest stored beside the SQLite database as `data/prompt-manifest.json` in the
 ### Adding New Workflows
 
 ```bash
-# Add a flow to the catalog (file name = UUID). Set `owner` + `visibility` inside the JSON:
-#   public showcase flow → "owner": "system-moira", "visibility": "public"
-#   private internal flow → "owner": "system-admin", "visibility": "private"
-cp my-workflow.json workflows/production/flows/
+# Add a public flow to the OSS catalog (file name = UUID). Set `owner` and `visibility` in the JSON:
+#   "owner": "system-moira", "visibility": "public"
+WORKFLOW_UUID=00000000-0000-4000-8000-000000000000
+cp my-workflow.json "workflows/production/flows/${WORKFLOW_UUID}.json"
 
 # Rebuild Docker to apply
 npm run docker:restart
 ```
 
+Private deployment workflows belong in the private repository's additional catalog, not in the OSS
+tree. Configure additional catalog roots through `WORKFLOWS_DIRS`.
+
 ### Workflow CLI
 
 ```bash
+WORKFLOW_UUID=00000000-0000-4000-8000-000000000000
+
 # View structure
-moira-workflow workflows/production/public/my-workflow.json structure --graph
+moira-workflow "workflows/production/flows/${WORKFLOW_UUID}.json" structure --graph
 
 # Search nodes
-moira-workflow workflows/production/public/my-workflow.json search "pattern"
+moira-workflow "workflows/production/flows/${WORKFLOW_UUID}.json" search "pattern"
 
 # Edit node
-moira-workflow workflows/production/public/my-workflow.json update node-id --directive "new text"
+moira-workflow "workflows/production/flows/${WORKFLOW_UUID}.json" update node-id --directive "new text"
 ```
 
 ## Project Structure

@@ -1,233 +1,78 @@
-# Feature Map — Self-Host Readiness
+# Self-Host Capability Map
 
-> A map of all MCP Moira functionality with a verdict for each block regarding self-host (target scenario: a private team with administrator-approved registration).
->
-> **Method:** a multi-agent inventory based on the actual code of the `feature/oss-prep` branch (all 7 packages). Not based on CLAUDE.md.
->
-> **Verdicts:**
->
-> - 🟢 **KEEP** — works for self-host as-is (possibly with configuration via env/admin).
-> - 🟡 **MODE** — disabled/hidden via `DEPLOYMENT_MODE` (see below). The code stays; behavior changes by mode.
-> - 🔴 **REWORK** — requires a code change (blocks self-host or is hardcoded).
-> - 💰 **EE** — paid commercial feature. **The code is open** (the "everything OSS + flags" model), gated by `FeatureResolver` (disabled/basic in self-host, enabled per plan in cloud). NOT hidden in a separate repo.
->
-> **Effort:** S (≤0.5 day) / M (0.5–2 days) / L (>2 days).
+Moira uses one `FeatureResolver` to expose deployment policy to the backend and frontend. The
+built-in resolver selects a complete policy from `DEPLOYMENT_MODE=self-host|saas`; unknown
+capabilities fail closed. A custom deployment can replace the resolver programmatically, but there
+are no per-capability environment switches.
 
----
+## Deployment policy
 
-## The `DEPLOYMENT_MODE` Concept
+| Capability                  | Self-host | SaaS     | Effect                                                                                                             |
+| --------------------------- | --------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `openRegistration`          | enabled   | enabled  | Allows email/password registration.                                                                                |
+| `accountApproval`           | enabled   | disabled | Requires administrator approval before product, API, OAuth, or MCP access.                                         |
+| `emailVerificationGate`     | disabled  | enabled  | Requires verified email for sensitive token and OAuth admission.                                                   |
+| `verificationEmailOnSignup` | disabled  | enabled  | Sends a verification message after registration.                                                                   |
+| `legalConsents`             | disabled  | enabled  | Requires terms and residency consent during registration.                                                          |
+| `betaNotices`               | disabled  | enabled  | Shows SaaS beta notices.                                                                                           |
+| `userManagement`            | enabled   | enabled  | Exposes ordinary-user list, detail, approval, blocking, and recovery.                                              |
+| `multiUserAdmin`            | disabled  | enabled  | Exposes cross-user workflows, executions, artifacts, session-wide actions, and artifact quota/takedown operations. |
+| `adminAnalytics`            | disabled  | enabled  | Exposes installation-wide statistics and analytics.                                                                |
+| `adminOperations`           | disabled  | enabled  | Exposes the operational analytics surface.                                                                         |
+| `operationsDevelopment`     | disabled  | enabled  | Enables monitoring-test endpoints that deliberately emit errors, delays, logs, and synthetic events.               |
+| `socialLogin`               | disabled  | enabled  | Offers GitHub and Google sign-in when their credentials are configured.                                            |
 
-A single env flag `DEPLOYMENT_MODE = self-host | saas` (default for the OSS image: `self-host`). Behavior defaults depend on it. This replaces a scattering of separate `SKIP_*` flags with one conceptual switch (the Sentry pattern: one code path, a different resolver).
+`GET /api/features` returns the same resolved booleans used by server middleware. Hiding a route in
+the Web UI is not the authorization boundary: the backend checks the named capability before the
+protected handler reads data or performs an action. A disabled capability returns
+`403 ACCESS_DENIED`.
 
-| Aspect                                      | `self-host` | `saas`   |
-| ------------------------------------------- | ----------- | -------- |
-| Legal consents (terms/residency) at sign-up | disabled    | enabled  |
-| Email verification as a gate (OAuth/tokens) | disabled    | enabled  |
-| Open registration                           | enabled     | enabled  |
-| Account approval                            | required    | disabled |
-| Beta-agreement modal / banner               | hidden      | shown    |
-| User management                             | enabled     | enabled  |
-| Broader multi-user admin pages              | hidden      | shown    |
-| Cross-user analytics                        | hidden      | shown    |
-| Operational dashboard                       | hidden      | shown    |
-| Monitoring test tools                       | hidden      | shown    |
-| Residency checkbox in the UI                | hidden      | shown    |
-| Admin auto-create + secret auto-generation  | yes         | no       |
+## Self-host administration
 
-The built-in resolver treats each mode as a complete policy composition. A different deployment
-policy requires replacing the programmatic `FeatureResolver`; there is no per-feature environment
-variable override.
+The default self-host policy is a private-team installation. It keeps these administrator surfaces:
 
----
+- registration approval and ordinary-user management;
+- temporary-password recovery when real email delivery is unavailable;
+- settings, audit, API-token, and local database administration;
+- deployment-neutral backend/database health and managed-workflow reconciliation through
+  `/api/admin/system-status`;
+- Workflow Management Flow recovery for previous/current/incoming bundled-workflow conflicts.
 
-## Zone A — workflow-engine (execution core)
+It does not expose installation-wide workflow/execution totals, recent activity, cross-user
+workflow/execution/artifact administration, operational analytics, or monitoring-test endpoints.
+The server avoids the corresponding broad repository reads when those capabilities are disabled.
 
-| Block                             | What                                                                                                                                     | Verdict | Effort | Note                                                 |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------ | ---------------------------------------------------- |
-| Graph executor (universal/engine) | Graph execution, routing, error-as-pause                                                                                                 | 🟢 KEEP | —      | Pure core, deterministic, DI                         |
-| Workflow node types               | start/end/agent-directive/teleport/condition/expression/subgraph/telegram-notification/lock/materialize/read-note/write-note/upsert-note | 🟢 KEEP | —      | Safe parsers (NOT eval); bounded tar materialization |
-| Template processor `{{}}`         | Variable interpolation, escaping                                                                                                         | 🟢 KEEP | —      | —                                                    |
-| Validation (AJV + structural)     | Schema + graph validation                                                                                                                | 🟢 KEEP | —      | —                                                    |
-| AgentMessageQueue                 | Protocol-agnostic message transport                                                                                                      | 🟢 KEEP | —      | —                                                    |
-| Telegram-notification handler     | Notifications                                                                                                                            | 🟢 KEEP | —      | Graceful degradation (no token → skip)               |
-| Lock handler (PIN)                | PIN gate, telegram                                                                                                                       | 🟢 KEEP | —      | PIN stored as a scrypt hash (`pin-hash.ts`)          |
+## Deployment-neutral product features
 
-**Zone summary:** ~70% pure core, all KEEP. External deps via DI (clean interfaces).
+Core workflow execution, validation, MCP tools, notes, artifacts, settings, Telegram integration,
+workflow sharing, account approval, user management, managed-resource reconciliation, and the Web UI
+remain in the Apache-2.0 product. Security behavior such as blocked-account admission, credential
+revocation, PIN hashing, request limits, and input validation is always active and is not a feature
+flag.
 
-## Zone B — mcp-server (transport + MCP tools)
+Email delivery has a separate runtime status returned by `GET /api/features`:
 
-| Block                                  | What                                | Verdict | Effort | Note                                                                                               |
-| -------------------------------------- | ----------------------------------- | ------- | ------ | -------------------------------------------------------------------------------------------------- |
-| HTTP transport (stateless)             | StreamableHTTP, POST /mcp           | 🟢 KEEP | —      | —                                                                                                  |
-| OAuth 2.1 auth (MCP)                   | Better Auth plugin, browser+consent | ✅ DONE | M      | Email gate lifted in self-host via emailVerificationGate → MCP connects                            |
-| API tokens (`moira_`)                  | Persistent bearer, SHA-256          | ✅ DONE | S      | `requireVerifiedAuth` is mode-driven — in self-host the token is issued without email verification |
-| MCP tools (list/start/step/manage/...) | Core MCP API                        | 🟢 KEEP | —      | —                                                                                                  |
-| Telegram preflight in start()          | Check before launch                 | 🟢 KEEP | —      | skipTelegramCheck=true bypasses it                                                                 |
-| Sharing (invites/access in manage)     | Workflow sharing                    | 💰 EE   | —      | RBAC sharing → EE candidate                                                                        |
-| Prompt overrides (model>agent>default) | Customizing tool descriptions       | 🟢 KEEP | —      | Optional; default prompts work                                                                     |
-| help (help tool, MDX from DOCS_DIR)    | Documentation                       | 🟢 KEEP | —      | DOCS_DIR from the docs package                                                                     |
-| Rate limiting                          | 1000/min                            | 🟢 KEEP | —      | Disableable (DISABLE_RATE_LIMIT)                                                                   |
+- `real`: SMTP or Brevo can deliver messages;
+- `test`: messages go only to the explicit test log;
+- `unavailable`: delivery is disabled or not configured;
+- `configuration-error`: supplied provider settings are invalid.
 
-**Zone summary:** core tools KEEP; auth (OAuth + tokens email gate) done per mode; sharing → EE.
+Self-host can run without real delivery and provides administrator-assisted ordinary-user recovery.
+SaaS refuses startup unless delivery is `real`.
 
-## Zone C — shared/auth + database/schema (the most SaaS-heavy)
+## Private deployment boundary
 
-| Block                                     | What                                                                       | Verdict | Effort | Note                                                                                                        |
-| ----------------------------------------- | -------------------------------------------------------------------------- | ------- | ------ | ----------------------------------------------------------------------------------------------------------- |
-| Legal consents terms/residency            | `better-auth-config.ts` legalConsents gate                                 | ✅ DONE | M      | Gated by `getFeatureResolver().isEnabled("legalConsents")`; residency checkbox hidden in self-host (Step 7) |
-| Email verification gate (OAuth/API token) | `better-auth-config.ts` + `auth-middleware.ts` requireVerifiedAuth         | ✅ DONE | M      | Gated by emailVerificationGate; the MCP client connects with an API token without verification in self-host |
-| Open email/password registration          | enabled=true, autoSignIn                                                   | ✅ DONE | S      | Open in self-host behind the independent accountApproval gate                                               |
-| Account approval                          | nullable approvedAt + admin transition                                     | ✅ DONE | M      | Existing/bootstrap users approved; new self-host registrations pending; product/API/OAuth/MCP default-deny  |
-| sendOnSignUp verification                 | emailVerification:181-210                                                  | ✅ DONE | S      | Gated by verificationEmailOnSignup                                                                          |
-| OAuth GitHub/Google                       | enabled=!!clientId                                                         | 🟢 KEEP | —      | Disabled without credentials                                                                                |
-| MCP OAuth plugin                          | /oauth/authorize                                                           | 🟢 KEEP | —      | Works locally                                                                                               |
-| Handle auto-gen                           | from email                                                                 | 🟢 KEEP | —      | —                                                                                                           |
-| User blocking                             | blocked flag, session hook                                                 | 🟢 KEEP | —      | Independent from approval; blocking always wins                                                             |
-| Load-test bypass                          | ENABLE_LOAD_TEST_AUTH                                                      | 🟢 KEEP | —      | Superfluous but harmless (don't set the env)                                                                |
-| GeoIP in session                          | country lookup                                                             | 🟢 KEEP | —      | Offline, harmless                                                                                           |
-| executionLock.pin hashing                 | schema.ts, `utils/pin-hash.ts`                                             | ✅ DONE | S      | scrypt hash (`hashPin`/`verifyPin`); plaintext returned once at creation                                    |
-| ~25 schema tables                         | user/session/workflow/execution/notes/audit/artifacts/tokens/locks/sharing | 🟢 KEEP | —      | Multi-user structure is OK                                                                                  |
+Cloud branding, landing assets, environment material, and private workflows are supplied by the
+private deployment repository. The OSS runtime accepts an additional workflow catalog through
+`WORKFLOWS_DIRS`; later directories can override the same `(owner, slug)` identity without moving
+private definitions into the public repository.
 
-**Zone summary:** blockers (legal consents, email gate) plus registration/verification done per mode; PIN hash — security fix done.
+## Sources of truth
 
-## Zone D — shared/services + repositories (quotas, multi-user)
-
-| Block                               | What                                    | Verdict         | Effort | Note                                                     |
-| ----------------------------------- | --------------------------------------- | --------------- | ------ | -------------------------------------------------------- |
-| Artifact quotas                     | 3-level (per-user → global → hardcoded) | 🟢 KEEP         | —      | Configurable via global settings                         |
-| Note quotas                         | global settings (size/total/versions)   | ✅ DONE         | S      | `GlobalSettingsService` (like artifacts), migration 0012 |
-| Multi-user isolation                | ownership by userId, visibility         | 🟢 KEEP         | —      | Correct                                                  |
-| Workflow slug/handle resolution     | per-user slug, global handle            | 🟢 KEEP         | —      | Marketplace foundation                                   |
-| Execution retention                 | global setting + periodic cleanup       | ✅ DONE         | M      | `ExecutionRetentionService`, default 0 = keep forever    |
-| Settings (user encrypted + global)  | config system                           | 🟢 KEEP         | —      | —                                                        |
-| Sharing service (invites)           | WorkflowSharingService                  | 💰 EE           | —      | See Zone B                                               |
-| /stats endpoints (quota dashboards) | usage %                                 | 🟡 MODE / 💰 EE | S      | Basics OK; advanced quota analytics → EE                 |
-
-**Zone summary:** artifact quotas/isolation/settings KEEP; note quotas + execution retention REWORK (S/M); sharing → EE.
-
-## Zone E — web-backend (routes + middleware)
-
-> The chat subsystem is NOT in the branch (future EE).
-
-| Block                              | What                                                               | Verdict | Effort | Note                                                                                                                 |
-| ---------------------------------- | ------------------------------------------------------------------ | ------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
-| Core routes                        | workflows/executions/artifacts/notes/tokens/user/health/stats CRUD | 🟢 KEEP | —      | ~75% core                                                                                                            |
-| **Workflow sharing routes**        | invites TTL, access RBAC, accept                                   | 💰 EE   | —      | Complex RBAC                                                                                                         |
-| Artifact/Note /stats               | quota statistics                                                   | 🟡 MODE | S      | Basics; advanced → EE                                                                                                |
-| Artifact sharing                   | share endpoint                                                     | 💰 EE   | —      | —                                                                                                                    |
-| **Abuse reporting** (\_\_report)   | artifact moderation                                                | 💰 EE   | —      | Requires moderation                                                                                                  |
-| OAuth consents/sessions routes     | OAuth infra                                                        | 🟡 MODE | S      | Per mode (OAuth optional)                                                                                            |
-| Admin analytics                    | overview/executions/users plus installation-wide statistics        | ✅ DONE | M      | `/admin/stats` and analytics routes are server-denied in self-host; neutral `/admin/system-status` remains available |
-| Operational analytics              | operational metrics and dashboard                                  | ✅ DONE | S      | Server-denied and hidden in self-host via adminOperations                                                            |
-| Monitoring test routes             | deliberate errors, delays, logs, workflow/MCP probes               | ✅ DONE | S      | Server-denied and hidden unless operationsDevelopment is enabled                                                     |
-| Admin user management              | list/detail/approve/block/verify/reset                             | 🟢 KEEP | —      | Available in self-host independently of broader multi-user admin pages                                               |
-| user-security (block/verify/reset) | requires email                                                     | 🟡 MODE | S      | email-dependent ones per mode                                                                                        |
-| Admin DB ops (vacuum/backup)       | local database maintenance                                         | 🟢 KEEP | —      | Useful to a self-host administrator; remains admin-only                                                              |
-| CORS origin allowlist              | `cors-middleware.ts`                                               | ✅ DONE | S      | allowlist: getBaseUrl + EXTRA_TRUSTED_ORIGINS + CORS_ALLOWED_ORIGINS + localhost                                     |
-| IPv6 rate-limit key                | `rate-limit-middleware.ts`                                         | ✅ DONE | S      | ipKeyGenerator for IPv6 (artifactViewLimiter fallback)                                                               |
-| Middleware (auth/admin/ratelimit)  | requireVerifiedAuth                                                | 🟡 MODE | S      | email gate per mode                                                                                                  |
-
-**Zone summary:** core routes KEEP; sharing/abuse/advanced-analytics → EE; CORS+IPv6 done; email/DB-ops per MODE.
-
-## Zone F — shared infra (email/metrics/audit/logging/errors/config)
-
-| Block                                     | What                      | Verdict | Effort | Note                                                                                                     |
-| ----------------------------------------- | ------------------------- | ------- | ------ | -------------------------------------------------------------------------------------------------------- |
-| EMAIL (SMTP + Brevo + explicit test sink) | explicit capability state | 🟢 KEEP | —      | Without a real provider self-host reports unavailable; administrator-assisted recovery remains available |
-| EMAIL_FROM default                        | env.ts getEmailFrom       | ✅ DONE | S      | Default noreply@localhost in self-host                                                                   |
-| CONTACT_EMAIL default                     | urls.ts getter            | ✅ DONE | S      | Default support@localhost in self-host                                                                   |
-| TELEGRAM_ENCRYPTION_KEY autogen           | secrets-bootstrap.ts      | ✅ DONE | S      | Auto-generated (256-bit) in self-host, persisted                                                         |
-| BETTER_AUTH_SECRET / ADMIN_PASSWORD       | secrets-bootstrap.ts      | ✅ DONE | M      | Auto-generated on first start; ADMIN_PASSWORD shown once in logs; migration does not fail                |
-| METRICS (Prometheus :9090)                | monitoring                | 🟢 KEEP | —      | Optional                                                                                                 |
-| AUDIT (audit actions, geoip)              | observability             | 🟢 KEEP | —      | Superfluous but harmless; advanced export → EE                                                           |
-| LOGGING (winston)                         | —                         | 🟢 KEEP | —      | Required                                                                                                 |
-| ERRORS (domain/app)                       | —                         | 🟢 KEEP | —      | Required                                                                                                 |
-| MCP-CLIENTS (config generators)           | Cursor/VSCode/Claude/...  | 🟢 KEEP | —      | Pure functions                                                                                           |
-| CONFIG (env singleton)                    | —                         | 🟢 KEEP | —      | See required env above                                                                                   |
-
-**Zone summary:** infra mostly KEEP; **5 startup env blockers** (EMAIL_FROM, CONTACT_EMAIL, TELEGRAM_ENCRYPTION_KEY, BETTER_AUTH_SECRET, ADMIN_PASSWORD) → REWORK via auto-generation/defaults in self-host mode.
-
-## Zone G — web-frontend + landing-page (UI)
-
-| Block                                                        | What                                                                         | Verdict                    | Effort | Note                                                                           |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------- | -------------------------- | ------ | ------------------------------------------------------------------------------ |
-| Residency checkbox                                           | AuthProvider.tsx                                                             | ✅ DONE                    | S      | Hidden in self-host via legalConsents                                          |
-| Terms checkbox                                               | acceptedTermsAt                                                              | ✅ DONE                    | S      | Hidden in self-host via legalConsents                                          |
-| Auth pages                                                   | Login/Register/Reset/Verify/OAuth                                            | 🟢 KEEP                    | —      | Hide OAuth buttons when disabled                                               |
-| App pages                                                    | Dashboard/Workflows(+ReactFlow)/Executions/Notes/Artifacts/Settings/AuditLog | 🟢 KEEP                    | —      | —                                                                              |
-| Admin user management                                        | Users and user detail                                                        | 🟢 KEEP                    | —      | Enabled in self-host via userManagement                                        |
-| Broader multi-user admin pages                               | Executions/Workflows/Artifacts/Reported/Deleted Workflows                    | ✅ DONE                    | M      | Hidden in self-host via multiUserAdmin (nav + route guard)                     |
-| Admin analytics                                              | Dashboard totals, recent activity and analytics API                          | ✅ DONE                    | S      | Self-host requests only neutral system status; no analytics render or prefetch |
-| Operational dashboard                                        | Operational metrics plus optional business analytics                         | ✅ DONE                    | S      | Hidden via adminOperations; optional analytics use adminAnalytics              |
-| Monitoring test page                                         | Deliberate diagnostic traffic                                                | ✅ DONE                    | S      | Hidden via operationsDevelopment                                               |
-| Admin ReportedArtifacts                                      | moderation UI                                                                | 💰 EE                      | —      | —                                                                              |
-| Admin Settings/System/Audit Log/API Tokens                   | schema, audit, local tokens                                                  | 🟢 KEEP                    | —      | Useful for a self-host administrator                                           |
-| **BetaAgreementModal + Banner**                              | SaaS disclaimer                                                              | 🟡 MODE                    | S      | Hide in self-host                                                              |
-| Quota UI (Notes/Artifacts)                                   | usedPercent                                                                  | 🟢 KEEP                    | —      | Configurable                                                                   |
-| **landing brand** (index/developers/admin-data-access.astro) | marketing                                                                    | 🔴 REWORK (extract)        | M      | → moira-infra (see OSS-MIGRATION-PLAN Phase A)                                 |
-| landing legal (terms/privacy.astro)                          | legal                                                                        | 🔴 REWORK                  | S      | Update for the self-host context                                               |
-| **docs (content/docs EN+RU)**                                | Starlight                                                                    | 🟢 KEEP (into OSS package) | M      | Extract into the docs site, DOCS_DIR (Phase 2.1)                               |
-
-**Zone summary:** residency/beta/admin-multiuser → MODE; landing brand → extract; docs → OSS package.
-
-## Zone H — workflow-cli
-
-| Block             | What                        | Verdict | Effort | Note                                                                     |
-| ----------------- | --------------------------- | ------- | ------ | ------------------------------------------------------------------------ |
-| CLI (19 commands) | view/edit/variables/version | 🟢 KEEP | —      | Standalone, offline, no auth/cloud. Critical for the self-host developer |
-
----
-
-## Verdict Summary
-
-### 🔴 REWORK (blockers/hardcoded) — priority for self-host
-
-| #   | Block                                                                                                                                     | Effort | Zone |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---- |
-| 1   | Startup env blockers: ADMIN_PASSWORD, EMAIL_FROM, CONTACT_EMAIL, TELEGRAM_ENCRYPTION_KEY (weak), BETTER_AUTH_SECRET — autogen/defaults ✅ | M      | F    |
-| 2   | Legal consents terms/residency — behind DEPLOYMENT_MODE ✅                                                                                | M      | C    |
-| 3   | Email verification gate (OAuth/tokens) — per mode ✅                                                                                      | M      | B,C  |
-| 4   | API token email gate (requireVerifiedAuth) — lift in self-host ✅                                                                         | S      | B    |
-| 5   | Note quotas hardcoded — global settings ✅                                                                                                | S      | D    |
-| 6   | Execution retention/cleanup ✅                                                                                                            | M      | D    |
-| 7   | CORS — configurable allowlist ✅                                                                                                          | S      | E    |
-| 8   | IPv6 rate-limit key (ipKeyGenerator) ✅                                                                                                   | S      | E    |
-| 9   | executionLock.pin — scrypt hash (security) ✅                                                                                             | S      | C    |
-| 10  | Extract landing brand + update legal                                                                                                      | M      | G    |
-| 11  | docs → separate OSS package (DOCS_DIR)                                                                                                    | M      | G    |
-
-### 🟡 MODE (DEPLOYMENT_MODE)
-
-Account approval, sendOnSignUp, residency/terms checkboxes, beta modal/banner, broader admin multi-user pages, email-dependent admin operations, OAuth consent routes, admin DB ops, basic /stats.
-
-### 💰 EE candidates (paid layer, NOT a self-host toggle)
-
-| EE feature                                   | Derived from                 | Zone  |
-| -------------------------------------------- | ---------------------------- | ----- |
-| Workflow sharing (invites + RBAC access)     | manage tool + sharing routes | B,D,E |
-| Artifact sharing                             | artifacts share              | E     |
-| Abuse reporting / moderation (takedown)      | \_\_report + admin reported  | E,G   |
-| Advanced quota analytics / billing           | advanced /stats              | D,E   |
-| Advanced admin analytics                     | analytics over-time/by-user  | E     |
-| Audit export (compliance)                    | audit                        | F     |
-| **chat / LLM orchestration** (not in branch) | future                       | —     |
-| **SSO/SAML** (not in branch)                 | future                       | —     |
-| **Central marketplace publishing**           | handle/slug + central        | —     |
-| **Hosted multi-tenant cloud**                | —                            | —     |
-
-### 🟢 KEEP (core, self-host ready)
-
-The entire workflow-engine, core MCP tools, core backend routes, core UI, workflow-cli, settings, multi-user isolation, artifact quotas, logging/errors/config/mcp-clients, metrics/audit (optional).
-
----
-
-## Overall Effort Estimate for Self-Host Code Adaptation
-
-| Category                                  | # blocks   | Total                                    |
-| ----------------------------------------- | ---------- | ---------------------------------------- |
-| 🔴 REWORK                                 | 11         | ~3 S + ~5 M ≈ **6–9 days**               |
-| 🟡 MODE (DEPLOYMENT_MODE infra + points)  | ~10 points | **~2–3 days** (incl. the mode mechanism) |
-| 💰 EE (extraction/gating, separate track) | ~10        | depends on the EE architecture (step 4)  |
-| 🟢 KEEP                                   | majority   | 0                                        |
-
-**Conclusion:** for a working self-host (single-user → team) the main work is **DEPLOYMENT_MODE + ~11 targeted reworks (startup blockers, auth email gate, quotas, CORS/IPv6, security)**, ≈ **8–12 days**. EE extraction is a separate track (depends on the chosen EE architecture).
+- Capability names and built-in mode policy: `packages/shared/src/config/feature-resolver.ts`
+- Server route mapping: `packages/web-backend/src/middleware/admin-route-capability.ts`
+- Route mounting and monitoring-test enforcement: `packages/web-backend/src/server.ts`
+- Public capability response: `packages/web-backend/src/routes/features.ts`
+- Frontend navigation and route projection: `packages/web-frontend/src/components/layout/AppSidebar.tsx`,
+  `packages/web-frontend/src/components/layout/AdminLayout.tsx`, and
+  `packages/web-frontend/src/components/ProtectedRoute.tsx`
