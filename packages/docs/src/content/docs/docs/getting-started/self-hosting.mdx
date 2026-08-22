@@ -11,9 +11,25 @@ image from the registry — no source checkout or local build needed.
 ## Prerequisites
 
 - Docker with the Compose plugin (`docker compose`)
-- The two files from the repository: `docker-compose.yml` and `.env.example`
+- Host `sqlite3` CLI (used to verify preflight and rollback snapshots)
+- The self-host release bundle files: `docker-compose.yml`, `.env.example`, and
+  executable `scripts/self-host-upgrade.sh` (download the same release tag from the repository;
+  no source build or private repository is required)
 
 ## Quick Start
+
+Download the three files from one immutable release tag (replace `0.3.5` when selecting another
+release):
+
+```bash
+MOIRA_VERSION=0.3.5
+MOIRA_RELEASE=https://raw.githubusercontent.com/moira-mcp/moira/v${MOIRA_VERSION}
+curl -fLO "$MOIRA_RELEASE/docker-compose.yml"
+curl -fLo .env.example "$MOIRA_RELEASE/.env.example"
+mkdir -p scripts
+curl -fLo scripts/self-host-upgrade.sh "$MOIRA_RELEASE/scripts/self-host-upgrade.sh"
+chmod +x scripts/self-host-upgrade.sh
+```
 
 <Steps>
 
@@ -31,7 +47,8 @@ image from the registry — no source checkout or local build needed.
     docker compose up -d
     ```
 
-    Compose pulls `ghcr.io/moira-mcp/moira:latest` and starts the container.
+    Compose pulls the immutable `MOIRA_IMAGE` from `.env` (the shipped example pins
+    `ghcr.io/moira-mcp/moira:0.3.5`) and starts the container.
 
 3.  **Open the Web UI**
 
@@ -195,6 +212,47 @@ http://localhost:8080/mcp
 
 Add it as an MCP server in your AI client and complete OAuth authentication. See
 [Quick Start](/docs/getting-started/quickstart/) for client configuration.
+
+## Safe Upgrade and Rollback
+
+Keep an immutable image pin in `.env` (a version or digest, never `latest`):
+
+```bash
+MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5
+docker compose pull moira
+docker compose exec -T moira cat /app/BUILD_INFO
+df -h ./data && test -r ./data/moira.db && test -w ./data
+```
+
+The shipped helper uses SQLite online backup and verifies `PRAGMA integrity_check` before it changes
+the active container:
+
+```bash
+./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
+docker compose ps && docker compose exec -T moira cat /app/BUILD_INFO
+```
+
+Preflight mounts production data read-only, writes its verified snapshot/evidence under
+`.moira-upgrade/`, and runs the exact incoming image against `.moira-upgrade/preflight/moira.db`,
+never the production DB.
+If it reports managed-workflow reconciliation, the active instance stays available. Ask your agent
+to run Workflow Management Flow, inspect the MCP `reconciliation` tool's previous/current/incoming
+candidates, submit the semantic merge, and retry the pinned upgrade. Do not use `--force` to discard
+local workflow changes.
+
+If replacement or health verification fails, restore the verified snapshot and previous pin:
+
+```bash
+./scripts/self-host-upgrade.sh rollback
+docker compose ps
+docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
+```
+
+Keep `.moira-upgrade/moira.db.upgrade-backup` until the new version has been verified. The helper
+preserves `.moira-upgrade/preflight/` as diagnostic/reconciliation evidence and replaces it on the
+next preflight.
 
 ## Adding Your Own Workflow Flows
 

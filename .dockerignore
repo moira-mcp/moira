@@ -36,6 +36,7 @@ logs/
 
 # Storage
 .moira-storage/
+.moira-upgrade/
 .graph-storage/
 data/
 

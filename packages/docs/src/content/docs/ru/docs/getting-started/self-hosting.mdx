@@ -11,9 +11,25 @@ import { Aside, Steps } from "@astrojs/starlight/components";
 ## Требования
 
 - Docker с плагином Compose (`docker compose`)
-- Два файла из репозитория: `docker-compose.yml` и `.env.example`
+- CLI `sqlite3` на хосте (для проверки preflight и rollback snapshot)
+- Файлы self-host release bundle: `docker-compose.yml`, `.env.example` и исполняемый
+  `scripts/self-host-upgrade.sh` (скачайте их из того же release tag репозитория;
+  сборка исходников и private-репозиторий не нужны)
 
 ## Быстрый старт
+
+Скачайте три файла из одного неизменяемого release tag (замените `0.3.5`, если выбираете другой
+релиз):
+
+```bash
+MOIRA_VERSION=0.3.5
+MOIRA_RELEASE=https://raw.githubusercontent.com/moira-mcp/moira/v${MOIRA_VERSION}
+curl -fLO "$MOIRA_RELEASE/docker-compose.yml"
+curl -fLo .env.example "$MOIRA_RELEASE/.env.example"
+mkdir -p scripts
+curl -fLo scripts/self-host-upgrade.sh "$MOIRA_RELEASE/scripts/self-host-upgrade.sh"
+chmod +x scripts/self-host-upgrade.sh
+```
 
 <Steps>
 
@@ -31,7 +47,8 @@ import { Aside, Steps } from "@astrojs/starlight/components";
     docker compose up -d
     ```
 
-    Compose скачивает `ghcr.io/moira-mcp/moira:latest` и запускает контейнер.
+    Compose скачивает неизменяемый `MOIRA_IMAGE` из `.env` (в поставляемом примере указан
+    `ghcr.io/moira-mcp/moira:0.3.5`) и запускает контейнер.
 
 3.  **Откройте веб-интерфейс**
 
@@ -198,6 +215,46 @@ http://localhost:8080/mcp
 
 Добавьте его как MCP-сервер в ваш AI-клиент и пройдите OAuth-аутентификацию. Настройку
 клиента смотрите в [Быстром старте](/ru/docs/getting-started/quickstart/).
+
+## Безопасное обновление и откат
+
+Храните в `.env` неизменяемый pin образа — версию или digest, но не `latest`:
+
+```bash
+MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5
+docker compose pull moira
+docker compose exec -T moira cat /app/BUILD_INFO
+df -h ./data && test -r ./data/moira.db && test -w ./data
+```
+
+Поставляемый helper использует online backup SQLite и проверяет `PRAGMA integrity_check` до замены
+активного контейнера:
+
+```bash
+./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
+docker compose ps && docker compose exec -T moira cat /app/BUILD_INFO
+```
+
+Preflight монтирует production data read-only, пишет snapshot/evidence в `.moira-upgrade/` и запускает
+точный входящий образ только на `.moira-upgrade/preflight/moira.db`, не на production БД.
+При конфликте managed workflow активный экземпляр остаётся доступным. Попросите агента запустить
+Workflow Management Flow, изучить previous/current/incoming кандидаты MCP-инструмента
+`reconciliation`, отправить семантическое слияние и повторить обновление с pin. Не используйте
+`--force` для удаления локальных изменений workflow.
+
+Если замена или health-проверка завершилась ошибкой, восстановите проверенный snapshot и прежний pin:
+
+```bash
+./scripts/self-host-upgrade.sh rollback
+docker compose ps
+docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
+```
+
+Сохраняйте `.moira-upgrade/moira.db.upgrade-backup` до проверки новой версии. Helper оставляет
+`.moira-upgrade/preflight/` как диагностическое/reconciliation-доказательство и заменяет его при следующем
+preflight.
 
 ## Добавление собственных workflow-флоу
 
