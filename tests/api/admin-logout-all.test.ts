@@ -147,7 +147,7 @@ describe.skip("Admin Logout All Users API", () => {
       expect(json.data.message).toContain("Logged out");
 
       // Admin session should still work
-      const adminCheck = await fetch(`${BASE_URL}/api/admin/stats`, {
+      const adminCheck = await fetch(`${BASE_URL}/api/admin/system-status`, {
         headers: { Cookie: adminCookie },
       });
       expect(adminCheck.status).toBe(200);

@@ -23,6 +23,9 @@ export type FeatureFlag =
   | "betaNotices"
   | "multiUserAdmin"
   | "userManagement"
+  | "adminAnalytics"
+  | "adminOperations"
+  | "operationsDevelopment"
   | "socialLogin";
 
 export interface FeaturesResponse {
@@ -80,12 +83,9 @@ export interface HealthCheckResponse {
   version: string;
 }
 
-export interface AdminStatsResponse {
-  totalWorkflows: number;
-  totalExecutions: number;
+export interface AdminSystemStatusResponse {
   totalDefinitions: number;
-  activeExecutions: number;
-  systemHealth?: {
+  systemHealth: {
     backendStatus: string;
     databaseSize: number;
     workflowReconciliation: {
@@ -104,7 +104,13 @@ export interface AdminStatsResponse {
       }>;
     };
   };
-  recentActivity?: Array<{
+}
+
+export interface AdminStatsResponse extends AdminSystemStatusResponse {
+  totalWorkflows: number;
+  totalExecutions: number;
+  activeExecutions: number;
+  recentActivity: Array<{
     id: string;
     workflowId: string;
     status: string;

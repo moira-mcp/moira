@@ -42,6 +42,12 @@ export type Feature =
   | "multiUserAdmin"
   /** Expose user-management capabilities independently of broader admin pages. */
   | "userManagement"
+  /** Expose aggregate administrator analytics across the hosted installation. */
+  | "adminAnalytics"
+  /** Expose operational dashboards backed by installation-wide telemetry. */
+  | "adminOperations"
+  /** Allow deliberate monitoring/development side effects such as test errors and delays. */
+  | "operationsDevelopment"
   /** Offer GitHub/Google social (OAuth) login. */
   | "socialLogin";
 
@@ -76,6 +82,9 @@ const MODE_FEATURES: Record<DeploymentMode, Record<Feature, boolean>> = {
     betaNotices: false,
     multiUserAdmin: false,
     userManagement: true,
+    adminAnalytics: false,
+    adminOperations: false,
+    operationsDevelopment: false,
     socialLogin: false,
   },
   saas: {
@@ -87,6 +96,9 @@ const MODE_FEATURES: Record<DeploymentMode, Record<Feature, boolean>> = {
     betaNotices: true,
     multiUserAdmin: true,
     userManagement: true,
+    adminAnalytics: true,
+    adminOperations: true,
+    operationsDevelopment: true,
     socialLogin: true,
   },
 };

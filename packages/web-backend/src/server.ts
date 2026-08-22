@@ -39,6 +39,15 @@ setGlobalService(Service.WEB_BACKEND);
 import { setupCorsMiddleware } from "./middleware/cors-middleware.js";
 import { setupErrorMiddleware } from "./middleware/error-middleware.js";
 import { requireAuth, optionalAuth } from "./middleware/auth-middleware.js";
+import { requireAdmin } from "./middleware/admin-middleware.js";
+import {
+  requireCapability,
+  requireSelectedCapability,
+} from "./middleware/capability-middleware.js";
+import {
+  selectAdminRouteCapability,
+  selectAnalyticsSurfaceCapability,
+} from "./middleware/admin-route-capability.js";
 import { apiLimiter, authLimiter } from "./middleware/rate-limit-middleware.js";
 import { requestBodyLogger } from "./middleware/request-body-logger.js";
 import { inputContextMiddleware } from "./middleware/input-context-middleware.js";
@@ -78,6 +87,12 @@ const __dirname = path.dirname(__filename);
 
 // Create logger for server
 const logger = createLogger({ component: "Server" });
+
+const requireAdminRouteCapability = requireSelectedCapability(selectAdminRouteCapability);
+
+const requireAnalyticsSurfaceCapability = requireSelectedCapability(
+  selectAnalyticsSurfaceCapability,
+);
 
 /**
  * MCP Moira API Server
@@ -367,11 +382,19 @@ class MoiraApiServer {
     this.app.use("/api/notes", apiLimiter, requireAuth, notesRoutes);
     this.app.use("/api/artifacts", apiLimiter, requireAuth, artifactsRoutes);
     this.app.use("/api/tokens", apiLimiter, tokenRoutes); // requireVerifiedAuth inside routes
-    this.app.use("/api/admin", apiLimiter, requireAuth, adminRoutes); // requireAdmin inside routes
-    this.app.use("/api/admin/tokens", apiLimiter, requireAuth, adminTokenRoutes); // requireAdmin inside routes
-    this.app.use("/api/admin", adminUserSecurityRoutes); // Already has apiLimiter, requireAuth, requireAdmin inside
-    this.app.use("/api/admin/analytics", apiLimiter, requireAuth, adminAnalyticsRoutes); // requireAdmin inside routes
-    this.app.use("/api/admin/monitoring-test", apiLimiter, requireAuth, monitoringTestRoutes); // requireAdmin inside routes
+    // Authenticate and authorize the administrator namespace once. Specific
+    // routers are mounted before the catch-all admin router so their handlers
+    // and capability policies take precedence without repeating role checks.
+    this.app.use("/api/admin", apiLimiter, requireAuth, requireAdmin);
+    this.app.use("/api/admin/tokens", adminTokenRoutes);
+    this.app.use("/api/admin/analytics", requireAnalyticsSurfaceCapability, adminAnalyticsRoutes);
+    this.app.use(
+      "/api/admin/monitoring-test",
+      requireCapability("operationsDevelopment"),
+      monitoringTestRoutes,
+    );
+    this.app.use("/api/admin", adminUserSecurityRoutes);
+    this.app.use("/api/admin", requireAdminRouteCapability, adminRoutes);
 
     // Default route for API documentation
     this.app.get("/api", (req, res) => {

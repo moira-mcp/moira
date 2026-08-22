@@ -986,7 +986,8 @@ DELETE /api/admin/users/:id/sessions       // Revoke all sessions
 GET    /api/admin/emails                   // List sent emails
 GET    /api/admin/executions               // List all executions
 GET    /api/admin/executions/:id           // Get execution details
-GET    /api/admin/stats                    // System statistics
+GET    /api/admin/system-status            // Neutral health/reconciliation status
+GET    /api/admin/stats                    // Installation-wide statistics (adminAnalytics)
 ```
 
 ### Admin Middleware

@@ -987,23 +987,33 @@ interface BetaWarningBannerProps {
 Mounted above `AuthProvider`. Default while loading / on error: all flags off
 (self-host baseline — SaaS UI never flashes before the server confirms it).
 
-SaaS-specific UI is hidden in self-host based on the flags:
+Deployment-specific UI is selected by named capabilities:
 
-| Flag             | UI gated                                                                            |
-| ---------------- | ----------------------------------------------------------------------------------- |
-| `legalConsents`  | Registration terms + residency consent checkboxes (`AuthProvider`)                  |
-| `betaNotices`    | `BetaAgreementModal` + `BetaWarningBanner` (`useBetaAgreement`)                     |
-| `multiUserAdmin` | Admin sidebar items Users / Executions / Workflows / Artifacts / Reported Artifacts |
+| Flag                    | UI gated                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `legalConsents`         | Registration terms + residency consent checkboxes (`AuthProvider`)                                           |
+| `betaNotices`           | `BetaAgreementModal` + `BetaWarningBanner` (`useBetaAgreement`)                                              |
+| `userManagement`        | Users list and user detail                                                                                   |
+| `multiUserAdmin`        | Executions, Workflows, Artifacts, Reported Artifacts, Deleted Workflows, logout-all, and related quick links |
+| `adminAnalytics`        | Installation-wide dashboard totals, recent activity, analytics panels, and their requests                    |
+| `adminOperations`       | Operational dashboard                                                                                        |
+| `operationsDevelopment` | Monitoring Test page                                                                                         |
 
-Multi-user admin gating is defense-in-depth:
+Capability gating is defense-in-depth:
 
-- Nav level: `AppSidebar` filters `NavRoute.multiUserAdmin` items (`AdminLayout`).
-- Route level: `ProtectedRoute requireMultiUserAdmin` redirects direct
-  navigation to `/admin` when the feature is off (`App.tsx` wraps the
-  multi-user admin routes).
+- Navigation level: `AppSidebar` filters routes through the generic
+  `NavRoute.capability` field configured by `AdminLayout`.
+- Route level: `ProtectedRoute requireCapability` redirects direct navigation to
+  `/admin` when the named capability is off; `App.tsx` assigns the same capability
+  to each protected route.
+- Request level: the backend resolves the same capability names before disabled
+  administrator handlers can read cross-user data or perform effects. UI filtering
+  is not the security boundary.
 
-Retained in self-host admin: Dashboard, Settings Manager, Audit Log, API Tokens,
-Deleted Workflows, Monitoring Test, Operational.
+The default self-host administrator retains Dashboard, Users, Audit Log, API Tokens,
+Settings Manager, database/health status, and managed-workflow reconciliation. It does
+not receive the broad multi-user pages, Deleted Workflows, analytics, Operational, or
+Monitoring Test surfaces. SaaS enables the complete comparison through the same resolver.
 
 ### React Flow Integration
 

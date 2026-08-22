@@ -57,6 +57,9 @@ const featureResponse = (accountApproval: boolean) => ({
     betaNotices: !accountApproval,
     multiUserAdmin: !accountApproval,
     userManagement: true,
+    adminAnalytics: !accountApproval,
+    adminOperations: !accountApproval,
+    operationsDevelopment: !accountApproval,
     socialLogin: !accountApproval,
   },
 });
@@ -264,6 +267,12 @@ describe("administrator account-approval presentation", () => {
     await waitFor(() =>
       expect(screen.getByTestId("admin-email-delivery-unavailable")).toBeInTheDocument(),
     );
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).includes("/api/admin/users/saas-user/artifact-quota"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByTestId("artifact-quota-card")).not.toBeInTheDocument();
     expect(screen.queryByText("Send Verification")).not.toBeInTheDocument();
     expect(screen.queryByText("Send Password Reset")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("open-temporary-password-dialog"));

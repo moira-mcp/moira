@@ -165,7 +165,7 @@ const App: React.FC = () => {
                   <Route
                     path="users"
                     element={
-                      <ProtectedRoute requireAdmin requireUserManagement>
+                      <ProtectedRoute requireAdmin requireCapability="userManagement">
                         <UserManagement />
                       </ProtectedRoute>
                     }
@@ -173,7 +173,7 @@ const App: React.FC = () => {
                   <Route
                     path="users/:id"
                     element={
-                      <ProtectedRoute requireAdmin requireUserManagement>
+                      <ProtectedRoute requireAdmin requireCapability="userManagement">
                         <AdminUserDetail />
                       </ProtectedRoute>
                     }
@@ -181,7 +181,7 @@ const App: React.FC = () => {
                   <Route
                     path="executions"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
                         <AdminExecutions />
                       </ProtectedRoute>
                     }
@@ -189,7 +189,7 @@ const App: React.FC = () => {
                   <Route
                     path="executions/:id"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
                         <AdminExecutionInspectorPage />
                       </ProtectedRoute>
                     }
@@ -197,7 +197,7 @@ const App: React.FC = () => {
                   <Route
                     path="workflows"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
                         <AdminWorkflows />
                       </ProtectedRoute>
                     }
@@ -205,7 +205,7 @@ const App: React.FC = () => {
                   <Route
                     path="artifacts"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
                         <AdminArtifacts />
                       </ProtectedRoute>
                     }
@@ -213,7 +213,7 @@ const App: React.FC = () => {
                   <Route
                     path="artifacts/reported"
                     element={
-                      <ProtectedRoute requireAdmin requireMultiUserAdmin>
+                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
                         <AdminReportedArtifacts />
                       </ProtectedRoute>
                     }
@@ -224,10 +224,31 @@ const App: React.FC = () => {
                     path="global-settings"
                     element={<AdminSettingsUnified defaultTab="values" />}
                   />
-                  <Route path="deleted-workflows" element={<DeletedWorkflows />} />
-                  <Route path="monitoring-test" element={<AdminMonitoringTest />} />
+                  <Route
+                    path="deleted-workflows"
+                    element={
+                      <ProtectedRoute requireAdmin requireCapability="multiUserAdmin">
+                        <DeletedWorkflows />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="monitoring-test"
+                    element={
+                      <ProtectedRoute requireAdmin requireCapability="operationsDevelopment">
+                        <AdminMonitoringTest />
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route path="tokens" element={<AdminTokens />} />
-                  <Route path="operational" element={<OperationalDashboard />} />
+                  <Route
+                    path="operational"
+                    element={
+                      <ProtectedRoute requireAdmin requireCapability="adminOperations">
+                        <OperationalDashboard />
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route path="analytics" element={<Navigate to={ROUTES.ADMIN} replace />} />
                 </Route>
               </Routes>

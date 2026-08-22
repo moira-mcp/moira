@@ -77,7 +77,7 @@ resolver.isEnabled("openRegistration"); // self-host → true, saas → true
 resolver.isEnabled("accountApproval"); // self-host → true, saas → false
 ```
 
-`Feature`: `openRegistration` | `accountApproval` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `userManagement` | `socialLogin`. Self-host opens registration behind administrator approval and exposes user management without enabling the broader multi-user admin surface. SaaS keeps its existing registration, verification, and admin behavior. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud).
+`Feature`: `openRegistration` | `accountApproval` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `userManagement` | `adminAnalytics` | `adminOperations` | `operationsDevelopment` | `socialLogin`. Self-host opens registration behind administrator approval and exposes user management without enabling broader cross-user administration, analytics, operational dashboards, or monitoring test tools. SaaS keeps its existing behavior. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud); the same singleton resolver controls `/api/features`, backend authorization, frontend navigation, route guards, and data prefetch.
 
 **Auth behavior by mode** (`better-auth-config.ts`, `web-backend/.../auth-middleware.ts`):
 
@@ -91,6 +91,18 @@ resolver.isEnabled("accountApproval"); // self-host → true, saas → false
 | `socialLogin`               | GitHub/Google OAuth login hidden                  | OAuth login offered (if config) |
 | `userManagement`            | enabled                                           | enabled                         |
 | `multiUserAdmin`            | disabled                                          | enabled                         |
+| `adminAnalytics`            | disabled                                          | enabled                         |
+| `adminOperations`           | disabled                                          | enabled                         |
+| `operationsDevelopment`     | disabled                                          | enabled                         |
+
+Capability checks are enforced by the server before protected route handlers. Hiding a link in
+the Web UI is only a usability effect and is not the security boundary. The operational page may
+load business-analytics widgets only when `adminAnalytics` is also enabled; disabling a capability
+therefore prevents both its DOM surface and its background requests.
+The administrator dashboard always reads deployment-neutral health and managed-workflow
+reconciliation from `GET /api/admin/system-status`. It requests installation-wide workflow and
+execution totals from `GET /api/admin/stats` only when `adminAnalytics` is enabled; the server
+enforces the same capability before those repository reads.
 
 In `self-host`, migration creates an already-approved recovery administrator and backfills existing users as approved. New registrations start pending: they can read `GET /api/user/me` and sign out, while product routes, persistent tokens, OAuth authorization and token issuance, and MCP access return `ACCOUNT_APPROVAL_REQUIRED` until an administrator calls `POST /api/admin/users/:id/approve`. Email verification remains a separate, disabled self-host gate.
 

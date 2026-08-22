@@ -5,8 +5,8 @@
  * no auth required, the {success, data, timestamp} envelope, a valid
  * deploymentMode, and a boolean for every gated feature flag.
  *
- * Runs against the Docker container (DEPLOYMENT_MODE=saas in the test env), so
- * this asserts the response SHAPE, not mode-specific values (mode-specific UI
+ * Runs against the configured Docker target, so this asserts the response
+ * SHAPE, not mode-specific values (mode-specific UI
  * behavior is covered by tests/e2e/feature-mode-ui.spec.ts and the resolver
  * logic by tests/unit/shared/feature-resolver.test.ts).
  */
@@ -25,6 +25,9 @@ const EXPECTED_FEATURES = [
   "betaNotices",
   "multiUserAdmin",
   "userManagement",
+  "adminAnalytics",
+  "adminOperations",
+  "operationsDevelopment",
   "socialLogin",
 ] as const;
 

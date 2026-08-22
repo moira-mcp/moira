@@ -15,13 +15,10 @@ import {
 } from "@mcp-moira/shared";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
-import { requireAdmin } from "../middleware/admin-middleware.js";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "AdminTokenRoutes" });
 const router = Router();
-
-router.use(requireAdmin);
 
 type TokenStatus = "active" | "expired" | "revoked";
 

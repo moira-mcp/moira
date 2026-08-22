@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { AreaChart, BarChart, LineChart } from "@tremor/react";
 import type { CustomTooltipProps } from "@tremor/react";
 import { apiClient } from "../services/api-client";
+import { useFeatures } from "../hooks/useFeatures";
 import { PageShell } from "../components/PageShell";
 import { StatCard } from "../components/stat-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -346,6 +347,8 @@ function ConversionFunnel({ funnel, testId }: { funnel: FunnelStage[]; testId?: 
 
 export const OperationalDashboard: React.FC = () => {
   const { t } = useTranslation();
+  const { isEnabled } = useFeatures();
+  const analyticsEnabled = isEnabled("adminAnalytics");
   // Operational metrics state
   const [metrics, setMetrics] = useState<OperationalMetric[]>([]);
   const [breakdowns, setBreakdowns] = useState<Breakdowns>({
@@ -385,9 +388,11 @@ export const OperationalDashboard: React.FC = () => {
           granularity,
           Object.keys(activeFilters).length > 0 ? activeFilters : undefined,
         ),
-        apiClient.getConversionFunnel(timeRange).catch(() => null),
-        apiClient.getAnalyticsTopWorkflows(timeRange, 10).catch(() => null),
-        apiClient.getEngagementMetrics(timeRange).catch(() => null),
+        analyticsEnabled ? apiClient.getConversionFunnel(timeRange).catch(() => null) : null,
+        analyticsEnabled
+          ? apiClient.getAnalyticsTopWorkflows(timeRange, 10).catch(() => null)
+          : null,
+        analyticsEnabled ? apiClient.getEngagementMetrics(timeRange).catch(() => null) : null,
       ]);
 
       setMetrics(operationalData.metrics);
@@ -413,7 +418,7 @@ export const OperationalDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [timeRange, granularity, filters, t]);
+  }, [analyticsEnabled, timeRange, granularity, filters, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -622,154 +627,156 @@ export const OperationalDashboard: React.FC = () => {
       </div>
 
       {/* === Business Analytics Section === */}
-      <div className="mb-8">
-        <h2
-          className="text-xl font-bold mb-4 flex items-center gap-2"
-          data-testid="business-analytics-heading"
-        >
-          <TrendingUp className="h-5 w-5" />
-          {t("admin.businessAnalytics.title")}
-        </h2>
-
-        {/* Engagement Summary Cards */}
-        {engagement && (
-          <div
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
-            data-testid="engagement-cards"
+      {analyticsEnabled && (
+        <div className="mb-8">
+          <h2
+            className="text-xl font-bold mb-4 flex items-center gap-2"
+            data-testid="business-analytics-heading"
           >
-            <StatCard
-              label={t("admin.businessAnalytics.engagement.returningUsers")}
-              value={`${engagement.returningUsersRate}%`}
-              icon={UserCheck}
-              trend={
-                engagement.activeUsersTrend.length > 1
-                  ? engagement.activeUsersTrend.map((p) => p.value)
-                  : undefined
-              }
-            />
-            <StatCard
-              label={t("admin.businessAnalytics.engagement.avgExecutionsPerUser")}
-              value={engagement.avgExecutionsPerUser}
-              icon={BarChart3}
-            />
-            <StatCard
-              label={t("admin.businessAnalytics.engagement.timeToFirstWorkflow")}
-              value={
-                engagement.avgTimeToFirstWorkflowDays !== null
-                  ? `${engagement.avgTimeToFirstWorkflowDays} ${t("admin.businessAnalytics.engagement.days")}`
-                  : "—"
-              }
-              icon={Target}
-            />
-            <StatCard
-              label={t("admin.analytics.userActivity.activeUsers")}
-              value={engagement.totalActiveUsers}
-              icon={Users}
-            />
+            <TrendingUp className="h-5 w-5" />
+            {t("admin.businessAnalytics.title")}
+          </h2>
+
+          {/* Engagement Summary Cards */}
+          {engagement && (
+            <div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"
+              data-testid="engagement-cards"
+            >
+              <StatCard
+                label={t("admin.businessAnalytics.engagement.returningUsers")}
+                value={`${engagement.returningUsersRate}%`}
+                icon={UserCheck}
+                trend={
+                  engagement.activeUsersTrend.length > 1
+                    ? engagement.activeUsersTrend.map((p) => p.value)
+                    : undefined
+                }
+              />
+              <StatCard
+                label={t("admin.businessAnalytics.engagement.avgExecutionsPerUser")}
+                value={engagement.avgExecutionsPerUser}
+                icon={BarChart3}
+              />
+              <StatCard
+                label={t("admin.businessAnalytics.engagement.timeToFirstWorkflow")}
+                value={
+                  engagement.avgTimeToFirstWorkflowDays !== null
+                    ? `${engagement.avgTimeToFirstWorkflowDays} ${t("admin.businessAnalytics.engagement.days")}`
+                    : "—"
+                }
+                icon={Target}
+              />
+              <StatCard
+                label={t("admin.analytics.userActivity.activeUsers")}
+                value={engagement.totalActiveUsers}
+                icon={Users}
+              />
+            </div>
+          )}
+
+          {/* Funnel + Top Workflows side by side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* Conversion Funnel */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Target className="h-4 w-4" />
+                  {t("admin.businessAnalytics.conversionFunnel.title")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {funnel.length > 0 ? (
+                  <ConversionFunnel funnel={funnel} testId="conversion-funnel" />
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    {t("admin.businessAnalytics.engagement.noData")}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Top Workflows */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  {t("admin.businessAnalytics.topWorkflows.title")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {topWorkflows.length > 0 ? (
+                  <div data-testid="top-workflows-chart">
+                    <BarChart
+                      className="h-56"
+                      data={topWorkflows.slice(0, 8).map((wf) => ({
+                        name:
+                          wf.workflowName.length > 25
+                            ? wf.workflowName.slice(0, 18) + "..."
+                            : wf.workflowName,
+                        [t("admin.businessAnalytics.topWorkflows.executions")]: wf.executionCount,
+                      }))}
+                      index="name"
+                      categories={[t("admin.businessAnalytics.topWorkflows.executions")]}
+                      colors={["indigo"]}
+                      showLegend={false}
+                      showAnimation
+                      layout="vertical"
+                      yAxisWidth={180}
+                      valueFormatter={(v: number) => String(v)}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-4 text-center">
+                    {t("admin.businessAnalytics.topWorkflows.noData")}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
           </div>
-        )}
 
-        {/* Funnel + Top Workflows side by side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Conversion Funnel */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <Target className="h-4 w-4" />
-                {t("admin.businessAnalytics.conversionFunnel.title")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {funnel.length > 0 ? (
-                <ConversionFunnel funnel={funnel} testId="conversion-funnel" />
-              ) : (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  {t("admin.businessAnalytics.engagement.noData")}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Top Workflows */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <BarChart3 className="h-4 w-4" />
-                {t("admin.businessAnalytics.topWorkflows.title")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {topWorkflows.length > 0 ? (
-                <div data-testid="top-workflows-chart">
-                  <BarChart
-                    className="h-56"
-                    data={topWorkflows.slice(0, 8).map((wf) => ({
-                      name:
-                        wf.workflowName.length > 25
-                          ? wf.workflowName.slice(0, 18) + "..."
-                          : wf.workflowName,
-                      [t("admin.businessAnalytics.topWorkflows.executions")]: wf.executionCount,
-                    }))}
-                    index="name"
-                    categories={[t("admin.businessAnalytics.topWorkflows.executions")]}
-                    colors={["indigo"]}
-                    showLegend={false}
-                    showAnimation
-                    layout="vertical"
-                    yAxisWidth={180}
-                    valueFormatter={(v: number) => String(v)}
+          {/* Registration Trend + Active Users Trend */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {registrationTrend.length > 1 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    {t("admin.businessAnalytics.conversionFunnel.registrationTrend")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <TimeSeriesChart
+                    data={registrationTrend}
+                    granularity="daily"
+                    metricName={t("admin.businessAnalytics.conversionFunnel.registered")}
+                    testId="chart-registration-trend"
+                    chartType={chartType}
                   />
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  {t("admin.businessAnalytics.topWorkflows.noData")}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                </CardContent>
+              </Card>
+            )}
 
-        {/* Registration Trend + Active Users Trend */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {registrationTrend.length > 1 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">
-                  {t("admin.businessAnalytics.conversionFunnel.registrationTrend")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <TimeSeriesChart
-                  data={registrationTrend}
-                  granularity="daily"
-                  metricName={t("admin.businessAnalytics.conversionFunnel.registered")}
-                  testId="chart-registration-trend"
-                  chartType={chartType}
-                />
-              </CardContent>
-            </Card>
-          )}
-
-          {engagement && engagement.activeUsersTrend.length > 1 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">
-                  {t("admin.businessAnalytics.engagement.activeUsersTrend")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <TimeSeriesChart
-                  data={engagement.activeUsersTrend}
-                  granularity="daily"
-                  metricName={t("admin.businessAnalytics.engagement.activeUsersTrend")}
-                  testId="chart-active-users-trend"
-                  chartType={chartType}
-                />
-              </CardContent>
-            </Card>
-          )}
+            {engagement && engagement.activeUsersTrend.length > 1 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">
+                    {t("admin.businessAnalytics.engagement.activeUsersTrend")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <TimeSeriesChart
+                    data={engagement.activeUsersTrend}
+                    granularity="daily"
+                    metricName={t("admin.businessAnalytics.engagement.activeUsersTrend")}
+                    testId="chart-active-users-trend"
+                    chartType={chartType}
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* === Operational Metrics Section === */}
       <h2

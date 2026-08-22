@@ -6,7 +6,6 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { requireAdmin } from "../middleware/admin-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import {
   logAuditEvent,
@@ -28,9 +27,6 @@ import {
 
 const router = Router();
 const repository = new DatabaseRepository();
-
-// All routes protected by requireAdmin middleware
-router.use(requireAdmin);
 
 /**
  * POST /api/admin/users/:id/temporary-password

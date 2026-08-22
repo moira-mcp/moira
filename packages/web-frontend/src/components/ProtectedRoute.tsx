@@ -14,21 +14,20 @@ import { useFeatures } from "../hooks/useFeatures";
 import { decideAdmissionRoute } from "../auth/admission-routing";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import type { FeatureFlag } from "../types/api-types";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requireAdmin?: boolean;
   requireEmailVerified?: boolean;
-  requireMultiUserAdmin?: boolean;
-  requireUserManagement?: boolean;
+  requireCapability?: FeatureFlag;
 }
 
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requireAdmin = false,
   requireEmailVerified = true,
-  requireMultiUserAdmin = false,
-  requireUserManagement = false,
+  requireCapability,
 }) => {
   const {
     isEnabled: isFeatureEnabled,
@@ -201,23 +200,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  // Multi-user admin pages are hidden when the feature is off (self-host).
-  // Wait for the feature flags to load before deciding, then redirect direct
-  // navigation back to the admin dashboard.
-  if (requireMultiUserAdmin) {
-    if (!featuresLoaded) {
-      return (
-        <div className="flex min-h-screen items-center justify-center">
-          <div className="text-muted-foreground">Loading...</div>
-        </div>
-      );
-    }
-    if (!isFeatureEnabled("multiUserAdmin")) {
-      return <Navigate to={ROUTES.ADMIN} replace />;
-    }
-  }
-
-  if (requireUserManagement && !isFeatureEnabled("userManagement")) {
+  // Direct navigation consumes the same named capability as feature discovery,
+  // navigation and backend authorization.
+  if (requireCapability && !isFeatureEnabled(requireCapability)) {
     return <Navigate to={ROUTES.ADMIN} replace />;
   }
 

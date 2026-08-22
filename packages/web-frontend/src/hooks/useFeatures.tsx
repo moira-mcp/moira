@@ -34,6 +34,9 @@ const ALL_OFF: FeatureFlags = {
   betaNotices: false,
   multiUserAdmin: false,
   userManagement: false,
+  adminAnalytics: false,
+  adminOperations: false,
+  operationsDevelopment: false,
   socialLogin: false,
 };
 

@@ -85,6 +85,9 @@ Response:
       betaNotices: boolean;
       multiUserAdmin: boolean;
       userManagement: boolean;
+      adminAnalytics: boolean;
+      adminOperations: boolean;
+      operationsDevelopment: boolean;
       socialLogin: boolean;
     }
     mcpUrl: string;
@@ -1791,9 +1794,50 @@ Errors:
 
 Authentication: Required (admin role)
 
+### GET /api/admin/system-status
+
+Get deployment-neutral administrator status. This endpoint is available to self-host and SaaS
+administrators and does not read installation-wide workflows or executions.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data: {
+    totalDefinitions: number;
+    systemHealth: {
+      backendStatus: "healthy" | "degraded";
+      databaseSize: number;
+      workflowReconciliation: {
+        status: "ok" | "error";
+        code: string;
+        conflicts: Array<{
+          owner: string;
+          slug: string;
+          classification: string;
+          instruction: string;
+          candidateRefs: {
+            previous: string | null;
+            current: string;
+            incoming: string;
+          };
+        }>;
+      }
+    }
+  }
+  timestamp: string;
+}
+```
+
+Authentication: Required (admin role)
+
 ### GET /api/admin/stats
 
-Get system statistics.
+Get the compatible administrator statistics response: installation-wide workflow/execution
+statistics plus the deployment-neutral status fields also exposed by `/api/admin/system-status`.
+The `adminAnalytics` capability is checked before the route handler reads workflows or executions;
+the default self-host policy returns `403 ACCESS_DENIED`.
 
 Response:
 
@@ -1804,12 +1848,39 @@ Response:
     totalWorkflows: number;
     totalExecutions: number;
     totalDefinitions: number;
+    systemHealth: {
+      backendStatus: "healthy" | "degraded";
+      databaseSize: number;
+      workflowReconciliation: {
+        status: "ok" | "error";
+        code: string;
+        conflicts: Array<{
+          owner: string;
+          slug: string;
+          classification: string;
+          instruction: string;
+          candidateRefs: {
+            previous: string | null;
+            current: string;
+            incoming: string;
+          };
+        }>;
+      }
+    }
+    activeExecutions: number;
+    recentActivity: Array<{
+      id: string;
+      workflowId: string;
+      status: string;
+      timestamp: number;
+      action: string;
+    }>;
   }
   timestamp: string;
 }
 ```
 
-Authentication: Required (admin role)
+Authentication: Required (admin role and `adminAnalytics` capability)
 
 ### GET /api/admin/users
 

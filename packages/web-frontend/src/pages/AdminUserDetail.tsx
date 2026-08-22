@@ -93,6 +93,7 @@ export const AdminUserDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { isEnabled, emailDelivery } = useFeatures();
   const accountApprovalEnabled = isEnabled("accountApproval");
+  const multiUserAdminEnabled = isEnabled("multiUserAdmin");
   const [data, setData] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -183,7 +184,7 @@ export const AdminUserDetail: React.FC = () => {
         loadSecurityActivity(),
         loadDetailedSessions(),
         loadOAuthConnections(),
-        loadArtifactQuota(),
+        multiUserAdminEnabled ? loadArtifactQuota() : Promise.resolve(),
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("admin.userDetail.errors.loadFailed"));
@@ -245,7 +246,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const loadArtifactQuota = async () => {
-    if (!id) return;
+    if (!id || !multiUserAdminEnabled) return;
     try {
       const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
         credentials: "include",
@@ -266,7 +267,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const handleSaveQuota = async () => {
-    if (!id) return;
+    if (!id || !multiUserAdminEnabled) return;
     setQuotaSaving(true);
     try {
       const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
@@ -294,7 +295,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const handleResetQuota = async () => {
-    if (!id) return;
+    if (!id || !multiUserAdminEnabled) return;
     setQuotaSaving(true);
     try {
       const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
@@ -1201,7 +1202,7 @@ export const AdminUserDetail: React.FC = () => {
       </Card>
 
       {/* Artifact Quota */}
-      {artifactQuota && (
+      {multiUserAdminEnabled && artifactQuota && (
         <Card className="mb-6" data-testid="artifact-quota-card">
           <CardHeader>
             <div className="flex justify-between items-center">

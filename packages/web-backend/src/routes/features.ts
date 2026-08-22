@@ -32,6 +32,9 @@ const FEATURES: Feature[] = [
   "betaNotices",
   "multiUserAdmin",
   "userManagement",
+  "adminAnalytics",
+  "adminOperations",
+  "operationsDevelopment",
   "socialLogin",
 ];
 

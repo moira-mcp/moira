@@ -29,6 +29,9 @@ const ALL_FLAGS = [
   "betaNotices",
   "multiUserAdmin",
   "userManagement",
+  "adminAnalytics",
+  "adminOperations",
+  "operationsDevelopment",
   "socialLogin",
 ] as const;
 
@@ -97,6 +100,15 @@ test.describe("Feature-mode UI gating", () => {
   test("self-host: admin nav exposes Users but hides broader multi-user pages", async ({
     page,
   }) => {
+    const adminDataRequests: string[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (
+        /^\/api\/admin\/(system-status|stats|analytics|monitoring-test)(?:\/|$)/.test(url.pathname)
+      ) {
+        adminDataRequests.push(`${request.method()} ${url.pathname}`);
+      }
+    });
     await mockFeatures(page, "self-host");
     await loginAsAdmin(page, false);
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "commit" });
@@ -111,6 +123,21 @@ test.describe("Feature-mode UI gating", () => {
     await expect(sidebarLink("/admin/executions")).toHaveCount(0);
     await expect(sidebarLink("/admin/workflows")).toHaveCount(0);
     await expect(sidebarLink("/admin/artifacts")).toHaveCount(0);
+    await expect(sidebarLink("/admin/deleted-workflows")).toHaveCount(0);
+    await expect(sidebarLink("/admin/monitoring-test")).toHaveCount(0);
+    await expect(sidebarLink("/admin/operational")).toHaveCount(0);
+    await expect(page.getByTestId("time-range-selector")).toHaveCount(0);
+    await expect(page.getByText("Top 10 Workflows", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Logout All Users" })).toHaveCount(0);
+    await expect(page.getByText("Total Workflows", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Total Executions", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("admin-recent-activity")).toHaveCount(0);
+    expect(adminDataRequests).toContain("GET /api/admin/system-status");
+    expect(
+      adminDataRequests.filter((entry) =>
+        /^GET \/api\/admin\/(stats|analytics|monitoring-test)(?:\/|$)/.test(entry),
+      ),
+    ).toEqual([]);
 
     const dashboardLink = (href: string) =>
       page.locator(`a[href="${href}"]:not([data-sidebar="menu-button"])`);
@@ -125,13 +152,115 @@ test.describe("Feature-mode UI gating", () => {
   });
 
   test("saas: admin nav shows multi-user pages", async ({ page }) => {
+    const analyticsRequest = page.waitForRequest(/\/api\/admin\/analytics\/overview/);
+    const statsRequest = page.waitForRequest(/\/api\/admin\/stats(?:\?|$)/);
     await mockFeatures(page, "saas");
+    await page.route("**/api/admin/stats", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            totalWorkflows: 4,
+            totalExecutions: 5,
+            activeExecutions: 1,
+            recentActivity: [
+              {
+                id: "saas-execution",
+                workflowId: "saas-workflow",
+                status: "completed",
+                timestamp: Date.now(),
+                action: "Workflow execution completed",
+              },
+            ],
+          },
+          timestamp: new Date().toISOString(),
+        }),
+      });
+    });
+    await page.route("**/api/admin/analytics/**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      const data = pathname.endsWith("/overview")
+        ? {
+            totalUsers: 0,
+            totalWorkflows: 0,
+            totalExecutions: 0,
+            activeExecutions: 0,
+            completedExecutions: 0,
+            failedExecutions: 0,
+            timeRange: "month",
+          }
+        : pathname.endsWith("/top-workflows")
+          ? { workflows: [] }
+          : pathname.endsWith("/executions")
+            ? {
+                total: 0,
+                completed: 0,
+                failed: 0,
+                active: 0,
+                successRate: 0,
+                avgDurationMs: null,
+                overTime: [],
+              }
+            : { activeUsers: 0, newUsers: 0, topUsers: [] };
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data, timestamp: new Date().toISOString() }),
+      });
+    });
     await loginAsAdmin(page);
     await page.goto(`${BASE_URL}/admin`, { waitUntil: "commit" });
     const sidebarLink = (href: string) =>
       page.locator(`a[data-sidebar="menu-button"][href="${href}"]`);
     await expect(sidebarLink("/admin/users")).toBeVisible({ timeout: 30000 });
     await expect(sidebarLink("/admin/executions")).toBeVisible();
+    await expect(sidebarLink("/admin/monitoring-test")).toBeVisible();
+    await expect(sidebarLink("/admin/operational")).toBeVisible();
+    await expect(page.getByText("Top 10 Workflows", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Logout All Users" })).toBeVisible();
+    await expect(page.getByTestId("admin-recent-activity")).toBeVisible();
+    await expect(page.getByText("saas-workflow", { exact: false })).toBeVisible();
+    await statsRequest;
+    await analyticsRequest;
+  });
+
+  test("operations-only override loads operational data without business analytics requests", async ({
+    page,
+  }) => {
+    const businessAnalyticsRequests: string[] = [];
+    page.on("request", (request) => {
+      if (
+        /\/api\/admin\/analytics\/(conversion-funnel|top-workflows|engagement)/.test(request.url())
+      ) {
+        businessAnalyticsRequests.push(request.url());
+      }
+    });
+    await mockFeatures(page, "self-host", { adminOperations: true });
+    await page.route("**/api/admin/analytics/operational*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: true,
+          data: {
+            metrics: [],
+            breakdowns: { byAction: [], bySource: [], byResource: [] },
+            activeFilters: { action: null, source: null, resource: null },
+            timeRange: "month",
+            granularity: "daily",
+          },
+          timestamp: new Date().toISOString(),
+        }),
+      });
+    });
+    await loginAsAdmin(page, false);
+    await page.goto(`${BASE_URL}/admin/operational`, { waitUntil: "commit" });
+
+    await expect(page.getByTestId("operational-heading")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId("business-analytics-heading")).toHaveCount(0);
+    expect(businessAnalyticsRequests).toEqual([]);
   });
 
   test("self-host: direct nav to a broader multi-user admin page redirects to dashboard", async ({
@@ -144,6 +273,16 @@ test.describe("Feature-mode UI gating", () => {
     await page.waitForURL(`${BASE_URL}/admin`, { timeout: 30000 });
     await expect(page).toHaveURL(`${BASE_URL}/admin`);
   });
+
+  for (const path of ["/admin/monitoring-test", "/admin/operational"]) {
+    test(`self-host: direct nav to ${path} redirects before the page loads`, async ({ page }) => {
+      await mockFeatures(page, "self-host");
+      await loginAsAdmin(page, false);
+      await page.goto(`${BASE_URL}${path}`, { waitUntil: "commit" });
+      await page.waitForURL(`${BASE_URL}/admin`, { timeout: 30000 });
+      await expect(page).toHaveURL(`${BASE_URL}/admin`);
+    });
+  }
 
   test("self-host: beta modal does not appear after login", async ({ page }) => {
     await mockFeatures(page, "self-host");

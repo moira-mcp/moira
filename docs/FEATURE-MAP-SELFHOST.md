@@ -28,6 +28,9 @@ A single env flag `DEPLOYMENT_MODE = self-host | saas` (default for the OSS imag
 | Beta-agreement modal / banner               | hidden      | shown    |
 | User management                             | enabled     | enabled  |
 | Broader multi-user admin pages              | hidden      | shown    |
+| Cross-user analytics                        | hidden      | shown    |
+| Operational dashboard                       | hidden      | shown    |
+| Monitoring test tools                       | hidden      | shown    |
 | Residency checkbox in the UI                | hidden      | shown    |
 | Admin auto-create + secret auto-generation  | yes         | no       |
 
@@ -106,21 +109,23 @@ variable override.
 
 > The chat subsystem is NOT in the branch (future EE).
 
-| Block                                | What                                                               | Verdict         | Effort | Note                                                                             |
-| ------------------------------------ | ------------------------------------------------------------------ | --------------- | ------ | -------------------------------------------------------------------------------- |
-| Core routes                          | workflows/executions/artifacts/notes/tokens/user/health/stats CRUD | 🟢 KEEP         | —      | ~75% core                                                                        |
-| **Workflow sharing routes**          | invites TTL, access RBAC, accept                                   | 💰 EE           | —      | Complex RBAC                                                                     |
-| Artifact/Note /stats                 | quota statistics                                                   | 🟡 MODE         | S      | Basics; advanced → EE                                                            |
-| Artifact sharing                     | share endpoint                                                     | 💰 EE           | —      | —                                                                                |
-| **Abuse reporting** (\_\_report)     | artifact moderation                                                | 💰 EE           | —      | Requires moderation                                                              |
-| OAuth consents/sessions routes       | OAuth infra                                                        | 🟡 MODE         | S      | Per mode (OAuth optional)                                                        |
-| Admin analytics                      | overview/executions/users/system                                   | 🟢 KEEP / 💰 EE | —      | read-only OK; advanced → EE                                                      |
-| Admin user management                | list/detail/approve/block/verify/reset                             | 🟢 KEEP         | —      | Available in self-host independently of broader multi-user admin pages           |
-| user-security (block/verify/reset)   | requires email                                                     | 🟡 MODE         | S      | email-dependent ones per mode                                                    |
-| Admin DB ops (vacuum/backup/restore) | direct DB access                                                   | 🟡 MODE         | S      | Exposed — tighten/hide                                                           |
-| CORS origin allowlist                | `cors-middleware.ts`                                               | ✅ DONE         | S      | allowlist: getBaseUrl + EXTRA_TRUSTED_ORIGINS + CORS_ALLOWED_ORIGINS + localhost |
-| IPv6 rate-limit key                  | `rate-limit-middleware.ts`                                         | ✅ DONE         | S      | ipKeyGenerator for IPv6 (artifactViewLimiter fallback)                           |
-| Middleware (auth/admin/ratelimit)    | requireVerifiedAuth                                                | 🟡 MODE         | S      | email gate per mode                                                              |
+| Block                              | What                                                               | Verdict | Effort | Note                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------ | ------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+| Core routes                        | workflows/executions/artifacts/notes/tokens/user/health/stats CRUD | 🟢 KEEP | —      | ~75% core                                                                                                            |
+| **Workflow sharing routes**        | invites TTL, access RBAC, accept                                   | 💰 EE   | —      | Complex RBAC                                                                                                         |
+| Artifact/Note /stats               | quota statistics                                                   | 🟡 MODE | S      | Basics; advanced → EE                                                                                                |
+| Artifact sharing                   | share endpoint                                                     | 💰 EE   | —      | —                                                                                                                    |
+| **Abuse reporting** (\_\_report)   | artifact moderation                                                | 💰 EE   | —      | Requires moderation                                                                                                  |
+| OAuth consents/sessions routes     | OAuth infra                                                        | 🟡 MODE | S      | Per mode (OAuth optional)                                                                                            |
+| Admin analytics                    | overview/executions/users plus installation-wide statistics        | ✅ DONE | M      | `/admin/stats` and analytics routes are server-denied in self-host; neutral `/admin/system-status` remains available |
+| Operational analytics              | operational metrics and dashboard                                  | ✅ DONE | S      | Server-denied and hidden in self-host via adminOperations                                                            |
+| Monitoring test routes             | deliberate errors, delays, logs, workflow/MCP probes               | ✅ DONE | S      | Server-denied and hidden unless operationsDevelopment is enabled                                                     |
+| Admin user management              | list/detail/approve/block/verify/reset                             | 🟢 KEEP | —      | Available in self-host independently of broader multi-user admin pages                                               |
+| user-security (block/verify/reset) | requires email                                                     | 🟡 MODE | S      | email-dependent ones per mode                                                                                        |
+| Admin DB ops (vacuum/backup)       | local database maintenance                                         | 🟢 KEEP | —      | Useful to a self-host administrator; remains admin-only                                                              |
+| CORS origin allowlist              | `cors-middleware.ts`                                               | ✅ DONE | S      | allowlist: getBaseUrl + EXTRA_TRUSTED_ORIGINS + CORS_ALLOWED_ORIGINS + localhost                                     |
+| IPv6 rate-limit key                | `rate-limit-middleware.ts`                                         | ✅ DONE | S      | ipKeyGenerator for IPv6 (artifactViewLimiter fallback)                                                               |
+| Middleware (auth/admin/ratelimit)  | requireVerifiedAuth                                                | 🟡 MODE | S      | email gate per mode                                                                                                  |
 
 **Zone summary:** core routes KEEP; sharing/abuse/advanced-analytics → EE; CORS+IPv6 done; email/DB-ops per MODE.
 
@@ -144,21 +149,24 @@ variable override.
 
 ## Zone G — web-frontend + landing-page (UI)
 
-| Block                                                        | What                                                                         | Verdict                    | Effort | Note                                                       |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------- | -------------------------- | ------ | ---------------------------------------------------------- |
-| Residency checkbox                                           | AuthProvider.tsx                                                             | ✅ DONE                    | S      | Hidden in self-host via legalConsents                      |
-| Terms checkbox                                               | acceptedTermsAt                                                              | ✅ DONE                    | S      | Hidden in self-host via legalConsents                      |
-| Auth pages                                                   | Login/Register/Reset/Verify/OAuth                                            | 🟢 KEEP                    | —      | Hide OAuth buttons when disabled                           |
-| App pages                                                    | Dashboard/Workflows(+ReactFlow)/Executions/Notes/Artifacts/Settings/AuditLog | 🟢 KEEP                    | —      | —                                                          |
-| Admin user management                                        | Users and user detail                                                        | 🟢 KEEP                    | —      | Enabled in self-host via userManagement                    |
-| Broader multi-user admin pages                               | Executions/Workflows/Artifacts/Reported                                      | ✅ DONE                    | M      | Hidden in self-host via multiUserAdmin (nav + route guard) |
-| Admin ReportedArtifacts                                      | moderation UI                                                                | 💰 EE                      | —      | —                                                          |
-| Admin Settings/System/AuditLog/Deleted                       | schema/audit                                                                 | 🟢 KEEP                    | —      | Useful for a single admin                                  |
-| **BetaAgreementModal + Banner**                              | SaaS disclaimer                                                              | 🟡 MODE                    | S      | Hide in self-host                                          |
-| Quota UI (Notes/Artifacts)                                   | usedPercent                                                                  | 🟢 KEEP                    | —      | Configurable                                               |
-| **landing brand** (index/developers/admin-data-access.astro) | marketing                                                                    | 🔴 REWORK (extract)        | M      | → moira-infra (see OSS-MIGRATION-PLAN Phase A)             |
-| landing legal (terms/privacy.astro)                          | legal                                                                        | 🔴 REWORK                  | S      | Update for the self-host context                           |
-| **docs (content/docs EN+RU)**                                | Starlight                                                                    | 🟢 KEEP (into OSS package) | M      | Extract into the docs site, DOCS_DIR (Phase 2.1)           |
+| Block                                                        | What                                                                         | Verdict                    | Effort | Note                                                                           |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------- | -------------------------- | ------ | ------------------------------------------------------------------------------ |
+| Residency checkbox                                           | AuthProvider.tsx                                                             | ✅ DONE                    | S      | Hidden in self-host via legalConsents                                          |
+| Terms checkbox                                               | acceptedTermsAt                                                              | ✅ DONE                    | S      | Hidden in self-host via legalConsents                                          |
+| Auth pages                                                   | Login/Register/Reset/Verify/OAuth                                            | 🟢 KEEP                    | —      | Hide OAuth buttons when disabled                                               |
+| App pages                                                    | Dashboard/Workflows(+ReactFlow)/Executions/Notes/Artifacts/Settings/AuditLog | 🟢 KEEP                    | —      | —                                                                              |
+| Admin user management                                        | Users and user detail                                                        | 🟢 KEEP                    | —      | Enabled in self-host via userManagement                                        |
+| Broader multi-user admin pages                               | Executions/Workflows/Artifacts/Reported/Deleted Workflows                    | ✅ DONE                    | M      | Hidden in self-host via multiUserAdmin (nav + route guard)                     |
+| Admin analytics                                              | Dashboard totals, recent activity and analytics API                          | ✅ DONE                    | S      | Self-host requests only neutral system status; no analytics render or prefetch |
+| Operational dashboard                                        | Operational metrics plus optional business analytics                         | ✅ DONE                    | S      | Hidden via adminOperations; optional analytics use adminAnalytics              |
+| Monitoring test page                                         | Deliberate diagnostic traffic                                                | ✅ DONE                    | S      | Hidden via operationsDevelopment                                               |
+| Admin ReportedArtifacts                                      | moderation UI                                                                | 💰 EE                      | —      | —                                                                              |
+| Admin Settings/System/Audit Log/API Tokens                   | schema, audit, local tokens                                                  | 🟢 KEEP                    | —      | Useful for a self-host administrator                                           |
+| **BetaAgreementModal + Banner**                              | SaaS disclaimer                                                              | 🟡 MODE                    | S      | Hide in self-host                                                              |
+| Quota UI (Notes/Artifacts)                                   | usedPercent                                                                  | 🟢 KEEP                    | —      | Configurable                                                                   |
+| **landing brand** (index/developers/admin-data-access.astro) | marketing                                                                    | 🔴 REWORK (extract)        | M      | → moira-infra (see OSS-MIGRATION-PLAN Phase A)                                 |
+| landing legal (terms/privacy.astro)                          | legal                                                                        | 🔴 REWORK                  | S      | Update for the self-host context                                               |
+| **docs (content/docs EN+RU)**                                | Starlight                                                                    | 🟢 KEEP (into OSS package) | M      | Extract into the docs site, DOCS_DIR (Phase 2.1)                               |
 
 **Zone summary:** residency/beta/admin-multiuser → MODE; landing brand → extract; docs → OSS package.
 

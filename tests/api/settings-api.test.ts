@@ -46,6 +46,18 @@ beforeAll(async () => {
     headers: { Cookie: adminCookies || "" },
   });
 
+  const featuresRes = await fetch(`${BASE_URL}/api/features`);
+  const features = (await featuresRes.json()) as {
+    data: { features: { accountApproval: boolean } };
+  };
+  if (features.data.features.accountApproval) {
+    const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${testUserId}/approve`, {
+      method: "POST",
+      headers: { Cookie: adminCookies || "" },
+    });
+    expect(approvalRes.status).toBe(200);
+  }
+
   // Login as test user to get auth cookie
   const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
@@ -452,8 +464,8 @@ describe("Admin Settings API", () => {
     expect(json.data.deleted).toBe(true);
   });
 
-  test("Admin can get system stats", async () => {
-    const res = await fetch(`${BASE_URL}/api/admin/stats`, {
+  test("Admin can get deployment-neutral system status", async () => {
+    const res = await fetch(`${BASE_URL}/api/admin/system-status`, {
       headers: { Cookie: adminCookie },
     });
 
@@ -461,8 +473,7 @@ describe("Admin Settings API", () => {
 
     const json = (await res.json()) as any;
     expect(json.success).toBe(true);
-    expect(json.data).toHaveProperty("totalWorkflows");
-    expect(json.data).toHaveProperty("totalExecutions");
     expect(json.data).toHaveProperty("totalDefinitions");
+    expect(json.data).toHaveProperty("systemHealth.workflowReconciliation");
   });
 });

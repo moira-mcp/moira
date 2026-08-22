@@ -8,14 +8,10 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { requireAdmin } from "../middleware/admin-middleware.js";
 import { createLogger, InternalError } from "@mcp-moira/shared";
 
 const router = Router();
 const logger = createLogger({ component: "MonitoringTest" });
-
-// All monitoring test routes protected by requireAdmin middleware
-router.use(requireAdmin);
 
 /**
  * POST /api/admin/monitoring-test/error - Generate a 500 error with logging

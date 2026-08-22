@@ -54,6 +54,14 @@ approval status and sign out, but cannot use workflows, API tokens, OAuth, or MC
 an administrator approves it. Email verification is a separate gate and is not required
 in self-host mode. Missing secrets are generated on first start.
 
+The self-host administrator keeps the **Users** page for approval, blocking, and account
+recovery. Cross-user workflow/execution/artifact administration, cloud analytics, the operational
+dashboard, and deliberate monitoring-test tools are disabled by the server and omitted from the
+navigation. These are deployment capabilities, not security controls implemented only in the UI.
+The SaaS policy enables them through the same resolver used by the API and the Web UI.
+The self-host dashboard still shows database health, setting-definition status, and managed-workflow
+reconciliation, but it neither requests nor renders installation-wide workflow or execution totals.
+
 ### Approve new accounts
 
 In the Web UI, sign in as an administrator, open **Admin Panel → Users**, and select an

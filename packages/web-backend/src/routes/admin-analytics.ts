@@ -5,16 +5,12 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { requireAdmin } from "../middleware/admin-middleware.js";
 import { auditLog, user, getDatabase, workflowExecution } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { and, gte, lte, count, desc, sql, countDistinct, eq, type SQL } from "drizzle-orm";
 
 const router = Router();
 const repository = new DatabaseRepository();
-
-// All analytics routes protected by requireAdmin middleware
-router.use(requireAdmin);
 
 /**
  * Helper to get time range boundaries

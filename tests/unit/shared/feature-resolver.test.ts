@@ -27,6 +27,9 @@ const FEATURE_EXPECTATIONS = {
   betaNotices: { "self-host": false, saas: true },
   multiUserAdmin: { "self-host": false, saas: true },
   userManagement: { "self-host": true, saas: true },
+  adminAnalytics: { "self-host": false, saas: true },
+  adminOperations: { "self-host": false, saas: true },
+  operationsDevelopment: { "self-host": false, saas: true },
   socialLogin: { "self-host": false, saas: true },
 } as const;
 
