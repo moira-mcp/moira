@@ -10,6 +10,7 @@ const original = {
   EMAIL_PROVIDER: process.env.EMAIL_PROVIDER,
   EMAIL_FROM: process.env.EMAIL_FROM,
   EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME,
+  EMAIL_TEST_RECIPIENTS: process.env.EMAIL_TEST_RECIPIENTS,
   SMTP_HOST: process.env.SMTP_HOST,
   SMTP_PORT: process.env.SMTP_PORT,
   SMTP_SECURE: process.env.SMTP_SECURE,
@@ -81,6 +82,7 @@ describe("SMTP provider", () => {
     process.env.SMTP_PORT = String(address.port);
     process.env.SMTP_SECURE = "false";
     process.env.SMTP_REQUIRE_TLS = "false";
+    delete process.env.EMAIL_TEST_RECIPIENTS;
     delete process.env.SMTP_USER;
     delete process.env.SMTP_PASSWORD;
 
