@@ -12,6 +12,13 @@ level headings classify the tracked test paths listed beneath them.
 
 ## Domain Details
 
+### operator scripts
+
+**unit**
+
+- `tests/unit/scripts/test-email.test.ts` — explicit-recipient refusal and validation plus captured
+  provider-boundary request for an IANA-reserved recipient
+
 ### admin
 
 **api**

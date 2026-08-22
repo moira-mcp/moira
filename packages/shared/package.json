@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./auth": "./src/auth/better-auth-config.ts",
+    "./email": "./src/email/index.ts",
     "./urls": "./src/config/urls.ts",
     "./mcp-clients": "./src/mcp-clients/index.ts",
     "./services/workflow-query-service": "./src/services/workflow-query-service.ts",

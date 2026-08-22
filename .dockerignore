@@ -50,7 +50,6 @@ temp/
 # Backups
 backups/
 workflow-backups/
-workflows/backup/
 
 # Development artifacts
 deploy-logs/

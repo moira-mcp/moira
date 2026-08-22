@@ -85,18 +85,9 @@ docker compose exec moira cat /app/BUILD_INFO
 
 ```
 workflows/
-├── production/           # Workflows included in Docker image
-│   ├── public/           # Public workflows (visible to all users)
-│   │   ├── quick-task.json
-│   │   ├── robust-task.json
-│   │   ├── verified-research.json
-│   │   ├── iterative-research.json
-│   │   └── ...
-│   └── private/          # Private workflows (admin only)
-│       ├── development-flow.json
-│       ├── feature-completion-workflow.json
-│       └── ...
-└── backup/               # Old/archived workflows (NOT in Docker image)
+├── production/
+│   └── flows/            # Public catalog; UUID-named workflow JSON files
+└── README.md
 ```
 
 ### Catalog Structure
@@ -105,7 +96,8 @@ workflows/
   catalog metadata `owner` (owning user id) and `visibility` (`public` | `private`). Identity is
   `(owner, slug)` — a slug is unique only per owner. The bundled folder ships the **public** catalog;
   private flows are supplied as an additional catalog directory merged via `WORKFLOWS_DIRS` (below).
-- `workflows/backup/` → Excluded from Docker image via `.dockerignore`
+- Personal exports and local backups stay outside Git. They are not catalog sources or public
+  examples and must not be placed below `workflows/`.
 
 **Multiple catalog directories.** The catalog can be loaded from more than one base directory.
 `WORKFLOWS_DIRS` (colon-separated, PATH-style) lists the directories to merge; it falls back to the

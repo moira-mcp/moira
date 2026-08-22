@@ -7,14 +7,17 @@ Workflow definitions for MCP Moira workflow engine.
 ```
 workflows/
 ├── production/
-│   ├── public/    → Available to all users
-│   └── private/   → Internal workflows only
+│   └── flows/     → Public catalog, one UUID-named JSON file per workflow
 └── README.md      → This file
 ```
 
 ## Migration
 
 During Docker build, workflows migrate from filesystem to database.
+
+Only `workflows/production/flows/` is an OSS catalog source. Personal exports and local backups
+must stay outside the repository; they are not examples and must never be added to a production
+catalog directory. Private deployments supply their additional catalog through `WORKFLOWS_DIRS`.
 
 ```bash
 # Default: skip existing workflows
