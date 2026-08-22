@@ -95,7 +95,8 @@ function ordinaryInputs(): Record<string, MockInput> {
     "report-and-accept-feature": { feature_decision: "accepted" },
     "revise-plan-after-feedback": {},
     "teleport-replan": {
-      replan_rationale: "Repository facts invalidate the approved plan; preserve completed outcomes",
+      replan_rationale:
+        "Repository facts invalidate the approved plan; preserve completed outcomes",
     },
   };
 }
@@ -218,19 +219,17 @@ const scenarios: TestScenario[] = [
   flow(
     "producer completion can replan before cheap validation",
     {
-      "complete-plan-unit": [
-        { completion_outcome: "replan" },
-        { completion_outcome: "ready" },
-      ],
+      "complete-plan-unit": [{ completion_outcome: "replan" }, { completion_outcome: "ready" }],
       "approve-plan": [approvedPlan, approvedPlan],
     },
     ["route-plan-unit-completion", "approve-current-unit-closure", "review-plan", "end"],
   ),
-  flow(
-    "producer completion creates a correction opportunity before cheap validation",
-    {},
-    ["implement-plan-unit", "complete-plan-unit", "validate-cheap", "end"],
-  ),
+  flow("producer completion creates a correction opportunity before cheap validation", {}, [
+    "implement-plan-unit",
+    "complete-plan-unit",
+    "validate-cheap",
+    "end",
+  ]),
   flow(
     "requirements rejection and plan repair remain durable",
     {
@@ -1017,7 +1016,9 @@ describe("software-development-flow v14.1", () => {
       expect(String(workflow.variableRegistry?.[name]?.default ?? "")).toContain("*Why.*");
       expect(JSON.stringify(workflow.nodes)).not.toContain(`{{${name}}}`);
     }
-    const materializer = workflow.nodes.find((node) => node.id === "materialize-development-standards") as {
+    const materializer = workflow.nodes.find(
+      (node) => node.id === "materialize-development-standards",
+    ) as {
       files: Array<{ path: string; from: string }>;
     };
     expect(materializer.files.map(({ path, from }) => ({ path, from }))).toEqual([
@@ -1249,19 +1250,23 @@ describe("software-development-flow v14.1", () => {
   });
 
   test("a verification-only repair after architecture reruns downstream gates but skips architecture", async () => {
-    const result = await runScenario(workflow, {
-      name: "runtime verification repair keeps current architecture evidence",
-      mockInputs: {
-        ...ordinaryInputs(),
-        "validate-runtime": [
-          { validation_outcome: "repository_failure" },
-          { validation_outcome: "pass" },
-          { validation_outcome: "pass" },
-        ],
-        "repair-runtime": { repair_outcome: "changed", mutation_scope: "verification_only" },
+    const result = await runScenario(
+      workflow,
+      {
+        name: "runtime verification repair keeps current architecture evidence",
+        mockInputs: {
+          ...ordinaryInputs(),
+          "validate-runtime": [
+            { validation_outcome: "repository_failure" },
+            { validation_outcome: "pass" },
+            { validation_outcome: "pass" },
+          ],
+          "repair-runtime": { repair_outcome: "changed", mutation_scope: "verification_only" },
+        },
+        expect: { status: "completed", maxSteps: 220 },
       },
-      expect: { status: "completed", maxSteps: 220 },
-    }, { engineSetup: useScenarioMaterializeGrant });
+      { engineSetup: useScenarioMaterializeGrant },
+    );
     expect(result.passed).toBe(true);
     const route = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
     const suffix = route.slice(route.indexOf("repair-runtime"));
@@ -1273,18 +1278,22 @@ describe("software-development-flow v14.1", () => {
   });
 
   test("a product repair advances the iteration and makes architecture stale", async () => {
-    const result = await runScenario(workflow, {
-      name: "runtime product repair invalidates architecture evidence",
-      mockInputs: {
-        ...ordinaryInputs(),
-        "validate-runtime": [
-          { validation_outcome: "repository_failure" },
-          { validation_outcome: "pass" },
-        ],
-        "repair-runtime": { repair_outcome: "changed", mutation_scope: "product" },
+    const result = await runScenario(
+      workflow,
+      {
+        name: "runtime product repair invalidates architecture evidence",
+        mockInputs: {
+          ...ordinaryInputs(),
+          "validate-runtime": [
+            { validation_outcome: "repository_failure" },
+            { validation_outcome: "pass" },
+          ],
+          "repair-runtime": { repair_outcome: "changed", mutation_scope: "product" },
+        },
+        expect: { status: "completed", maxSteps: 220 },
       },
-      expect: { status: "completed", maxSteps: 220 },
-    }, { engineSetup: useScenarioMaterializeGrant });
+      { engineSetup: useScenarioMaterializeGrant },
+    );
     expect(result.passed).toBe(true);
     expect(result.finalContext.current_iteration).toBe(2);
     const route = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
@@ -1292,14 +1301,18 @@ describe("software-development-flow v14.1", () => {
   });
 
   test("a new plan unit cannot inherit architecture currency from the previous unit", async () => {
-    const result = await runScenario(workflow, {
-      name: "second unit gets a fresh architecture review",
-      mockInputs: {
-        ...ordinaryInputs(),
-        "approve-plan": { ...approvedPlan, total_steps: 2 },
+    const result = await runScenario(
+      workflow,
+      {
+        name: "second unit gets a fresh architecture review",
+        mockInputs: {
+          ...ordinaryInputs(),
+          "approve-plan": { ...approvedPlan, total_steps: 2 },
+        },
+        expect: { status: "completed", maxSteps: 220 },
       },
-      expect: { status: "completed", maxSteps: 220 },
-    }, { engineSetup: useScenarioMaterializeGrant });
+      { engineSetup: useScenarioMaterializeGrant },
+    );
     expect(result.passed).toBe(true);
     const route = result.visitedNodes.filter((id, index, all) => id !== all[index - 1]);
     expect(route.filter((id) => id === "review-architecture")).toHaveLength(2);
@@ -1386,11 +1399,7 @@ describe("software-development-flow v14.1", () => {
       firstPreparation,
       preparationClosure,
     );
-    for (const forbiddenNode of [
-      "implement-plan-unit",
-      "complete-plan-unit",
-      "validate-cheap",
-    ]) {
+    for (const forbiddenNode of ["implement-plan-unit", "complete-plan-unit", "validate-cheap"]) {
       expect(prematurePreparationSuffix).not.toContain(forbiddenNode);
     }
     const preparationReview = preparationReplan.indexOf("review-plan", preparationClosure + 1);
@@ -1430,10 +1439,7 @@ describe("software-development-flow v14.1", () => {
         "cheap test and architecture repairs invalidate all later evidence",
         "repair-cheap-validation",
       ],
-      [
-        "cheap test and architecture repairs invalidate all later evidence",
-        "repair-test-adequacy",
-      ],
+      ["cheap test and architecture repairs invalidate all later evidence", "repair-test-adequacy"],
       ["cheap test and architecture repairs invalidate all later evidence", "repair-architecture"],
       [
         "delegated completeness review sends an incomplete unit back through the cheap gate",
