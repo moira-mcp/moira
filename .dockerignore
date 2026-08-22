@@ -29,8 +29,10 @@ playwright-report/
 logs/
 *.log
 
-# Environment (будет скопирован явно в Dockerfile)
-# .env файлы копируются отдельной командой
+# Environment: only the deliberately public template may enter the OSS context.
+.env
+.env.*
+!.env.example
 
 # Storage
 .moira-storage/

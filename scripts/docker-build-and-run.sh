@@ -278,20 +278,24 @@ fi
 
 # --- Build image ---
 echo "🔨 Building Docker image: $DOCKER_IMAGE_NAME:latest"
-GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_COMMIT=$(node scripts/git-tree-identity.mjs 2>/dev/null || echo "unknown")
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 if [ "$DRY_RUN" = "true" ]; then
     echo "[DRY-RUN] ${DOCKER_CMD[*]} build -f config/Dockerfile \\"
-    echo "    --build-arg ENV_FILE=.env.local \\"
     echo "    --build-arg BUILD_ID=local \\"
+    echo "    --build-arg MOIRA_HOST=$MOIRA_HOST \\"
+    echo "    --build-arg CONTACT_EMAIL=${CONTACT_EMAIL:-support@localhost} \\"
+    echo "    --build-arg STATIC_ARTIFACTS_DOMAIN=$STATIC_ARTIFACTS_DOMAIN \\"
     echo "    --build-arg GIT_COMMIT=$GIT_COMMIT \\"
     echo "    --build-arg BUILD_TIME=$BUILD_TIME \\"
     echo "    -t $DOCKER_IMAGE_NAME:latest ."
 else
     "${DOCKER_CMD[@]}" build -f config/Dockerfile \
-        --build-arg ENV_FILE=.env.local \
         --build-arg BUILD_ID=local \
+        --build-arg MOIRA_HOST="$MOIRA_HOST" \
+        --build-arg CONTACT_EMAIL="${CONTACT_EMAIL:-support@localhost}" \
+        --build-arg STATIC_ARTIFACTS_DOMAIN="$STATIC_ARTIFACTS_DOMAIN" \
         --build-arg GIT_COMMIT="$GIT_COMMIT" \
         --build-arg BUILD_TIME="$BUILD_TIME" \
         -t "$DOCKER_IMAGE_NAME:latest" .
@@ -308,9 +312,18 @@ else
 fi
 
 # Build run command arguments
-RUN_ARGS=(run --name "$DOCKER_CONTAINER_NAME" -p "$DOCKER_PORT:80")
+RUN_ARGS=(
+    run --name "$DOCKER_CONTAINER_NAME" -p "$DOCKER_PORT:80"
+    --env-file .env.local
+    -e MCP_PORT=3000
+    -e WEB_BACKEND_PORT=3001
+    -e WEB_FRONTEND_PORT=3002
+)
 
 if [ "$REMOTE_MODE" = "true" ]; then
+    # Later env files override earlier values, matching the source order above,
+    # while keeping secret values out of the process arguments and logs.
+    RUN_ARGS+=(--env-file .env.remote)
     # Remote mode: bind mount data on PC if REMOTE_DATA_PATH is set
     if [ -n "$REMOTE_DATA_PATH" ]; then
         echo "📁 Using remote data path: $REMOTE_DATA_PATH"

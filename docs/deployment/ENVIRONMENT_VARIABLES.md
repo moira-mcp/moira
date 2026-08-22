@@ -218,44 +218,42 @@ PLAYWRIGHT_WS_ENDPOINT=ws://192.0.2.1:3000/           # Playwright WebSocket end
 - **Location**: `/path/to/moira/.env.production`
 - **Git tracked**: NO (in .gitignore)
 - **Usage**: Production server (MOIRA_HOST domain)
-- **Used by**: passed as `ENV_FILE=.env.production` to `docker build`
+- **Used by**: supplied at container runtime, never copied into the OSS image
 
 ### `.env.production.staging` (Staging Server)
 
 - **Location**: `/path/to/moira/.env.production.staging`
 - **Git tracked**: NO (in .gitignore)
 - **Usage**: Staging server (moira.example.com)
-- **Used by**: passed as `ENV_FILE=.env.production.staging` to `docker build`
+- **Used by**: supplied at container runtime, never copied into the OSS image
 
-## Docker Build ARG: `ENV_FILE`
+## Docker build arguments
 
-```dockerfile
-ARG ENV_FILE=.env.local
-COPY ${ENV_FILE} .env
-RUN echo "✅ Using env file: ${ENV_FILE}"
-```
-
-The Dockerfile default is `ENV_FILE=.env.local` (see `config/Dockerfile`); production
-and staging builds must pass the build arg explicitly.
+`config/Dockerfile` accepts only non-secret compile-time values: `APP_BASE_PATH`,
+`MOIRA_HOST`, `CONTACT_EMAIL`, `STATIC_ARTIFACTS_DOMAIN`, `BUILD_ID`, `GIT_COMMIT`,
+and `BUILD_TIME`. The final OSS image contains the public `.env.example` defaults;
+Compose or `docker run --env-file`/`-e` supplies real runtime configuration and secrets.
 
 ### Usage
 
 **Local Docker** (via `docker-build-and-run.sh`):
 
 ```bash
-docker build --build-arg ENV_FILE=.env.local ...
+./scripts/docker-build-and-run.sh
 ```
 
 **Production deploy** (pass the build arg):
 
 ```bash
-docker build --build-arg ENV_FILE=.env.production ...
+docker build --build-arg MOIRA_HOST=moira.example.com \
+  --build-arg STATIC_ARTIFACTS_DOMAIN=static.moira.example.com ...
 ```
 
 **Staging deploy** (pass the build arg):
 
 ```bash
-docker build --build-arg ENV_FILE=.env.production.staging ...
+docker build --build-arg MOIRA_HOST=staging.moira.example.com \
+  --build-arg STATIC_ARTIFACTS_DOMAIN=static.staging.moira.example.com ...
 ```
 
 ## Email Configuration
@@ -398,22 +396,22 @@ This allows parallel development without port conflicts.
 
 ### Production Server (${MOIRA_HOST})
 
-1. **Build**: build passes `ENV_FILE=.env.production`
-2. **Runtime**: Container reads copied `.env` file
+1. **Build**: non-secret public URL arguments compile the frontend and docs
+2. **Runtime**: Container receives the production env file from the deployment layer
 3. **Supervisor**: Sets `NODE_ENV=production` for all processes
 4. **Email**: the selected real provider delivers email
 
 ### Staging Server (moira.example.com)
 
-1. **Build**: build passes `ENV_FILE=.env.production.staging` (via buildArgs)
-2. **Runtime**: Container reads copied `.env` file
+1. **Build**: non-secret staging URL arguments compile the frontend and docs
+2. **Runtime**: Container receives the staging env file from the deployment layer
 3. **Supervisor**: Sets `NODE_ENV=production`
 4. **Email**: the selected real provider delivers email
 
 ### Local Docker
 
-1. **Build**: `docker-build-and-run.sh` passes `ENV_FILE=.env.local`
-2. **Runtime**: Container uses local `.env.local` file
+1. **Build**: `docker-build-and-run.sh` passes non-secret URL values from `.env.local`
+2. **Runtime**: The development launcher supplies its configured environment
 3. **Supervisor**: Sets `NODE_ENV=production`
 4. **Email**: `EMAIL_PROVIDER=test` logs email without claiming delivery, or `none` disables it
 

@@ -129,7 +129,8 @@ jobs:
           load: true
           tags: ${{ env.DOCKER_IMAGE }}:latest
           build-args: |
-            ENV_FILE=.env.local
+            MOIRA_HOST=localhost:${{ env.DOCKER_PORT }}
+            STATIC_ARTIFACTS_DOMAIN=static.localhost:${{ env.DOCKER_PORT }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -141,6 +142,10 @@ jobs:
           docker run \
             --name ${{ env.DOCKER_IMAGE }} \
             -p ${{ env.DOCKER_PORT }}:80 \
+            --env-file .env.ci \
+            -e MCP_PORT=3000 \
+            -e WEB_BACKEND_PORT=3001 \
+            -e WEB_FRONTEND_PORT=3002 \
             -v $(pwd)/workflows:/app/workflows \
             -v $(pwd)/data:/app/data \
             -e DISABLE_RATE_LIMIT=true \

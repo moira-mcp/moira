@@ -25,8 +25,9 @@ services:
     #   context: .
     #   dockerfile: config/Dockerfile
     #   args:
-    #     ENV_FILE: .env.example
     #     BUILD_ID: local
+    #     MOIRA_HOST: ${MOIRA_HOST:-localhost:8080}
+    #     STATIC_ARTIFACTS_DOMAIN: ${STATIC_ARTIFACTS_DOMAIN:-static.localhost:8080}
     #     APP_BASE_PATH: /
 
     restart: unless-stopped

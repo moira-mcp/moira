@@ -1,3 +1,9 @@
+# syntax=docker/dockerfile:1
+
+# This Dockerfile is the sole application build/runtime contract. Downstream
+# compositions may extend its `runtime` target without recompiling application
+# packages.
+
 # ===================================
 # Core stage - shared between all
 # ===================================
@@ -46,25 +52,17 @@ COPY packages/shared/ ./packages/shared/
 COPY packages/workflow-engine/ ./packages/workflow-engine/
 
 # ===================================
-# Build stage with environments
-# ===================================
-FROM base AS base-env
-
-# Copy only the specific env file needed for build
-ARG ENV_FILE=.env.local
-COPY ${ENV_FILE} .env
-RUN echo "✅ Using env file: ${ENV_FILE}"
-
-# ===================================
 # Frontend build stage
 # ===================================
-FROM base-env AS frontend-build
+FROM base AS frontend-build
 
 # BUILD_ID used to separate cache between different build contexts (local/staging/prod)
 ARG BUILD_ID=default
+ARG MOIRA_HOST=localhost:8080
 # Web UI base path: "/" (default, self-host) or "/app" (our hosted deploy).
 # webpack reads APP_BASE_PATH via DefinePlugin to derive route prefix + publicPath.
 ARG APP_BASE_PATH=/
+ENV MOIRA_HOST=${MOIRA_HOST}
 ENV APP_BASE_PATH=${APP_BASE_PATH}
 COPY packages/web-frontend/ ./packages/web-frontend/
 RUN --mount=type=cache,id=webpack-${BUILD_ID},target=/app/packages/web-frontend/node_modules/.cache/webpack \
@@ -74,14 +72,20 @@ RUN --mount=type=cache,id=webpack-${BUILD_ID},target=/app/packages/web-frontend/
 # ===================================
 # Docs build stage (Starlight static site → served at /docs)
 # ===================================
-FROM base-env AS docs-build
+FROM base AS docs-build
 
 ARG BUILD_ID=default
-# astro.config reads MOIRA_HOST / STATIC_ARTIFACTS_DOMAIN from .env (copied in
-# base-env) to resolve the MCP/static URLs baked into doc pages.
+ARG MOIRA_HOST=localhost:8080
+ARG CONTACT_EMAIL=support@localhost
+ARG STATIC_ARTIFACTS_DOMAIN=static.localhost:8080
+ENV MOIRA_HOST=${MOIRA_HOST}
+ENV CONTACT_EMAIL=${CONTACT_EMAIL}
+ENV STATIC_ARTIFACTS_DOMAIN=${STATIC_ARTIFACTS_DOMAIN}
+# astro.config reads these explicit, non-secret build values to resolve the
+# MCP/static URLs baked into documentation pages.
 COPY packages/docs/ ./packages/docs/
 RUN --mount=type=cache,id=astro-docs-${BUILD_ID},target=/app/packages/docs/node_modules/.astro \
-    cp .env ./packages/docs/.env && cd packages/docs && npx astro build
+    cd packages/docs && npx astro build
 
 # ===================================
 # Backend build stage
@@ -97,7 +101,7 @@ RUN npx tsc --noEmit --project packages/web-backend/tsconfig.json
 # ===================================
 # Final stage
 # ===================================
-FROM core
+FROM core AS runtime
 
 # MCP Registry: proves this image belongs to the published server entry.
 LABEL io.modelcontextprotocol.server.name="io.github.moira-mcp/moira"
@@ -119,10 +123,9 @@ COPY --from=frontend-build /app/packages/web-frontend/dist ./packages/web-fronte
 # Copy prompt files for migration
 COPY config/prompts/ ./config/prompts/
 
-# Copy only the specific env file needed (no secrets leakage)
-ARG ENV_FILE=.env.local
-COPY ${ENV_FILE} .env
-RUN echo "✅ Using env file: ${ENV_FILE}"
+# Ship only the public self-host defaults. Runtime env/Compose values override
+# this file, and private compositions may replace it in their own private layer.
+COPY .env.example .env
 
 # Web UI base path for the backend at runtime (server.ts OAuth redirect, email
 # callback URLs). Must match the value used to build the frontend above.
@@ -136,7 +139,8 @@ ARG BUILD_TIME=unknown
 RUN echo "commit: ${GIT_COMMIT}" > /app/BUILD_INFO && \
     echo "build_time: ${BUILD_TIME}" >> /app/BUILD_INFO && \
     echo "build_id: ${BUILD_ID}" >> /app/BUILD_INFO && \
-    echo "env_file: ${ENV_FILE}" >> /app/BUILD_INFO
+    echo "app_base_path: ${APP_BASE_PATH}" >> /app/BUILD_INFO && \
+    echo "configuration: runtime-env" >> /app/BUILD_INFO
 
 # Copy migration scripts and workflows
 COPY scripts/ ./scripts/
@@ -148,8 +152,8 @@ RUN chmod +x ./scripts/health-check.sh ./scripts/startup-ready.sh ./scripts/wait
 
 # Setup nginx for static files. Web UI dist destination depends on APP_BASE_PATH:
 #   "/"    (self-host) → /var/www/html/      (Web UI at root, no brand landing)
-#   "/app" (our deploy) → /var/www/html/app/ (Web UI under /app; landing baked at
-#           root by the infra Dockerfile.infra, not here)
+#   "/app" (composed distribution) → /var/www/html/app/ (Web UI under /app;
+#           the downstream image may overlay its own root content)
 RUN mkdir -p /var/www/html /app/source-maps && \
     if [ "${APP_BASE_PATH}" = "/" ]; then WEBUI_DEST=/var/www/html; else WEBUI_DEST=/var/www/html/app; fi && \
     mkdir -p "${WEBUI_DEST}" && \

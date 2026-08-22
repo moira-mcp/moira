@@ -67,11 +67,16 @@ The local build uses a `local` BUILD_ID for BuildKit cache isolation
 Every Docker image contains `/app/BUILD_INFO` with build metadata:
 
 ```
-commit: aed4278
-build_time: 2025-12-19T02:08:35.347Z
+commit: <source commit or commit-dirty-content-hash>
+build_time: <ISO-8601 UTC build time>
 build_id: local
-env_file: .env.example
+app_base_path: /
+configuration: runtime-env
 ```
+
+Public release builds pass the checked-out commit and current build time. A
+dirty development build must use a dirty content identity rather than labeling
+changed bytes as the clean commit.
 
 Check the running version:
 

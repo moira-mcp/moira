@@ -16,6 +16,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/config/docker-image-contract.test.ts` — canonical parameterized OSS runtime image contract, explicit non-secret compile-time inputs, and prohibition on embedding deployment env files
 - `tests/unit/scripts/test-email.test.ts` — explicit-recipient refusal and validation plus captured
   provider-boundary request for an IANA-reserved recipient
 
