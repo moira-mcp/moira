@@ -70,6 +70,38 @@ Existing users are marked approved during the database migration; the bootstrap 
 is always created as approved. Blocking and email verification remain independent controls:
 a blocked account is denied even when approved.
 
+### Configure email or recover without it
+
+Email delivery is disabled by default. To enable password-reset and verification messages,
+configure a standard SMTP server in `.env` and restart the container:
+
+```bash
+EMAIL_PROVIDER=smtp
+EMAIL_FROM=moira@example.com
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_REQUIRE_TLS=true
+SMTP_USER=your-smtp-user
+SMTP_PASSWORD=your-smtp-password
+```
+
+SMTP authentication is optional, but `SMTP_USER` and `SMTP_PASSWORD` must be set together.
+Use `SMTP_SECURE=true` for implicit TLS (commonly port 465); otherwise
+`SMTP_REQUIRE_TLS=true` requires STARTTLS. Brevo remains available with
+`EMAIL_PROVIDER=brevo`, `BREVO_API_KEY`, and `EMAIL_FROM`. Invalid partial configuration
+stops startup. SaaS mode also refuses to start without a real provider.
+
+With `EMAIL_PROVIDER=none` (the default), Moira starts normally and the Web UI explains that
+forgot-password and email actions are unavailable. An administrator can instead open an
+ordinary user's detail page, choose **Set temporary password**, and send that password through
+a separate secure channel. This action revokes all of the user's sessions, API tokens, OAuth
+credentials and consents. The user signs in with the temporary password and must immediately
+replace it. Administrator accounts must use the command-line recovery procedure below.
+
+`EMAIL_PROVIDER=test` is only a log sink for automated testing. It never means that delivery is
+configured and never reports a logged message as sent.
+
 ### Recover administrator access
 
 From the directory containing `docker-compose.yml`, supply a new password without putting it

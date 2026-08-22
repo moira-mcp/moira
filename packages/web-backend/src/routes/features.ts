@@ -11,7 +11,14 @@ import { Router, Request, Response } from "express";
 
 import { ApiResponse } from "../types/index.js";
 import { asyncHandler } from "../middleware/error-middleware.js";
-import { getDeploymentMode, getFeatureResolver, getMcpUrl, type Feature } from "@mcp-moira/shared";
+import {
+  getDeploymentMode,
+  getFeatureResolver,
+  getMcpUrl,
+  type EmailDeliveryStatus,
+  type Feature,
+} from "@mcp-moira/shared";
+import * as sharedEmail from "@mcp-moira/shared";
 
 const router = Router();
 
@@ -38,6 +45,7 @@ export interface FeaturesResponse {
    * on whatever host/port the running instance is actually served from.
    */
   mcpUrl: string;
+  emailDelivery: EmailDeliveryStatus;
 }
 
 /**
@@ -54,7 +62,12 @@ router.get(
 
     const response: ApiResponse<FeaturesResponse> = {
       success: true,
-      data: { deploymentMode: getDeploymentMode(), features, mcpUrl: getMcpUrl() },
+      data: {
+        deploymentMode: getDeploymentMode(),
+        features,
+        mcpUrl: getMcpUrl(),
+        emailDelivery: sharedEmail.getEmailDeliveryStatus(),
+      },
       timestamp: new Date().toISOString(),
     };
 

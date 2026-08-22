@@ -540,6 +540,7 @@ Admin panel at `/admin/users` provides:
 - **Block/Unblock** users with reason
 - **Send verification email** manually
 - **Send password reset email** manually
+- **Set a temporary password** for an ordinary user when email delivery is unavailable
 
 ### Execution Monitoring
 
@@ -552,12 +553,12 @@ Admin panel at `/admin/executions`:
 
 ### Email History
 
-Track all sent emails:
+Track every email attempt:
 
 - Verification emails
 - Password reset emails
 - Notifications
-- Status (sent/failed) with error messages
+- Status (`sent`, `failed`, or log-only `logged`) with error messages
 
 ## Email Features
 
@@ -570,23 +571,30 @@ Track all sent emails:
 
 ### Password Reset
 
-- User requests via `/forgot-password`
-- Reset link sent to email
+- With a real SMTP or Brevo provider, the user requests via `/forgot-password`
+  and receives a reset link
 - Link expires in 1 hour
-- Admin can send reset manually
+- Without real delivery, the reset form and email-send actions report the
+  capability as unavailable; an administrator can set a temporary password for
+  an ordinary user and require replacement at the next login
 
 ### Email Provider
 
 Configured via environment variables:
 
 ```bash
-EMAIL_PROVIDER=brevo       # Currently: brevo
-BREVO_API_KEY=xkeysib-xxx  # Brevo API key
-EMAIL_FROM=noreply@domain  # Sender email
-EMAIL_FROM_NAME="App Name" # Sender name
+EMAIL_PROVIDER=smtp          # smtp, brevo, auto, none, or explicit test sink
+EMAIL_FROM=noreply@domain    # Required for real delivery
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_REQUIRE_TLS=true
+# SMTP_USER and SMTP_PASSWORD are optional, but must be supplied together
 ```
 
-Abstracted provider interface supports Brevo, Resend, SendGrid.
+Real delivery supports generic SMTP and Brevo. With `EMAIL_PROVIDER=auto` (or
+unset), a complete SMTP configuration takes precedence and a legacy
+`BREVO_API_KEY` plus `EMAIL_FROM` configuration remains supported. The explicit
+`test` provider logs messages and is never advertised as real delivery.
 
 ## Documentation Map
 

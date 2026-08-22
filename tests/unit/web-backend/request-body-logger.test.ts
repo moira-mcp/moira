@@ -7,10 +7,14 @@
  * Actual logging behavior is tested via integration tests.
  */
 
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import express, { Application, Request, Response } from "express";
 import request from "supertest";
-import { requestBodyLogger } from "../../../packages/web-backend/src/middleware/request-body-logger.js";
+import { getLogLevel, setLogLevel } from "@mcp-moira/shared";
+import {
+  isSensitiveRequestBodyPath,
+  requestBodyLogger,
+} from "../../../packages/web-backend/src/middleware/request-body-logger.js";
 
 describe("requestBodyLogger middleware", () => {
   let app: Application;
@@ -78,6 +82,41 @@ describe("requestBodyLogger middleware", () => {
   });
 
   describe("sensitive endpoint exclusion", () => {
+    it("classifies every password-changing request as sensitive", () => {
+      expect(isSensitiveRequestBodyPath("/api/user/change-password")).toBe(true);
+      expect(isSensitiveRequestBodyPath("/api/user/change-password-forced")).toBe(true);
+      expect(isSensitiveRequestBodyPath("/api/admin/users/target-id/temporary-password")).toBe(
+        true,
+      );
+      expect(isSensitiveRequestBodyPath("/api/admin/users/target-id/force-password-reset")).toBe(
+        false,
+      );
+    });
+
+    it("omits a temporary password from emitted request-body logs", async () => {
+      const previousLevel = getLogLevel();
+      const consoleOutput = (console as Console & { _stdout: NodeJS.WriteStream })._stdout;
+      const writeSpy = jest.spyOn(consoleOutput, "write").mockImplementation(() => true);
+      const secret = `temporary-secret-${Date.now()}`;
+      const safeMarker = `safe-request-${Date.now()}`;
+
+      try {
+        setLogLevel("debug");
+        await request(app)
+          .post("/api/admin/users/target-id/temporary-password")
+          .send({ temporaryPassword: secret });
+        await request(app).post("/api/public/other").send({ marker: safeMarker });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        const output = writeSpy.mock.calls.flat().map(String).join("\n");
+        expect(output).toContain(safeMarker);
+        expect(output).not.toContain(secret);
+      } finally {
+        setLogLevel(previousLevel);
+        writeSpy.mockRestore();
+      }
+    });
+
     it("should pass through /api/auth/* endpoints (not logged)", async () => {
       // Auth endpoints are excluded from body logging
       const response = await request(app)

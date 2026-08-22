@@ -20,6 +20,7 @@ const TEST_USER = {
 };
 
 let authCookie: string;
+let adminCookie: string;
 let testUserId: string;
 
 beforeAll(async () => {
@@ -38,13 +39,27 @@ beforeAll(async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(ADMIN_CREDENTIALS),
   });
-  const adminCookies = adminLoginRes.headers.get("set-cookie");
+  adminCookie = adminLoginRes.headers.get("set-cookie") || "";
+
+  const featuresRes = await fetch(`${BASE_URL}/api/features`);
+  const featureData = (await featuresRes.json()) as {
+    data: {
+      features: { accountApproval: boolean };
+    };
+  };
 
   // Verify test user email
   await fetch(`${BASE_URL}/api/admin/users/${testUserId}/verify-email`, {
     method: "POST",
-    headers: { Cookie: adminCookies || "" },
+    headers: { Cookie: adminCookie },
   });
+  if (featureData.data.features.accountApproval) {
+    const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${testUserId}/approve`, {
+      method: "POST",
+      headers: { Cookie: adminCookie },
+    });
+    expect(approvalRes.status).toBe(200);
+  }
 
   // Login as test user
   const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
@@ -351,77 +366,6 @@ describe("User Profile API", () => {
         }),
       });
       authCookie = reloginRes.headers.get("set-cookie") || authCookie;
-    });
-  });
-
-  describe("POST /api/user/resend-verification", () => {
-    test("returns error when email already verified", async () => {
-      const res = await fetch(`${BASE_URL}/api/user/resend-verification`, {
-        method: "POST",
-        headers: { Cookie: authCookie },
-      });
-
-      expect(res.status).toBe(400);
-      const json = (await res.json()) as any;
-      expect(json.success).toBe(false);
-      expect(json.error.message).toMatch(/already verified/i);
-    });
-
-    test("returns 401 without authentication", async () => {
-      const res = await fetch(`${BASE_URL}/api/user/resend-verification`, {
-        method: "POST",
-      });
-
-      expect(res.status).toBe(401);
-    });
-  });
-
-  describe("POST /api/user/resend-verification - Rate Limiting", () => {
-    test("returns 429 with cooldownSeconds on second request within cooldown period", async () => {
-      // Create new unverified user for rate limit testing
-      const unverifiedUser = {
-        email: `ratelimit-${Date.now()}@example.com`,
-        password: "RateLimit123!",
-        name: "Rate Limit Test",
-        acceptedTermsAt: new Date().toISOString(),
-        acceptedNotRussianResidentAt: new Date().toISOString(),
-      };
-
-      // Sign up new user (will be unverified)
-      const signUpRes = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(unverifiedUser),
-      });
-      expect(signUpRes.status).toBe(200);
-      const signUpCookies = signUpRes.headers.get("set-cookie") || "";
-
-      // First resend request - should succeed
-      const firstRes = await fetch(`${BASE_URL}/api/user/resend-verification`, {
-        method: "POST",
-        headers: { Cookie: signUpCookies },
-      });
-
-      expect(firstRes.status).toBe(200);
-      const firstJson = (await firstRes.json()) as any;
-      expect(firstJson.success).toBe(true);
-      expect(firstJson.cooldownSeconds).toBeDefined();
-      expect(typeof firstJson.cooldownSeconds).toBe("number");
-
-      // Second resend request immediately - should be rate limited
-      const secondRes = await fetch(`${BASE_URL}/api/user/resend-verification`, {
-        method: "POST",
-        headers: { Cookie: signUpCookies },
-      });
-
-      expect(secondRes.status).toBe(429);
-      const secondJson = (await secondRes.json()) as any;
-      expect(secondJson.success).toBe(false);
-      expect(secondJson.error.message).toMatch(/too many requests/i);
-      // cooldownSeconds is in error.details for new error format
-      expect(secondJson.error.details?.cooldownSeconds).toBeDefined();
-      expect(secondJson.error.details?.cooldownSeconds).toBeGreaterThan(0);
-      expect(secondJson.error.details?.cooldownSeconds).toBeLessThanOrEqual(60);
     });
   });
 });

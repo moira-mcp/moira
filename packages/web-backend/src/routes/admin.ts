@@ -28,6 +28,7 @@ import {
   getSqliteInstance,
   getWorkflowReconciliationStatusSummary,
 } from "@mcp-moira/shared";
+import * as sharedEmail from "@mcp-moira/shared";
 
 const router = Router();
 const repository = new DatabaseRepository();
@@ -550,7 +551,10 @@ router.post(
     const { id } = req.params;
 
     if (!isEmailConfigured()) {
-      throw createApiError.badRequest("Email service not configured");
+      throw createApiError.badRequest("Email delivery is unavailable", {
+        code: "EMAIL_DELIVERY_UNAVAILABLE",
+        delivery: sharedEmail.getEmailDeliveryStatus(),
+      });
     }
 
     const { user, getDatabase } = await import("@mcp-moira/shared");
@@ -580,9 +584,22 @@ router.post(
       resourceId: id,
     });
 
+    const suppressed = sharedEmail.shouldSuppressTestRecipient(userData.email);
+
     res.json({
       success: true,
-      data: { id, emailSent: true },
+      data: {
+        id,
+        emailSent: !suppressed,
+        delivery: suppressed
+          ? {
+              state: "test",
+              provider: "test",
+              available: false,
+              reason: "Recipient was routed to the explicitly enabled test sink",
+            }
+          : sharedEmail.getEmailDeliveryStatus(),
+      },
       timestamp: new Date().toISOString(),
     });
   }),
@@ -597,7 +614,10 @@ router.post(
     const { id } = req.params;
 
     if (!isEmailConfigured()) {
-      throw createApiError.badRequest("Email service not configured");
+      throw createApiError.badRequest("Email delivery is unavailable", {
+        code: "EMAIL_DELIVERY_UNAVAILABLE",
+        delivery: sharedEmail.getEmailDeliveryStatus(),
+      });
     }
 
     const { user, getDatabase } = await import("@mcp-moira/shared");
@@ -627,9 +647,22 @@ router.post(
       resourceId: id,
     });
 
+    const suppressed = sharedEmail.shouldSuppressTestRecipient(userData.email);
+
     res.json({
       success: true,
-      data: { id, emailSent: true },
+      data: {
+        id,
+        emailSent: !suppressed,
+        delivery: suppressed
+          ? {
+              state: "test",
+              provider: "test",
+              available: false,
+              reason: "Recipient was routed to the explicitly enabled test sink",
+            }
+          : sharedEmail.getEmailDeliveryStatus(),
+      },
       timestamp: new Date().toISOString(),
     });
   }),

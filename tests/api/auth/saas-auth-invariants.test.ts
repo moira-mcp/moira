@@ -6,7 +6,7 @@
 import { afterEach, beforeAll, describe, expect, test } from "@jest/globals";
 import { randomUUID } from "node:crypto";
 import { getAdminCredentials, getTestBaseUrl } from "../../utils/test-config.js";
-import { dockerLogsSafe, execSqliteInDocker } from "../../utils/docker-command.js";
+import { execSqliteInDocker, waitForDockerLog } from "../../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
@@ -41,6 +41,7 @@ describe("SaaS authentication invariants", () => {
           emailVerificationGate: true,
           verificationEmailOnSignup: true,
         },
+        emailDelivery: { state: "real", available: true },
       },
     });
   });
@@ -90,8 +91,8 @@ describe("SaaS authentication invariants", () => {
     });
     expect(withConsent.status).toBe(200);
     const userCookie = cookieFrom(withConsent);
-    const verificationEmailLog = await dockerLogsSafe(
-      `grep -F '${email}' | grep -F 'Verify your email - MCP Moira'`,
+    const verificationEmailLog = await waitForDockerLog(
+      `grep -m 1 -E 'TEST MODE: Email logged \\(not sent\\).*Verify your email - MCP Moira.*${email}'`,
     );
     expect(verificationEmailLog).toContain(email);
     expect(verificationEmailLog).toContain("TEST MODE: Email logged (not sent)");
@@ -106,6 +107,56 @@ describe("SaaS authentication invariants", () => {
       emailVerified: false,
       accountApprovalRequired: false,
     });
+
+    const firstResend = await fetch(`${BASE_URL}/api/user/resend-verification`, {
+      method: "POST",
+      headers: { Cookie: userCookie },
+    });
+    expect(firstResend.status).toBe(200);
+    expect(await firstResend.json()).toMatchObject({
+      success: true,
+      cooldownSeconds: expect.any(Number),
+    });
+    const secondResend = await fetch(`${BASE_URL}/api/user/resend-verification`, {
+      method: "POST",
+      headers: { Cookie: userCookie },
+    });
+    expect(secondResend.status).toBe(429);
+    expect(await secondResend.json()).toMatchObject({
+      error: { details: { cooldownSeconds: expect.any(Number) } },
+    });
+
+    const emailAdminCookie = await signInAdmin();
+    try {
+      for (const endpoint of ["send-verification", "send-reset"] as const) {
+        const subject =
+          endpoint === "send-verification"
+            ? "Verify your email - MCP Moira"
+            : "Reset your password - MCP Moira";
+        const deliveryEmail = `admin-${endpoint}-${Date.now()}@example.com`;
+        execSqliteInDocker(
+          `UPDATE user SET email = '${deliveryEmail}' WHERE id = '${statusBody.data.id}'`,
+        );
+        const delivery = await fetch(
+          `${BASE_URL}/api/admin/users/${statusBody.data.id}/${endpoint}`,
+          { method: "POST", headers: { Cookie: emailAdminCookie } },
+        );
+        expect(delivery.status).toBe(200);
+        expect(await delivery.json()).toMatchObject({
+          data: {
+            emailSent: false,
+            delivery: { state: "test", provider: "test", available: false },
+          },
+        });
+        expect(
+          await waitForDockerLog(
+            `grep -m 1 -E 'TEST MODE: Email logged \\(not sent\\).*${subject}.*${deliveryEmail}'`,
+          ),
+        ).toContain(deliveryEmail);
+      }
+    } finally {
+      execSqliteInDocker(`UPDATE user SET email = '${email}' WHERE id = '${statusBody.data.id}'`);
+    }
 
     const updateProfile = await fetch(`${BASE_URL}/api/auth/update-user`, {
       method: "POST",

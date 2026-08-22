@@ -7,6 +7,7 @@
  */
 
 import { test as base, expect, chromium } from "@playwright/test";
+import { redactRequestBody } from "../utils/redact-request-body.js";
 
 type AutoLogFixture = {
   autoCaptureLogs: void;
@@ -34,16 +35,7 @@ export const test = base.extend<AutoLogFixture>({
         if (["POST", "PUT", "PATCH"].includes(method)) {
           const postData = request.postData();
           if (postData) {
-            try {
-              const parsed = JSON.parse(postData);
-              // Mask password fields
-              if (parsed.password) parsed.password = "***";
-              if (parsed.currentPassword) parsed.currentPassword = "***";
-              if (parsed.newPassword) parsed.newPassword = "***";
-              log += `\n   Body: ${JSON.stringify(parsed)}`;
-            } catch {
-              log += `\n   Body: ${postData.substring(0, 500)}`;
-            }
+            log += `\n   Body: ${redactRequestBody(postData)}`;
           }
         }
         networkLogs.push(log);

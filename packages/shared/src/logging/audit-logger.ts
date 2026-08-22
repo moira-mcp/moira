@@ -25,6 +25,36 @@ export interface AuditContext {
   changes?: AuditChange[];
 }
 
+export interface AuditRequestContext {
+  source?: string;
+  ip?: string;
+  country?: string;
+  userAgent?: string;
+}
+
+export function getAuditRequestContext(req: Request): AuditRequestContext {
+  const ip =
+    req.ip ||
+    req.get("x-forwarded-for")?.split(",")[0].trim() ||
+    req.socket.remoteAddress ||
+    undefined;
+  const geo = ip ? geoip.lookup(ip) : null;
+
+  return {
+    source: getAuditSource(),
+    ip,
+    country: geo?.country || undefined,
+    userAgent: req.get("user-agent") || undefined,
+  };
+}
+
+export function recordAuditEventMetric(action: string, resource?: string): void {
+  auditActionsTotal.inc({
+    action,
+    resource: resource || "unknown",
+  });
+}
+
 /**
  * Interface for audit logging capability
  * Implemented by both DatabaseRepository (logAudit) and AuditRepository (log)
@@ -44,18 +74,7 @@ export async function logAuditEvent(
   req: Request,
   context: AuditContext,
 ): Promise<void> {
-  // Get real IP with proxy support (x-forwarded-for header)
-  const ip =
-    req.ip ||
-    req.get("x-forwarded-for")?.split(",")[0].trim() ||
-    req.socket.remoteAddress ||
-    undefined;
-  const geo = ip ? geoip.lookup(ip) : null;
-  const country = geo?.country || undefined;
-  const userAgent = req.get("user-agent") || undefined;
-
-  // Get source from global service
-  const source = getAuditSource();
+  const { ip, country, userAgent, source } = getAuditRequestContext(req);
 
   await repository.logAudit({
     userId: context.userId,
@@ -70,11 +89,7 @@ export async function logAuditEvent(
     changes: context.changes ? JSON.stringify(context.changes) : undefined,
   });
 
-  // Increment audit metrics
-  auditActionsTotal.inc({
-    action: context.action,
-    resource: context.resource || "unknown",
-  });
+  recordAuditEventMetric(context.action, context.resource);
 }
 
 /**
@@ -113,11 +128,7 @@ export async function logAuditEventDirect(
     await repository.log(entry);
   }
 
-  // Increment audit metrics
-  auditActionsTotal.inc({
-    action: context.action,
-    resource: context.resource || "unknown",
-  });
+  recordAuditEventMetric(context.action, context.resource);
 }
 
 /**

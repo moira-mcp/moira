@@ -10,10 +10,11 @@
  */
 
 import { execSync } from "child_process";
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Get the docker command prefix, including --context if remote
@@ -107,6 +108,41 @@ export async function dockerLogsSafe(
   } catch {
     return "";
   }
+}
+
+/**
+ * Wait for a matching line in the container's durable Winston logs.
+ * Existing lines are inspected first; tail then follows new writes until the
+ * caller's pipeline produces a result or the bounded timeout expires.
+ */
+export async function waitForDockerLog(
+  pipeline: string,
+  container?: string,
+  timeout: number = 10000,
+): Promise<string> {
+  const containerName = container || getContainerName();
+  const context = process.env.REMOTE_DOCKER_CONTEXT;
+  const timeoutSeconds = Math.max(1, Math.ceil(timeout / 1000));
+  const script = [
+    'fifo="/tmp/moira-log-wait-$$"',
+    'mkfifo "$fifo"',
+    'tail -n 2000 -F /var/log/app/backend-api*.log /var/log/app/mcp-server*.log >"$fifo" 2>/dev/null &',
+    "tail_pid=$!",
+    'trap \'kill "$tail_pid" 2>/dev/null || true; rm -f "$fifo"\' EXIT',
+    `${pipeline} <"$fifo"`,
+  ].join("\n");
+  const args = [
+    ...(context ? ["--context", context] : []),
+    "exec",
+    containerName,
+    "timeout",
+    String(timeoutSeconds),
+    "sh",
+    "-c",
+    script,
+  ];
+  const { stdout } = await execFileAsync("docker", args, { timeout: timeout + 2000 });
+  return stdout;
 }
 
 /**

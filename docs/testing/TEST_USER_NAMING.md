@@ -4,12 +4,17 @@ When creating test users, use email addresses matching specific patterns.
 
 ## Why this matters
 
-The email system automatically detects test users and:
+The email system redirects recognized test recipients only when the deployment
+explicitly sets `EMAIL_TEST_RECIPIENTS=true`:
 
-- **Development/Test:** all emails are logged but not sent
-- **Production:** emails to test addresses are logged, emails to real addresses are sent
+- `EMAIL_PROVIDER=test`: every message is logged and never sent.
+- Real SMTP/Brevo provider plus `EMAIL_TEST_RECIPIENTS=true`: recognized test
+  recipients are logged through the test sink; other recipients use the real provider.
+- Suppression disabled: recipient naming does not change delivery.
 
-This lets you run e2e tests against a production server without sending real emails.
+The repository's CI environment combines a real-provider capability shape with
+the explicit suppression switch. Do not run mail-producing tests against an
+uncontrolled production deployment.
 
 ## Recommended formats
 
@@ -54,31 +59,34 @@ test("login flow", async () => {
 ### Dynamically created users
 
 ```typescript
-// test<timestamp>@moira.local
+// test-<timestamp>@test.local
 test("concurrent users", async () => {
   const timestamp = Date.now();
   const users = await Promise.all([
-    signUp({ email: `test${timestamp}@moira.local`, password: "Pass123" }),
-    signUp({ email: `test${timestamp + 1}@moira.local`, password: "Pass123" }),
+    signUp({ email: `test-${timestamp}@test.local`, password: "Pass123" }),
+    signUp({ email: `test-${timestamp + 1}@test.local`, password: "Pass123" }),
   ]);
 });
 
-// test<random>@moira.local
+// test-<random>@test.local
 test("unique users", async () => {
   const randomId = Math.random().toString(36).substr(2, 9);
-  await signUp({ email: `test${randomId}@moira.local`, password: "Pass123" });
+  await signUp({ email: `test-${randomId}@test.local`, password: "Pass123" });
 });
 ```
 
 ## Supported patterns
 
 ```typescript
-/^test.*@example\.com$/i        // test@example.com, testuser@example.com
-/^.*\.test@example\.com$/i      // user.test@example.com, admin.test@example.com
-/^e2e.*@moira\.local$/i         // e2e-user@moira.local, e2e123@moira.local
-/^playwright.*@moira\.local$/i  // playwright-test@moira.local
-/^test\d+@moira\.local$/i       // test1@moira.local, test123@moira.local
+/^[^@]+@example\.com$/i                    // IANA-reserved example domain
+/^[^@]+@test\.com$/i                       // legacy CI fixture domain
+/^[^@]+@test\.local$/i                     // local test fixtures
+/^[^@]+@moira\.local$/i                    // local Moira fixtures
+/^[^@]+@load-testing-noverify\.local$/i     // authenticated load-test fixtures
+/^[^@]+@[^@]+\.test$/i                     // IANA-reserved .test TLD
 ```
+
+These patterns have an effect only while `EMAIL_TEST_RECIPIENTS=true`.
 
 ## What NOT to use
 
@@ -138,7 +146,7 @@ describe("Email Service", () => {
 
     await sendVerificationEmail(user);
 
-    // Email logged but not sent (test mode)
+    // EMAIL_PROVIDER=test logs without sending.
     expect(emailLogger.logs).toContainEqual(expect.objectContaining({ to: "test@example.com" }));
   });
 });
@@ -155,7 +163,7 @@ test.describe("Authentication Flow", () => {
     await page.fill('[name="password"]', "TestPassword123");
     await page.click('button[type="submit"]');
 
-    // In production: email logged but not sent (test user)
+    // In controlled CI, EMAIL_TEST_RECIPIENTS=true redirects this recipient.
     await expect(page.locator(".success-message")).toBeVisible();
   });
 });
@@ -174,22 +182,22 @@ describe("Workflow Notifications", () => {
     const workflow = await createWorkflow({ userId: user.id });
     await completeWorkflow(workflow.id);
 
-    // Email logged but not sent
+    // The explicit test provider logs without sending.
     expect(emailLogger.logs).toHaveLength(1);
   });
 });
 ```
 
-## Verifying in production
+## Verifying in a controlled real-capability test environment
 
 To confirm that test emails are not sent in production:
 
 ```bash
-# Run e2e tests against production
-PROD_URL=https://moira.example.com npm run test:e2e
+# Use reserved recipients and explicit suppression with an isolated test instance.
+EMAIL_TEST_RECIPIENTS=true npm run test:e2e
 
 # Check logs - you should see "TEST MODE: Email logged (not sent)"
-# Real emails to non-test addresses still work normally
+# The public capability remains real; non-reserved recipients would use SMTP/Brevo.
 ```
 
 ## Adding new patterns
@@ -212,8 +220,10 @@ function isTestEmail(email: string): boolean {
 
 **Q: What if I forget to use a test email in a test?**
 
-A: In development/test environments, all emails are logged. In production, a real email
-will be sent to a real address.
+A: With `EMAIL_PROVIDER=test`, every message stays local. With a real provider,
+only the explicit `EMAIL_TEST_RECIPIENTS=true` switch activates recipient
+suppression. A fixture outside the recognized domains can otherwise reach the
+configured provider, so CI must use the documented reserved corpus.
 
 **Q: Can I use Gmail for tests?**
 
@@ -221,8 +231,6 @@ A: No. Use only test patterns. Gmail addresses will attempt to send real emails.
 
 **Q: How do I confirm an email was not sent?**
 
-A: Check the logs - you should see `TEST MODE: Email logged (not sent)` instead of a real send.
-
-```
-
-```
+A: Check the durable email log for `TEST MODE: Email logged (not sent)` and the
+returned `delivery: logged` result. The public capability remains `real`; a
+log-only result must never be reported as sent.

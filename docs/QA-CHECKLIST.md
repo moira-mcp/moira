@@ -103,8 +103,12 @@ Manual testing checklist for scenarios that cannot be automated in E2E tests.
 
 ### Prerequisites
 
-- Email service configured (Resend, SMTP)
+- A real generic SMTP or Brevo provider configured
 - Test email account accessible
+
+If self-host intentionally runs without a real provider, verify instead that
+the forgot-password and send-email controls report delivery unavailable and
+that administrator temporary-password recovery remains available.
 
 ### Registration Email
 

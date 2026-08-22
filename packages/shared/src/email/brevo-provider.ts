@@ -50,6 +50,8 @@ export class BrevoProvider implements EmailProvider {
     return {
       messageId: response.body.messageId || `brevo-${Date.now()}`,
       success: true,
+      provider: "brevo",
+      delivery: "sent",
     };
   }
 }

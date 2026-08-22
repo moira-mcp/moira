@@ -19,6 +19,7 @@ import {
   HandleConflictError,
   UserNotFoundError,
 } from "@mcp-moira/shared";
+import * as sharedEmail from "@mcp-moira/shared";
 import { user, session, oauthAccessToken } from "@mcp-moira/shared";
 import { eq, and, ne } from "drizzle-orm";
 import { auth } from "../auth.js";
@@ -245,6 +246,13 @@ router.post(
 
     if (!userId || !userEmail) {
       throw createApiError.unauthorized("User session not found");
+    }
+
+    if (sharedEmail.getEmailDeliveryStatus().state !== "real") {
+      throw createApiError.badRequest(
+        "Email delivery is unavailable. Contact your administrator for account recovery.",
+        { code: "EMAIL_DELIVERY_UNAVAILABLE" },
+      );
     }
 
     // Check rate limit

@@ -34,6 +34,12 @@ export interface FeaturesResponse {
    * URL matches the actual host/port instead of a build-time-baked value.
    */
   mcpUrl: string;
+  emailDelivery: {
+    state: "real" | "test" | "unavailable" | "configuration-error";
+    provider: "smtp" | "brevo" | "test" | null;
+    available: boolean;
+    reason: string | null;
+  };
 }
 
 export interface ApiError {

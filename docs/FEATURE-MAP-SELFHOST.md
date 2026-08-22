@@ -126,19 +126,19 @@ variable override.
 
 ## Zone F — shared infra (email/metrics/audit/logging/errors/config)
 
-| Block                               | What                     | Verdict | Effort | Note                                                                                      |
-| ----------------------------------- | ------------------------ | ------- | ------ | ----------------------------------------------------------------------------------------- |
-| EMAIL (Brevo + TestProvider)        | graceful fallback        | 🟢 KEEP | —      | Without BREVO_API_KEY → logs                                                              |
-| EMAIL_FROM default                  | env.ts getEmailFrom      | ✅ DONE | S      | Default noreply@localhost in self-host                                                    |
-| CONTACT_EMAIL default               | urls.ts getter           | ✅ DONE | S      | Default support@localhost in self-host                                                    |
-| TELEGRAM_ENCRYPTION_KEY autogen     | secrets-bootstrap.ts     | ✅ DONE | S      | Auto-generated (256-bit) in self-host, persisted                                          |
-| BETTER_AUTH_SECRET / ADMIN_PASSWORD | secrets-bootstrap.ts     | ✅ DONE | M      | Auto-generated on first start; ADMIN_PASSWORD shown once in logs; migration does not fail |
-| METRICS (Prometheus :9090)          | monitoring               | 🟢 KEEP | —      | Optional                                                                                  |
-| AUDIT (audit actions, geoip)        | observability            | 🟢 KEEP | —      | Superfluous but harmless; advanced export → EE                                            |
-| LOGGING (winston)                   | —                        | 🟢 KEEP | —      | Required                                                                                  |
-| ERRORS (domain/app)                 | —                        | 🟢 KEEP | —      | Required                                                                                  |
-| MCP-CLIENTS (config generators)     | Cursor/VSCode/Claude/... | 🟢 KEEP | —      | Pure functions                                                                            |
-| CONFIG (env singleton)              | —                        | 🟢 KEEP | —      | See required env above                                                                    |
+| Block                                     | What                      | Verdict | Effort | Note                                                                                                     |
+| ----------------------------------------- | ------------------------- | ------- | ------ | -------------------------------------------------------------------------------------------------------- |
+| EMAIL (SMTP + Brevo + explicit test sink) | explicit capability state | 🟢 KEEP | —      | Without a real provider self-host reports unavailable; administrator-assisted recovery remains available |
+| EMAIL_FROM default                        | env.ts getEmailFrom       | ✅ DONE | S      | Default noreply@localhost in self-host                                                                   |
+| CONTACT_EMAIL default                     | urls.ts getter            | ✅ DONE | S      | Default support@localhost in self-host                                                                   |
+| TELEGRAM_ENCRYPTION_KEY autogen           | secrets-bootstrap.ts      | ✅ DONE | S      | Auto-generated (256-bit) in self-host, persisted                                                         |
+| BETTER_AUTH_SECRET / ADMIN_PASSWORD       | secrets-bootstrap.ts      | ✅ DONE | M      | Auto-generated on first start; ADMIN_PASSWORD shown once in logs; migration does not fail                |
+| METRICS (Prometheus :9090)                | monitoring                | 🟢 KEEP | —      | Optional                                                                                                 |
+| AUDIT (audit actions, geoip)              | observability             | 🟢 KEEP | —      | Superfluous but harmless; advanced export → EE                                                           |
+| LOGGING (winston)                         | —                         | 🟢 KEEP | —      | Required                                                                                                 |
+| ERRORS (domain/app)                       | —                         | 🟢 KEEP | —      | Required                                                                                                 |
+| MCP-CLIENTS (config generators)           | Cursor/VSCode/Claude/...  | 🟢 KEEP | —      | Pure functions                                                                                           |
+| CONFIG (env singleton)                    | —                         | 🟢 KEEP | —      | See required env above                                                                                   |
 
 **Zone summary:** infra mostly KEEP; **5 startup env blockers** (EMAIL_FROM, CONTACT_EMAIL, TELEGRAM_ENCRYPTION_KEY, BETTER_AUTH_SECRET, ADMIN_PASSWORD) → REWORK via auto-generation/defaults in self-host mode.
 

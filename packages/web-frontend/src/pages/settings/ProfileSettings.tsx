@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CheckCircle, AlertTriangle } from "lucide-react";
+import { useFeatures } from "@/hooks/useFeatures";
 
 export interface UserProfile {
   id: string;
@@ -30,6 +31,8 @@ interface ProfileSettingsProps {
 
 export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onProfileUpdate }) => {
   const { t } = useTranslation();
+  const { isEnabled, emailDelivery } = useFeatures();
+  const emailVerificationRequired = isEnabled("emailVerificationGate");
 
   const [name, setName] = useState(profile.name || "");
   const [handle, setHandle] = useState(profile.handle || "");
@@ -190,21 +193,22 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
                   disabled
                   className="flex-1"
                 />
-                {profile.emailVerified ? (
-                  <Badge variant="outline" className="text-chart-2 border-chart-2/30 gap-1">
-                    <CheckCircle className="h-3 w-3" />
-                    {t("pages.settings.profile.verified")}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-warning border-warning/30 gap-1">
-                    <AlertTriangle className="h-3 w-3" />
-                    {t("pages.settings.profile.notVerified")}
-                  </Badge>
-                )}
+                {emailVerificationRequired &&
+                  (profile.emailVerified ? (
+                    <Badge variant="outline" className="text-chart-2 border-chart-2/30 gap-1">
+                      <CheckCircle className="h-3 w-3" />
+                      {t("pages.settings.profile.verified")}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-warning border-warning/30 gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      {t("pages.settings.profile.notVerified")}
+                    </Badge>
+                  ))}
               </div>
             </div>
 
-            {!profile.emailVerified && (
+            {emailVerificationRequired && !profile.emailVerified && (
               <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
                 <p className="text-sm text-warning-foreground mb-2">
                   {t("pages.settings.profile.verificationWarning")}
@@ -214,12 +218,17 @@ export const ProfileSettings: React.FC<ProfileSettingsProps> = ({ profile, onPro
                   variant="outline"
                   size="sm"
                   onClick={handleResendVerification}
-                  disabled={sendingVerification}
+                  disabled={sendingVerification || !emailDelivery.available}
                 >
                   {sendingVerification
                     ? t("pages.settings.profile.sendingVerification")
                     : t("pages.settings.profile.resendVerification")}
                 </Button>
+                {!emailDelivery.available && (
+                  <p className="text-sm text-muted-foreground mt-2">
+                    {t("pages.settings.profile.emailDeliveryUnavailable")}
+                  </p>
+                )}
                 {verificationSuccess && (
                   <p className="text-sm text-chart-2 mt-2">
                     ✓ {t("pages.settings.profile.verificationSent")}
