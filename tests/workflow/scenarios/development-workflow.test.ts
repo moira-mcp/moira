@@ -1238,7 +1238,9 @@ describe("software-development-flow v14.1", () => {
     expect(closure.directive).toContain(
       "do not refuse closure merely because that outcome can still be delivered",
     );
-    expect(closure.directive).toContain("exactly one must state the current `replan` disposition");
+    expect(closure.directive).toContain(
+      "Exactly one applicable source must state the current `replan` disposition",
+    );
     expect(closure.directive).toContain(
       "`closure_decision=refused` remains the user's explicit refusal",
     );
