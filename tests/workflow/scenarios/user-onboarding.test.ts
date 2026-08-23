@@ -229,7 +229,7 @@ describe("user-onboarding", () => {
         mockInputs: {
           welcome: {
             user_intent: "try_existing",
-            selected_workflow: "moira/research",
+            selected_workflow: "moira/verified-research",
             selection_valid: true,
           },
           "launch-workflow": { handoff_decision: "defer" },

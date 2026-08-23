@@ -809,7 +809,6 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/architecture-design-flow.test.ts`
 - `tests/workflow/scenarios/artifacts-demo-dashboard-builder.test.ts`
 - `tests/workflow/scenarios/artifacts-demo-report-publisher.test.ts`
-- `tests/workflow/scenarios/bug-hunting-workflow.test.ts`
 - `tests/workflow/scenarios/conditional-branching.test.ts`
 - `tests/workflow/scenarios/content-creation.test.ts`
 - `tests/workflow/scenarios/coverage.test.ts`
