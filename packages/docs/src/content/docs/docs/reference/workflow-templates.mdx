@@ -351,14 +351,13 @@ flowchart LR
     B -->|edit| D[Load source]
     D --> E{Full anti-pattern audit?}
     E -->|yes| F[Audit and choose scope]
-    E -->|no| G[Analyze requested scope]
+    E -->|no| G[Analyze and plan]
     F --> G
     C --> H[Design contract]
-    G --> I[Edit design contract]
     H --> J[Independent design review]
-    I --> J
+    G --> J
     J -->|create repair| H
-    J -->|edit repair| I
+    J -->|edit repair| G
     J -->|create replan| H
     J -->|edit replan| G
     J -->|pass| K[Optional user approval]
@@ -378,12 +377,13 @@ Use this workflow to create custom workflows or modify existing templates.
 
 | Feature | Description |
 |---------|-------------|
-| Disk-backed artifacts | Requirements, analysis, plans, and review reports stay in the workspace |
+| Disk-backed artifacts | Requirements, plans, and review reports stay in the workspace; the analysis of an edit is the first section of its plan, so a correction cannot land in one document and leave a second one stating the superseded version |
 | Embedded authoring reference | Engine rules, patterns, anti-patterns, review criteria, cost ordering, and authority rules are shipped inside the workflow |
 | Identity-aware editing | The edit path reconciles local and server provenance before semantic planning |
 | Optional source audit | Interactive mode asks for consent; autonomous mode chooses from the requested change and available evidence |
 | Evidence-aware design | Every proposed proof must distinguish the required state from a plausible wrong state using an appropriate evidence method |
 | Pre-mutation design review | Create and edit share an independent semantic gate before artifact mutation; human approval remains a separate decision |
+| Criteria fixed by review | Once the edit contract passes independent review, its acceptance criteria are a contract the executor may not reword: a criterion that turns out wrong is taken to the process-revision teleport, where the change is visible, instead of being relaxed in place |
 | Cause-aware review | Reviews route to pass, artifact repair, or contract replan; repeated same-root findings without stronger evidence cannot grow another validator layer |
 | Bounded class-wide repair | A confirmed root is repaired across its real manifestations in the agreed scope, not converted into a universal contextual detector |
 | Validation | The creating or editing node runs the official schema and graph validator |

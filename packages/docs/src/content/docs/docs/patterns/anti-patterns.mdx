@@ -432,6 +432,16 @@ Architecture, completeness, testability, or semantic retention is reduced to a t
 a passing score is treated as permission to accept a regression elsewhere. Required guarantees are
 hard gates; cost diagnostics stay separate and cannot compensate for lost behaviour.
 
+The same defect arrives as a minimum: a count of sources, of alternatives, of decision records, of
+test cases. What separates a requirement from a fabricated threshold is where the number comes from.
+A bound an external contract imposes states an obligation, and its violation is observable outside
+the run. A bound invented inside the workflow does not distinguish two states of the result: the
+difference between seven sources and eight says nothing about whether the research answers its
+question, and it is met by adding the eighth.
+
+**Detection:** ask what the neighbouring value would mean. If nothing, the number stands in for the
+reading nobody did.
+
 ## Scope and Authority
 
 ### Unauthorized Side Effects
@@ -473,6 +483,45 @@ from following dependencies discovered during implementation.
 A useful plan fixes the outcome, scope, contracts, invariants, dependencies, acceptance criteria,
 behavioral checks, and material risks. Known nodes and files are entry points, not an exhaustive
 allowlist, unless an external contract explicitly makes them one.
+
+### Plan That Carries the Deliverable
+
+The mirror image of the previous entry. A plan unit contains the result instead of describing it:
+the paragraphs the task is meant to produce, the full text of a brief for another agent, the answer
+of an investigation.
+
+Where the deliverable is code, plan and result live in different media and the altitude holds by
+itself. Where the deliverable is prose — documentation, briefs, a body of rules, an analysis — they
+share a medium and nothing separates them by construction. The plan review then reviews the result,
+the result review reads the same text a second time, and no gate has judged the step that was
+supposed to produce it.
+
+**Detection:** after the plan is approved, is there work an intelligent executor still has to do? A
+unit a later step could satisfy by copying text out of the plan is a unit whose result is already
+written there.
+
+### Order of Telling Taken for Order of Work
+
+A checklist supplied by a person is treated as a queue, and the workflow forbids the executor to
+reorder it. A list written by a human records their thinking: the condition the first item depends
+on is often realised while writing the third and written down there, and a remark that governs the
+whole job lands in the middle looking like another item.
+
+Content and completeness belong to whoever wrote the list — rewriting an item, dropping one or
+adding unrequested work stays forbidden. The order belongs to the executor, who is the one that can
+see item two cannot start until item three exists.
+
+**Detection:** one prohibition covering both, usually through the word `renumber`, which reads
+equally as "do not restate the items" and as "do not work out which runs first".
+
+### Redundancy Required in Every Plan Item
+
+A rule demands that every plan item repeat every nuance and duplicate every cross-cutting action,
+unconditionally, because an executor may receive one item alone.
+
+The problem is real; the unconditional answer is not. The item grows until it carries the
+deliverable — the entry above — and the repeated text becomes a duplicate source of truth that
+drifts. State what the executor needs when it is alone, and let duplication be judged item by item.
 
 ## Instructions and Context
 
@@ -524,6 +573,23 @@ reviewer is different: it inspects its primary sources itself.
 Ceremony kept only because earlier models needed it — fixed search counts, filename recipes,
 prescribed plan templates, mandatory tool sequences, and microsteps split across turns. Each of these
 needs a current contract or a reproduced failure to justify it.
+
+### Directive as a Drill Order
+
+A directive spells out the sequence of moves an executor would derive from the goal on its own, or
+raises its voice to make a rule stick — capitals, warning signs, MANDATORY, NEVER, CRITICAL, FIX IT,
+NO REPORTS — and usually does both.
+
+Volume adds no executability. There is no state of the world in which "do this ACTUALLY critically"
+holds or fails, so nothing can accept or refuse it, and the executor performs the form instead of
+judging the work. The steps fail from the other side: they are right only for the case the author
+pictured, and an executor meeting a different one either follows them into the wrong result or
+ignores the directive, having learned that its words are decoration.
+
+**Detection, two signs.** Remove the capitals and the signs: if the rule stops requiring anything,
+there was no requirement, only tone. Or read the steps and ask whether an executor holding the goal
+would have arrived at them anyway — a directive built as "STEP 1 … STEP 2 …" can be quiet and still
+be a drill order.
 
 ## Related
 

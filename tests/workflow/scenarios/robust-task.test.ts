@@ -333,8 +333,94 @@ describe("Robust Task cause-aware contract", () => {
       expect(serialized).not.toContain(removed);
     }
 
-    expect(workflow.metadata.version).toBe("9.0.0");
+    expect(workflow.metadata.version).toBe("9.1.1");
     expect(node(workflow, "initialize-workspace").directive).toContain("process-id.txt");
+
+    // Version is pinned so a directive change cannot ship without reopening this file.
+    expect(workflow.metadata.version).toBe("9.1.1");
+    // A plan step fixes what must become true, the evidence that would accept it, and what it
+    // depends on; it never carries the deliverable. The rule is written
+    // out once where the first plan is made, and every node that publishes a later plan version
+    // carries the reference in both halves — directive and gate — because a plan is lowered back
+    // onto the result while it is being repaired or replanned, not while it is first written. The
+    // gate binds only the steps that node may reshape: four of the five preserve completed steps as
+    // executed, so demanding altitude of those would make the gate unpassable mid-run.
+    const createPlan = node(workflow, "create-plan");
+    expect(createPlan.directive).toContain("it does not carry the deliverable itself");
+    expect(createPlan.directive).toContain("Where the result is prose");
+    expect(createPlan.directive).toContain("work an intelligent executor still has to do remains");
+    expect(createPlan.directive).toContain(
+      "a step a later turn could satisfy by copying text out of the plan",
+    );
+    expect(createPlan.completionCondition).toContain(
+      "every step fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
+    );
+    // fix-plan looks pre-approval, but a mid-run replan re-enters review and a blocking finding
+    // routes straight back into it (execute-step → teleport-replan → reset-plan-review-round →
+    // review-plan → route-plan-review:false → check-plan-review-limit:false), so it binds only the
+    // steps it shapes, exactly like the four nodes below.
+    const fixPlan = node(workflow, "fix-plan");
+    expect(fixPlan.directive).toContain(
+      "The steps this revision shapes keep the altitude the first plan is held to",
+    );
+    expect(fixPlan.completionCondition).toContain(
+      "every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
+    );
+    // Work that is already closed stays closed: every node that publishes a plan version after
+    // execution may begin says so in its directive and answers for it at its gate. fix-plan looked
+    // exempt because its only edges come from the review router, but the run reaches it mid-flight
+    // through replan-from-verdict, so it carries the same obligation. Evidence needs no clause here:
+    // it lives in immutable attempt directories addressed by plan version, and no plan node writes
+    // there.
+    expect(node(workflow, "fix-plan").directive).toContain("preserve unaffected decisions");
+    expect(node(workflow, "fix-plan").directive).toContain(
+      "Steps already executed stay as they were executed",
+    );
+    expect(node(workflow, "revise-plan").directive).toContain(
+      "Preserve completed steps 1 through {{current_step}} - 1 when execution has begun",
+    );
+    expect(node(workflow, "replan-from-verdict").directive).toContain(
+      "preserve completed outcomes",
+    );
+    expect(node(workflow, "replan-from-decision").directive).toContain(
+      "Preserve completed steps and reshape only the open step and unfinished tail",
+    );
+    expect(node(workflow, "teleport-replan").directive).toContain(
+      "preserve completed steps before {{current_step}}, and reshape only the open step and unfinished tail",
+    );
+    // The gates say it in three shapes that predate this edit and are kept as equals; each is pinned
+    // where it stands, so swapping one for another is visible too.
+    for (const [nodeId, gateClause] of [
+      ["fix-plan", "every step it shapes fixes an outcome"],
+      ["revise-plan", "completed work remains preserved"],
+      ["replan-from-verdict", "preserves completed outcomes"],
+      ["replan-from-decision", "completed work is preserved"],
+      ["teleport-replan", "preserves completed work"],
+    ] as const) {
+      expect(node(workflow, nodeId).completionCondition).toContain(gateClause);
+    }
+    // The four nodes that reshape a plan mid-run may only touch the unfinished tail, so both halves
+    // bind exactly the steps they shape: a gate demanding more would be unpassable once a run has
+    // executed a step written below the altitude.
+    for (const nodeId of [
+      "revise-plan",
+      "replan-from-verdict",
+      "replan-from-decision",
+      "teleport-replan",
+    ]) {
+      const publisher = node(workflow, nodeId);
+      expect(publisher.directive).toContain(
+        "The steps this revision shapes keep the altitude the first plan is held to",
+      );
+      expect(publisher.directive).toContain(
+        "they fix what must become true, the evidence that would accept it, and what it depends on",
+      );
+      expect(publisher.completionCondition).toContain(
+        "every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
+      );
+    }
+    // Autonomous mode is routed, not schema-driven: the plan-approval gate is entered through its
+    // mode condition, and both notification routes lead to that condition.
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     expect(node(workflow, "route-operating-mode-plan-approval").connections).toEqual({
       true: "check-all-steps-done",

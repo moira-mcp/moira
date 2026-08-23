@@ -5,7 +5,7 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.3.0",
+    "version": "3.4.5",
     "description": "Autonomous sequential checklist with optional supplied tasks, an engine-owned one-based cursor, one concise local evidence acknowledgement per completed task, and a mid-run jump that replaces the checklist while keeping completed tasks and resuming at a stated position."
   },
   "nodes": [
@@ -19,8 +19,8 @@
     {
       "id": "obtain-tasks",
       "type": "agent-directive",
-      "directive": "Obtain the complete ordered checklist for the user's current goal.\n\nIf the current user or caller context already provides a ready task array matching the required schema, return that array unchanged. Do not replan, rewrite, renumber, summarize, or enrich supplied tasks.\n\nOtherwise plan the checklist once. Return 1 to 100 self-contained tasks. Each action must name the concrete work, relevant constraints, and verification. Each expected_result must describe an observable completion condition. Do not execute tasks in this step and do not add IDs, statuses, result codes, counters, or reporting fields.",
-      "completionCondition": "One bounded typed task array is returned unchanged from supplied context or planned once from the current goal",
+      "directive": "Obtain the complete checklist for the user's current goal, ordered so that it can be worked through in that order.\n\nWhen the user or caller already supplied the tasks as a ready array matching the required schema, their content belongs to whoever wrote it: return every item they gave, with its wording and scope unchanged, drop nothing, and add no work they did not ask for. The order is yours to establish, because you are the one who can see which item cannot start until another has produced what it needs. A list written by a person records their thinking rather than a queue: the condition the first item depends on is often realised while writing the third and written down there, and a remark that governs the whole job can sit in the middle looking like another item. Place each item where its prerequisites already hold, and treat such a remark as a constraint on the items it governs rather than as a task of its own. Where the resulting order differs from the written one, the difference and the dependency that caused it are visible to the author before any work starts, so they can correct you rather than discover it afterwards. Where two supplied items each need the other's result, no order satisfies both: name that pair to the author instead of choosing silently.\n\nOtherwise plan the checklist once. Return 1 to 100 self-contained tasks. Each action must name the concrete work, relevant constraints, and verification. Each expected_result must describe an observable completion condition. Do not execute tasks in this step and do not add IDs, statuses, result codes, counters, or reporting fields.",
+      "completionCondition": "One bounded typed task array is returned: either unchanged in content from a supplied schema-valid list, or planned once from the current goal. In the supplied case, supplied items keep their content, none is lost, nothing unrequested is added, a remark that governs the whole job constrains the items it governs instead of becoming one, any difference from the written order is visible to the author before work starts, and every item stands where its prerequisites already hold, except a pair that each need the other's result, which is named to the author",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

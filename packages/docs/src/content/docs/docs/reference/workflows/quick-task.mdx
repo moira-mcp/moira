@@ -67,7 +67,7 @@ Returned paths are constrained by JSON Schema for shape and length. File existen
 
 ## Planning and approval
 
-The planner writes between one and ten meaningful ordered work units. Each unit states its action, expected result, and a verification method appropriate to the work. The plan body stays in `plan.md`; the workflow receives only its bounded path and exact item count.
+The planner writes between one and ten meaningful ordered work units. Each unit states its action, expected result, and a verification method appropriate to the work, and fixes that outcome rather than carrying the deliverable itself: after the plan is approved, work an intelligent executor still has to do remains. The rule matters most where the result is prose — a document, briefs for other agents, an investigation's answer — because there plan and result share a medium. The repair node that precedes approval answers for the whole plan; the revision node, which also runs mid-flight, answers for the units it shapes, because already executed units stay at their positions as they were executed. The plan body stays in `plan.md`; the workflow receives only its bounded path and exact item count.
 
 An independent reviewer reads `task.md` and the current `plan.md` directly. It writes the complete reproducible blocking finding set to `review.md` and returns only the report path plus `issues_count`. A nonzero count routes to a separate repair node, which writes a new immutable plan iteration before returning to the same reviewer. Zero findings is valid and reaches the approval gate.
 

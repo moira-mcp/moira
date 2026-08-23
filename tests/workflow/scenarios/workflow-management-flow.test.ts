@@ -81,7 +81,6 @@ function editInputs(name: string, localPath = `workflows/${name}.json`): Record<
     "gather-edit-requirements": {},
     "ask-full-antipattern-audit": { full_antipattern_audit: "no" },
     "audit-complete-workflow": { additional_edit_scope: "none" },
-    "analyze-edit-problem": {},
     "create-edit-plan": {},
     "review-workflow-design": { design_review_outcome: "pass" },
     "fix-edit-plan": {
@@ -241,7 +240,7 @@ const scenarios: TestScenario[] = [
       ],
       "fix-edit-plan": { repair_outcome: "reassess" },
     },
-    ["fix-edit-plan", "reassess-design-contract", "analyze-edit-problem", "end"],
+    ["fix-edit-plan", "reassess-design-contract", "create-edit-plan", "end"],
   ),
   scenario(
     "scanner validation defect replans without artifact repair",
@@ -252,7 +251,7 @@ const scenarios: TestScenario[] = [
         { quality_review_outcome: "pass" },
       ],
     },
-    ["route-quality-review-replan", "reassess-design-contract", "analyze-edit-problem", "end"],
+    ["route-quality-review-replan", "reassess-design-contract", "create-edit-plan", "end"],
     ["fix-quality-issues"],
   ),
   scenario(
@@ -339,7 +338,6 @@ const scenarios: TestScenario[] = [
     },
     [
       "teleport-revise-process",
-      "analyze-edit-problem",
       "create-edit-plan",
       "present-edit-plan",
       "apply-workflow-changes",
@@ -374,8 +372,9 @@ describe("workflow-management-flow v6", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("6.0.0");
-    expect(workflow.nodes).toHaveLength(58);
+    expect(workflow.metadata.version).toBe("6.2.1");
+    // One node fewer than upstream 6.1.0: the analysis responsibility moved into the planning node.
+    expect(workflow.nodes).toHaveLength(57);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
 
@@ -428,6 +427,31 @@ describe("workflow-management-flow v6", () => {
       expect(reference.toLowerCase()).toContain(section.toLowerCase());
     }
 
+    // One assertion per rule the formulation pass carries: each pins the phrase that carries the
+    // rule, so removing the rule fails here instead of passing silently. The rule about matching
+    // evidence to the kind of claim is upstream's ("Discriminating evidence and matching
+    // modality"), so only the prose-deliverable paragraph it lacked is ours, and it lives inside
+    // upstream's plan-as-a-script antipattern rather than in a second section of its own.
+    for (const rule of [
+      "### Rules stated as outcomes, each carrying its reason",
+      "### Order of telling taken for order of work",
+      "the order belongs to the executor",
+      "### Redundancy required in every plan item",
+      "judged item by item, on whether it genuinely applies there",
+      "### Directive as a drill order",
+      "Remove the capitals and the signs",
+      "### Discriminating evidence and matching modality",
+      "Where the deliverable is itself prose",
+      "does not distinguish two states of the result",
+    ]) {
+      expect(reference.toLowerCase()).toContain(rule.toLowerCase());
+    }
+    // The prose paragraph continues upstream's code-only prohibition instead of standing apart.
+    const scriptSection = reference.slice(
+      reference.indexOf("### Plan as a mechanical implementation script"),
+    );
+    expect(scriptSection).toContain("Where the deliverable is itself prose");
+
     const nodes = Object.fromEntries(workflow.nodes.map((node) => [node.id, node])) as Record<
       string,
       any
@@ -438,6 +462,30 @@ describe("workflow-management-flow v6", () => {
     expect(
       nodes["review-workflow-design"].inputSchema.properties.design_review_outcome.enum,
     ).toEqual(["pass", "repair", "replan"]);
+
+    // One responsibility writes one document: the analysis section and the outcomes derived from
+    // it share a file, so a correction cannot land in one of them and leave the other superseded.
+    // Each assertion pins a half that lived in the deleted analysis node, and the completion
+    // condition demands both — without it the gate would accept a plan with no analysis at all.
+    const merged = nodes["create-edit-plan"];
+    for (const carried of [
+      "the analysis section first",
+      "source-provenance.md",
+      "workflow-authoring-reference.md",
+      "{{additional_edit_scope}}",
+      "baseline diagnostics",
+      "observable acceptance criteria",
+      "entry points, not an exhaustive whitelist",
+    ]) {
+      expect(merged.directive).toContain(carried);
+    }
+    expect(merged.completionCondition).toContain("complete analysis");
+    expect(merged.completionCondition).toContain("outcome-oriented edit design contract");
+
+    // The acceptance criteria of an approved plan are the contract the executor is judged by, so
+    // the executor may not reword them: it states the rule and names the teleport as the way out.
+    expect(nodes["apply-workflow-changes"].directive).toContain("acceptance criterion");
+    expect(nodes["apply-workflow-changes"].directive).toContain("process-revision teleport");
     expect(nodes["review-workflow-quality"].directive).toContain("workflow-quality-review.md");
     expect(
       nodes["review-workflow-quality"].inputSchema.properties.quality_review_outcome.enum,
@@ -495,7 +543,16 @@ describe("workflow-management-flow v6", () => {
     expect(nodes["teleport-revise-process"].connections.success).toBe(
       "route-action-after-reassessment",
     );
+    // Whichever way an edit run re-enters, it lands on the node that derives the analysis and the
+    // contract again together — the analysis has no separate node to return to any more.
+    expect(nodes["route-action-after-reassessment"].connections.false).toBe("create-edit-plan");
+    expect(nodes["route-full-antipattern-audit"].connections.false).toBe("create-edit-plan");
+    expect(nodes["audit-complete-workflow"].connections.success).toBe("create-edit-plan");
+    expect(nodes["revise-edit-requirements"].connections.success).toBe("create-edit-plan");
     expect(nodes["teleport-revise-process"].hint).toContain("belong to their repair owners");
+    // A criterion that turns out wrong is a legitimate trigger, so the executor forbidden from
+    // rewording it in place can find the sanctioned route at the moment it needs one.
+    expect(nodes["teleport-revise-process"].hint).toContain("acceptance criterion");
     expect(nodes["report-final-result"].inputSchema.properties).toEqual({});
     // The nodes that keep asking in interactive mode must state their autonomous rule.
     expect(nodes["ask-upload"].directive).toContain("`autonomous` mode do not ask");
@@ -515,6 +572,9 @@ describe("workflow-management-flow v6", () => {
       "issue_history",
       "anti_pattern_catalog",
       "upload_admin_override",
+      // The second document about the edit is gone, not merely unreferenced by the writer.
+      "edit-analysis.md",
+      "analyze-edit-problem",
     ]) {
       expect(serialized).not.toContain(removed);
     }

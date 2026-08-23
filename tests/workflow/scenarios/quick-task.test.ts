@@ -65,6 +65,9 @@ describe("quick-task scenarios", () => {
 
     expect(validation.valid).toBe(true);
     expect(validation.errors).toHaveLength(0);
+    // Pinned so a directive change cannot ship without the version that publishes it, and without
+    // this file being reopened alongside the flow.
+    expect(workflow.metadata.version).toBe("4.4.0");
   });
 
   it("keeps only the plan reference, approved length, execution cursor, and operating mode globals", () => {
@@ -215,6 +218,72 @@ describe("quick-task scenarios", () => {
     expect(directive("execute-step")).toContain("{{get-task.execution_file}}");
     expect(directive("fix-issues")).toContain("{{final-review.review_file}}");
     expect(directive("rework")).toContain("{{present-to-user.decision_file}}");
+
+    // A plan unit fixes what must become true, the evidence that would accept it, and what it
+    // depends on; it does not carry the deliverable. The rule
+    // is stated once where the plan is first written, and the two nodes that publish later
+    // iterations refer to it, so a revision cannot quietly lower the plan back onto the result.
+    const createPlan = workflow.nodes.find((node) => node.id === "create-plan") as {
+      directive: string;
+      completionCondition: string;
+    };
+    expect(createPlan.directive).toContain("it does not carry the deliverable itself");
+    expect(createPlan.directive).toContain("work an intelligent executor still has to do remains");
+    expect(createPlan.directive).toContain(
+      "a unit a later step could satisfy by copying text out of the plan",
+    );
+    expect(createPlan.completionCondition).toContain(
+      "every unit fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
+    );
+    expect(createPlan.directive).toContain("Where the result is prose");
+    // Every node that publishes a plan iteration carries the rule in both of its halves: the
+    // directive that tells the author, and the gate the author measures the result against. A plan
+    // is lowered back onto the result exactly when it is being repaired or revised, not when it is
+    // first written, so a gate that is silent there is the one that matters.
+    // Both repair-plan and revise-plan are reachable mid-flight — revise-plan straight from
+    // teleport-replan, repair-plan right behind it through plan-review — where completed units stay
+    // as executed, so each gate binds only the units that node shapes, never the whole plan.
+    const planNode = (nodeId: string) =>
+      workflow.nodes.find((candidate) => candidate.id === nodeId) as {
+        directive: string;
+        completionCondition: string;
+      };
+    expect(planNode("repair-plan").directive).toContain(
+      "the units it shapes fix what must become true, the evidence that would accept it",
+    );
+    // Whatever the plan is repaired or revised for, work that already happened stays as it happened:
+    // the executed unit keeps its position, because the zero-based cursor addresses units by index,
+    // and its evidence entry keeps its text, because that entry is the record of what was done. Both
+    // halves are pinned in every carrier — a gate that names only positions leaves the evidence
+    // unguarded, and the run has three nodes that may write a plan after execution has begun.
+    for (const nodeId of ["repair-plan", "revise-plan"]) {
+      expect(planNode(nodeId).completionCondition).toContain(
+        "preserves already executed units at their positions without rewriting their recorded execution evidence",
+      );
+    }
+    expect(planNode("repair-plan").directive).toContain(
+      "every already executed unit at its position, without rewriting existing execution evidence",
+    );
+    expect(planNode("teleport-replan").completionCondition).toContain(
+      "with executed units preserved at their positions and their recorded execution evidence left as written",
+    );
+    // The directives said both halves before this edit and keep saying them: a half left unpinned is
+    // the half a later edit drops.
+    expect(planNode("revise-plan").directive).toContain(
+      "every already executed unit at its position, without rewriting existing execution evidence",
+    );
+    expect(planNode("teleport-replan").directive).toContain(
+      "Their evidence entries stay as written",
+    );
+    expect(planNode("repair-plan").completionCondition).toContain(
+      "keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable",
+    );
+    expect(planNode("revise-plan").directive).toContain(
+      "The units this revision shapes keep the altitude the initial plan is held to",
+    );
+    expect(planNode("revise-plan").completionCondition).toContain(
+      "keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable",
+    );
 
     const serialized = JSON.stringify(workflow.nodes);
     for (const removedTemplate of [

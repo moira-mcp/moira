@@ -168,15 +168,16 @@ The loop-entry directive renders the round counter and states that the repetitio
 
 ## Numeric Quality Check
 
-For measurable quality:
+For a property a machine can decide, route on the machine's own answer — a count of reproducible
+findings, an exit status, a coverage gap:
 
 ```json
 {
   "inputSchema": {
     "properties": {
-      "quality_score": { "type": "number", "minimum": 0, "maximum": 10 }
+      "issues_count": { "type": "number", "minimum": 0 }
     },
-    "required": ["quality_score"]
+    "required": ["issues_count"]
   }
 }
 ```
@@ -184,12 +185,18 @@ For measurable quality:
 ```json
 {
   "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "quality_score" },
-    "right": 8
+    "operator": "eq",
+    "left": { "contextPath": "issues_count" },
+    "right": 0
   }
 }
 ```
+
+Do not route on a quality score. A number a reviewer assigns to coherence, depth or architecture
+does not distinguish two states of the result — seven against eight says nothing a reader could
+verify — and the threshold is met by adjusting the number. Where the property is qualitative, the
+gate is the reviewer's reasoned verdict and the count of findings that verdict produced. See
+[Fixed Semantic Quality Score](/docs/patterns/anti-patterns/).
 
 ## Real Example
 
@@ -215,27 +222,21 @@ When a workflow includes validation gates (nodes that ask user for approval), th
 
 ### Validation Gate Directive Pattern
 
-Always include this instruction in validation gate directives:
+A gate directive says what its answer records and where each answer leads, so the agent can see that
+answering honestly is the only way the run proceeds correctly:
 
 ```
-CRITICALLY IMPORTANT - REACTION TO FEEDBACK:
-- If user said "yes" → approval = "yes"
-- If user gave ANY feedback or said "no" → approval = "no"
-- DO NOT fix yourself!
-- Reply approval = "no" and write user_feedback with feedback
-- Workflow will direct to fix branch itself
-- All fixes are done only through workflow, not independently
+`approval` records the user's own answer. Anything other than an unqualified yes is a no, and the
+feedback belongs in `user_feedback` — the flow routes a no to the responsibility that owns the
+repair, so a correction made here instead is a change nobody reviewed.
 ```
 
 ### Why This Matters
 
-Without explicit instructions, agents tend to:
-
-1. Interpret user feedback as minor corrections and self-fix
-2. Report `approval = "yes"` even when user gave feedback
-3. Skip the workflow's fix branch entirely
-
-This breaks the workflow's iteration loop and prevents proper quality control.
+A gate exists to move a decision to whoever owns it. An agent that reads the answer as "minor
+corrections I can apply myself" delivers work the flow never routed through its repair and review
+path, and an `approval = "yes"` recorded over feedback loses the feedback entirely. Naming the
+consequence — where a no goes, what a yes closes — is what makes the honest answer the useful one.
 
 ### Example Validation Gate
 
@@ -243,7 +244,7 @@ This breaks the workflow's iteration loop and prevents proper quality control.
 {
   "type": "agent-directive",
   "id": "approve-plan",
-  "directive": "Show user the plan and ask for confirmation.\n\nPlan: {{plan_summary}}\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself",
+  "directive": "Present the plan and ask whether it is approved.\n\nPlan: {{plan_summary}}\n\n`approval` records the user's own answer: anything other than an unqualified yes is a no, with the exact words in `user_feedback`. A no routes to the responsibility that owns the revision, so a correction made here instead is a change nobody reviewed.",
   "completionCondition": "User confirmed or rejected plan",
   "inputSchema": {
     "type": "object",

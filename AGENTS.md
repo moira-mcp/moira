@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Agent guide for the Moira repository. Read this before making changes. It is also
-available as `CLAUDE.md` through a symbolic link for Claude Code.
+Agent guide for the Moira repository. Read this before making changes. Claude Code
+reads `CLAUDE.md`, which imports this file with `@AGENTS.md`.
 
 ## What Moira Is
 
@@ -170,6 +170,22 @@ If authentication fails, diagnose the cause — do not silently switch servers.
 
 The MCP tool list is cached at authorization time. After changing tool
 names/parameters/descriptions, the client must reconnect to pick them up.
+
+## Standard Flows
+
+"Standard flows" in this repository means the four bundled flows the maintainer runs
+by default for real work. They live in `workflows/production/flows/`, identified by
+slug:
+
+- `software-development-flow` — the development flow (`91b11263-…json`).
+- `todo-list` — the sequential checklist (`93609982-…json`).
+- `robust-task` — the execution flow with retry, escalation, and replanning
+  (`bbbccd66-…json`); it is an execution flow, not a research flow.
+- `quick-task` — bounded plan → approval → execution → review (`e21e3890-…json`).
+
+When a request says "standard flows" without naming them, it means exactly this set.
+Research flows (`Verified Research`, `Deep Corpus Research`, `Iterative Research`,
+and the rest) are not part of it, and neither is `software-development-flow-lite`.
 
 ## Workflow Authoring
 

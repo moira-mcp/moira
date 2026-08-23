@@ -5,7 +5,7 @@
   "id": "e21e3890-daf3-44b9-8143-9fa8be1b9231",
   "metadata": {
     "name": "Quick Task",
-    "version": "4.2.0",
+    "version": "4.4.0",
     "description": "Ограниченное выполнение многошаговой задачи с файловым workspace: сохраняет неизменяемые версии плана, решений и ревью, последовательно выполняет утверждённый план с долговечными доказательствами, допускает пересмотр плана прямо во время выполнения и завершает независимой проверкой и приёмкой пользователя."
   },
   "nodes": [
@@ -54,8 +54,8 @@
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work. Prepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and exact item count; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().",
-      "completionCondition": "A complete immutable initial plan covering the task contract is published at current_plan_file and total_steps exactly equals its 1..10 work units",
+      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work.\n\nA unit fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after this plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here.\n\nPrepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and exact item count; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().",
+      "completionCondition": "A complete immutable initial plan covering the task contract is published at current_plan_file, total_steps exactly equals its 1..10 work units, and every unit fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -123,8 +123,8 @@
     {
       "id": "repair-plan",
       "type": "agent-directive",
-      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md describing the review basis and a complete corrected plan.md preserving unaffected obligations. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().",
-      "completionCondition": "A new complete immutable plan iteration corrects every confirmed finding and current_plan_file and total_steps identify that verified plan",
+      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md describing the review basis and a complete corrected plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The corrected plan keeps the altitude the initial plan is held to: the units it shapes fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().",
+      "completionCondition": "A new complete immutable plan iteration corrects every confirmed finding, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and total_steps identify that verified plan",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -193,8 +193,8 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Publish the next immutable plan iteration from whichever basis applies to this run. Read the current plan {{current_plan_file}} and the task contract {{get-task.task_file}}. When the user rejected the plan at the approval gate, the basis is the exact decision record written beside that plan; when you arrived by a mid-execution replan, the basis is the reason you just stated. Create the next numeric iteration with change.md preserving that exact basis and a complete revised plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return feedback, the replan reason, or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().",
-      "completionCondition": "A new complete immutable plan iteration incorporates the exact basis of this revision, preserves already executed units at their positions, and current_plan_file and total_steps identify that verified plan",
+      "directive": "Publish the next immutable plan iteration from whichever basis applies to this run. Read the current plan {{current_plan_file}} and the task contract {{get-task.task_file}}. When the user rejected the plan at the approval gate, the basis is the exact decision record written beside that plan; when you arrived by a mid-execution replan, the basis is the reason you just stated. Create the next numeric iteration with change.md preserving that exact basis and a complete revised plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The units this revision shapes keep the altitude the initial plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return feedback, the replan reason, or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().",
+      "completionCondition": "A new complete immutable plan iteration incorporates the exact basis of this revision, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and total_steps identify that verified plan",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -401,7 +401,7 @@
       "type": "teleport",
       "hint": "Jump here during execution when the approved plan itself no longer fits reality: new facts, scope that was missed, or the outcome of an executed unit invalidates the remaining plan. Not for a blocking plan-review finding (that is repair-plan), not for a defect in the produced result (that is fix-issues), not for a plan the user rejected at the approval gate, and not for a unit that is merely hard or blocked — tell the user that and stay on the unit.",
       "directive": "You jumped here because the approved plan no longer fits the real work. State plainly what changed or what was wrong, and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid.\n\nKeep every unit already executed at its position: the cursor is zero-based and unchanged, so preserved positions are what let the run continue instead of repeating finished work. Their evidence entries stay as written.\n\nDo not perform task work here and do not restate findings that belong to a repair owner. The next responsibility publishes the new immutable plan iteration from this reason, and that plan goes back through the ordinary independent review and, in interactive mode, the user's approval.",
-      "completionCondition": "The reason the plan no longer fits and the required plan change are stated, with executed units preserved at their positions",
+      "completionCondition": "The reason the plan no longer fits and the required plan change are stated, with executed units preserved at their positions and their recorded execution evidence left as written",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

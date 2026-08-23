@@ -12,8 +12,13 @@ mcp__moira__start({ workflowId: "moira/todo-list", parentExecutionId: "none" })
 ```
 
 The first step obtains 1–100 tasks. If the current user or caller context already contains a
-schema-valid ready list, the agent submits it unchanged. Otherwise the same step plans the list
-once from the current goal. Each task contains only:
+schema-valid ready list, its content stays the author's: every item is submitted with its wording
+and scope unchanged, nothing is dropped, and no unrequested work is added. The order is the
+executor's: items are placed where their prerequisites already hold, a remark that governs the whole
+job is attached to the items it constrains instead of being executed as one, and where the resulting
+order differs from the written one, the difference and the dependency behind it are visible to the
+author before any work starts. Otherwise the same step plans the list once from the current goal.
+Each task contains only:
 
 - `action`: the self-contained work to perform;
 - `expected_result`: the observable condition that proves completion.
@@ -74,7 +79,9 @@ response:
 ```
 
 There is no separate supplied-task branch and no pre-start input mapping. The intake step preserves
-the ready array rather than replanning it, then starts at the first item. Keep domain results in the
+the content of a ready array rather than replanning it, orders it by dependency, and starts at the
+first item. Where two supplied items each need the other's result, no order satisfies both, and that
+pair is named to the author rather than chosen silently. Keep domain results in the
 caller. For example, a requirements-coverage workflow should write its own report and own
 `COVERED`/`GAP` classifications instead of asking Todo List to transport them.
 
