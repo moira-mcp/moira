@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./auth": "./src/auth/better-auth-config.ts",
+    "./email": "./src/email/index.ts",
     "./urls": "./src/config/urls.ts",
     "./mcp-clients": "./src/mcp-clients/index.ts",
     "./services/workflow-query-service": "./src/services/workflow-query-service.ts",
@@ -17,7 +18,11 @@
   "dependencies": {
     "@getbrevo/brevo": "^3.0.1",
     "dotenv": "^17.2.3",
+    "nodemailer": "^9.0.5",
     "prom-client": "^15.1.3"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1"
+  }
 }

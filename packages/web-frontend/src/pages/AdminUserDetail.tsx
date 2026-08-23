@@ -91,8 +91,9 @@ interface UserDetails {
 export const AdminUserDetail: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const { isEnabled } = useFeatures();
+  const { isEnabled, emailDelivery } = useFeatures();
   const accountApprovalEnabled = isEnabled("accountApproval");
+  const multiUserAdminEnabled = isEnabled("multiUserAdmin");
   const [data, setData] = useState<UserDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -150,6 +151,10 @@ export const AdminUserDetail: React.FC = () => {
   const approveButtonRef = useRef<HTMLButtonElement>(null);
   const approvalStatusRef = useRef<HTMLSpanElement>(null);
   const [blockReason, setBlockReason] = useState("");
+  const [temporaryPasswordDialogOpen, setTemporaryPasswordDialogOpen] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [temporaryPasswordConfirm, setTemporaryPasswordConfirm] = useState("");
+  const [temporaryPasswordError, setTemporaryPasswordError] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
     title: string;
@@ -179,7 +184,7 @@ export const AdminUserDetail: React.FC = () => {
         loadSecurityActivity(),
         loadDetailedSessions(),
         loadOAuthConnections(),
-        loadArtifactQuota(),
+        multiUserAdminEnabled ? loadArtifactQuota() : Promise.resolve(),
       ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : t("admin.userDetail.errors.loadFailed"));
@@ -241,7 +246,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const loadArtifactQuota = async () => {
-    if (!id) return;
+    if (!id || !multiUserAdminEnabled) return;
     try {
       const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
         credentials: "include",
@@ -262,7 +267,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const handleSaveQuota = async () => {
-    if (!id) return;
+    if (!id || !multiUserAdminEnabled) return;
     setQuotaSaving(true);
     try {
       const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
@@ -290,7 +295,7 @@ export const AdminUserDetail: React.FC = () => {
   };
 
   const handleResetQuota = async () => {
-    if (!id) return;
+    if (!id || !multiUserAdminEnabled) return;
     setQuotaSaving(true);
     try {
       const response = await fetch(`/api/admin/users/${id}/artifact-quota`, {
@@ -441,6 +446,44 @@ export const AdminUserDetail: React.FC = () => {
 
   const handleForcePasswordReset = () => {
     handleAction("force password reset", `/api/admin/users/${id}/force-password-reset`, "POST");
+  };
+
+  const handleTemporaryPassword = async () => {
+    if (!id) return;
+    if (temporaryPassword.length < 8) {
+      setTemporaryPasswordError(t("admin.userDetail.recovery.minLength"));
+      return;
+    }
+    if (temporaryPassword !== temporaryPasswordConfirm) {
+      setTemporaryPasswordError(t("admin.userDetail.recovery.noMatch"));
+      return;
+    }
+
+    setActionLoading("temporary password");
+    setTemporaryPasswordError(null);
+    try {
+      const response = await fetch(`/api/admin/users/${id}/temporary-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ temporaryPassword }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error?.message || t("admin.userDetail.recovery.failed"));
+      }
+      setTemporaryPassword("");
+      setTemporaryPasswordConfirm("");
+      setTemporaryPasswordDialogOpen(false);
+      toast.success(t("admin.userDetail.recovery.success"));
+      await loadUser();
+    } catch (err) {
+      setTemporaryPasswordError(
+        err instanceof Error ? err.message : t("admin.userDetail.recovery.failed"),
+      );
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const handleClearPasswordReset = () => {
@@ -613,6 +656,30 @@ export const AdminUserDetail: React.FC = () => {
           <CardTitle>{t("admin.userDetail.actions.title")}</CardTitle>
         </CardHeader>
         <CardContent>
+          {!emailDelivery.available && (
+            <div
+              className="mb-4 rounded-lg border border-warning/30 bg-warning/10 p-4"
+              data-testid="admin-email-delivery-unavailable"
+            >
+              <p className="font-medium text-warning">
+                {t("admin.userDetail.recovery.emailUnavailableTitle")}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("admin.userDetail.recovery.emailUnavailableDescription")}
+              </p>
+              {!user.isAdmin && (
+                <Button
+                  className="mt-3"
+                  variant="outline"
+                  onClick={() => setTemporaryPasswordDialogOpen(true)}
+                  data-testid="open-temporary-password-dialog"
+                >
+                  <Key className="mr-2 h-4 w-4" />
+                  {t("admin.userDetail.recovery.setTemporaryPassword")}
+                </Button>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap gap-3">
             {accountApprovalEnabled && user.approvedAt === null && (
               <Button
@@ -690,42 +757,46 @@ export const AdminUserDetail: React.FC = () => {
                   : t("admin.userDetail.actions.verifyEmail")}
               </Button>
             )}
-            <Button
-              variant="outline"
-              disabled={actionLoading === "send verification"}
-              onClick={() =>
-                setConfirmDialog({
-                  open: true,
-                  title: t("admin.userDetail.actions.sendVerification"),
-                  description: t("admin.userDetail.actions.confirmSendVerification"),
-                  confirmLabel: t("admin.userDetail.actions.sendVerification"),
-                  onConfirm: handleSendVerification,
-                })
-              }
-            >
-              <Mail className="h-4 w-4 mr-2" />
-              {actionLoading === "send verification"
-                ? t("admin.userDetail.actions.sending")
-                : t("admin.userDetail.actions.sendVerification")}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={actionLoading === "send reset"}
-              onClick={() =>
-                setConfirmDialog({
-                  open: true,
-                  title: t("admin.userDetail.actions.sendPasswordReset"),
-                  description: t("admin.userDetail.actions.confirmSendReset"),
-                  confirmLabel: t("admin.userDetail.actions.sendPasswordReset"),
-                  onConfirm: handleSendReset,
-                })
-              }
-            >
-              <Key className="h-4 w-4 mr-2" />
-              {actionLoading === "send reset"
-                ? t("admin.userDetail.actions.sending")
-                : t("admin.userDetail.actions.sendPasswordReset")}
-            </Button>
+            {emailDelivery.available && (
+              <Button
+                variant="outline"
+                disabled={actionLoading === "send verification"}
+                onClick={() =>
+                  setConfirmDialog({
+                    open: true,
+                    title: t("admin.userDetail.actions.sendVerification"),
+                    description: t("admin.userDetail.actions.confirmSendVerification"),
+                    confirmLabel: t("admin.userDetail.actions.sendVerification"),
+                    onConfirm: handleSendVerification,
+                  })
+                }
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                {actionLoading === "send verification"
+                  ? t("admin.userDetail.actions.sending")
+                  : t("admin.userDetail.actions.sendVerification")}
+              </Button>
+            )}
+            {emailDelivery.available && (
+              <Button
+                variant="outline"
+                disabled={actionLoading === "send reset"}
+                onClick={() =>
+                  setConfirmDialog({
+                    open: true,
+                    title: t("admin.userDetail.actions.sendPasswordReset"),
+                    description: t("admin.userDetail.actions.confirmSendReset"),
+                    confirmLabel: t("admin.userDetail.actions.sendPasswordReset"),
+                    onConfirm: handleSendReset,
+                  })
+                }
+              >
+                <Key className="h-4 w-4 mr-2" />
+                {actionLoading === "send reset"
+                  ? t("admin.userDetail.actions.sending")
+                  : t("admin.userDetail.actions.sendPasswordReset")}
+              </Button>
+            )}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -803,6 +874,16 @@ export const AdminUserDetail: React.FC = () => {
 
             {/* Security Action Buttons */}
             <div className="flex flex-wrap gap-3">
+              {emailDelivery.available && !user.isAdmin && (
+                <Button
+                  variant="outline"
+                  disabled={actionLoading === "temporary password"}
+                  onClick={() => setTemporaryPasswordDialogOpen(true)}
+                >
+                  <Key className="h-4 w-4 mr-2" />
+                  {t("admin.userDetail.recovery.setTemporaryPassword")}
+                </Button>
+              )}
               <Button
                 variant="destructive"
                 disabled={actionLoading === "force password reset" || user.passwordResetRequired}
@@ -1121,7 +1202,7 @@ export const AdminUserDetail: React.FC = () => {
       </Card>
 
       {/* Artifact Quota */}
-      {artifactQuota && (
+      {multiUserAdminEnabled && artifactQuota && (
         <Card className="mb-6" data-testid="artifact-quota-card">
           <CardHeader>
             <div className="flex justify-between items-center">
@@ -1302,6 +1383,8 @@ export const AdminUserDetail: React.FC = () => {
                     <div className="flex items-center gap-2">
                       {email.status === "sent" ? (
                         <CheckCircle className="h-4 w-4 text-success" />
+                      ) : email.status === "logged" ? (
+                        <AlertTriangle className="h-4 w-4 text-warning" />
                       ) : (
                         <XCircle className="h-4 w-4 text-destructive" />
                       )}
@@ -1309,7 +1392,7 @@ export const AdminUserDetail: React.FC = () => {
                         <p className="font-medium">{email.subject}</p>
                         <p className="text-sm text-muted-foreground">
                           {t("admin.userDetail.emailHistory.type")}: {email.type} |{" "}
-                          {t("admin.userDetail.emailHistory.to")}: {email.to}
+                          {t("admin.userDetail.emailHistory.to")}: {email.to} | {email.status}
                         </p>
                         {email.error && <p className="text-sm text-destructive">{email.error}</p>}
                       </div>
@@ -1348,6 +1431,76 @@ export const AdminUserDetail: React.FC = () => {
             </Button>
             <Button variant="destructive" onClick={handleBlockConfirm}>
               {t("admin.userDetail.actions.blockUser")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={temporaryPasswordDialogOpen}
+        onOpenChange={(open) => {
+          setTemporaryPasswordDialogOpen(open);
+          if (!open) {
+            setTemporaryPassword("");
+            setTemporaryPasswordConfirm("");
+            setTemporaryPasswordError(null);
+          }
+        }}
+      >
+        <DialogContent data-testid="temporary-password-dialog">
+          <DialogHeader>
+            <DialogTitle>{t("admin.userDetail.recovery.title")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              {t("admin.userDetail.recovery.description", { email: user.email })}
+            </p>
+            <div className="space-y-2">
+              <label htmlFor="temporary-password" className="text-sm font-medium">
+                {t("admin.userDetail.recovery.temporaryPassword")}
+              </label>
+              <Input
+                id="temporary-password"
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                maxLength={128}
+                value={temporaryPassword}
+                onChange={(event) => setTemporaryPassword(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="temporary-password-confirm" className="text-sm font-medium">
+                {t("admin.userDetail.recovery.confirmTemporaryPassword")}
+              </label>
+              <Input
+                id="temporary-password-confirm"
+                type="password"
+                autoComplete="new-password"
+                value={temporaryPasswordConfirm}
+                onChange={(event) => setTemporaryPasswordConfirm(event.target.value)}
+              />
+            </div>
+            {temporaryPasswordError && (
+              <p className="text-sm text-destructive" role="alert">
+                {temporaryPasswordError}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTemporaryPasswordDialogOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={actionLoading === "temporary password"}
+              onClick={handleTemporaryPassword}
+              data-testid="submit-temporary-password"
+            >
+              {actionLoading === "temporary password"
+                ? t("admin.userDetail.recovery.saving")
+                : t("admin.userDetail.recovery.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

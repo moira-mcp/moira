@@ -9,7 +9,12 @@ import { ApiResponse, HealthCheckResponse, ServerConfigResponse } from "../types
 
 import { asyncHandler } from "../middleware/error-middleware.js";
 import { WorkflowValidationService } from "../services/validation-service.js";
-import { getWebBackendPort, getNodeEnv } from "@mcp-moira/shared";
+import {
+  getWebBackendPort,
+  getNodeEnv,
+  getSqliteInstance,
+  getWorkflowReconciliationStatusSummary,
+} from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const router = Router();
@@ -35,14 +40,18 @@ router.get(
     const mcpEngineOk = checks[2].status === "fulfilled" && checks[2].value;
 
     const allHealthy = databaseOk && validationOk; // Skip mcpEngine check for Web UI
+    const reconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
+    const degraded = allHealthy && reconciliation.status === "error";
 
     const healthResponse: HealthCheckResponse = {
-      status: allHealthy ? "ok" : "error",
+      status: !allHealthy ? "error" : degraded ? "degraded" : "ok",
       services: {
         fileSystem: databaseOk,
         validation: validationOk,
         mcpEngine: mcpEngineOk,
+        workflowReconciliation: reconciliation.status === "ok",
       },
+      reconciliation,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       version: "0.1.0",
@@ -55,7 +64,9 @@ router.get(
     };
 
     // Set appropriate HTTP status
-    const statusCode = allHealthy ? 200 : 503; // Service Unavailable if unhealthy
+    // Reconciliation conflicts are operable/degraded in self-host, so the
+    // container remains reachable for WMF recovery.
+    const statusCode = allHealthy ? 200 : 503;
     res.status(statusCode).json(apiResponse);
   }),
 );
@@ -114,6 +125,7 @@ router.get(
         totalWorkflows: workflows.length,
       },
       validation: validationStatus,
+      reconciliation: getWorkflowReconciliationStatusSummary(getSqliteInstance()),
       features: {
         caching: false,
         fileWatching: false,

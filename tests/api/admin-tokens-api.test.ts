@@ -47,20 +47,47 @@ async function createAndVerifyUser(
     throw new Error(`Failed to create user: ${JSON.stringify(signUpData)}`);
   }
 
-  await fetch(`${BASE_URL}/api/admin/users/${signUpData.user.id}/verify-email`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
+  const verifyResponse = await fetch(
+    `${BASE_URL}/api/admin/users/${signUpData.user.id}/verify-email`,
+    {
+      method: "POST",
+      headers: { Cookie: adminCookie },
+    },
+  );
+  if (verifyResponse.status !== 200) {
+    throw new Error(`Failed to verify user email: ${verifyResponse.status}`);
+  }
+
+  const featuresResponse = await fetch(`${BASE_URL}/api/features`);
+  const features = (await featuresResponse.json()) as {
+    data: { features: { accountApproval: boolean } };
+  };
+  if (features.data.features.accountApproval) {
+    const approvalResponse = await fetch(
+      `${BASE_URL}/api/admin/users/${signUpData.user.id}/approve`,
+      {
+        method: "POST",
+        headers: { Cookie: adminCookie },
+      },
+    );
+    if (approvalResponse.status !== 200) {
+      throw new Error(`Failed to approve user: ${approvalResponse.status}`);
+    }
+  }
 
   const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: userData.email, password: userData.password }),
   });
+  const cookie = loginRes.headers.get("set-cookie") || "";
+  if (loginRes.status !== 200 || !cookie) {
+    throw new Error(`Failed to sign in admitted user: ${loginRes.status}`);
+  }
 
   return {
     userId: signUpData.user.id,
-    cookie: loginRes.headers.get("set-cookie") || "",
+    cookie,
   };
 }
 
@@ -71,6 +98,9 @@ async function createToken(cookie: string, name: string, expiresIn?: string): Pr
     body: JSON.stringify({ name, expiresIn }),
   });
   const json = (await res.json()) as any;
+  if (res.status !== 201 || !json.data?.id) {
+    throw new Error(`Failed to create token: ${res.status} ${JSON.stringify(json)}`);
+  }
   return json.data.id;
 }
 

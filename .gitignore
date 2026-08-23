@@ -13,6 +13,7 @@ dist/
 
 # Storage
 .moira-storage/
+.moira-upgrade/
 .graph-storage/
 
 # IDE

@@ -23,7 +23,8 @@ const LOGGABLE_METHODS = ["POST", "PUT", "PATCH"];
  */
 const SENSITIVE_PATTERNS = [
   /^\/api\/auth\/.*/,
-  /^\/api\/user\/change-password$/,
+  /^\/api\/user\/change-password(?:-forced)?$/,
+  /^\/api\/admin\/users\/[^/]+\/temporary-password$/,
   /^\/api\/public\/workflows$/,
 ];
 
@@ -39,6 +40,10 @@ export interface RequestBodyLoggerOptions {
  */
 function isSensitiveEndpoint(path: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(path));
+}
+
+export function isSensitiveRequestBodyPath(path: string): boolean {
+  return isSensitiveEndpoint(path, SENSITIVE_PATTERNS);
 }
 
 /**

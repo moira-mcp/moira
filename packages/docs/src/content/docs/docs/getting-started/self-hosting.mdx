@@ -11,9 +11,25 @@ image from the registry — no source checkout or local build needed.
 ## Prerequisites
 
 - Docker with the Compose plugin (`docker compose`)
-- The two files from the repository: `docker-compose.yml` and `.env.example`
+- Host `sqlite3` CLI (used to verify preflight and rollback snapshots)
+- The self-host release bundle files: `docker-compose.yml`, `.env.example`, and
+  executable `scripts/self-host-upgrade.sh` (download the same release tag from the repository;
+  no source build or private repository is required)
 
 ## Quick Start
+
+Download the three files from one immutable release tag (replace `0.3.5` when selecting another
+release):
+
+```bash
+MOIRA_VERSION=0.3.5
+MOIRA_RELEASE=https://raw.githubusercontent.com/moira-mcp/moira/v${MOIRA_VERSION}
+curl -fLO "$MOIRA_RELEASE/docker-compose.yml"
+curl -fLo .env.example "$MOIRA_RELEASE/.env.example"
+mkdir -p scripts
+curl -fLo scripts/self-host-upgrade.sh "$MOIRA_RELEASE/scripts/self-host-upgrade.sh"
+chmod +x scripts/self-host-upgrade.sh
+```
 
 <Steps>
 
@@ -31,7 +47,8 @@ image from the registry — no source checkout or local build needed.
     docker compose up -d
     ```
 
-    Compose pulls `ghcr.io/moira-mcp/moira:latest` and starts the container.
+    Compose pulls the immutable `MOIRA_IMAGE` from `.env` (the shipped example pins
+    `ghcr.io/moira-mcp/moira:0.3.5`) and starts the container.
 
 3.  **Open the Web UI**
 
@@ -54,6 +71,14 @@ approval status and sign out, but cannot use workflows, API tokens, OAuth, or MC
 an administrator approves it. Email verification is a separate gate and is not required
 in self-host mode. Missing secrets are generated on first start.
 
+The self-host administrator keeps the **Users** page for approval, blocking, and account
+recovery. Cross-user workflow/execution/artifact administration, cloud analytics, the operational
+dashboard, and deliberate monitoring-test tools are disabled by the server and omitted from the
+navigation. These are deployment capabilities, not security controls implemented only in the UI.
+The SaaS policy enables them through the same resolver used by the API and the Web UI.
+The self-host dashboard still shows database health, setting-definition status, and managed-workflow
+reconciliation, but it neither requests nor renders installation-wide workflow or execution totals.
+
 ### Approve new accounts
 
 In the Web UI, sign in as an administrator, open **Admin Panel → Users**, and select an
@@ -69,6 +94,38 @@ transition.
 Existing users are marked approved during the database migration; the bootstrap administrator
 is always created as approved. Blocking and email verification remain independent controls:
 a blocked account is denied even when approved.
+
+### Configure email or recover without it
+
+Email delivery is disabled by default. To enable password-reset and verification messages,
+configure a standard SMTP server in `.env` and restart the container:
+
+```bash
+EMAIL_PROVIDER=smtp
+EMAIL_FROM=moira@example.com
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_REQUIRE_TLS=true
+SMTP_USER=your-smtp-user
+SMTP_PASSWORD=your-smtp-password
+```
+
+SMTP authentication is optional, but `SMTP_USER` and `SMTP_PASSWORD` must be set together.
+Use `SMTP_SECURE=true` for implicit TLS (commonly port 465); otherwise
+`SMTP_REQUIRE_TLS=true` requires STARTTLS. Brevo remains available with
+`EMAIL_PROVIDER=brevo`, `BREVO_API_KEY`, and `EMAIL_FROM`. Invalid partial configuration
+stops startup. SaaS mode also refuses to start without a real provider.
+
+With `EMAIL_PROVIDER=none` (the default), Moira starts normally and the Web UI explains that
+forgot-password and email actions are unavailable. An administrator can instead open an
+ordinary user's detail page, choose **Set temporary password**, and send that password through
+a separate secure channel. This action revokes all of the user's sessions, API tokens, OAuth
+credentials and consents. The user signs in with the temporary password and must immediately
+replace it. Administrator accounts must use the command-line recovery procedure below.
+
+`EMAIL_PROVIDER=test` is only a log sink for automated testing. It never means that delivery is
+configured and never reports a logged message as sent.
 
 ### Recover administrator access
 
@@ -155,6 +212,47 @@ http://localhost:8080/mcp
 
 Add it as an MCP server in your AI client and complete OAuth authentication. See
 [Quick Start](/docs/getting-started/quickstart/) for client configuration.
+
+## Safe Upgrade and Rollback
+
+Keep an immutable image pin in `.env` (a version or digest, never `latest`):
+
+```bash
+MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5
+docker compose pull moira
+docker compose exec -T moira cat /app/BUILD_INFO
+df -h ./data && test -r ./data/moira.db && test -w ./data
+```
+
+The shipped helper uses SQLite online backup and verifies `PRAGMA integrity_check` before it changes
+the active container:
+
+```bash
+./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
+docker compose ps && docker compose exec -T moira cat /app/BUILD_INFO
+```
+
+Preflight mounts production data read-only, writes its verified snapshot/evidence under
+`.moira-upgrade/`, and runs the exact incoming image against `.moira-upgrade/preflight/moira.db`,
+never the production DB.
+If it reports managed-workflow reconciliation, the active instance stays available. Ask your agent
+to run Workflow Management Flow, inspect the MCP `reconciliation` tool's previous/current/incoming
+candidates, submit the semantic merge, and retry the pinned upgrade. Do not use `--force` to discard
+local workflow changes.
+
+If replacement or health verification fails, restore the verified snapshot and previous pin:
+
+```bash
+./scripts/self-host-upgrade.sh rollback
+docker compose ps
+docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
+```
+
+Keep `.moira-upgrade/moira.db.upgrade-backup` until the new version has been verified. The helper
+preserves `.moira-upgrade/preflight/` as diagnostic/reconciliation evidence and replaces it on the
+next preflight.
 
 ## Adding Your Own Workflow Flows
 

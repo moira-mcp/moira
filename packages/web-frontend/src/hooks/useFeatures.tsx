@@ -14,6 +14,15 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { apiClient } from "../services/api-client";
 import type { DeploymentMode, FeatureFlag, FeaturesResponse } from "../types/api-types";
 
+type EmailDelivery = FeaturesResponse["emailDelivery"];
+
+const EMAIL_UNAVAILABLE: EmailDelivery = {
+  state: "unavailable",
+  provider: null,
+  available: false,
+  reason: "Email delivery status could not be loaded",
+};
+
 type FeatureFlags = Record<FeatureFlag, boolean>;
 
 const ALL_OFF: FeatureFlags = {
@@ -25,6 +34,9 @@ const ALL_OFF: FeatureFlags = {
   betaNotices: false,
   multiUserAdmin: false,
   userManagement: false,
+  adminAnalytics: false,
+  adminOperations: false,
+  operationsDevelopment: false,
   socialLogin: false,
 };
 
@@ -38,6 +50,7 @@ interface FeaturesContextType {
    * host/port instead of a build-time-baked value.
    */
   mcpUrl: string | null;
+  emailDelivery: EmailDelivery;
   loaded: boolean;
   error: boolean;
   retry: () => void;
@@ -50,6 +63,7 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
   const [deploymentMode, setDeploymentMode] = useState<DeploymentMode | null>(null);
   const [features, setFeatures] = useState<FeatureFlags>(ALL_OFF);
   const [mcpUrl, setMcpUrl] = useState<string | null>(null);
+  const [emailDelivery, setEmailDelivery] = useState<EmailDelivery>(EMAIL_UNAVAILABLE);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -65,6 +79,7 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
         setDeploymentMode(res.deploymentMode);
         setFeatures({ ...ALL_OFF, ...res.features });
         setMcpUrl(res.mcpUrl ?? null);
+        setEmailDelivery(res.emailDelivery ?? EMAIL_UNAVAILABLE);
         setError(false);
       })
       .catch(() => {
@@ -72,6 +87,7 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
         setDeploymentMode(null);
         setFeatures(ALL_OFF);
         setMcpUrl(null);
+        setEmailDelivery(EMAIL_UNAVAILABLE);
         setError(true);
       })
       .finally(() => {
@@ -90,6 +106,7 @@ export function FeaturesProvider({ children }: { children: React.ReactNode }) {
         deploymentMode,
         features,
         mcpUrl,
+        emailDelivery,
         loaded,
         error,
         retry: () => setRetryKey((current) => current + 1),

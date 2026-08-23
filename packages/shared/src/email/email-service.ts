@@ -13,6 +13,8 @@ export interface EmailOptions {
 export interface EmailResult {
   messageId: string;
   success: boolean;
+  provider: "smtp" | "brevo" | "test";
+  delivery: "sent" | "logged";
 }
 
 export interface EmailProvider {

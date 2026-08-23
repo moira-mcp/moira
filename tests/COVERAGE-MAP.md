@@ -12,13 +12,29 @@ level headings classify the tracked test paths listed beneath them.
 
 ## Domain Details
 
+### operator scripts
+
+**unit**
+
+- `tests/unit/config/docker-image-contract.test.ts` — canonical parameterized OSS runtime image contract, explicit non-secret compile-time inputs, and prohibition on embedding deployment env files
+- `tests/unit/scripts/sqlite-online-backup.test.ts` — coherent SQLite online backup under concurrent WAL writes, integrity verification, and missing-source fail-closed behavior
+- `tests/unit/scripts/self-host-upgrade-contract.test.ts` — immutable image pins, isolated preflight, degraded self-host conflict policy, guarded replacement, health check, and backup-compatible rollback
+- `tests/unit/docs/self-host-upgrade-docs.test.ts` — executable EN/RU upgrade command parity, helper/sqlite prerequisites, quick-start immutable-pin consistency with Compose/env example, reconciliation recovery, integrity verification, and rollback instructions
+- `tests/unit/scripts/test-email.test.ts` — explicit-recipient refusal and validation plus captured
+  provider-boundary request for an IANA-reserved recipient
+
 ### admin
 
 **api**
 
 - `tests/api/admin-analytics.test.ts`
-- `tests/api/admin-user-security-api.test.ts`
+- `tests/api/capability-boundary-api.test.ts` — real self-host administrator HTTP denial with the exact named capability for installation-wide administrator statistics, every mounted analytics/operations and monitoring-test method, and bounded cross-user workflow/execution/artifact/session aliases, including Express-accepted case/trailing-slash variants and user-prefixed artifact takedown and quota routes, with the shared `ACCESS_DENIED` contract and ordinary-user approval preserved
+- `tests/api/admin-user-security-api.test.ts` — administrator temporary-password recovery, malformed-boundary rejection without mutation, mandatory follow-up change, exact session/API/OAuth-token/OAuth-consent revocation, linked-provider token clearing, old credential denial, audit secrecy, atomic rollback for both final user-update and audit-completion failures, and distinct-admin-target/self/non-admin denial with credential/session preservation alongside existing security actions
 - `tests/api/admin-user-security.test.ts`
+
+**integration**
+
+- `tests/integration/temporary-password-recovery-serialization.test.ts` — deterministic overlap pauses production recovery at its password-hash boundary, completes ordinary-user promotion, and proves the serialized recovery decision rejects without changing password/reset, session, API-token, OAuth-token/consent, or linked-provider authority
 
 **unit**
 
@@ -45,7 +61,7 @@ level headings classify the tracked test paths listed beneath them.
 **api**
 
 - `tests/api/tokens-api.test.ts`
-- `tests/api/admin-tokens-api.test.ts`
+- `tests/api/admin-tokens-api.test.ts` — mode-aware admitted-user token fixtures plus authenticated administrator list/filter/pagination/revocation and non-admin/anonymous denial through the production admin namespace
 
 **mcp-tools**
 
@@ -166,13 +182,14 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/web-backend/account-approval-route-gating.test.ts` — disabled-mode administrator approval route returns before the mutation/audit service boundary
+- `tests/unit/web-backend/account-approval-route-gating.test.ts` — disabled-mode administrator approval returns before mutation/audit; neutral status remains successful when broad repository reads are forbidden; the enabled production route selector returns computed non-empty workflow/execution totals, running count, ordered recent activity, and the compatible definition/health/reconciliation fields
+- `tests/unit/web-backend/capability-middleware.test.ts` — the same injected resolver controls public feature exposure and backend authorization; disabled, unknown, selected-path, and resolver-error decisions fail closed before handler side effects, while mixed overrides keep operations and development independent and cannot authorize a case-variant operational route through analytics
 - `tests/unit/web-frontend/account-admission-ui.test.ts` — independent approval/email route decisions and deployment-capability selection for the registration completion page
-- `tests/unit/web-frontend/account-approval-admin-ui.test.tsx` — capability-aware account-approval status and actions in the administrator list and detail surfaces, including the SaaS null-timestamp regression
-- `tests/unit/web-frontend/admin-navigation-capabilities.test.ts` — narrow Users capability remains independent of broader multi-user administration in self-host and SaaS navigation
+- `tests/unit/web-frontend/account-approval-admin-ui.test.tsx` — capability-aware account-approval status and actions in the administrator list/detail surfaces, including SaaS null-timestamp behavior, self-host suppression of the artifact-quota request/card, temporary-password form submission, real versus unavailable profile/admin delivery controls, and fail-closed forgot-password loading/error/unavailable states
+- `tests/unit/web-frontend/admin-navigation-capabilities.test.ts` — generic named-capability filtering keeps narrow Users independent from broader multi-user and operational navigation
 - `tests/unit/shared/account-admission.test.ts` — mode-independent approval state, fail-closed null/missing identity handling, and blocked/approval/email-verification denial precedence
 - `tests/unit/shared/deployment-mode-config.test.ts` — DEPLOYMENT_MODE resolution: default self-host, case/whitespace normalization, invalid-value throws, isSelfHost/isSaas predicates
-- `tests/unit/shared/feature-resolver.test.ts` — ModeFeatureResolver per-mode flags, unknown-feature safe default, singleton get/override/reset
+- `tests/unit/shared/feature-resolver.test.ts` — complete ModeFeatureResolver matrix including analytics, operations, and operations/development boundaries; unknown-feature safe default; singleton get/override/reset
 - `tests/unit/shared/secrets-bootstrap.test.ts` — self-host secret generation+persist, mask vs expose, no-regenerate-when-present, restart idempotency, saas no-op, loadPersistedSecrets no-override + absent-file
 - `tests/unit/shared/deployment-mode-safeguard.test.ts` — unset-DEPLOYMENT_MODE safeguard: production+public→error/refuse-boot, non-prod+public→warn, mode-set/localhost/127.x/empty-host→ok
 
@@ -184,13 +201,13 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/auth/self-host-auth.test.ts` — complete self-host HTTP/MCP lifecycle from pending registration through concurrent admin approval, one audit transition, and Better Auth/product/token/OAuth unlock; pending OAuth code, refresh-token, and bearer-introspection denial with admitted introspection success; default-denied session-authorized Better Auth capabilities; sign-in, real signed verification, and stored reset-token flows with a pending cookie; admin authorization, audit actor identity, self-block rejection, and missing-user contracts; blocked/approval/email independence; pending status/sign-out; bootstrap-admin token issuance
-- `tests/api/auth/saas-auth-invariants.test.ts` — explicit SaaS mode, consent enforcement, verification-email capability, no account-approval gate including profile mutation, blocked-first/email-verification gates for persistent tokens, OAuth code/refresh exchange, direct MCP bearer access, and bearer introspection, plus successful verified/unblocked code, refresh, MCP, and introspection paths
-- `tests/api/features-api.test.ts` — public GET /api/features contract: no-auth 200 + {success,data,timestamp} envelope; valid deploymentMode; boolean for every gated feature flag, exact key set; runtime-resolved mcpUrl is an absolute http(s) URL ending in /mcp on the request host
+- `tests/api/auth/self-host-auth.test.ts` — complete self-host HTTP/MCP lifecycle from pending registration through concurrent admin approval, one audit transition, and Better Auth/product/token/OAuth unlock; pending OAuth code, refresh-token, and bearer-introspection denial with admitted introspection success; explicit unavailable delivery from both Better Auth reset aliases, verification, profile resend, and admin APIs without false success, email-log creation, or target-account recovery/verification-row side effects measured before every affected call under parallel API workers; independent manual email verification/forced-reset actions; admin authorization, audit actor identity, self-block rejection, and missing-user contracts; blocked/approval/email independence; pending status/sign-out; bootstrap-admin token issuance
+- `tests/api/auth/saas-auth-invariants.test.ts` — explicit SaaS real-delivery mode, consent enforcement, verification email, profile resend/cooldown, logged-only administrator delivery results and observable test-sink messages for suppressed test recipients, no account-approval gate including profile mutation, blocked-first/email-verification gates for persistent tokens, OAuth code/refresh exchange, direct MCP bearer access, and bearer introspection, plus successful verified/unblocked code, refresh, MCP, and introspection paths
+- `tests/api/features-api.test.ts` — public GET /api/features contract: no-auth envelope, exact authorization-capability keys, runtime MCP URL, sanitized delivery state/provider/reason, and `available` true only for real delivery
 
 **e2e**
 
-- `tests/e2e/feature-mode-ui.spec.ts` — UI gating via the exact mocked mode capability sets: self-host exposes Users in the sidebar/dashboard while hiding broader multi-user administration and legal consent; SaaS retains both; direct navigation is guarded independently by the narrow and broad capabilities; beta modal is absent in self-host
+- `tests/e2e/feature-mode-ui.spec.ts` — exact mocked mode capabilities: self-host exposes Users while omitting broad, logout-all, analytics, operations, and monitoring affordances and requests; SaaS shows them and issues analytics requests; direct navigation fails closed; legal/beta mode behavior remains intact
 - `tests/e2e/self-host-account-approval.spec.ts` — failed-then-recovered deployment-capability loading selects neither the wrong self-host nor SaaS admission flow and cannot open a protected SaaS route before retry; explicit self-host registration → pending status/sign-out → protected-route denial and transient status retry → administrator list/detail confirmation with loading/error/retry/live-region/keyboard/focus recovery and Russian localized failure behavior → automatic rendered product access; explicit mocked SaaS legal-consent and email-verification completion UI
 
 ### self-host-limits
@@ -211,6 +228,9 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/email/email-error-classification.test.ts`
+- `tests/unit/email/email-delivery-config.test.ts` — explicit real/test/unavailable/configuration-error states including unknown provider selection; explicit and automatic SMTP/Brevo selection, legacy Brevo compatibility under partial/default SMTP variables, complete-SMTP precedence and validation; complete CI recipient-domain suppression through provider-neutral sending with zero real-provider calls and durable logged history for every recipient; actual startup-validation wiring for SaaS no-provider/test-sink fatal, self-host unavailable, and both-mode invalid/unknown configuration, with fatal status proven to come from the product-owned exit code
+- `tests/unit/email/brevo-provider.test.ts` — provider-neutral Brevo selection with a local SDK transport stub, exact message projection, returned sent contract, and persisted sent email history without network access
+- `tests/unit/email/smtp-provider.test.ts` — provider-neutral `sendEmail` selection reaches an isolated loopback SMTP fixture with exact recipient, subject, text, and HTML and persists a sent `emailLog`; direct adapter checks observe configured authentication, propagate transport rejection without external network access, and verify implicit-TLS/required-STARTTLS option forwarding
 
 ### error-handling
 
@@ -311,7 +331,7 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/unit/web-backend/client-logs.test.ts`
 - `tests/unit/web-backend/headers.test.ts`
-- `tests/unit/web-backend/request-body-logger.test.ts`
+- `tests/unit/web-backend/request-body-logger.test.ts` — request logging plus emitted-log proof that administrator temporary credentials are omitted while a safe neighboring body remains observable
 
 **api**
 
@@ -494,6 +514,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/logging/e2e-request-redaction.test.ts` — E2E failure-capture formatter masks temporary credential and confirmation fields while preserving safe request diagnostics
 - `tests/unit/services/encryption.test.ts`
 - `tests/unit/shared/logging/sanitize-input.test.ts`
 
@@ -624,7 +645,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/user-profile-api.test.ts`
+- `tests/api/user-profile-api.test.ts` — deployment-independent profile and password lifecycle; deployment-specific verification resend behavior is owned by the SaaS and self-host authentication API suites
 
 **e2e**
 
@@ -651,6 +672,8 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text, and subgraph navigation callback
+- `tests/unit/web-frontend/backend-health.test.ts` — a reconciliation-degraded backend remains operable/connected while a hard health error disconnects
+- `tests/unit/web-frontend/admin-reconciliation-status.test.tsx` — self-host administrator dashboard makes no disabled analytics request and renders managed-workflow conflict identity, classification, all candidate references, WMF instruction, and clear state
 - `tests/unit/web-frontend/quick-start-card.test.ts` — i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked
 
 **e2e**
@@ -673,6 +696,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/logging/compute-changes.test.ts`
 - `tests/unit/shared/workflow-query-service.test.ts` — incl. setWorkflowVariable preserves rich schema
 - `tests/unit/shared/workflow-catalog.test.ts` — catalog identity/ownership metadata is excluded from the executable graph; readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop
+- `tests/unit/shared/managed-resource-reconciler.test.ts` — closed three-way classification for first install/adoption, unchanged, user-only, upstream-only, converged, conflict, soft/hard deletion, removal, and tombstone reintroduction
 - `tests/unit/web-frontend/workflow-transformer.test.ts` — including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning
 - `tests/unit/workflow-engine/variable-resolver.test.ts`
 - `tests/unit/workflow-engine/workflow-schema-keywords.test.ts` — ordered unique-reference plans, deep evidence-prefix correlation, protected plan prefixes, non-mutating blocked responses, global-input inlining, and GraphValidator keyword registration
@@ -686,7 +710,8 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/integration/workflow-file-tokens.test.ts` — upload/download lifecycle plus five-minute materialize TTL boundary, real SQLite grant-failure normalization, user/execution/node binding, and atomic one-use claim
 - `tests/integration/agent-response-contract.test.ts`
-- `tests/integration/workflow-catalog-loader.test.ts` — owner/visibility mapping, version-aware idempotence including persisted legacy root catalog metadata, missing owners, content mismatch, cross-owner isolation, soft-deleted restoration, explicit previous-slug migration without duplicate catalog entries, and multi-directory merge/install behavior
+- `tests/integration/workflow-catalog-loader.test.ts` — owner/visibility mapping and three-way visibility changes, baseline adoption/divergence, distinct previous/current/incoming candidate content, upstream/user/two-sided changes, semver regression and same-version source mismatch, catalog-wide preflight, user soft/hard deletion, upstream removal/tombstone/reintroduction and lifecycle resolution, conflict recovery across declared previous-slug migration for every selection route, lightweight summaries that do not parse malformed candidate bodies, multi-directory overlays, real SQLite rollback on a later apply failure, stale workflow/conflict/baseline guards across graph/visibility/lifecycle/alias changes, competing resolutions, real catalog evidence replacement, and baseline creation/update/rename races, malformed baseline failure, explicit recovery, structured MCP response, administrator resolution, and SaaS CLI failure on a copied database without source mutation
+- `tests/integration/mcp-reconciliation-notice.test.ts` — real in-memory MCP initialization and ordinary registered tool call both expose the graph-free managed-workflow reconciliation notice
 - `tests/integration/database/workflow-privacy-defaults.test.ts`
 - `tests/integration/manage-workflow-actions.test.ts`
 - `tests/integration/manage-workflow-new-actions.test.ts`

@@ -39,53 +39,97 @@ A caller may map an existing typed array directly to `tasks` and bypass planning
 
 ## Workflow Migration
 
-During Docker build, workflows migrate from filesystem to database.
+During container startup, workflows reconcile from the filesystem catalog into the database.
 
 ### Source Locations
 
 ```
 workflows/production/
-├── public/     → PUBLIC workflows (accessible to all users)
-└── private/    → PRIVATE workflows (internal use only)
+└── flows/      → one JSON file per owner-aware catalog entry
 ```
 
 ### Migration Script
 
 `scripts/migrate-workflows-in-docker.ts`
 
-**Idempotent behavior**: Existing workflows are skipped by default. Use `--force` to overwrite.
+The loader reconciles the complete bundled catalog against a persistent copy of the last bundled
+state. It plans every identity before writing, then applies workflow rows, validation caches,
+baselines, and conflict records in one SQLite transaction. The transaction verifies both the live
+workflow and every managed-baseline existence/state/version/slug used by the plan. A concurrent
+resolution or catalog run that changes either input makes the older plan stale before any write.
 
 ```bash
-# Default: skip existing, compare versions
+# Default: three-way reconciliation
 npx tsx scripts/migrate-workflows-in-docker.ts
 
-# Force overwrite all workflows
+# Explicitly discard local changes (destructive)
 npx tsx scripts/migrate-workflows-in-docker.ts --force
+
+# After reviewing/merging the three candidates, accept the current database graph
+npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current
 ```
 
-**Version comparison**:
+The three states are the previous bundled baseline, the current database row, and the incoming
+catalog entry. Presence, soft deletion, hard absence, and graph content all participate in the
+comparison:
 
-- `local < server`: Skip with warning (server has newer version)
-- `local = server` with content changes: FATAL error, exits with code 1 (use --force to override)
-- `local > server`: Migrate (local is newer)
+- an upstream-only change installs and advances the baseline;
+- a user-only graph edit or deletion is preserved without advancing the baseline;
+- an upstream removal soft-deletes an unchanged managed row and records a managed tombstone;
+- a two-sided change or divergent first adoption preserves the database and records an unresolved
+  `MANAGED_WORKFLOW_RECONCILIATION_REQUIRED` error;
+- an older incoming semantic version is skipped; changed upstream content at the same version is a
+  reconciliation error rather than evidence that user content may be overwritten.
+- an invalid semantic version or graph fails catalog-wide preflight before any workflow, baseline,
+  or conflict record is written.
+
+Self-host startup remains available in the unresolved state so an administrator or agent can run
+Workflow Management Flow (WMF). `GET /api/health`, `GET /api/health/status`, administrator stats,
+MCP server instructions, MCP health, and the MCP `reconciliation` tool expose the same error code,
+identity, classification, candidate references, and recovery instruction. Public health and ordinary
+MCP users never receive workflow graphs. Their status paths query only conflict metadata and
+candidate references rather than loading the retained graph bodies. Administrator dashboard health
+uses the same lightweight summary; an administrator can use `reconciliation` action `status` or
+`get` when full candidate content is needed, and `resolve` is also administrator-only. A merged graph
+must be submitted with its visibility. The error clears only through this explicit resolution, which
+records the incoming source as the new baseline so the merged database graph remains an intentional
+local delta.
+The selected candidate and whether a merged graph was supplied are stored in the audit log in the
+same transaction as the baseline update and conflict clear.
+Resolution also compares both the live workflow and the durable conflict revision with the evidence
+read before validation. The revision covers the conflict identity, classification, all three
+candidates, and recovery instruction. If the workflow changes, another administrator resolves the
+conflict, or catalog reconciliation replaces its evidence, resolution returns
+`MANAGED_WORKFLOW_RECONCILIATION_STALE` without changing the workflow, baseline, current conflict, or
+audit log. Run catalog reconciliation again to capture the new current state, then repeat the
+semantic WMF merge against the refreshed candidates.
+For a conflict captured while `previousSlugs` migrates an identity, the retained evidence includes
+the matched workflow ID, its actual database slug, and the previous managed slug. Resolution checks
+both old and new aliases and writes the accepted present/deleted state under the current catalog slug;
+a genuine post-capture edit still produces the same stale error.
+
+In `DEPLOYMENT_MODE=saas`, the same conflict is fatal. Deployment preflight must run the command on
+a copied database; a conflict exits non-zero while retaining its candidate evidence in that copy.
 
 Process:
 
-1. Enumerates the catalog via `readWorkflowCatalog()` (`workflows/production/flows/<uuid>.json`)
+1. Enumerates the merged catalog via `readWorkflowCatalogs()` (`workflows/production/flows/<uuid>.json`)
 2. Resolves each flow's `owner` and `visibility` from the catalog file
 3. Skips and reports a flow whose `owner` does not exist on the target (never reassigns to a system owner)
-4. Checks if the flow exists for that owner via `WorkflowRepository.resolveSlug(slug, owner)`
-5. Compares versions using semver comparison
-6. Skips existing flows if local version ≤ server version (unless `--force`)
-7. Saves new/updated flows via `WorkflowMutationService.save({ userId: owner, slug, visibility })`
-8. Exits with error on content mismatch at same version
+4. Classifies the union of incoming identities and stored managed baselines, including declared
+   `previousSlugs` and catalog removals
+5. Reads active, soft-deleted, and hard-absent current states and validates every selected graph
+6. Stops workflow/baseline writes when any identity conflicts; self-host persists only conflict
+   evidence, while SaaS exits non-zero
+7. Verifies captured workflow and baseline inputs, then applies a conflict-free immutable plan and
+   all baseline changes in one transaction
 
 ### Execution
 
-Migration runs during Docker container startup:
+`scripts/init-database.sh` runs reconciliation after schema migrations during container startup:
 
 ```bash
-moira-workflow:migrate
+npx tsx scripts/migrate-workflows-in-docker.ts
 ```
 
 ## Adding New Workflow
@@ -123,7 +167,7 @@ Place in `workflows/production/flows/` (file name = the flow's UUID). Include th
 ### 2. Validate
 
 ```bash
-moira-workflow workflows/production/public/my-workflow.json structure
+moira-workflow workflows/production/flows/<workflow-uuid>.json structure
 ```
 
 ### 3. Rebuild Docker

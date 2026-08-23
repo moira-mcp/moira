@@ -36,6 +36,8 @@ export class TestEmailProvider implements EmailProvider {
     return {
       success: true,
       messageId: `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      provider: "test",
+      delivery: "logged",
     };
   }
 

@@ -604,6 +604,7 @@
         "resendVerification": "Resend Verification Email",
         "sendingVerification": "Sending...",
         "verificationSent": "Verification email sent!",
+        "emailDeliveryUnavailable": "Email delivery is unavailable. Contact your administrator.",
         "handleTitle": "Username (Handle)",
         "handle": "Handle",
         "handlePlaceholder": "your-handle",
@@ -697,6 +698,13 @@
         "createFailed": "Failed to create token",
         "revokeFailed": "Failed to revoke token"
       }
+    },
+    "forgotPasswordUnavailable": {
+      "title": "Email recovery is unavailable",
+      "description": "This Moira installation does not have a real email provider configured.",
+      "instructions": "Ask your administrator to set a temporary password for your account. After signing in with it, Moira will require you to choose a new password.",
+      "backToLogin": "Back to login",
+      "loading": "Checking email recovery availability..."
     },
     "forcedPasswordReset": {
       "title": "Password Reset Required",
@@ -979,7 +987,9 @@
       "systemHealth": {
         "title": "System Health",
         "backendStatus": "Backend Status",
-        "databaseSize": "Database Size"
+        "databaseSize": "Database Size",
+        "workflowReconciliation": "Bundled workflows",
+        "reconciliationOk": "Up to date"
       },
       "logoutAll": {
         "title": "Session Management",
@@ -1178,7 +1188,7 @@
       "stats": {
         "workflows": "Workflows",
         "activeSessions": "Active Sessions",
-        "emailsSent": "Emails Sent"
+        "emailsSent": "Email Attempts"
       },
       "actions": {
         "title": "Actions",
@@ -1229,6 +1239,21 @@
         "noEmails": "No emails sent",
         "type": "Type",
         "to": "To"
+      },
+      "recovery": {
+        "emailUnavailableTitle": "Email delivery is unavailable",
+        "emailUnavailableDescription": "Verification and reset emails cannot be sent from this installation. Use manual verification or set a temporary password for an ordinary user.",
+        "setTemporaryPassword": "Set temporary password",
+        "title": "Set a temporary password",
+        "description": "Set a temporary password for {{email}}. Existing sessions and application credentials will be revoked. Give the password to the user through a secure channel; it is never emailed or logged.",
+        "temporaryPassword": "Temporary password",
+        "confirmTemporaryPassword": "Confirm temporary password",
+        "minLength": "Temporary password must be at least 8 characters",
+        "noMatch": "Temporary passwords do not match",
+        "confirm": "Set password and revoke access",
+        "saving": "Securing account...",
+        "success": "Temporary password set. Existing access was revoked.",
+        "failed": "Failed to set the temporary password"
       },
       "security": {
         "title": "Security Actions",

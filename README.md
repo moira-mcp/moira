@@ -70,37 +70,30 @@ at `/docs/` for the full reference.
 
 ### Updating / Upgrading
 
-A self-host upgrade is just an image swap — your data in `./data` is untouched:
+Use an immutable version tag or digest and the shipped upgrade helper. The helper creates and
+verifies a coherent SQLite backup, runs the exact incoming image against an isolated copy, and only
+then replaces the container:
 
 ```bash
-docker compose pull        # fetch the new ghcr.io/moira-mcp/moira image
-docker compose up -d        # recreate the container on the new image
+./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
+./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
 ```
 
-On **every** container start, before the app serves traffic, the entrypoint runs
-database migrations and a **version-gated** workflow-catalog sync. So upgrading the
-image automatically:
+Preflight mounts production data read-only and retains its snapshot and conflict evidence under
+`.moira-upgrade/`. If it reports managed-workflow reconciliation, keep the active instance running,
+use Workflow Management Flow to semantically merge the previous/current/incoming candidates, and
+retry the same pinned image. Do not use `--force` to discard local workflow changes.
 
-- applies schema migrations to your existing database, and
-- updates the **bundled** system workflows whose version was bumped in the new release
-  — a higher `metadata.version` is re-installed in place, unchanged ones are skipped,
-  and a previously soft-deleted bundled flow is restored and updated.
+If replacement or health verification fails after preflight, restore the verified database and
+previous image pin:
 
-What is **preserved** across an upgrade:
+```bash
+./scripts/self-host-upgrade.sh rollback
+```
 
-- your **own** workflows (created/edited in the Web UI) — never touched,
-- all execution history, notes, artifacts, settings, and accounts,
-- everything else in `./data` (a host bind-mount that survives container recreation).
-
-What **changes**:
-
-- only the **system bundled** workflows are brought up to the versions shipped in the
-  new image.
-
-To pin a specific version instead of tracking `latest`, set the tag in
-`docker-compose.yml`, e.g. `image: ghcr.io/moira-mcp/moira:0.4.0`. Per-version release
-notes and the changelog are on the
-[GitHub Releases](https://github.com/moira-mcp/moira/releases) page.
+The complete procedure, prerequisites, space/permission checks, version inspection, and recovery
+contract are in [Self-hosting: Safe Upgrade and Rollback](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#safe-upgrade-and-rollback), with a matching [Russian version](packages/docs/src/content/docs/ru/docs/getting-started/self-hosting.mdx#безопасное-обновление-и-откат). Release notes are on the [GitHub Releases](https://github.com/moira-mcp/moira/releases) page.
 
 ### Local Development (from source)
 
@@ -391,7 +384,7 @@ packages/mcp-server/       # MCP HTTP server (internal port, behind nginx)
 packages/web-backend/      # Express API (internal port, behind nginx)
 packages/web-frontend/     # React UI (static build served by nginx)
 data/                      # SQLite database (moira.db)
-workflows/                 # System workflow definitions (backup)
+workflows/                 # Bundled public workflow catalog
 docs/                      # Technical documentation
 ```
 
@@ -540,10 +533,12 @@ Admin panel at `/admin/users` provides:
 - **Block/Unblock** users with reason
 - **Send verification email** manually
 - **Send password reset email** manually
+- **Set a temporary password** for an ordinary user when email delivery is unavailable
 
 ### Execution Monitoring
 
-Admin panel at `/admin/executions`:
+The Cloud `multiUserAdmin` capability enables the cross-user panel at `/admin/executions`. It is
+server-denied and hidden by the default self-host policy:
 
 - View all user executions
 - Filter by user, status
@@ -552,12 +547,12 @@ Admin panel at `/admin/executions`:
 
 ### Email History
 
-Track all sent emails:
+Track every email attempt:
 
 - Verification emails
 - Password reset emails
 - Notifications
-- Status (sent/failed) with error messages
+- Status (`sent`, `failed`, or log-only `logged`) with error messages
 
 ## Email Features
 
@@ -570,23 +565,30 @@ Track all sent emails:
 
 ### Password Reset
 
-- User requests via `/forgot-password`
-- Reset link sent to email
+- With a real SMTP or Brevo provider, the user requests via `/forgot-password`
+  and receives a reset link
 - Link expires in 1 hour
-- Admin can send reset manually
+- Without real delivery, the reset form and email-send actions report the
+  capability as unavailable; an administrator can set a temporary password for
+  an ordinary user and require replacement at the next login
 
 ### Email Provider
 
 Configured via environment variables:
 
 ```bash
-EMAIL_PROVIDER=brevo       # Currently: brevo
-BREVO_API_KEY=xkeysib-xxx  # Brevo API key
-EMAIL_FROM=noreply@domain  # Sender email
-EMAIL_FROM_NAME="App Name" # Sender name
+EMAIL_PROVIDER=smtp          # smtp, brevo, auto, none, or explicit test sink
+EMAIL_FROM=noreply@domain    # Required for real delivery
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_REQUIRE_TLS=true
+# SMTP_USER and SMTP_PASSWORD are optional, but must be supplied together
 ```
 
-Abstracted provider interface supports Brevo, Resend, SendGrid.
+Real delivery supports generic SMTP and Brevo. With `EMAIL_PROVIDER=auto` (or
+unset), a complete SMTP configuration takes precedence and a legacy
+`BREVO_API_KEY` plus `EMAIL_FROM` configuration remains supported. The explicit
+`test` provider logs messages and is never advertised as real delivery.
 
 ## Documentation Map
 

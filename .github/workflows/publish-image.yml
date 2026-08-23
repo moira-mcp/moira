@@ -6,8 +6,9 @@ name: Publish Image
 # emulation, so arm64 builds are fast. Each arch is pushed by digest; a final
 # job stitches the per-arch digests into one tagged manifest list.
 #
-# APP_BASE_PATH=/ puts the Web UI at the root; .env.selfhost is a committed,
-# secret-free env file. Publishes the image only; it does not deploy anywhere.
+# APP_BASE_PATH=/ puts the Web UI at the root. Only explicit non-secret URL
+# values are supplied at build time; runtime configuration is not baked into
+# the public image. Publishes the image only; it does not deploy anywhere.
 
 on:
   # Primary path: called by release.yml after a semantic-release version is cut,
@@ -67,6 +68,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Capture build time
+        id: build-time
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -76,9 +81,12 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             APP_BASE_PATH=/
-            ENV_FILE=.env.selfhost
+            MOIRA_HOST=localhost:8080
+            CONTACT_EMAIL=support@localhost
+            STATIC_ARTIFACTS_DOMAIN=static.localhost:8080
             BUILD_ID=public
             GIT_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.build-time.outputs.value }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
           cache-to: type=gha,mode=max,scope=${{ env.PLATFORM_PAIR }}

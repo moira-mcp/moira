@@ -25,28 +25,9 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LogOut } from "lucide-react";
 import { StatCard } from "../components/stat-card";
 import { useFeatures } from "../hooks/useFeatures";
+import type { AdminStatsResponse, AdminSystemStatusResponse } from "../types";
 
 type TimeRange = "today" | "week" | "month" | "year" | "all";
-
-interface ActivityItem {
-  id: string;
-  workflowId: string;
-  status: string;
-  timestamp: number;
-  action: string;
-}
-
-interface SystemStats {
-  totalWorkflows: number;
-  totalExecutions: number;
-  totalDefinitions: number;
-  activeExecutions: number;
-  systemHealth?: {
-    backendStatus: string;
-    databaseSize: number;
-  };
-  recentActivity?: ActivityItem[];
-}
 
 interface OverviewData {
   totalUsers: number;
@@ -91,7 +72,10 @@ const statusBadgeClass = (status: string): string => {
 export const AdminDashboard: React.FC = () => {
   const { t } = useTranslation();
   const { isEnabled: isFeatureEnabled } = useFeatures();
-  const [stats, setStats] = useState<SystemStats | null>(null);
+  const analyticsEnabled = isFeatureEnabled("adminAnalytics");
+  const multiUserAdminEnabled = isFeatureEnabled("multiUserAdmin");
+  const [systemStatus, setSystemStatus] = useState<AdminSystemStatusResponse | null>(null);
+  const [stats, setStats] = useState<AdminStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [logoutAllDialogOpen, setLogoutAllDialogOpen] = useState(false);
@@ -107,10 +91,14 @@ export const AdminDashboard: React.FC = () => {
   const [usersData, setUsersData] = useState<UsersData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
-  const loadStats = useCallback(async () => {
+  const loadDashboardData = useCallback(async () => {
     setLoading(true);
     try {
-      const statsData = await apiClient.getAdminStats();
+      const [systemStatusData, statsData] = await Promise.all([
+        apiClient.getAdminSystemStatus(),
+        analyticsEnabled ? apiClient.getAdminStats() : Promise.resolve(null),
+      ]);
+      setSystemStatus(systemStatusData);
       setStats(statsData);
       setError(null);
     } catch (err: unknown) {
@@ -119,9 +107,18 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [analyticsEnabled, t]);
 
   const loadAnalytics = useCallback(async () => {
+    if (!analyticsEnabled) {
+      setOverview(null);
+      setTopWorkflows([]);
+      setExecutionsData(null);
+      setUsersData(null);
+      setAnalyticsLoading(false);
+      return;
+    }
+
     setAnalyticsLoading(true);
     try {
       const [overviewRes, topWorkflowsRes, executionsRes, usersRes] = await Promise.all([
@@ -149,11 +146,11 @@ export const AdminDashboard: React.FC = () => {
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [timeRange]);
+  }, [analyticsEnabled, timeRange]);
 
   useEffect(() => {
-    loadStats();
-  }, [loadStats]);
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   useEffect(() => {
     loadAnalytics();
@@ -174,12 +171,12 @@ export const AdminDashboard: React.FC = () => {
     return <PageShell title={t("admin.dashboard.title")} loading />;
   }
 
-  if (error || !stats) {
+  if (error || !systemStatus) {
     return (
       <PageShell
         title={t("admin.dashboard.title")}
         error={error || t("admin.dashboard.failedToLoad")}
-        onRetry={loadStats}
+        onRetry={loadDashboardData}
       />
     );
   }
@@ -187,34 +184,43 @@ export const AdminDashboard: React.FC = () => {
   return (
     <PageShell title={t("admin.dashboard.title")}>
       {/* Header actions */}
-      <div className="flex justify-end items-center mb-6">
-        <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
-          <SelectTrigger className="w-[180px]" data-testid="time-range-selector">
-            <SelectValue placeholder={t("admin.analytics.selectTimeRange")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">{t("admin.analytics.timeRanges.today")}</SelectItem>
-            <SelectItem value="week">{t("admin.analytics.timeRanges.week")}</SelectItem>
-            <SelectItem value="month">{t("admin.analytics.timeRanges.month")}</SelectItem>
-            <SelectItem value="year">{t("admin.analytics.timeRanges.year")}</SelectItem>
-            <SelectItem value="all">{t("admin.analytics.timeRanges.all")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {analyticsEnabled && (
+        <div className="flex justify-end items-center mb-6">
+          <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
+            <SelectTrigger className="w-[180px]" data-testid="time-range-selector">
+              <SelectValue placeholder={t("admin.analytics.selectTimeRange")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="today">{t("admin.analytics.timeRanges.today")}</SelectItem>
+              <SelectItem value="week">{t("admin.analytics.timeRanges.week")}</SelectItem>
+              <SelectItem value="month">{t("admin.analytics.timeRanges.month")}</SelectItem>
+              <SelectItem value="year">{t("admin.analytics.timeRanges.year")}</SelectItem>
+              <SelectItem value="all">{t("admin.analytics.timeRanges.all")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* System Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard value={stats.totalWorkflows} label={t("admin.dashboard.stats.totalWorkflows")} />
+        {analyticsEnabled && stats && (
+          <>
+            <StatCard
+              value={stats.totalWorkflows}
+              label={t("admin.dashboard.stats.totalWorkflows")}
+            />
+            <StatCard
+              value={stats.totalExecutions}
+              label={t("admin.dashboard.stats.totalExecutions")}
+            />
+            <StatCard
+              value={stats.activeExecutions}
+              label={t("admin.dashboard.stats.activeExecutions")}
+            />
+          </>
+        )}
         <StatCard
-          value={stats.totalExecutions}
-          label={t("admin.dashboard.stats.totalExecutions")}
-        />
-        <StatCard
-          value={stats.activeExecutions}
-          label={t("admin.dashboard.stats.activeExecutions")}
-        />
-        <StatCard
-          value={stats.totalDefinitions}
+          value={systemStatus.totalDefinitions}
           label={t("admin.dashboard.stats.settingDefinitions")}
         />
       </div>
@@ -251,8 +257,8 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* System Health */}
-      {stats.systemHealth && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      {systemStatus.systemHealth && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">
@@ -261,11 +267,55 @@ export const AdminDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-success"></span>
+                <span
+                  className={`w-3 h-3 rounded-full ${
+                    systemStatus.systemHealth.backendStatus === "healthy"
+                      ? "bg-success"
+                      : "bg-destructive"
+                  }`}
+                ></span>
                 <span className="text-muted-foreground capitalize">
-                  {stats.systemHealth.backendStatus}
+                  {systemStatus.systemHealth.backendStatus}
                 </span>
               </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">
+                {t("admin.dashboard.systemHealth.workflowReconciliation")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {systemStatus.systemHealth.workflowReconciliation.status === "ok" ? (
+                <Badge variant="secondary">
+                  {t("admin.dashboard.systemHealth.reconciliationOk")}
+                </Badge>
+              ) : (
+                <div className="space-y-3 text-sm" data-testid="workflow-reconciliation-error">
+                  <Badge variant="destructive">
+                    {systemStatus.systemHealth.workflowReconciliation.code}
+                  </Badge>
+                  {systemStatus.systemHealth.workflowReconciliation.conflicts.map((conflict) => (
+                    <div key={`${conflict.owner}/${conflict.slug}`} className="space-y-1">
+                      <p className="font-medium">
+                        {conflict.owner}/{conflict.slug} ({conflict.classification})
+                      </p>
+                      <p className="text-muted-foreground whitespace-pre-wrap">
+                        {conflict.instruction}
+                      </p>
+                      <dl className="text-xs text-muted-foreground break-all">
+                        <dt>previous</dt>
+                        <dd>{conflict.candidateRefs.previous ?? "absent"}</dd>
+                        <dt>current</dt>
+                        <dd>{conflict.candidateRefs.current}</dd>
+                        <dt>incoming</dt>
+                        <dd>{conflict.candidateRefs.incoming}</dd>
+                      </dl>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -276,38 +326,45 @@ export const AdminDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-foreground">
-                {(stats.systemHealth.databaseSize / 1024 / 1024).toFixed(2)} {t("common.units.mb")}
+                {(systemStatus.systemHealth.databaseSize / 1024 / 1024).toFixed(2)}{" "}
+                {t("common.units.mb")}
               </div>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">{t("admin.dashboard.logoutAll.title")}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Button variant="destructive" size="sm" onClick={() => setLogoutAllDialogOpen(true)}>
-                <LogOut className="h-4 w-4 mr-2" />
-                {t("admin.dashboard.logoutAll.button")}
-              </Button>
-              <ConfirmDialog
-                open={logoutAllDialogOpen}
-                onOpenChange={setLogoutAllDialogOpen}
-                title={t("admin.dashboard.logoutAll.confirmTitle")}
-                description={t("admin.dashboard.logoutAll.confirmDescription")}
-                confirmLabel={t("admin.dashboard.logoutAll.confirm")}
-                cancelLabel={t("auth.CANCEL")}
-                variant="destructive"
-                onConfirm={handleLogoutAll}
-              />
-              {logoutAllResult && (
-                <p
-                  className={`mt-2 text-sm ${logoutAllResult.success ? "text-success" : "text-destructive"}`}
+          {multiUserAdminEnabled && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">{t("admin.dashboard.logoutAll.title")}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setLogoutAllDialogOpen(true)}
                 >
-                  {logoutAllResult.message}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+                  <LogOut className="h-4 w-4 mr-2" />
+                  {t("admin.dashboard.logoutAll.button")}
+                </Button>
+                <ConfirmDialog
+                  open={logoutAllDialogOpen}
+                  onOpenChange={setLogoutAllDialogOpen}
+                  title={t("admin.dashboard.logoutAll.confirmTitle")}
+                  description={t("admin.dashboard.logoutAll.confirmDescription")}
+                  confirmLabel={t("admin.dashboard.logoutAll.confirm")}
+                  cancelLabel={t("auth.CANCEL")}
+                  variant="destructive"
+                  onConfirm={handleLogoutAll}
+                />
+                {logoutAllResult && (
+                  <p
+                    className={`mt-2 text-sm ${logoutAllResult.success ? "text-success" : "text-destructive"}`}
+                  >
+                    {logoutAllResult.message}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -422,7 +479,7 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* Top 10 Workflows Table */}
-      {!analyticsLoading && (
+      {analyticsEnabled && !analyticsLoading && (
         <Card className="mb-8">
           <CardHeader>
             <CardTitle>{t("admin.analytics.topWorkflows")}</CardTitle>
@@ -434,8 +491,8 @@ export const AdminDashboard: React.FC = () => {
       )}
 
       {/* Recent Activity */}
-      {stats.recentActivity && stats.recentActivity.length > 0 && (
-        <Card className="mb-8">
+      {analyticsEnabled && stats && stats.recentActivity.length > 0 && (
+        <Card className="mb-8" data-testid="admin-recent-activity">
           <CardHeader>
             <CardTitle>{t("admin.dashboard.recentActivity.title")}</CardTitle>
           </CardHeader>
@@ -482,7 +539,7 @@ export const AdminDashboard: React.FC = () => {
                   to: ROUTES.ADMIN_DELETED_WORKFLOWS,
                   icon: "🗑️",
                   key: "deletedWorkflows",
-                  capability: undefined,
+                  capability: "multiUserAdmin",
                 },
                 {
                   to: ROUTES.ADMIN_SETTINGS,

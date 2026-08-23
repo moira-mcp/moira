@@ -43,7 +43,14 @@ export {
 export type { RequestContext, ResourceIds } from "./logging/context.js";
 export { sanitizeInput, extractResourceIds, wasTruncated } from "./logging/sanitize-input.js";
 export type { RequestLoggerOptions, RequestContextOptions } from "./logging/express-middleware.js";
-export { logAuditEvent, logAuditEventDirect, computeChanges } from "./logging/audit-logger.js";
+export {
+  logAuditEvent,
+  logAuditEventDirect,
+  computeChanges,
+  getAuditRequestContext,
+  recordAuditEventMetric,
+} from "./logging/audit-logger.js";
+export type { AuditRequestContext } from "./logging/audit-logger.js";
 export type { AuditContext, AuditChange } from "./logging/audit-logger.js";
 
 // Audit

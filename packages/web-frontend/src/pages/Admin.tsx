@@ -6,7 +6,7 @@
  * Note: console.error used for browser debugging of API errors
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { apiClient } from "../services/api-client";
@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "../components/PageShell";
 import { PageLoader } from "@/components/page-loader";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { useFeatures } from "../hooks/useFeatures";
 
 interface SettingDefinition {
   key: string;
@@ -30,8 +31,8 @@ interface SettingDefinition {
 }
 
 interface SystemStats {
-  totalWorkflows: number;
-  totalExecutions: number;
+  totalWorkflows?: number;
+  totalExecutions?: number;
   totalDefinitions: number;
 }
 
@@ -48,6 +49,8 @@ type TabType = "definitions" | "users" | "stats";
 
 export const Admin: React.FC = () => {
   const { t } = useTranslation();
+  const { isEnabled: isFeatureEnabled } = useFeatures();
+  const analyticsEnabled = isFeatureEnabled("adminAnalytics");
   const [activeTab, setActiveTab] = useState<TabType>("definitions");
   const [definitions, setDefinitions] = useState<SettingDefinition[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -56,16 +59,6 @@ export const Admin: React.FC = () => {
   const [_editingKey, setEditingKey] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<SettingDefinition>>({});
   const [deleteKey, setDeleteKey] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (activeTab === "definitions") {
-      loadDefinitions();
-    } else if (activeTab === "users") {
-      loadUsers();
-    } else if (activeTab === "stats") {
-      loadStats();
-    }
-  }, [activeTab]);
 
   const loadDefinitions = async () => {
     setLoading(true);
@@ -91,17 +84,34 @@ export const Admin: React.FC = () => {
     }
   };
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     setLoading(true);
     try {
-      const statsData = await apiClient.getAdminStats();
-      setStats(statsData);
+      const [systemStatus, analyticsStats] = await Promise.all([
+        apiClient.getAdminSystemStatus(),
+        analyticsEnabled ? apiClient.getAdminStats() : Promise.resolve(null),
+      ]);
+      setStats({
+        totalDefinitions: systemStatus.totalDefinitions,
+        totalWorkflows: analyticsStats?.totalWorkflows,
+        totalExecutions: analyticsStats?.totalExecutions,
+      });
     } catch (error) {
       console.error("Failed to load stats:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [analyticsEnabled]);
+
+  useEffect(() => {
+    if (activeTab === "definitions") {
+      loadDefinitions();
+    } else if (activeTab === "users") {
+      loadUsers();
+    } else if (activeTab === "stats") {
+      loadStats();
+    }
+  }, [activeTab, loadStats]);
 
   const handleCreateDefinition = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -335,18 +345,22 @@ export const Admin: React.FC = () => {
               <p className="text-muted-foreground">{t("admin.panel.loading")}</p>
             ) : stats ? (
               <div className="grid grid-cols-3 gap-4">
-                <div className="bg-card border border-border rounded-lg p-6">
-                  <div className="text-3xl font-bold">{stats.totalWorkflows}</div>
-                  <div className="text-sm text-muted-foreground">
-                    {t("admin.panel.stats.totalWorkflows")}
-                  </div>
-                </div>
-                <div className="bg-card border border-border rounded-lg p-6">
-                  <div className="text-3xl font-bold">{stats.totalExecutions}</div>
-                  <div className="text-sm text-muted-foreground">
-                    {t("admin.panel.stats.totalExecutions")}
-                  </div>
-                </div>
+                {analyticsEnabled && (
+                  <>
+                    <div className="bg-card border border-border rounded-lg p-6">
+                      <div className="text-3xl font-bold">{stats.totalWorkflows}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {t("admin.panel.stats.totalWorkflows")}
+                      </div>
+                    </div>
+                    <div className="bg-card border border-border rounded-lg p-6">
+                      <div className="text-3xl font-bold">{stats.totalExecutions}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {t("admin.panel.stats.totalExecutions")}
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="bg-card border border-border rounded-lg p-6">
                   <div className="text-3xl font-bold">{stats.totalDefinitions}</div>
                   <div className="text-sm text-muted-foreground">

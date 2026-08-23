@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Workflow Migration Script for Docker
- * Loads the owner-aware workflow catalog into the database during Docker build.
+ * Loads the owner-aware workflow catalog into the database during container startup.
  *
  * Catalog: <baseDir>/flows/<uuid>.json — each file carries its own `owner` and `visibility` (catalog
  * metadata). The flow is installed under its mapped owner with that visibility. Catalog identity is
@@ -12,9 +12,9 @@
  * de-duplicated by (owner, slug) with a later directory overriding an earlier one — so a production
  * build can combine a public bundled folder with a private operator folder. Unset → single default.
  *
- * IDEMPOTENT: does NOT overwrite an existing flow unless its local version is newer (semver), and
- *   FAILS on a same-version content mismatch. Use --force to overwrite all.
- * NON-DESTRUCTIVE: only touches flows it owns; never clobbers other owners' flows.
+ * THREE-WAY: compares the last bundled baseline, current database state, and incoming catalog.
+ * User-only changes survive; upstream-only changes apply; two-sided changes become durable
+ * reconciliation errors. SaaS fails; self-host remains operable for WMF recovery.
  * MISSING OWNER: when a flow's mapped owner does not exist on the target, the flow is SKIPPED and
  *   reported — it is never silently reassigned to a system owner.
  *
@@ -22,36 +22,58 @@
  * testable; this script is the thin Docker CLI wrapper.
  *
  * Usage:
- *   npx tsx scripts/migrate-workflows-in-docker.ts           # version-aware, fail on content mismatch
- *   npx tsx scripts/migrate-workflows-in-docker.ts --force   # overwrite all
+ *   npx tsx scripts/migrate-workflows-in-docker.ts
+ *   npx tsx scripts/migrate-workflows-in-docker.ts --force
+ *   npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current
  */
 
 import {
   getDatabase,
-  WorkflowRepository,
+  getSqliteInstance,
   UserRepository,
   getWorkflowMutationService,
   initializeWorkflowValidationCache,
   readWorkflowCatalogs,
   getWorkflowsDirs,
   installCatalogEntries,
-  CatalogContentMismatchError,
+  CatalogReconciliationError,
+  CatalogPreflightError,
+  resolveWorkflowReconciliation,
+  isSaas,
+  formatWorkflowReconciliationNotice,
 } from "@mcp-moira/shared";
 
 const forceUpdate = process.argv.includes("--force");
+const resolveIndex = process.argv.indexOf("--resolve");
 
 async function migrate(): Promise<void> {
   console.log("Loading workflow catalog into database...");
   console.log(
     forceUpdate
       ? "⚠️  Force mode: will overwrite existing workflows"
-      : "📋 Idempotent mode: version-aware (fails on content mismatch)",
+      : "📋 Three-way mode: preserves user-only changes and records conflicts",
   );
 
   const db = getDatabase();
-  const workflowRepo = new WorkflowRepository(db);
   const userRepo = new UserRepository(db);
   const mutationService = getWorkflowMutationService();
+  const sqlite = getSqliteInstance();
+
+  if (resolveIndex !== -1) {
+    const raw = process.argv[resolveIndex + 1];
+    const split = raw?.lastIndexOf(":") ?? -1;
+    if (!raw || split <= 0) {
+      throw new Error("--resolve requires owner/slug:current|incoming|previous");
+    }
+    const reference = raw.slice(0, split);
+    const selection = raw.slice(split + 1);
+    if (selection !== "current" && selection !== "incoming" && selection !== "previous") {
+      throw new Error("--resolve selection must be current, incoming, or previous");
+    }
+    await resolveWorkflowReconciliation(reference, selection, { sqlite, mutationService });
+    console.log(`Resolved bundled workflow reconciliation for ${reference} using ${selection}`);
+    return;
+  }
 
   const dirs = getWorkflowsDirs();
   const entries = readWorkflowCatalogs(dirs);
@@ -62,18 +84,30 @@ async function migrate(): Promise<void> {
   let result;
   try {
     result = await installCatalogEntries(entries, {
-      workflowRepo,
       userRepo,
       mutationService,
+      sqlite,
       force: forceUpdate,
+      fatalConflicts: isSaas(),
       log: (msg) => console.log(msg),
     });
   } catch (error) {
-    if (error instanceof CatalogContentMismatchError) {
+    if (error instanceof CatalogPreflightError) {
+      console.error(`\n❌ FATAL: ${error.message}`);
+      for (const outcome of error.result.outcomes.filter((item) =>
+        item.outcome.startsWith("invalid"),
+      )) {
+        console.error(`   ${outcome.owner}/${outcome.slug}: ${outcome.outcome}`);
+      }
+      process.exit(1);
+    }
+    if (error instanceof CatalogReconciliationError) {
+      const notice = formatWorkflowReconciliationNotice(sqlite);
       console.error(
         `\n❌ FATAL: ${error.message}\n` +
-          `   Either the metadata version was updated without syncing all node changes, or the\n` +
-          `   file changed without bumping the version. Investigate, or use --force to override.\n`,
+          `   Inspect the previous/current/incoming candidates and resolve the semantic merge.\n` +
+          `   --force discards local changes and must only be used deliberately.\n` +
+          (notice ? `\n${notice}\n` : ""),
       );
       process.exit(1);
     }
@@ -82,20 +116,24 @@ async function migrate(): Promise<void> {
 
   console.log("\n" + "=".repeat(50));
   console.log(`✅ Installed: ${result.installed} | Updated: ${result.updated}`);
+  if (result.removed > 0) console.log(`🗑️  Removed:   ${result.removed}`);
+  if (result.adopted > 0) console.log(`✅ Adopted:   ${result.adopted}`);
+  if (result.preserved > 0) console.log(`🛡️  Preserved: ${result.preserved} user changes`);
+  if (result.conflicts > 0)
+    console.error(
+      `❌ Reconciliation required: ${result.conflicts} (self-host remains operable but degraded)`,
+    );
+  if (result.conflicts > 0) {
+    console.error(formatWorkflowReconciliationNotice(sqlite));
+  }
   if (result.skipped > 0) console.log(`⏭️  Skipped:  ${result.skipped} (exists/older/unchanged)`);
   if (result.skippedMissingOwner > 0)
     console.log(`⏭️  Skipped:  ${result.skippedMissingOwner} (owner missing on target)`);
-  if (result.invalid > 0) console.log(`❌ Invalid:  ${result.invalid} (bad version)`);
   console.log("=".repeat(50));
 
   console.log("\n🔍 Running validation cache migration...");
   await initializeWorkflowValidationCache();
   console.log("✅ Validation cache migration complete");
-
-  if (result.invalid > 0) {
-    console.error("\n❌ Migration completed with invalid flows");
-    process.exit(1);
-  }
 }
 
 migrate().catch((err) => {

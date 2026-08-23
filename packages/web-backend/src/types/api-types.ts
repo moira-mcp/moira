@@ -44,12 +44,14 @@ export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 
 // Health check endpoint
 export interface HealthCheckResponse {
-  status: "ok" | "error";
+  status: "ok" | "degraded" | "error";
   services: {
     fileSystem: boolean;
     validation: boolean;
     mcpEngine: boolean;
+    workflowReconciliation: boolean;
   };
+  reconciliation: import("@mcp-moira/shared").WorkflowReconciliationStatusSummary;
   uptime: number;
   timestamp: string;
   version: string;

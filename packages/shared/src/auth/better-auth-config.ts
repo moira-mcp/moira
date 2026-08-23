@@ -11,7 +11,7 @@ import geoip from "geoip-lite";
 import type { ServiceLogger } from "../logging/logger.js";
 import { createLogger } from "../logging/logger.js";
 import { getSqliteInstance, getDatabase } from "../database/connection.js";
-import { sendEmail, isEmailConfigured } from "../email/index.js";
+import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { AuditAction } from "../audit/actions.js";
 import { user, oauthAccessToken } from "../database/schema.js";
@@ -33,6 +33,21 @@ import { ACCOUNT_APPROVAL_REQUIRED_CODE, getAccountAccessDenial } from "./accoun
 import { generateHandleFromEmail, generateRandomHandleSuffix } from "../validation/slug-handle.js";
 
 const logger = createLogger({ component: "BetterAuth" });
+
+function assertRealEmailDelivery(): void {
+  const status = getEmailDeliveryStatus();
+  if (status.state !== "real") {
+    logger.warn("Real email delivery is unavailable", {
+      state: status.state,
+      provider: status.provider,
+      reason: status.reason,
+    });
+    throw new APIError("BAD_REQUEST", {
+      message: "Email delivery is unavailable. Contact your administrator for account recovery.",
+      code: "EMAIL_DELIVERY_UNAVAILABLE",
+    });
+  }
+}
 
 // Load testing domain - users with this domain can bypass email verification
 // when X-Load-Test header matches LOAD_TEST_SECRET
@@ -58,6 +73,12 @@ const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
   "/mcp/register",
   "/ok",
   "/error",
+]);
+
+const EMAIL_DELIVERY_PATHS = new Set([
+  "/forget-password",
+  "/request-password-reset",
+  "/send-verification-email",
 ]);
 
 function isPublicAccountLifecyclePath(path: string): boolean {
@@ -201,10 +222,7 @@ const baseConfig = {
       user: { id: string; email: string };
       url: string;
     }) => {
-      if (!isEmailConfigured()) {
-        logger.warn("Email not configured, skipping password reset email");
-        return;
-      }
+      assertRealEmailDelivery();
       await sendEmail(user.id, "password_reset", {
         to: user.email,
         subject: "Reset your password - MCP Moira",
@@ -232,10 +250,7 @@ const baseConfig = {
       user: { id: string; email: string };
       url: string;
     }) => {
-      if (!isEmailConfigured()) {
-        logger.warn("Email not configured, skipping verification email");
-        return;
-      }
+      assertRealEmailDelivery();
       // Fix callbackURL to go to /app instead of / (landing page)
       // Better Auth uses callbackURL=/ by default when not specified by client
       let fixedUrl = url;
@@ -506,6 +521,10 @@ const baseConfig = {
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      if (EMAIL_DELIVERY_PATHS.has(ctx.path)) {
+        assertRealEmailDelivery();
+      }
+
       // Registration is deployment-configurable. Self-host enables it together
       // with the independent account-approval gate.
       if (
@@ -567,7 +586,13 @@ const baseConfig = {
             .from(oauthAccessToken)
             .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
             .limit(1);
-          userId = tokenData?.userId;
+          if (!tokenData) {
+            throw new APIError("UNAUTHORIZED", {
+              message: "OAuth credential has been revoked or is invalid",
+              code: "INVALID_TOKEN",
+            });
+          }
+          userId = tokenData.userId;
         } else if (body?.code) {
           const verificationValue = await ctx.context.internalAdapter.findVerificationValue(
             body.code,
@@ -595,7 +620,13 @@ const baseConfig = {
             .from(oauthAccessToken)
             .where(eq(oauthAccessToken.accessToken, accessToken))
             .limit(1);
-          if (tokenData?.userId) await assertMcpOAuthAccountAccess(tokenData.userId);
+          if (!tokenData) {
+            throw new APIError("UNAUTHORIZED", {
+              message: "OAuth credential has been revoked or is invalid",
+              code: "INVALID_TOKEN",
+            });
+          }
+          await assertMcpOAuthAccountAccess(tokenData.userId);
         }
       }
 

@@ -170,6 +170,43 @@ export const workflow = sqliteTable(
   }),
 );
 
+/** Last upstream state observed for a bundled workflow. */
+export const managedWorkflowBaseline = sqliteTable(
+  "managedWorkflowBaseline",
+  {
+    ownerId: text("ownerId").notNull(),
+    slug: text("slug").notNull(),
+    state: text("state").notNull(),
+    sourceVersion: text("sourceVersion"),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.ownerId, table.slug] }),
+  }),
+);
+
+/** Durable, MCP-visible evidence for an unresolved bundled-workflow merge. */
+export const workflowReconciliationConflict = sqliteTable(
+  "workflowReconciliationConflict",
+  {
+    ownerId: text("ownerId").notNull(),
+    slug: text("slug").notNull(),
+    currentWorkflowId: text("currentWorkflowId"),
+    currentWorkflowSlug: text("currentWorkflowSlug"),
+    previousManagedSlug: text("previousManagedSlug"),
+    classification: text("classification").notNull(),
+    previousState: text("previousState"),
+    currentState: text("currentState").notNull(),
+    incomingState: text("incomingState").notNull(),
+    instruction: text("instruction").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.ownerId, table.slug] }),
+  }),
+);
+
 export const workflowExecution = sqliteTable("workflowExecution", {
   executionId: text("executionId").primaryKey(),
   workflowId: text("workflowId")

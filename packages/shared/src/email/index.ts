@@ -6,11 +6,16 @@
 import type { EmailProvider, EmailOptions, EmailResult, EmailType } from "./email-service.js";
 import { BrevoProvider } from "./brevo-provider.js";
 import { TestEmailProvider } from "./test-provider.js";
+import { SmtpProvider } from "./smtp-provider.js";
 import { getDatabase } from "../database/connection.js";
 import { emailLog } from "../database/schema.js";
 import { v4 as uuidv4 } from "uuid";
 import { createLogger } from "../logging/logger.js";
-import { getBrevoApiKey } from "../config/env.js";
+import {
+  getEmailDeliveryStatus,
+  isTestRecipientSuppressionEnabled,
+  type EmailDeliveryStatus,
+} from "../config/env.js";
 
 // Email service logger for Grafana/Loki
 const logger = createLogger({ component: "email" });
@@ -91,6 +96,7 @@ export function maskEmail(email: string): string {
 }
 
 export * from "./email-service.js";
+export type { EmailDeliveryStatus } from "../config/env.js";
 
 let emailProvider: EmailProvider | null = null;
 
@@ -100,14 +106,19 @@ let emailProvider: EmailProvider | null = null;
  */
 function isTestEmail(email: string): boolean {
   const testPatterns = [
-    /^test.*@example\.com$/i, // test@example.com, testuser@example.com
-    /^.*\.test@example\.com$/i, // user.test@example.com
-    /^e2e.*@moira\.local$/i, // e2e-user@moira.local, e2e123@moira.local
-    /^playwright.*@moira\.local$/i, // playwright-test@moira.local
-    /^test\d+@moira\.local$/i, // test1@moira.local, test123@moira.local
+    /^[^@]+@example\.com$/i, // IANA-reserved example domain used by automated tests
+    /^[^@]+@test\.com$/i, // legacy CI fixture domain; suppression requires the explicit switch
+    /^[^@]+@test\.local$/i,
+    /^[^@]+@moira\.local$/i,
+    /^[^@]+@load-testing-noverify\.local$/i,
+    /^[^@]+@[^@]+\.test$/i, // IANA-reserved .test TLD
   ];
 
   return testPatterns.some((pattern) => pattern.test(email));
+}
+
+export function shouldSuppressTestRecipient(email: string): boolean {
+  return isTestRecipientSuppressionEnabled() && isTestEmail(email);
 }
 
 /**
@@ -118,15 +129,26 @@ export function getEmailProvider(): EmailProvider {
     return emailProvider;
   }
 
-  // If no Brevo API key: use test provider
-  if (!getBrevoApiKey()) {
-    emailProvider = new TestEmailProvider();
-    return emailProvider;
+  const status = getEmailDeliveryStatus();
+  if (status.state === "configuration-error" || status.state === "unavailable") {
+    throw new EmailDeliveryUnavailableError(status);
   }
-
-  // Production: use Brevo provider
-  emailProvider = new BrevoProvider();
+  emailProvider =
+    status.provider === "smtp"
+      ? new SmtpProvider()
+      : status.provider === "brevo"
+        ? new BrevoProvider()
+        : new TestEmailProvider();
   return emailProvider;
+}
+
+export class EmailDeliveryUnavailableError extends Error {
+  readonly code = "EMAIL_DELIVERY_UNAVAILABLE";
+
+  constructor(readonly status: EmailDeliveryStatus) {
+    super(status.reason || "Email delivery is unavailable");
+    this.name = "EmailDeliveryUnavailableError";
+  }
 }
 
 /**
@@ -138,14 +160,10 @@ export async function sendEmail(
   type: EmailType,
   options: EmailOptions,
 ): Promise<EmailResult> {
-  // Check if recipient is a test user (even in production)
-  if (isTestEmail(options.to)) {
-    const testProvider = new TestEmailProvider();
-    return await testProvider.send(options);
-  }
-
-  // Normal flow for real users
-  const provider = getEmailProvider();
+  // Reserved recipients use the local provider but still share durable attempt history.
+  const provider = shouldSuppressTestRecipient(options.to)
+    ? new TestEmailProvider()
+    : getEmailProvider();
   const db = getDatabase();
   const logId = uuidv4();
   const now = new Date().toISOString();
@@ -161,7 +179,7 @@ export async function sendEmail(
       to: options.to,
       subject: options.subject,
       messageId: result.messageId,
-      status: "sent",
+      status: result.delivery === "sent" ? "sent" : "logged",
       createdAt: now,
     });
 
@@ -202,10 +220,7 @@ export async function sendEmail(
  * Check if email service is configured
  */
 export function isEmailConfigured(): boolean {
-  try {
-    getEmailProvider();
-    return true;
-  } catch {
-    return false;
-  }
+  return getEmailDeliveryStatus().state === "real";
 }
+
+export { getEmailDeliveryStatus };

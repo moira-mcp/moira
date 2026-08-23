@@ -6,11 +6,12 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { requireAdmin } from "../middleware/admin-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import {
   logAuditEvent,
   AuditAction,
+  getAuditRequestContext,
+  recordAuditEventMetric,
   getDatabase,
   user,
   oauthAccessToken,
@@ -19,12 +20,72 @@ import {
 } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { eq, and } from "drizzle-orm";
+import {
+  recoverOrdinaryUserWithTemporaryPassword,
+  TemporaryPasswordRecoveryError,
+} from "../services/temporary-password-recovery.js";
 
 const router = Router();
 const repository = new DatabaseRepository();
 
-// All routes protected by requireAdmin middleware
-router.use(requireAdmin);
+/**
+ * POST /api/admin/users/:id/temporary-password
+ * Set an administrator-supplied one-time credential and revoke all active access.
+ */
+router.post(
+  "/users/:id/temporary-password",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const currentUserId = (req as AuthenticatedRequest).userId;
+    const temporaryPassword = req.body?.temporaryPassword;
+
+    if (typeof temporaryPassword !== "string" || temporaryPassword.length < 8) {
+      throw createApiError.validationFailed("Temporary password must be at least 8 characters");
+    }
+    if (temporaryPassword.length > 128) {
+      throw createApiError.validationFailed("Temporary password must be less than 128 characters");
+    }
+    if (id === currentUserId) {
+      throw createApiError.badRequest("Cannot recover your own account with this endpoint");
+    }
+
+    let recovery: Awaited<ReturnType<typeof recoverOrdinaryUserWithTemporaryPassword>>;
+    try {
+      recovery = await recoverOrdinaryUserWithTemporaryPassword({
+        userId: id,
+        requestedBy: currentUserId,
+        temporaryPassword,
+        audit: getAuditRequestContext(req),
+      });
+    } catch (error) {
+      if (error instanceof TemporaryPasswordRecoveryError) {
+        if (error.code === "TARGET_NOT_FOUND") {
+          throw createApiError.notFound(error.message, { userId: error.userId });
+        }
+        throw createApiError.badRequest(error.message);
+      }
+      throw error;
+    }
+    const { now } = recovery;
+
+    recordAuditEventMetric(AuditAction.ADMIN_FORCE_PASSWORD_RESET, "user");
+
+    res.json({
+      success: true,
+      data: {
+        userId: id,
+        passwordResetRequired: true,
+        requestedAt: now,
+        requestedBy: currentUserId,
+        sessionsRevoked: recovery.sessionsRevoked,
+        oauthTokensRevoked: recovery.oauthTokensRevoked,
+        oauthConsentsRevoked: recovery.oauthConsentsRevoked,
+        apiTokensRevoked: recovery.apiTokensRevoked,
+      },
+      timestamp: now,
+    });
+  }),
+);
 
 /**
  * POST /api/admin/users/:id/force-password-reset

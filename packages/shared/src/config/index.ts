@@ -42,8 +42,11 @@ export {
   getTelegramApiTimeout,
   // Email
   getBrevoApiKey,
+  getSmtpConfig,
+  getEmailDeliveryStatus,
   getEmailFrom,
   getEmailFromName,
+  isTestRecipientSuppressionEnabled,
   // Server Ports
   getWebBackendPort,
   getMcpPort,
@@ -75,11 +78,18 @@ export {
   validateEnvConfig,
 } from "./env.js";
 
-export type { DeploymentMode } from "./env.js";
+export type {
+  DeploymentMode,
+  EmailDeliveryState,
+  EmailDeliveryStatus,
+  EmailProviderName,
+  SmtpConfig,
+} from "./env.js";
 export {
   DEPLOYMENT_MODES,
   DEFAULT_DEPLOYMENT_MODE,
   evaluateUnsetModeSafeguard,
+  evaluateEmailStartupRequirement,
   UNSET_MODE_PUBLIC_HOST_MESSAGE,
 } from "./env.js";
 

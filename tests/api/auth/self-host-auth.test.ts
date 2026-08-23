@@ -10,7 +10,7 @@
 import { describe, test, expect, beforeAll, afterEach } from "@jest/globals";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getTestBaseUrl, getAdminCredentials } from "../../utils/test-config.js";
-import { dockerLogsSafe, execSqliteInDocker } from "../../utils/docker-command.js";
+import { execSqliteInDocker } from "../../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
@@ -49,6 +49,19 @@ async function expectAuditActor(
   );
 }
 
+function countVerificationRowsFor(...targets: string[]): string {
+  const clauses = targets.flatMap((target) => {
+    const escaped = target.replace(/'/g, "''");
+    return [`instr(identifier, '${escaped}') > 0`, `instr(value, '${escaped}') > 0`];
+  });
+  return execSqliteInDocker(`SELECT COUNT(*) FROM verification WHERE ${clauses.join(" OR ")}`);
+}
+
+function countEmailLogsFor(userId: string): string {
+  const escaped = userId.replace(/'/g, "''");
+  return execSqliteInDocker(`SELECT COUNT(*) FROM emailLog WHERE userId = '${escaped}'`);
+}
+
 describe("deployment-mode auth behavior", () => {
   const createdUserIds = new Set<string>();
   const createdTokenIds = new Set<string>();
@@ -56,8 +69,15 @@ describe("deployment-mode auth behavior", () => {
   beforeAll(async () => {
     const response = await fetch(`${BASE_URL}/api/features`);
     expect(response.status).toBe(200);
-    expect((await response.json()) as { data: { deploymentMode: string } }).toMatchObject({
-      data: { deploymentMode: "self-host" },
+    expect(
+      (await response.json()) as {
+        data: { deploymentMode: string; emailDelivery: { state: string; available: boolean } };
+      },
+    ).toMatchObject({
+      data: {
+        deploymentMode: "self-host",
+        emailDelivery: { state: "unavailable", available: false },
+      },
     });
   });
 
@@ -374,6 +394,19 @@ describe("deployment-mode auth behavior", () => {
     });
     expect(productAfter.status).toBe(200);
 
+    const profileVerificationRowsBefore = countVerificationRowsFor(email, userId);
+    const profileEmailLogsBefore = countEmailLogsFor(userId);
+    const profileResendWithoutDelivery = await fetch(`${BASE_URL}/api/user/resend-verification`, {
+      method: "POST",
+      headers: { Cookie: userCookie },
+    });
+    expect(profileResendWithoutDelivery.status).toBe(400);
+    expect(await profileResendWithoutDelivery.json()).toMatchObject({
+      error: { details: { code: "EMAIL_DELIVERY_UNAVAILABLE" } },
+    });
+    expect(countVerificationRowsFor(email, userId)).toBe(profileVerificationRowsBefore);
+    expect(countEmailLogsFor(userId)).toBe(profileEmailLogsBefore);
+
     const updateAfter = await fetch(`${BASE_URL}/api/auth/update-user`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: userCookie, Origin: BASE_URL },
@@ -442,7 +475,7 @@ describe("deployment-mode auth behavior", () => {
     await expectAuditActor(adminCookie, "admin:block_user", userId, adminId);
   });
 
-  test("should allow pending sign-out while admin email actions stay independent", async () => {
+  test("should expose unavailable email honestly while keeping manual admin actions independent", async () => {
     const email = `pending-logout-${Date.now()}@example.com`;
     const signup = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
       method: "POST",
@@ -460,80 +493,72 @@ describe("deployment-mode auth behavior", () => {
     createdUserIds.add(userId);
 
     const adminCookie = await signInAdmin();
+    const unknownResetEmail = `unknown-${Date.now()}@example.com`;
+    const verificationRowsBefore = countVerificationRowsFor(email, userId, unknownResetEmail);
+    const emailLogsBefore = countEmailLogsFor(userId);
     const sendVerification = await fetch(
       `${BASE_URL}/api/admin/users/${userId}/send-verification`,
       { method: "POST", headers: { Cookie: adminCookie } },
     );
-    expect(sendVerification.status).toBe(200);
-    expect(await sendVerification.json()).toMatchObject({ data: { emailSent: true } });
+    expect(sendVerification.status).toBe(400);
+    expect(await sendVerification.json()).toMatchObject({
+      error: {
+        details: {
+          code: "EMAIL_DELIVERY_UNAVAILABLE",
+          delivery: { state: "unavailable", available: false },
+        },
+      },
+    });
     const adminStatus = await fetch(`${BASE_URL}/api/user/me`, {
       headers: { Cookie: adminCookie },
     });
     const adminId = ((await adminStatus.json()) as { data: { id: string } }).data.id;
-    await expectAuditActor(adminCookie, "admin:send_verification", userId, adminId);
-
-    const verificationLog = await dockerLogsSafe(
-      `grep -F '"to":"${email}"' | grep -F '/api/auth/verify-email?token=' | tail -n 1`,
-    );
-    const verificationUrl = verificationLog.match(
-      /https?:\/\/[^"\s]+\/api\/auth\/verify-email\?token=[^"\s]+/,
-    )?.[0];
-    expect(verificationUrl).toBeTruthy();
-    const verifyFromEmail = await fetch(verificationUrl!, {
-      headers: { Cookie: userCookie },
-      redirect: "manual",
-    });
-    expect(verifyFromEmail.status).toBe(302);
-
-    const verifiedFromLinkDetail = await fetch(`${BASE_URL}/api/admin/users/${userId}`, {
-      headers: { Cookie: adminCookie },
-    });
-    expect(verifiedFromLinkDetail.status).toBe(200);
-    expect(await verifiedFromLinkDetail.json()).toMatchObject({
-      data: { user: { approvedAt: null, emailVerified: true } },
-    });
 
     const sendReset = await fetch(`${BASE_URL}/api/admin/users/${userId}/send-reset`, {
       method: "POST",
       headers: { Cookie: adminCookie },
     });
-    expect(sendReset.status).toBe(200);
-    expect(await sendReset.json()).toMatchObject({ data: { emailSent: true } });
-    await expectAuditActor(adminCookie, "admin:send_reset", userId, adminId);
-
-    const resetLog = await dockerLogsSafe(
-      `grep -F '"to":"${email}"' | grep -F '/api/auth/reset-password/' | tail -n 1`,
-    );
-    const resetToken = resetLog.match(/\/api\/auth\/reset-password\/([^?"\s]+)/)?.[1];
-    expect(resetToken).toBeTruthy();
-    expect(
-      execSqliteInDocker(
-        `SELECT value FROM verification WHERE identifier = 'reset-password:${resetToken}'`,
-      ),
-    ).toBe(userId);
-
-    const replacementPassword = "replacement-password-123";
-    const resetPassword = await fetch(`${BASE_URL}/api/auth/reset-password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: userCookie, Origin: BASE_URL },
-      body: JSON.stringify({ token: resetToken, newPassword: replacementPassword }),
+    expect(sendReset.status).toBe(400);
+    expect(await sendReset.json()).toMatchObject({
+      error: { details: { code: "EMAIL_DELIVERY_UNAVAILABLE" } },
     });
-    expect(resetPassword.status).toBe(200);
 
-    const pendingSignIn = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
+    const forgotPassword = await fetch(`${BASE_URL}/api/auth/forget-password`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: userCookie, Origin: BASE_URL },
-      body: JSON.stringify({ email, password: replacementPassword }),
+      headers: { "Content-Type": "application/json", Origin: BASE_URL },
+      body: JSON.stringify({ email, redirectTo: `${BASE_URL}/reset-password` }),
     });
-    expect(pendingSignIn.status).toBe(200);
+    expect(forgotPassword.status).toBe(400);
+    expect(await forgotPassword.json()).toMatchObject({ code: "EMAIL_DELIVERY_UNAVAILABLE" });
+
+    const publicReset = await fetch(`${BASE_URL}/api/auth/request-password-reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: BASE_URL },
+      body: JSON.stringify({ email: unknownResetEmail }),
+    });
+    expect(publicReset.status).toBe(400);
+    expect(await publicReset.json()).toMatchObject({ code: "EMAIL_DELIVERY_UNAVAILABLE" });
+
+    const directVerification = await fetch(`${BASE_URL}/api/auth/send-verification-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: BASE_URL },
+      body: JSON.stringify({ email, callbackURL: `${BASE_URL}/app` }),
+    });
+    expect(directVerification.status).toBe(400);
+    expect(await directVerification.json()).toMatchObject({
+      code: "EMAIL_DELIVERY_UNAVAILABLE",
+    });
+
+    expect(countVerificationRowsFor(email, userId, unknownResetEmail)).toBe(verificationRowsBefore);
+    expect(countEmailLogsFor(userId)).toBe(emailLogsBefore);
+
     const signout = await fetch(`${BASE_URL}/api/auth/sign-out`, {
       method: "POST",
-      headers: { Cookie: cookieFrom(pendingSignIn), Origin: BASE_URL },
+      headers: { Cookie: userCookie, Origin: BASE_URL },
     });
     expect(signout.status).toBe(200);
 
-    // The separate administrator mutation remains idempotent after verification
-    // through the signed Better Auth link.
+    // Manual administrator mutations do not depend on an email provider.
     const verifyEmail = await fetch(`${BASE_URL}/api/admin/users/${userId}/verify-email`, {
       method: "POST",
       headers: { Cookie: adminCookie },

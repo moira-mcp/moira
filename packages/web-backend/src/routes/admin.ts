@@ -6,7 +6,6 @@
 import { Router, Request, Response } from "express";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { requireAdmin } from "../middleware/admin-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { auth } from "../auth.js";
 import {
@@ -25,13 +24,13 @@ import {
   MCP_TEXT_KEYS,
   MCP_AGENT_CATEGORY,
   MCP_MODEL_CATEGORY,
+  getSqliteInstance,
+  getWorkflowReconciliationStatusSummary,
 } from "@mcp-moira/shared";
+import * as sharedEmail from "@mcp-moira/shared";
 
 const router = Router();
 const repository = new DatabaseRepository();
-
-// All admin routes protected by requireAdmin middleware
-router.use(requireAdmin);
 
 /**
  * GET /api/admin/settings/definitions - List all setting definitions (including adminOnly)
@@ -548,7 +547,10 @@ router.post(
     const { id } = req.params;
 
     if (!isEmailConfigured()) {
-      throw createApiError.badRequest("Email service not configured");
+      throw createApiError.badRequest("Email delivery is unavailable", {
+        code: "EMAIL_DELIVERY_UNAVAILABLE",
+        delivery: sharedEmail.getEmailDeliveryStatus(),
+      });
     }
 
     const { user, getDatabase } = await import("@mcp-moira/shared");
@@ -578,9 +580,22 @@ router.post(
       resourceId: id,
     });
 
+    const suppressed = sharedEmail.shouldSuppressTestRecipient(userData.email);
+
     res.json({
       success: true,
-      data: { id, emailSent: true },
+      data: {
+        id,
+        emailSent: !suppressed,
+        delivery: suppressed
+          ? {
+              state: "test",
+              provider: "test",
+              available: false,
+              reason: "Recipient was routed to the explicitly enabled test sink",
+            }
+          : sharedEmail.getEmailDeliveryStatus(),
+      },
       timestamp: new Date().toISOString(),
     });
   }),
@@ -595,7 +610,10 @@ router.post(
     const { id } = req.params;
 
     if (!isEmailConfigured()) {
-      throw createApiError.badRequest("Email service not configured");
+      throw createApiError.badRequest("Email delivery is unavailable", {
+        code: "EMAIL_DELIVERY_UNAVAILABLE",
+        delivery: sharedEmail.getEmailDeliveryStatus(),
+      });
     }
 
     const { user, getDatabase } = await import("@mcp-moira/shared");
@@ -625,9 +643,22 @@ router.post(
       resourceId: id,
     });
 
+    const suppressed = sharedEmail.shouldSuppressTestRecipient(userData.email);
+
     res.json({
       success: true,
-      data: { id, emailSent: true },
+      data: {
+        id,
+        emailSent: !suppressed,
+        delivery: suppressed
+          ? {
+              state: "test",
+              provider: "test",
+              available: false,
+              reason: "Recipient was routed to the explicitly enabled test sink",
+            }
+          : sharedEmail.getEmailDeliveryStatus(),
+      },
       timestamp: new Date().toISOString(),
     });
   }),
@@ -703,31 +734,59 @@ router.get(
   }),
 );
 
+async function getAdminSystemStatus() {
+  const fs = await import("fs/promises");
+  const definitions = await repository.getSettingDefinitions();
+  const workflowReconciliation = getWorkflowReconciliationStatusSummary(getSqliteInstance());
+  const dbPath = getDbPath();
+  let databaseSize = 0;
+  try {
+    const stats = await fs.stat(dbPath);
+    databaseSize = stats.size;
+  } catch {
+    // A missing database file is reported as zero bytes, matching the existing contract.
+  }
+
+  return {
+    totalDefinitions: definitions.length,
+    systemHealth: {
+      backendStatus: workflowReconciliation.status === "ok" ? "healthy" : "degraded",
+      databaseSize,
+      workflowReconciliation,
+    },
+  };
+}
+
 /**
- * GET /api/admin/stats - System statistics
+ * GET /api/admin/system-status - Deployment-neutral system status
+ */
+router.get(
+  "/system-status",
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json({
+      success: true,
+      data: await getAdminSystemStatus(),
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+/**
+ * GET /api/admin/stats - Installation-wide workflow and execution statistics
+ *
+ * The server mount protects this handler with adminAnalytics before the
+ * repository reads below can run.
  */
 router.get(
   "/stats",
-  asyncHandler(async (req: Request, res: Response) => {
-    const fs = await import("fs/promises");
-
+  asyncHandler(async (_req: Request, res: Response) => {
     // Get counts from repository
     const workflows = await repository.listWorkflows("system-admin"); // Admin sees all
     const executions = await repository.listExecutions();
-    const definitions = await repository.getSettingDefinitions();
+    const systemStatus = await getAdminSystemStatus();
 
     // Count active executions (Issue #386: only "running" status for active)
     const activeExecutions = executions.filter((e) => e.status === "running").length;
-
-    // System health indicators
-    const dbPath = getDbPath();
-    let databaseSize = 0;
-    try {
-      const stats = await fs.stat(dbPath);
-      databaseSize = stats.size;
-    } catch (err) {
-      // DB file not found or error
-    }
 
     // Recent activity (last 10 executions)
     const recentActivity = executions
@@ -746,12 +805,8 @@ router.get(
       data: {
         totalWorkflows: workflows.length,
         totalExecutions: executions.length,
-        totalDefinitions: definitions.length,
+        ...systemStatus,
         activeExecutions,
-        systemHealth: {
-          backendStatus: "healthy",
-          databaseSize: databaseSize,
-        },
         recentActivity,
       },
       timestamp: new Date().toISOString(),

@@ -10,8 +10,8 @@
  * preserving the strict hosted behavior.
  *
  * Persistence lives in `<dirname(DB_PATH)>/.secrets.env` (the data dir is a
- * durable bind-mount), NOT in `.env` (which is baked into the image at build
- * time and read-only at runtime).
+ * durable bind-mount), NOT in the public `.env.example` defaults copied into
+ * the image or in an operator-supplied runtime environment.
  *
  * This module is deliberately dependency-light (only node builtins + dotenv)
  * and reads `process.env` directly so it can run BEFORE the config singleton
@@ -37,13 +37,11 @@ const DB_PATH_DEFAULT = "./data/moira.db";
 const SECRETS_FILE_NAME = ".secrets.env";
 
 /**
- * Build-time placeholder values baked into the public image's env file
- * (`.env.selfhost` → `.env`) so the image BUILD doesn't fail, but which are NOT
- * real secrets. They are deliberately non-empty, so at runtime they must be
- * treated as "absent" — otherwise the auto-generated real secret is never
- * written over them and a fresh self-host install boots with (or rejects) the
- * public placeholder. Keep in sync with `config/.env.selfhost` and the
- * weak-key check in `env.ts`.
+ * Legacy public-image placeholder values. Current images copy `.env.example`
+ * with empty secrets, but upgrades can retain either placeholder in the
+ * process environment. Treat both as absent so first-start bootstrap replaces
+ * them with durable generated secrets. Keep these values in sync with the
+ * weak-key check in `env.ts` while compatibility is required.
  */
 const BUILD_PLACEHOLDERS: Record<string, string> = {
   BETTER_AUTH_SECRET: "public-image-build-placeholder-not-used-at-runtime",

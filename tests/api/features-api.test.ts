@@ -5,8 +5,8 @@
  * no auth required, the {success, data, timestamp} envelope, a valid
  * deploymentMode, and a boolean for every gated feature flag.
  *
- * Runs against the Docker container (DEPLOYMENT_MODE=saas in the test env), so
- * this asserts the response SHAPE, not mode-specific values (mode-specific UI
+ * Runs against the configured Docker target, so this asserts the response
+ * SHAPE, not mode-specific values (mode-specific UI
  * behavior is covered by tests/e2e/feature-mode-ui.spec.ts and the resolver
  * logic by tests/unit/shared/feature-resolver.test.ts).
  */
@@ -25,6 +25,9 @@ const EXPECTED_FEATURES = [
   "betaNotices",
   "multiUserAdmin",
   "userManagement",
+  "adminAnalytics",
+  "adminOperations",
+  "operationsDevelopment",
   "socialLogin",
 ] as const;
 
@@ -34,6 +37,12 @@ interface FeaturesResponse {
     deploymentMode: "self-host" | "saas";
     features: Record<string, boolean>;
     mcpUrl: string;
+    emailDelivery: {
+      state: "real" | "test" | "unavailable" | "configuration-error";
+      provider: "smtp" | "brevo" | "test" | null;
+      available: boolean;
+      reason: string | null;
+    };
   };
   timestamp: string;
 }
@@ -65,6 +74,18 @@ describe("GET /api/features", () => {
     for (const feature of EXPECTED_FEATURES) {
       expect(typeof body.data.features[feature]).toBe("boolean");
     }
+  });
+
+  test("reports delivery capability without exposing provider credentials", async () => {
+    const res = await fetch(`${BASE_URL}/api/features`);
+    const body = (await res.json()) as FeaturesResponse;
+
+    expect(["real", "test", "unavailable", "configuration-error"]).toContain(
+      body.data.emailDelivery.state,
+    );
+    expect(typeof body.data.emailDelivery.available).toBe("boolean");
+    expect(JSON.stringify(body.data.emailDelivery)).not.toMatch(/password|api.?key|secret/i);
+    expect(body.data.emailDelivery.available).toBe(body.data.emailDelivery.state === "real");
   });
 
   test("returns a runtime-resolved MCP URL: absolute, ending in /mcp, on the request host", async () => {

@@ -11,7 +11,7 @@ export {
   clampPagination,
 } from "./list-query-builder.js";
 export type { ListQueryConfig, ListQueryParams, ListQueryResult } from "./list-query-builder.js";
-export { WorkflowRepository } from "./repositories/workflow-repository.js";
+export { WorkflowRepository, MAX_WORKFLOW_SIZE_BYTES } from "./repositories/workflow-repository.js";
 export { ExecutionRepository } from "./repositories/execution-repository.js";
 export type { ExecutionFilter, ExecutionListResult } from "./repositories/execution-repository.js";
 export { SettingsRepository } from "./repositories/settings-repository.js";
@@ -20,6 +20,26 @@ export { GlobalSettingsRepository } from "./repositories/global-settings-reposit
 export { UserRepository } from "./repositories/user-repository.js";
 export { AccountApprovalRepository } from "./repositories/account-approval-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
+export {
+  WorkflowReconciliationRepository,
+  getWorkflowReconciliationStatus,
+  getWorkflowReconciliationStatusSummary,
+  managedWorkflowStatesEqual,
+  WORKFLOW_RECONCILIATION_ERROR_CODE,
+  WORKFLOW_RECONCILIATION_STALE_ERROR_CODE,
+  WorkflowReconciliationStaleError,
+} from "./repositories/workflow-reconciliation-repository.js";
+export type {
+  ManagedWorkflowContent,
+  ManagedWorkflowState,
+  ManagedWorkflowBaselineRecord,
+  WorkflowReconciliationConflictRecord,
+  WorkflowReconciliationApplyPlan,
+  WorkflowStatePrecondition,
+  WorkflowReconciliationStatus,
+  WorkflowReconciliationStatusSummary,
+  WorkflowReconciliationConflictSummary,
+} from "./repositories/workflow-reconciliation-repository.js";
 export {
   NoteRepository,
   MAX_VERSIONS_PER_NOTE,

@@ -74,6 +74,13 @@ describe("Expression Parser", () => {
       expect(tokens[4]).toEqual({ type: "RPAREN", value: ")", position: 6 });
     });
 
+    test.each([
+      ["[]", "EMPTY_ARRAY"],
+      ["{}", "EMPTY_OBJECT"],
+    ])("should tokenize the empty collection literal %s", (source, type) => {
+      expect(new Tokenizer(source).tokenize()[0]).toMatchObject({ type, value: source });
+    });
+
     test("should throw on unexpected character", () => {
       const tokenizer = new Tokenizer("a @ b");
 
@@ -180,6 +187,16 @@ describe("Expression Parser", () => {
       expect(ast.type).toBe("AssignmentExpression");
       expect((ast as any).target).toBe("result");
       expect((ast as any).value.type).toBe("BinaryExpression");
+    });
+
+    test.each([
+      ["items = []", "EmptyArrayLiteral"],
+      ["record = {}", "EmptyObjectLiteral"],
+    ])("should parse empty collection assignment %s", (source, literalType) => {
+      expect(new Parser(new Tokenizer(source).tokenize()).parse()).toMatchObject({
+        type: "AssignmentExpression",
+        value: { type: literalType },
+      });
     });
 
     test("should throw on unexpected token at end", () => {
@@ -401,6 +418,24 @@ describe("Expression Parser", () => {
       expect(result.value).toBe(1);
       expect(result.assignments).toEqual({ iteration: 1 });
     });
+
+    test.each([
+      ["items = []", []],
+      ["record = {}", {}],
+    ])("should reset a collection with %s", (expression, expected) => {
+      const result = interpreter.evaluate(expression, {});
+
+      expect(result.value).toEqual(expected);
+      expect(result.assignments).toEqual({ [expression.split(" ")[0]]: expected });
+      expect(result.error).toBeUndefined();
+    });
+
+    test.each(["items = [1]", "record = { key: 1 }"])(
+      "should reject non-empty collection syntax: %s",
+      (expression) => {
+        expect(interpreter.evaluate(expression, {}).error).toBeDefined();
+      },
+    );
 
     test("should handle decimal arithmetic", () => {
       const result = interpreter.evaluate("price * 1.1", { price: 100 });

@@ -32,6 +32,38 @@ export const DEPLOYMENT_MODES: readonly DeploymentMode[] = ["self-host", "saas"]
 
 export const DEFAULT_DEPLOYMENT_MODE: DeploymentMode = "self-host";
 
+export type EmailProviderName = "smtp" | "brevo" | "test";
+export type EmailDeliveryState = "real" | "test" | "unavailable" | "configuration-error";
+
+export interface EmailDeliveryStatus {
+  state: EmailDeliveryState;
+  provider: EmailProviderName | null;
+  available: boolean;
+  reason: string | null;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  requireTls: boolean;
+  user?: string;
+  password?: string;
+}
+
+export function evaluateEmailStartupRequirement(
+  deploymentMode: DeploymentMode,
+  status: EmailDeliveryStatus,
+): string | null {
+  if (status.state === "configuration-error") {
+    return status.reason || "Invalid email configuration";
+  }
+  if (deploymentMode === "saas" && status.state !== "real") {
+    return "DEPLOYMENT_MODE=saas requires a real SMTP or Brevo email provider";
+  }
+  return null;
+}
+
 /** Message shown when DEPLOYMENT_MODE is unset on a public host. */
 export const UNSET_MODE_PUBLIC_HOST_MESSAGE =
   "DEPLOYMENT_MODE is unset on a non-localhost host. It defaults to 'self-host', which " +
@@ -169,6 +201,130 @@ class ConfigSingleton {
     return process.env.BREVO_API_KEY;
   }
 
+  getSmtpConfig(): SmtpConfig | undefined {
+    this.ensureInitialized();
+    const status = this.getEmailDeliveryStatus();
+    if (status.provider !== "smtp" || status.state !== "real") return undefined;
+    const user = process.env.SMTP_USER?.trim();
+    return {
+      host: process.env.SMTP_HOST!.trim(),
+      port: Number(process.env.SMTP_PORT || "587"),
+      secure: process.env.SMTP_SECURE === "true",
+      requireTls: process.env.SMTP_REQUIRE_TLS === "true",
+      ...(user ? { user, password: process.env.SMTP_PASSWORD! } : {}),
+    };
+  }
+
+  getEmailDeliveryStatus(): EmailDeliveryStatus {
+    this.ensureInitialized();
+    const requested = process.env.EMAIL_PROVIDER?.trim().toLowerCase();
+    const smtpHost = process.env.SMTP_HOST?.trim();
+    const smtpUser = process.env.SMTP_USER?.trim();
+    const smtpPassword = process.env.SMTP_PASSWORD;
+    const smtpPort = process.env.SMTP_PORT;
+    const smtpSecure = process.env.SMTP_SECURE;
+    const smtpRequireTls = process.env.SMTP_REQUIRE_TLS;
+    const brevoKey = process.env.BREVO_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim();
+
+    if (requested && !["smtp", "brevo", "test", "none", "auto"].includes(requested)) {
+      return {
+        state: "configuration-error",
+        provider: null,
+        available: false,
+        reason: `Invalid EMAIL_PROVIDER "${requested}". Allowed values: smtp, brevo, test, none, auto`,
+      };
+    }
+
+    const provider = requested && requested !== "auto" ? requested : undefined;
+    if (provider === "none") {
+      return {
+        state: "unavailable",
+        provider: null,
+        available: false,
+        reason: "Email delivery is disabled",
+      };
+    }
+    if (provider === "test") {
+      return {
+        state: "test",
+        provider: "test",
+        available: false,
+        reason: "Messages are written to the test log and are not delivered",
+      };
+    }
+
+    const smtpMentioned = !!(
+      smtpHost ||
+      smtpUser ||
+      smtpPassword ||
+      smtpPort ||
+      smtpSecure ||
+      smtpRequireTls
+    );
+    const smtpMissing: string[] = [];
+    if (!smtpHost) smtpMissing.push("SMTP_HOST");
+    if (!from) smtpMissing.push("EMAIL_FROM");
+    if (!!smtpUser !== !!smtpPassword) {
+      smtpMissing.push("both SMTP_USER and SMTP_PASSWORD, or neither");
+    }
+    const port = Number(smtpPort || "587");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      smtpMissing.push("a valid SMTP_PORT");
+    }
+    for (const [name, value] of [
+      ["SMTP_SECURE", smtpSecure],
+      ["SMTP_REQUIRE_TLS", smtpRequireTls],
+    ] as const) {
+      if (value !== undefined && value !== "true" && value !== "false") {
+        smtpMissing.push(`${name}=true or false`);
+      }
+    }
+    const smtpComplete = smtpMentioned && smtpMissing.length === 0;
+    const brevoComplete = !!(brevoKey && from);
+    const selected =
+      provider ??
+      (smtpComplete
+        ? "smtp"
+        : brevoComplete
+          ? "brevo"
+          : smtpMentioned
+            ? "smtp"
+            : brevoKey
+              ? "brevo"
+              : undefined);
+    if (!selected) {
+      return {
+        state: "unavailable",
+        provider: null,
+        available: false,
+        reason: "No email provider is configured",
+      };
+    }
+
+    if (selected === "brevo") {
+      if (!brevoKey || !from) {
+        return {
+          state: "configuration-error",
+          provider: "brevo",
+          available: false,
+          reason: `Brevo requires ${[!brevoKey && "BREVO_API_KEY", !from && "EMAIL_FROM"].filter(Boolean).join(" and ")}`,
+        };
+      }
+      return { state: "real", provider: "brevo", available: true, reason: null };
+    }
+
+    if (smtpMissing.length > 0) {
+      return {
+        state: "configuration-error",
+        provider: "smtp",
+        available: false,
+        reason: `SMTP requires ${smtpMissing.join(", ")}`,
+      };
+    }
+    return { state: "real", provider: "smtp", available: true, reason: null };
+  }
+
   getEmailFrom(): string {
     this.ensureInitialized();
     const email = process.env.EMAIL_FROM;
@@ -189,6 +345,11 @@ class ConfigSingleton {
   getEmailFromName(): string {
     this.ensureInitialized();
     return process.env.EMAIL_FROM_NAME || "MCP Moira";
+  }
+
+  isTestRecipientSuppressionEnabled(): boolean {
+    this.ensureInitialized();
+    return process.env.EMAIL_TEST_RECIPIENTS === "true";
   }
 
   // ============================================================================
@@ -371,8 +532,16 @@ class ConfigSingleton {
     if (!process.env.MOIRA_HOST) errors.push("MOIRA_HOST");
     if (!process.env.BETTER_AUTH_SECRET) errors.push("BETTER_AUTH_SECRET");
     if (!process.env.DB_PATH) warnings.push("DB_PATH not set, using default: ./data/moira.db");
-    if (!process.env.BREVO_API_KEY)
-      warnings.push("BREVO_API_KEY not set - email service will use test mode");
+    const emailStatus = this.getEmailDeliveryStatus();
+    const emailStartupError = evaluateEmailStartupRequirement(
+      this.getDeploymentMode(),
+      emailStatus,
+    );
+    if (emailStartupError) {
+      errors.push(emailStartupError);
+    } else if (emailStatus.state !== "real") {
+      warnings.push(emailStatus.reason || "Email delivery is unavailable");
+    }
     if (!process.env.GITHUB_CLIENT_ID)
       warnings.push("GitHub OAuth not configured - social login disabled");
     if (!process.env.TELEGRAM_ENCRYPTION_KEY) {
@@ -409,6 +578,11 @@ class ConfigSingleton {
 
     // Throw if required missing
     if (errors.length > 0) {
+      // Configuration can be evaluated during static module initialization,
+      // before an entry point installs its own startup catch. Winston records
+      // such an uncaught exception but is configured not to force an exit, so
+      // preserve a fatal process status even on that import-time path.
+      process.exitCode = 1;
       throw new Error(`Missing required environment variables: ${errors.join(", ")}`);
     }
 
@@ -441,7 +615,7 @@ class ConfigSingleton {
       logLevel: this.getLogLevelEnv(),
       webBackendPort: this.getWebBackendPort(),
       mcpPort: this.getMcpPort(),
-      emailConfigured: !!this.getBrevoApiKey(),
+      emailDelivery: this.getEmailDeliveryStatus(),
       githubOAuthConfigured: !!this.getGitHubClientId(),
       telegramEncryptionConfigured: !!this.getTelegramEncryptionKey(),
     });
@@ -485,11 +659,20 @@ export function getTelegramApiTimeout(): number {
 export function getBrevoApiKey(): string | undefined {
   return config.getBrevoApiKey();
 }
+export function getSmtpConfig(): SmtpConfig | undefined {
+  return config.getSmtpConfig();
+}
+export function getEmailDeliveryStatus(): EmailDeliveryStatus {
+  return config.getEmailDeliveryStatus();
+}
 export function getEmailFrom(): string {
   return config.getEmailFrom();
 }
 export function getEmailFromName(): string {
   return config.getEmailFromName();
+}
+export function isTestRecipientSuppressionEnabled(): boolean {
+  return config.isTestRecipientSuppressionEnabled();
 }
 export function getWebBackendPort(): number {
   return config.getWebBackendPort();

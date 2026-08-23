@@ -208,7 +208,7 @@ export function useBackendHealth() {
     try {
       const health = await apiClient.healthCheck();
       setHealthData(health);
-      setIsHealthy(health.status === "ok");
+      setIsHealthy(isBackendOperable(health.status));
     } catch (err) {
       setIsHealthy(false);
       const message = ApiErrorUtils.getUserFriendlyMessage(err);
@@ -240,6 +240,10 @@ export function useBackendHealth() {
     error,
     checkHealth,
   };
+}
+
+export function isBackendOperable(status: "ok" | "degraded" | "error"): boolean {
+  return status === "ok" || status === "degraded";
 }
 
 /**

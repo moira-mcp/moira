@@ -357,6 +357,36 @@ All client setup pages (landing QuickStart, docs quickstart, docs MCP clients) i
 
 **UI management:** Settings page (`/app/settings`) → API Tokens section. Users can create tokens with name and expiration, view token list with status badges, copy token value on creation (shown once), and revoke tokens with confirmation dialog.
 
+## Email Delivery
+
+`GET /api/features` exposes the effective `emailDelivery` capability without
+credentials. Its state is `real`, `test`, `unavailable`, or
+`configuration-error`. Only `real` means that password-reset and verification
+messages can reach users.
+
+Self-host deployments can configure generic SMTP or Brevo as described in
+`docs/deployment/ENVIRONMENT_VARIABLES.md`. Without a real provider, startup
+continues, but forgot-password, resend-verification, and administrator email
+actions are unavailable in both the API and UI. SaaS startup fails unless a real
+provider is configured. The explicit `test` provider and test-recipient sink log
+messages for automated testing and never report them as sent.
+
+### Recover an Ordinary User Without Email
+
+When a self-host instance has no real email provider, an administrator can open
+the ordinary user's detail page and choose **Set temporary password**. The
+administrator must transmit that password through a separate secure channel.
+
+`POST /api/admin/users/:id/temporary-password` accepts
+`{ "temporaryPassword": "..." }` for a non-admin target. It replaces the
+credential, revokes all sessions, persistent API tokens, OAuth access tokens,
+OAuth consents, and linked-provider tokens, and sets `passwordResetRequired`.
+The next login succeeds only with the temporary password and redirects the user
+to `/app/force-password-reset`, where the user must choose a new password. The
+audit event records revocation counts and never records the temporary password.
+Administrator accounts use the command-line recovery procedure in **Recover
+Administrator Access** instead.
+
 ## Email Verification
 
 SaaS users must verify their email address before sensitive access. Self-host
@@ -391,7 +421,7 @@ export const requireVerifiedAuth = async (req, res, next) => {
 };
 ```
 
-**User Flow:**
+**SaaS User Flow:**
 
 1. User registers at /app/register
 2. Session created immediately (UX: can see "verify email" page)
@@ -419,7 +449,8 @@ export const requireVerifiedAuth = async (req, res, next) => {
 
 **Testing Email Verification:**
 
-- TestEmailProvider logs verification URLs to backend logs
+- Set `EMAIL_PROVIDER=test`; `TestEmailProvider` logs verification URLs to
+  backend logs and the public delivery capability remains `test`, not `real`
 - Check: `docker exec <container> cat /var/log/supervisor/backend-api.log | grep "Email URLs"`
 
 ## Blocked Users
@@ -491,14 +522,15 @@ export const setAuthErrorHandler = (handler: AuthErrorHandler | null): void => {
 
 ## Forced Password Reset
 
-When admin forces password reset for a user:
+When an administrator requires a user to change an existing or newly assigned
+temporary password:
 
 **User Flow:**
 
 1. User logs in normally
-2. Middleware detects `forcePasswordReset` flag
-3. Redirects to /auth/forced-password-reset
-4. User enters new password
+2. Middleware detects the `passwordResetRequired` flag
+3. Redirects to `/app/force-password-reset`
+4. User enters the current or temporary password and a new password
 5. Auto-login with new credentials via `authClient.signIn.email()`
 6. Redirects to /app/workflows
 
@@ -506,6 +538,9 @@ When admin forces password reset for a user:
 
 **Admin Actions:**
 
+- Set temporary password: Replaces the credential, sets the reset flag, and
+  revokes sessions, persistent API tokens, OAuth tokens, OAuth consents, and
+  linked-provider tokens
 - Block user: Sets flag + deletes sessions + deletes OAuth tokens + deletes consents
 - Revoke sessions: Deletes sessions + deletes OAuth tokens + deletes consents
 - All revocations audited with counts

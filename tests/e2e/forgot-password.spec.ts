@@ -12,6 +12,19 @@ const BASE_URL = getTestBaseUrl();
 test.describe("Forgot Password Flow E2E", () => {
   const testPassword = "TestPassword123!";
 
+  test.beforeAll(async ({ request }) => {
+    const response = await request.get(`${BASE_URL}/api/features`);
+    expect(response.ok()).toBe(true);
+    const body = (await response.json()) as {
+      data?: { emailDelivery?: { state?: string; available?: boolean } };
+    };
+    if (body.data?.emailDelivery?.state !== "real" || !body.data.emailDelivery.available) {
+      throw new Error(
+        "Forgot Password Flow E2E requires a real email-delivery capability with reserved test-recipient suppression",
+      );
+    }
+  });
+
   test("shows forgot password link on login page", async ({ page }) => {
     await page.goto(`${BASE_URL}/login`);
     await page.waitForLoadState("domcontentloaded");

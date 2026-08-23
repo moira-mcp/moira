@@ -11,6 +11,7 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 
 - `list` - List available workflow templates
 - `manage` - Create, edit, or get workflow details
+- `reconciliation` - Inspect or resolve bundled-workflow reconciliation errors
 - `start` - Start new workflow execution
 - `step` - Advance workflow with agent input
 
@@ -126,6 +127,70 @@ step({
 ```
 
 The updated note appears in execution lists (`session({ action: "executions" })`).
+
+---
+
+## reconciliation
+
+Inspects and resolves conflicts between the previous bundled workflow, the current database workflow, and the incoming image workflow. While a conflict is unresolved, Moira also adds its graph-free summary and Workflow Management Flow (WMF) recovery instruction to MCP initialization instructions and tool responses.
+
+### Action: status
+
+Returns the current reconciliation state.
+
+**Parameters:**
+
+- `action`: `"status"` (required)
+
+**Authorization and disclosure:**
+
+- Every authenticated user receives the error code, owner/slug, classification, candidate references, recovery location, and WMF instruction.
+- Only administrators receive candidate lifecycle and graph contents in the status response.
+
+### Action: get
+
+Dereferences one candidate for semantic inspection in WMF.
+
+**Parameters:**
+
+- `action`: `"get"` (required)
+- `reference` (string, required) - A `#previous`, `#current`, or `#incoming` reference returned by `status`
+
+**Authorization:** Administrator only.
+
+### Action: resolve
+
+Accepts a candidate or a semantically merged current graph, updates the database and managed baseline atomically, records an audit event, and clears the error only after the state is persisted.
+
+**Parameters:**
+
+- `action`: `"resolve"` (required)
+- `reference` (string, required) - Conflict identity in `owner/slug` form
+- `selection` (string, required) - `"current"`, `"incoming"`, or `"previous"`
+- `mergedGraph` (object, optional) - Semantically merged workflow graph; requires `selection: "current"`
+- `visibility` (`"public" | "private"`, required with `mergedGraph`) - Visibility of the merged workflow
+
+**Authorization:** Administrator only. Every graph written by resolution and the incoming state accepted as the new managed baseline pass the normal workflow validator and size limit before any state is changed.
+
+Resolution also checks the live workflow against the retained current candidate in the same transaction. If a user changed or deleted the workflow after the conflict was captured, the tool returns `MANAGED_WORKFLOW_RECONCILIATION_STALE` and leaves the workflow, baseline, conflict, and audit log unchanged. Run catalog reconciliation again, inspect the refreshed candidates, and repeat the semantic WMF merge.
+
+**Example:**
+
+```json
+reconciliation({ action: "status" })
+→ { status: "error", code: "MANAGED_WORKFLOW_RECONCILIATION_REQUIRED", conflicts: [...] }
+
+reconciliation({
+  action: "resolve",
+  reference: "system-admin/my-workflow",
+  selection: "current",
+  mergedGraph: { metadata: {...}, nodes: [...] },
+  visibility: "private"
+})
+→ { status: "ok", code: "MANAGED_WORKFLOW_RECONCILIATION_REQUIRED", conflicts: [] }
+```
+
+Do not mechanically merge JSON. Run WMF, compare all three candidates semantically, preserve intentional user changes, and resolve only after reviewing the merged workflow.
 
 ---
 

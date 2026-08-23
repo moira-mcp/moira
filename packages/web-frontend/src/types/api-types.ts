@@ -23,6 +23,9 @@ export type FeatureFlag =
   | "betaNotices"
   | "multiUserAdmin"
   | "userManagement"
+  | "adminAnalytics"
+  | "adminOperations"
+  | "operationsDevelopment"
   | "socialLogin";
 
 export interface FeaturesResponse {
@@ -34,6 +37,12 @@ export interface FeaturesResponse {
    * URL matches the actual host/port instead of a build-time-baked value.
    */
   mcpUrl: string;
+  emailDelivery: {
+    state: "real" | "test" | "unavailable" | "configuration-error";
+    provider: "smtp" | "brevo" | "test" | null;
+    available: boolean;
+    reason: string | null;
+  };
 }
 
 export interface ApiError {
@@ -57,15 +66,57 @@ export const ApiErrorCode = {
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 
 export interface HealthCheckResponse {
-  status: "ok" | "error";
+  status: "ok" | "degraded" | "error";
   services: {
     fileSystem: boolean;
     validation: boolean;
     mcpEngine: boolean;
+    workflowReconciliation: boolean;
+  };
+  reconciliation: {
+    status: "ok" | "error";
+    code: string;
+    conflicts: unknown[];
   };
   uptime: number;
   timestamp: string;
   version: string;
+}
+
+export interface AdminSystemStatusResponse {
+  totalDefinitions: number;
+  systemHealth: {
+    backendStatus: string;
+    databaseSize: number;
+    workflowReconciliation: {
+      status: "ok" | "error";
+      code: string;
+      conflicts: Array<{
+        owner: string;
+        slug: string;
+        classification: string;
+        instruction: string;
+        candidateRefs: {
+          previous: string | null;
+          current: string;
+          incoming: string;
+        };
+      }>;
+    };
+  };
+}
+
+export interface AdminStatsResponse extends AdminSystemStatusResponse {
+  totalWorkflows: number;
+  totalExecutions: number;
+  activeExecutions: number;
+  recentActivity: Array<{
+    id: string;
+    workflowId: string;
+    status: string;
+    timestamp: number;
+    action: string;
+  }>;
 }
 
 export interface WorkflowListRequest {

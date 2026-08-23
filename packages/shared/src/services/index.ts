@@ -172,11 +172,22 @@ export {
 export {
   installCatalogEntry,
   installCatalogEntries,
-  CatalogContentMismatchError,
+  CatalogReconciliationError,
+  CatalogPreflightError,
+  formatWorkflowReconciliationNotice,
+  resolveWorkflowReconciliation,
   type EntryOutcome,
   type CatalogLoadResult,
   type CatalogLoadDeps,
 } from "./workflow-catalog-loader.js";
+
+export {
+  managedStateEquals,
+  reconcileManagedResource,
+  type ManagedResourceState,
+  type ReconciliationClassification,
+  type ReconciliationDecision,
+} from "./managed-resource-reconciler.js";
 
 export {
   LockService,

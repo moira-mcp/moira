@@ -56,7 +56,7 @@ An exception for the config module itself is configured in `.eslintrc.json` over
 **WARNINGS (a warning is logged, the app continues):**
 
 - DB_PATH - fallback: ./data/moira.db
-- BREVO_API_KEY - email will not work
+- no real email provider in self-host mode - email recovery is unavailable, but administrator-assisted recovery remains available
 - GITHUB_CLIENT_ID - OAuth will not work
 
 **TESTING/DEVELOPMENT:**
@@ -77,7 +77,7 @@ resolver.isEnabled("openRegistration"); // self-host → true, saas → true
 resolver.isEnabled("accountApproval"); // self-host → true, saas → false
 ```
 
-`Feature`: `openRegistration` | `accountApproval` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `userManagement` | `socialLogin`. Self-host opens registration behind administrator approval and exposes user management without enabling the broader multi-user admin surface. SaaS keeps its existing registration, verification, and admin behavior. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud).
+`Feature`: `openRegistration` | `accountApproval` | `emailVerificationGate` | `verificationEmailOnSignup` | `legalConsents` | `betaNotices` | `multiUserAdmin` | `userManagement` | `adminAnalytics` | `adminOperations` | `operationsDevelopment` | `socialLogin`. Self-host opens registration behind administrator approval and exposes user management without enabling broader cross-user administration, analytics, operational dashboards, or monitoring test tools. SaaS keeps its existing behavior. An unknown feature → `false` (safe default). The resolver can be swapped via `setFeatureResolver()` (cloud); the same singleton resolver controls `/api/features`, backend authorization, frontend navigation, route guards, and data prefetch.
 
 **Auth behavior by mode** (`better-auth-config.ts`, `web-backend/.../auth-middleware.ts`):
 
@@ -91,6 +91,18 @@ resolver.isEnabled("accountApproval"); // self-host → true, saas → false
 | `socialLogin`               | GitHub/Google OAuth login hidden                  | OAuth login offered (if config) |
 | `userManagement`            | enabled                                           | enabled                         |
 | `multiUserAdmin`            | disabled                                          | enabled                         |
+| `adminAnalytics`            | disabled                                          | enabled                         |
+| `adminOperations`           | disabled                                          | enabled                         |
+| `operationsDevelopment`     | disabled                                          | enabled                         |
+
+Capability checks are enforced by the server before protected route handlers. Hiding a link in
+the Web UI is only a usability effect and is not the security boundary. The operational page may
+load business-analytics widgets only when `adminAnalytics` is also enabled; disabling a capability
+therefore prevents both its DOM surface and its background requests.
+The administrator dashboard always reads deployment-neutral health and managed-workflow
+reconciliation from `GET /api/admin/system-status`. It requests installation-wide workflow and
+execution totals from `GET /api/admin/stats` only when `adminAnalytics` is enabled; the server
+enforces the same capability before those repository reads.
 
 In `self-host`, migration creates an already-approved recovery administrator and backfills existing users as approved. New registrations start pending: they can read `GET /api/user/me` and sign out, while product routes, persistent tokens, OAuth authorization and token issuance, and MCP access return `ACCOUNT_APPROVAL_REQUIRED` until an administrator calls `POST /api/admin/users/:id/approve`. Email verification remains a separate, disabled self-host gate.
 
@@ -177,7 +189,7 @@ ESLint automatically enforces that there are no direct reads of `process.env.XXX
 
 **Key characteristics**:
 
-- No `BREVO_API_KEY` - emails use TestEmailProvider
+- `EMAIL_PROVIDER=test` - emails are logged and the UI reports delivery unavailable
 - Local URLs: `http://localhost:${MOIRA_PORT}`
 - Unique ports per worktree (master=3030, dev=3031, dev2=3032, dev3=3033)
 
@@ -206,75 +218,85 @@ PLAYWRIGHT_WS_ENDPOINT=ws://192.0.2.1:3000/           # Playwright WebSocket end
 - **Location**: `/path/to/moira/.env.production`
 - **Git tracked**: NO (in .gitignore)
 - **Usage**: Production server (MOIRA_HOST domain)
-- **Used by**: passed as `ENV_FILE=.env.production` to `docker build`
+- **Used by**: supplied at container runtime, never copied into the OSS image
 
 ### `.env.production.staging` (Staging Server)
 
 - **Location**: `/path/to/moira/.env.production.staging`
 - **Git tracked**: NO (in .gitignore)
 - **Usage**: Staging server (moira.example.com)
-- **Used by**: passed as `ENV_FILE=.env.production.staging` to `docker build`
+- **Used by**: supplied at container runtime, never copied into the OSS image
 
-## Docker Build ARG: `ENV_FILE`
+## Docker build arguments
 
-```dockerfile
-ARG ENV_FILE=.env.local
-COPY ${ENV_FILE} .env
-RUN echo "✅ Using env file: ${ENV_FILE}"
-```
-
-The Dockerfile default is `ENV_FILE=.env.local` (see `config/Dockerfile`); production
-and staging builds must pass the build arg explicitly.
+`config/Dockerfile` accepts only non-secret compile-time values: `APP_BASE_PATH`,
+`MOIRA_HOST`, `CONTACT_EMAIL`, `STATIC_ARTIFACTS_DOMAIN`, `BUILD_ID`, `GIT_COMMIT`,
+and `BUILD_TIME`. The final OSS image contains the public `.env.example` defaults;
+Compose or `docker run --env-file`/`-e` supplies real runtime configuration and secrets.
 
 ### Usage
 
 **Local Docker** (via `docker-build-and-run.sh`):
 
 ```bash
-docker build --build-arg ENV_FILE=.env.local ...
+./scripts/docker-build-and-run.sh
 ```
 
 **Production deploy** (pass the build arg):
 
 ```bash
-docker build --build-arg ENV_FILE=.env.production ...
+docker build --build-arg MOIRA_HOST=moira.example.com \
+  --build-arg STATIC_ARTIFACTS_DOMAIN=static.moira.example.com ...
 ```
 
 **Staging deploy** (pass the build arg):
 
 ```bash
-docker build --build-arg ENV_FILE=.env.production.staging ...
+docker build --build-arg MOIRA_HOST=staging.moira.example.com \
+  --build-arg STATIC_ARTIFACTS_DOMAIN=static.staging.moira.example.com ...
 ```
 
 ## Email Configuration
 
-### Logic (packages/shared/src/email/index.ts)
+### Provider selection
 
-```typescript
-// 1. Check if test email pattern
-if (isTestEmail(options.to)) {
-  return TestEmailProvider; // Always log, never send
-}
+`EMAIL_PROVIDER` accepts `smtp`, `brevo`, `test`, `none`, or `auto`. If it is
+unset (equivalent to `auto`), a complete SMTP configuration takes precedence
+over `BREVO_API_KEY`; a legacy Brevo-only configuration continues to resolve to
+Brevo. A partially configured selected provider is a startup error.
+The `test` provider only writes messages to logs and is deliberately reported
+as unavailable for user-facing delivery. `DEPLOYMENT_MODE=saas` refuses startup
+unless the resolved provider is real (`smtp` or `brevo`).
 
-// 2. Check if BREVO_API_KEY exists (via config module)
-if (!getBrevoApiKey()) {
-  return TestEmailProvider; // No key -> test mode
-}
+Generic SMTP variables:
 
-// 3. Use real provider
-return BrevoProvider; // Send real emails
-```
+| Variable           | Meaning                                                 |
+| ------------------ | ------------------------------------------------------- |
+| `SMTP_HOST`        | SMTP server hostname; required for SMTP                 |
+| `SMTP_PORT`        | Port, default `587`                                     |
+| `SMTP_SECURE`      | `true` for TLS from connection start, commonly port 465 |
+| `SMTP_REQUIRE_TLS` | `true` to require STARTTLS when `SMTP_SECURE=false`     |
+| `SMTP_USER`        | Optional authentication user; requires `SMTP_PASSWORD`  |
+| `SMTP_PASSWORD`    | Optional authentication password; requires `SMTP_USER`  |
+| `EMAIL_FROM`       | Required sender address for every real provider         |
+| `EMAIL_FROM_NAME`  | Sender display name, default `MCP Moira`                |
+
+`EMAIL_TEST_RECIPIENTS=true` explicitly redirects the repository's known
+automated-test domains (`example.com`, `test.com`, `test.local`, `moira.local`,
+`load-testing-noverify.local`, and the reserved `.test` TLD) to the log-only
+provider. This switch does not change the general delivery status and must
+remain off outside controlled test environments.
 
 ### Environment-specific behavior
 
-**Local development** (`.env.local` without BREVO_API_KEY):
+**Local development** (`EMAIL_PROVIDER=test`):
 
 - All emails -> TestEmailProvider (logged, not sent)
 
-**Production** (`.env.production` with BREVO_API_KEY):
+**Production** (`EMAIL_PROVIDER=brevo` or `EMAIL_PROVIDER=smtp`):
 
-- Test email patterns -> TestEmailProvider (logged, not sent)
-- Real emails -> BrevoProvider (sent via Brevo API)
+- Messages are delivered through the selected real provider.
+- Test-address suppression applies only when `EMAIL_TEST_RECIPIENTS=true`.
 
 ## Required Variables by Environment
 
@@ -374,24 +396,24 @@ This allows parallel development without port conflicts.
 
 ### Production Server (${MOIRA_HOST})
 
-1. **Build**: build passes `ENV_FILE=.env.production`
-2. **Runtime**: Container reads copied `.env` file
+1. **Build**: non-secret public URL arguments compile the frontend and docs
+2. **Runtime**: Container receives the production env file from the deployment layer
 3. **Supervisor**: Sets `NODE_ENV=production` for all processes
-4. **Email**: BREVO_API_KEY present -> BrevoProvider for real emails
+4. **Email**: the selected real provider delivers email
 
 ### Staging Server (moira.example.com)
 
-1. **Build**: build passes `ENV_FILE=.env.production.staging` (via buildArgs)
-2. **Runtime**: Container reads copied `.env` file
+1. **Build**: non-secret staging URL arguments compile the frontend and docs
+2. **Runtime**: Container receives the staging env file from the deployment layer
 3. **Supervisor**: Sets `NODE_ENV=production`
-4. **Email**: BREVO_API_KEY present -> BrevoProvider for real emails
+4. **Email**: the selected real provider delivers email
 
 ### Local Docker
 
-1. **Build**: `docker-build-and-run.sh` passes `ENV_FILE=.env.local`
-2. **Runtime**: Container uses local `.env.local` file
-3. **Supervisor**: Sets `NODE_ENV=production` (but BREVO_API_KEY absent)
-4. **Email**: No BREVO_API_KEY -> TestEmailProvider for all emails
+1. **Build**: `docker-build-and-run.sh` passes non-secret URL values from `.env.local`
+2. **Runtime**: The development launcher supplies its configured environment
+3. **Supervisor**: Sets `NODE_ENV=production`
+4. **Email**: `EMAIL_PROVIDER=test` logs email without claiming delivery, or `none` disables it
 
 ## Load Testing
 
@@ -513,7 +535,7 @@ docker compose exec moira cat .env | head -5
 # Check logs for email activity
 docker exec <container-name> tail -f /var/log/supervisor/backend-api.log | grep Email
 
-# Expected in local: "TEST MODE: Email logged (not sent)"
-# Expected in production for test@example.com: "TEST MODE: Email logged (not sent)"
-# Expected in production for real@user.com: Brevo API call
+# EMAIL_PROVIDER=test: "TEST MODE: Email logged (not sent)"
+# Real provider + EMAIL_TEST_RECIPIENTS=true + test@example.com: logged, not sent
+# Real provider + suppression off + real@user.com: SMTP or Brevo delivery
 ```

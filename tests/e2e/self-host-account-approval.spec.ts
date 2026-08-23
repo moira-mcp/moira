@@ -17,6 +17,9 @@ test.describe("self-host account approval experience", () => {
     expect(features.data.features.accountApproval).toBe(true);
     expect(features.data.features.userManagement).toBe(true);
     expect(features.data.features.multiUserAdmin).toBe(false);
+    expect(features.data.features.adminAnalytics).toBe(false);
+    expect(features.data.features.adminOperations).toBe(false);
+    expect(features.data.features.operationsDevelopment).toBe(false);
 
     let featureAttempts = 0;
     await page.route("**/api/features", async (route) => {
@@ -290,6 +293,9 @@ test.describe("SaaS registration experience", () => {
               betaNotices: true,
               multiUserAdmin: true,
               userManagement: true,
+              adminAnalytics: true,
+              adminOperations: true,
+              operationsDevelopment: true,
               socialLogin: true,
             },
           },

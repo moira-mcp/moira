@@ -20,6 +20,8 @@ import {
   WorkflowListRequest,
   WorkflowDetailRequest,
   WorkflowValidationRequest,
+  AdminStatsResponse,
+  AdminSystemStatusResponse,
 } from "../types";
 
 // Public auth endpoints that should not trigger 401/403 interceptor redirects
@@ -909,23 +911,25 @@ export class MoiraApiClient {
   /**
    * Get admin system stats
    */
-  async getAdminStats(): Promise<{
-    totalWorkflows: number;
-    totalExecutions: number;
-    totalDefinitions: number;
-    activeExecutions: number;
-  }> {
+  async getAdminStats(): Promise<AdminStatsResponse> {
     try {
-      type AdminStatsResponse = {
-        totalWorkflows: number;
-        totalExecutions: number;
-        totalDefinitions: number;
-        activeExecutions: number;
-      };
       const response = await this.client.get<ApiResponse<AdminStatsResponse>>("/admin/stats");
       return response.data.data!;
     } catch (error) {
       throw new ApiClientError("Failed to get admin stats", ApiErrorCode.INTERNAL_ERROR);
+    }
+  }
+
+  /**
+   * Get deployment-neutral admin health and configuration status
+   */
+  async getAdminSystemStatus(): Promise<AdminSystemStatusResponse> {
+    try {
+      const response =
+        await this.client.get<ApiResponse<AdminSystemStatusResponse>>("/admin/system-status");
+      return response.data.data!;
+    } catch (error) {
+      throw new ApiClientError("Failed to get admin system status", ApiErrorCode.INTERNAL_ERROR);
     }
   }
 

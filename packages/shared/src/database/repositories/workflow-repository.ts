@@ -49,6 +49,8 @@ const ADMIN_WORKFLOW_LIST_CONFIG: ListQueryConfig<"name" | "createdAt" | "update
   maxLimit: 100,
 };
 
+export const MAX_WORKFLOW_SIZE_BYTES = 5 * 1024 * 1024;
+
 /**
  * Filter parameters for workflow list queries
  */
@@ -843,7 +845,7 @@ export class WorkflowRepository {
     // Size validation: max 5MB for workflow JSON
     const graphJson = JSON.stringify(graph);
     const sizeBytes = Buffer.byteLength(graphJson, "utf8");
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    const maxSize = MAX_WORKFLOW_SIZE_BYTES;
 
     if (sizeBytes > maxSize) {
       const sizeMB = (sizeBytes / 1024 / 1024).toFixed(2);

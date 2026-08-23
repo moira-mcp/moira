@@ -6,7 +6,7 @@
  * - Basic arithmetic: +, -, *, /
  * - Variable assignment: a = b + c
  * - Context variable access
- * - Literal numbers, strings, and booleans
+ * - Literal numbers, strings, booleans, empty arrays, and empty objects
  *
  * Architecture:
  * - Tokenizer converts expression string to tokens
@@ -20,6 +20,8 @@ export type TokenType =
   | "NUMBER" // 123, 45.67
   | "STRING" // "hello", 'world'
   | "BOOLEAN" // true, false
+  | "EMPTY_ARRAY" // []
+  | "EMPTY_OBJECT" // {}
   | "IDENTIFIER" // variable names
   | "OPERATOR" // +, -, *, /
   | "ASSIGN" // =
@@ -38,6 +40,8 @@ export type ASTNode =
   | NumberLiteral
   | StringLiteral
   | BooleanLiteral
+  | EmptyArrayLiteral
+  | EmptyObjectLiteral
   | Identifier
   | BinaryExpression
   | AssignmentExpression;
@@ -55,6 +59,14 @@ export interface StringLiteral {
 export interface BooleanLiteral {
   type: "BooleanLiteral";
   value: boolean;
+}
+
+export interface EmptyArrayLiteral {
+  type: "EmptyArrayLiteral";
+}
+
+export interface EmptyObjectLiteral {
+  type: "EmptyObjectLiteral";
 }
 
 export interface Identifier {
@@ -113,6 +125,21 @@ export class Tokenizer {
       // Identifiers (variable names)
       if (/[a-zA-Z_]/.test(char)) {
         tokens.push(this.readIdentifier());
+        continue;
+      }
+
+      // Empty collection literals are intentionally the only supported
+      // collection syntax. They cover deterministic reset operations without
+      // turning the safe arithmetic language into a general object parser.
+      if (this.input.startsWith("[]", this.position)) {
+        tokens.push({ type: "EMPTY_ARRAY", value: "[]", position: this.position });
+        this.position += 2;
+        continue;
+      }
+
+      if (this.input.startsWith("{}", this.position)) {
+        tokens.push({ type: "EMPTY_OBJECT", value: "{}", position: this.position });
+        this.position += 2;
         continue;
       }
 
@@ -380,6 +407,16 @@ export class Parser {
       return { type: "BooleanLiteral", value: token.value as boolean };
     }
 
+    if (token.type === "EMPTY_ARRAY") {
+      this.consume("EMPTY_ARRAY");
+      return { type: "EmptyArrayLiteral" };
+    }
+
+    if (token.type === "EMPTY_OBJECT") {
+      this.consume("EMPTY_OBJECT");
+      return { type: "EmptyObjectLiteral" };
+    }
+
     // Identifier (variable reference)
     if (token.type === "IDENTIFIER") {
       this.consume("IDENTIFIER");
@@ -430,6 +467,12 @@ export class Evaluator {
 
       case "BooleanLiteral":
         return node.value;
+
+      case "EmptyArrayLiteral":
+        return [];
+
+      case "EmptyObjectLiteral":
+        return {};
 
       case "Identifier":
         return this.resolveVariable(node.name);

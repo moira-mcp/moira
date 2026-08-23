@@ -986,7 +986,8 @@ DELETE /api/admin/users/:id/sessions       // Revoke all sessions
 GET    /api/admin/emails                   // List sent emails
 GET    /api/admin/executions               // List all executions
 GET    /api/admin/executions/:id           // Get execution details
-GET    /api/admin/stats                    // System statistics
+GET    /api/admin/system-status            // Neutral health/reconciliation status
+GET    /api/admin/stats                    // Installation-wide statistics (adminAnalytics)
 ```
 
 ### Admin Middleware
@@ -1032,11 +1033,14 @@ emailLog: {
   to: string;
   subject: string;
   messageId: string;
-  status: 'sent' | 'failed';
+  status: 'sent' | 'failed' | 'logged';
   error?: string;
   createdAt: string;
 }
 ```
+
+`logged` is the explicit test-recipient/test-provider outcome. It records an attempt but never means
+that a message left the process.
 
 ### API Token Storage
 
@@ -1065,7 +1069,8 @@ apiToken: {
 POST   /api/tokens      // Create token (returns plaintext once, requireVerifiedAuth)
 GET    /api/tokens       // List user's tokens (metadata only, no secrets)
 DELETE /api/tokens/:id   // Revoke token (soft delete, idempotent)
-// Auth: requireVerifiedAuth (email must be verified)
+// Auth: requireVerifiedAuth. SaaS requires verified email; self-host disables that gate but still
+// requires an approved, unblocked account.
 // Limit: 25 active tokens per user
 
 // packages/web-backend/src/routes/admin-tokens.ts
@@ -1081,6 +1086,7 @@ DELETE /api/admin/tokens/:id  // Admin revoke any token (soft delete, idempotent
 // packages/shared/src/auth/better-auth-config.ts
 emailAndPassword: {
   sendResetPassword: async ({ user, url }) => {
+    assertRealEmailDelivery();
     await sendEmail(user.id, 'password_reset', {
       to: user.email,
       subject: 'Reset your password - MCP Moira',
@@ -1089,8 +1095,9 @@ emailAndPassword: {
   }
 },
 emailVerification: {
-  sendOnSignUp: true,
+  sendOnSignUp: getFeatureResolver().isEnabled('verificationEmailOnSignup'),
   sendVerificationEmail: async ({ user, url }) => {
+    assertRealEmailDelivery();
     await sendEmail(user.id, 'verification', {
       to: user.email,
       subject: 'Verify your email - MCP Moira',
@@ -1099,6 +1106,11 @@ emailVerification: {
   }
 }
 ```
+
+Self-host does not send verification on sign-up and can run with delivery unavailable. SaaS enables
+sign-up verification and startup requires a real SMTP or Brevo provider. Both callback types refuse
+before link/token side effects when delivery is not `real`; the explicit test sink is not accepted
+as delivery.
 
 ## Session Info Tool
 

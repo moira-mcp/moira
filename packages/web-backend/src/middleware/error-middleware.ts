@@ -36,7 +36,7 @@ function mapErrorCodeToApiCode(error: AppError): ApiErrorCode {
     VALIDATION_ERROR: ApiErrorCode.VALIDATION_FAILED,
     NOT_FOUND: ApiErrorCode.WORKFLOW_NOT_FOUND,
     AUTHENTICATION_ERROR: ApiErrorCode.INTERNAL_ERROR, // Will be handled by auth middleware
-    AUTHORIZATION_ERROR: ApiErrorCode.INTERNAL_ERROR,
+    AUTHORIZATION_ERROR: ApiErrorCode.ACCESS_DENIED,
     CONFLICT: ApiErrorCode.INTERNAL_ERROR,
     RATE_LIMIT_EXCEEDED: ApiErrorCode.INTERNAL_ERROR,
     DATABASE_ERROR: ApiErrorCode.INTERNAL_ERROR,
