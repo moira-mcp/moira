@@ -204,6 +204,9 @@ jobs:
             -e DEPLOYMENT_MODE=self-host \
             -e MOIRA_HOST=localhost:3031 \
             -e STATIC_ARTIFACTS_DOMAIN=static.localhost:3031 \
+            -e MCP_PORT=3000 \
+            -e WEB_BACKEND_PORT=3001 \
+            -e WEB_FRONTEND_PORT=3002 \
             -e EMAIL_PROVIDER=none \
             -e BREVO_API_KEY= \
             -e EMAIL_TEST_RECIPIENTS=false \
