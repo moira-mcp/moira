@@ -174,7 +174,7 @@ describe("Workflow Catalog Reader", () => {
   });
 
   describe("real production catalog", () => {
-    test("enumerates the full set with system and user owners distinguishable", () => {
+    test("enumerates every production file with system ownership preserved", () => {
       // getCatalogDir() resolves against the process cwd → the real repo catalog.
       const realDir = getCatalogDir();
       if (!fs.existsSync(realDir)) {
@@ -185,7 +185,9 @@ describe("Workflow Catalog Reader", () => {
       // Every file is a valid catalog entry with the required metadata.
       // The public OSS repo bundles the public catalog only; private flows live in the
       // separate private catalog folder (moira-infra), merged at build time via WORKFLOWS_DIRS.
-      expect(entries.length).toBeGreaterThanOrEqual(30);
+      const catalogFiles = fs.readdirSync(realDir).filter((file) => file.endsWith(".json"));
+      expect(entries).toHaveLength(catalogFiles.length);
+      expect(entries.length).toBeGreaterThan(0);
       for (const e of entries) {
         expect(typeof e.owner).toBe("string");
         expect(e.owner.length).toBeGreaterThan(0);
