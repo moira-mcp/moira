@@ -7,21 +7,45 @@
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
+import { loadWorkflowFixture } from "./fixtures/load-workflow.js";
 
 const BASE_URL = getTestBaseUrl();
 
-// Public workflow with note nodes (from workflows/production/public/)
-const NOTE_WORKFLOW_OWNER = "moira";
-const NOTE_WORKFLOW_SLUG = "notes-demo-metrics-collector";
+const NOTE_WORKFLOW_OWNER = "admin";
+let noteWorkflowId = "";
+let noteWorkflowSlug = "";
 
 test.describe("Note Nodes Rendering", () => {
+  test.describe.configure({ mode: "serial" });
+
+  test.beforeAll(async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await loginAsAdmin(page);
+    const result = await loadWorkflowFixture(page, "note-nodes-test.json", "private");
+    expect(result.success).toBe(true);
+    expect(result.workflowId).toBeTruthy();
+    expect(result.slug).toBeTruthy();
+    noteWorkflowId = result.workflowId;
+    noteWorkflowSlug = result.slug;
+    await context.close();
+  });
+
+  test.afterAll(async ({ browser }) => {
+    if (!noteWorkflowId) return;
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await loginAsAdmin(page);
+    await page.request.delete(`${BASE_URL}/api/workflows/${noteWorkflowId}`);
+    await context.close();
+  });
+
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
   test("workflow with note nodes opens without crash", async ({ page }) => {
-    // Navigate to the public note-demo workflow
-    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${NOTE_WORKFLOW_SLUG}`);
+    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}`);
     await page.waitForLoadState("domcontentloaded");
 
     // Wait for ReactFlow canvas to render - this is the key check
@@ -38,7 +62,7 @@ test.describe("Note Nodes Rendering", () => {
   });
 
   test("note nodes display with correct labels", async ({ page }) => {
-    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${NOTE_WORKFLOW_SLUG}`);
+    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}`);
     await page.waitForLoadState("domcontentloaded");
 
     // Wait for canvas
@@ -49,32 +73,23 @@ test.describe("Note Nodes Rendering", () => {
     const writeLabel = page.locator('.react-flow__node:has-text("WRITE")');
     const upsertLabel = page.locator('.react-flow__node:has-text("UPSERT")');
 
-    // At least one note node type should be visible
-    const hasWriteNode = (await writeLabel.count()) > 0;
-    const hasUpsertNode = (await upsertLabel.count()) > 0;
-
-    expect(hasWriteNode || hasUpsertNode).toBe(true);
+    await expect(writeLabel).toHaveCount(1);
+    await expect(upsertLabel).toHaveCount(1);
   });
 
   test("note nodes are clickable and show details", async ({ page }) => {
-    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${NOTE_WORKFLOW_SLUG}`);
+    await page.goto(`${BASE_URL}/workflows/${NOTE_WORKFLOW_OWNER}/${noteWorkflowSlug}`);
     await page.waitForLoadState("domcontentloaded");
 
     // Wait for canvas
     await expect(page.locator(".react-flow")).toBeVisible({ timeout: 15000 });
 
-    // Find any note node (WRITE or UPSERT)
     const noteNode = page.locator('.react-flow__node:has-text("WRITE")').first();
-    const hasWriteNode = (await noteNode.count()) > 0;
+    await expect(noteNode).toBeVisible();
+    await noteNode.click();
 
-    if (hasWriteNode) {
-      // Click on the node
-      await noteNode.click();
-
-      // Node details should show in sidebar or dialog
-      const sidebar = page.locator('[data-testid="workflow-sidebar"]');
-      const detailSheet = page.locator('[role="dialog"], [data-state="open"]').first();
-      await expect(sidebar.or(detailSheet).first()).toBeVisible({ timeout: 5000 });
-    }
+    const sidebar = page.locator('[data-testid="workflow-sidebar"]');
+    const detailSheet = page.locator('[role="dialog"], [data-state="open"]').first();
+    await expect(sidebar.or(detailSheet).first()).toBeVisible({ timeout: 5000 });
   });
 });

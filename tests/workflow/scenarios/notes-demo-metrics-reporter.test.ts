@@ -19,7 +19,8 @@ import { GraphValidator, detectCycles, ReadNoteHandler } from "@mcp-moira/workfl
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 function loadWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("notes-demo-metrics-reporter", "public")!.graph as WorkflowGraph;
+  return findSystemCatalogEntry("notes-demo-metrics-reporter", "public", "workflows/examples")!
+    .graph as WorkflowGraph;
 }
 
 /** Create a mock NoteService that returns metrics data */

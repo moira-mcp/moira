@@ -14,10 +14,20 @@ describe("Production catalog validation", () => {
   const validator = new GraphValidator();
   const entries = readWorkflowCatalog();
 
-  test("catalog is non-empty", () => {
-    // The public OSS repo bundles the public catalog only (private flows live in the separate
-    // private folder merged at build time via WORKFLOWS_DIRS).
-    expect(entries.length).toBeGreaterThanOrEqual(30);
+  test("catalog contains the core authoring and standard execution contracts", () => {
+    // Catalog size changes when examples or superseded products leave the production surface.
+    // The stable regression contract is that the executable authoring knowledge and standard
+    // task/development choices remain bundled; an arbitrary minimum count cannot prove that.
+    const slugs = new Set(entries.map((entry) => entry.slug));
+    for (const requiredSlug of [
+      "workflow-management-flow",
+      "software-development-flow",
+      "quick-task",
+      "robust-task",
+      "todo-list",
+    ]) {
+      expect(slugs).toContain(requiredSlug);
+    }
   });
 
   test("every catalog flow validates with zero errors under the output-scope rules", async () => {
