@@ -85,6 +85,22 @@ mcp__moira__start({ workflowId: "moira/software-development-flow-lite", parentEx
 
 ---
 
+## Валидация бизнеса
+
+### startup-idea-validation
+
+Evidence-led валидация стартап-идеи в свободной форме. Workflow создаёт связанный с execution реестр источников, исследование и feasibility-анализ, решение из доказательств и self-contained offline HTML. Детерминированные проверки охватывают наблюдаемые свойства пакета; за семантическую полноту отвечает действительно независимое ревью. Публикация и Telegram-уведомление являются отдельными опциональными effects и требуют полномочий.
+
+**Применение:** Решение о продолжении стартап-гипотезы и способе дальнейшей проверки, включая эксперименты, pivot, паузу или остановку. Для исследовательского отчёта без startup decision synthesis используйте Verified Research, а после выбора продуктового направления — PRD Creation.
+
+```bash
+mcp__moira__start({ workflowId: "moira/startup-idea-validation", parentExecutionId: "none" })
+```
+
+[Подробнее →](/ru/docs/reference/workflows/startup-idea-validation/)
+
+---
+
 ## Управление задачами
 
 ### quick-task (Рекомендуется)

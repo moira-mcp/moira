@@ -453,6 +453,7 @@ function getTopicList(): string {
   result += `| external research needing durable source evidence, repeated independent zero-issue review, and changed repair | \`moira/iterative-research\` |\n`;
   result += `| portable adaptive research needing filesystem-or-memory operation, pre-access authority review, evidence readiness, exact-zero final review, and separately authorized delivery | \`moira/universal-research-workflow\` |\n`;
   result += `| "create PRD", "requirements document" | \`moira/prd-creation\` |\n`;
+  result += `| "validate startup idea", "assess startup hypothesis", "should we build this startup" | \`moira/startup-idea-validation\` |\n`;
   result += `| "design UI", "wireframe", "mockup" | \`moira/ux-design\` |\n`;
   result += `| "analyze data", "data analysis" | \`moira/data-analysis\` |\n`;
   result += `| "marketing campaign", "promotional content" | \`moira/marketing-campaign\` |\n\n`;

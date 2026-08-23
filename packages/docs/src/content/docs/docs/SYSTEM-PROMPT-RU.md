@@ -26,6 +26,7 @@ MCP Moira — Agent Workflow Engine на основе графов нод, ко�
 | Создать PRD                          | `moira/prd-creation`                   |
 | Разработать UX/UI                    | `moira/ux-design`                      |
 | Анализ данных                        | `moira/data-analysis`                  |
+| Валидация стартап-идеи               | `moira/startup-idea-validation`        |
 | Маркетинговые материалы              | `moira/marketing-campaign`             |
 | Создать/редактировать workflow       | `moira/workflow-management-flow`       |
 

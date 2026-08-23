@@ -25,6 +25,7 @@ When user message contains these phrases, IMMEDIATELY suggest the corresponding 
 | "create PRD", "product requirements", "requirements document"                           | Start `moira/prd-creation`                   |
 | "design UI", "design UX", "wireframe", "mockup"                                         | Start `moira/ux-design`                      |
 | "analyze data", "data analysis", "analyze metrics"                                      | Start `moira/data-analysis`                  |
+| "validate startup idea", "assess startup hypothesis", "should we build this startup"    | Start `moira/startup-idea-validation`        |
 | "marketing campaign", "marketing materials", "promotional content"                      | Start `moira/marketing-campaign`             |
 | "complex task", "multi-step task", "big task"                                           | Start `moira/robust-task`                    |
 | "develop feature", "implement", "build feature", "code task", "fix bug"                 | Start `moira/software-development-flow`      |
