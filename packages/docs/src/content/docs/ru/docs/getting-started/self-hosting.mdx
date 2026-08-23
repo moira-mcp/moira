@@ -11,24 +11,17 @@ import { Aside, Steps } from "@astrojs/starlight/components";
 ## Требования
 
 - Docker с плагином Compose (`docker compose`)
-- CLI `sqlite3` на хосте (для проверки preflight и rollback snapshot)
-- Файлы self-host release bundle: `docker-compose.yml`, `.env.example` и исполняемый
-  `scripts/self-host-upgrade.sh` (скачайте их из того же release tag репозитория;
-  сборка исходников и private-репозиторий не нужны)
+- Публичные `docker-compose.yml` и `.env.example`; для обычного пути не нужны сборка
+  исходников, private-репозиторий, CLI SQLite на хосте или отдельный upgrade-скрипт
 
 ## Быстрый старт
 
-Скачайте три файла из одного неизменяемого release tag (замените `0.3.5`, если выбираете другой
-релиз):
+Скачайте актуальные публичные self-host файлы:
 
 ```bash
-MOIRA_VERSION=0.3.5
-MOIRA_RELEASE=https://raw.githubusercontent.com/moira-mcp/moira/v${MOIRA_VERSION}
-curl -fLO "$MOIRA_RELEASE/docker-compose.yml"
-curl -fLo .env.example "$MOIRA_RELEASE/.env.example"
-mkdir -p scripts
-curl -fLo scripts/self-host-upgrade.sh "$MOIRA_RELEASE/scripts/self-host-upgrade.sh"
-chmod +x scripts/self-host-upgrade.sh
+MOIRA_FILES=https://raw.githubusercontent.com/moira-mcp/moira/master
+curl -fLO "$MOIRA_FILES/docker-compose.yml"
+curl -fLo .env.example "$MOIRA_FILES/.env.example"
 ```
 
 <Steps>
@@ -47,8 +40,8 @@ chmod +x scripts/self-host-upgrade.sh
     docker compose up -d
     ```
 
-    Compose скачивает неизменяемый `MOIRA_IMAGE` из `.env` (в поставляемом примере указан
-    `ghcr.io/moira-mcp/moira:0.3.5`) и запускает контейнер.
+    Compose скачивает `ghcr.io/moira-mcp/moira:latest`, актуальный публичный релиз,
+    и запускает контейнер.
 
 3.  **Откройте веб-интерфейс**
 
@@ -216,45 +209,77 @@ http://localhost:8080/mcp
 Добавьте его как MCP-сервер в ваш AI-клиент и пройдите OAuth-аутентификацию. Настройку
 клиента смотрите в [Быстром старте](/ru/docs/getting-started/quickstart/).
 
-## Безопасное обновление и откат
+## Обновление и восстановление
 
-Храните в `.env` неизменяемый pin образа — версию или digest, но не `latest`:
-
-```bash
-MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5
-docker compose pull moira
-docker compose exec -T moira cat /app/BUILD_INFO
-df -h ./data && test -r ./data/moira.db && test -w ./data
-```
-
-Поставляемый helper использует online backup SQLite и проверяет `PRAGMA integrity_check` до замены
-активного контейнера:
+Для обычного обновления не требуется искать версию или запускать скрипт из репозитория:
 
 ```bash
-./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
-./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
-./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
-docker compose ps && docker compose exec -T moira cat /app/BUILD_INFO
-```
-
-Preflight монтирует production data read-only, пишет snapshot/evidence в `.moira-upgrade/` и запускает
-точный входящий образ только на `.moira-upgrade/preflight/moira.db`, не на production БД.
-При конфликте managed workflow активный экземпляр остаётся доступным. Попросите агента запустить
-Workflow Management Flow, изучить previous/current/incoming кандидаты MCP-инструмента
-`reconciliation`, отправить семантическое слияние и повторить обновление с pin. Не используйте
-`--force` для удаления локальных изменений workflow.
-
-Если замена или health-проверка завершилась ошибкой, восстановите проверенный snapshot и прежний pin:
-
-```bash
-./scripts/self-host-upgrade.sh rollback
+docker compose pull
+docker compose up -d
 docker compose ps
-docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
 ```
 
-Сохраняйте `.moira-upgrade/moira.db.upgrade-backup` до проверки новой версии. Helper оставляет
-`.moira-upgrade/preflight/` как диагностическое/reconciliation-доказательство и заменяет его при следующем
-preflight.
+Если существующий `.env` создан из старого сломанного шаблона и всё ещё содержит удалённый тег
+`0.3.5`, один раз замените строку перед обновлением:
+
+```bash
+MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest
+```
+
+До запуска миграций нового self-host образа startup guard создаёт online backup существующей SQLite
+БД и проверяет `PRAGMA integrity_check`. База вместе с соответствующим `prompt-manifest.json`
+сохраняется в `data/.moira-startup-backups/current/`, а предыдущие состояния ротируются в
+`previous-1/` и `previous-2/`. При настоящем первом запуске БД ещё нет, поэтому backup не создаётся.
+
+В current-слоте хранится persistent-маркер незавершённой инициализации. Если контейнер или хост
+прерывается до фиксации результата, следующий запуск сначала восстанавливает проверенный slot и
+только затем создаёт новый backup, поэтому частично мигрированная БД не становится новым baseline.
+На первом запуске отдельный marker без фиктивной backup-БД фиксирует, что базы раньше не было. После
+прерывания повторный запуск удаляет только незавершённые новую БД, WAL/SHM и prompt manifest и
+начинает с чистого состояния; успешная инициализация удаляет marker.
+
+Если инициализация схемы, промптов или workflow завершается ошибкой после записи данных, guard
+удаляет WAL/SHM, восстанавливает проверенные БД и manifest, пишет `/tmp/init-failed` и не запускает
+MCP, API и nginx. Recovery-копия сохраняется. После исправления конфигурации или каталога проверьте
+состояние и повторите запуск:
+
+```bash
+docker compose logs moira
+docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
+docker compose exec -T moira sqlite3 /app/data/.moira-startup-backups/current/moira.db 'PRAGMA integrity_check;'
+docker compose restart moira
+docker compose ps
+```
+
+`latest` намеренно следует за текущим публичным релизом. Автоматическое восстановление защищает
+постоянные данные, но не может заменить сам Docker-образ. Если образ не доходит до startup guard,
+БД не мигрировалась. Временно укажите в `MOIRA_IMAGE` предыдущую версию из
+[GitHub Releases](https://github.com/moira-mcp/moira/releases), выполните `docker compose up -d`,
+а после исправленного релиза вернитесь на `latest`.
+
+Конфликты сверки managed workflow остаются нефатальными в self-host. Используйте
+Workflow Management Flow и MCP-инструмент `reconciliation`, чтобы изучить previous/current/incoming
+кандидаты и отправить семантическое слияние; не применяйте `--force` для удаления локальных изменений.
+
+### Необязательный preflight до остановки
+
+Оператор может заранее проверить точный образ на изолированной копии БД, скачав advanced helper из
+этого релиза. Это необязательный путь; обычное обновление использует две Compose-команды выше. CLI
+`sqlite3` на хосте нужен только для advanced-варианта.
+
+```bash
+RELEASE_VERSION=x.y.z
+TARGET_IMAGE=ghcr.io/moira-mcp/moira:${RELEASE_VERSION}
+curl -fLo self-host-upgrade.sh "https://raw.githubusercontent.com/moira-mcp/moira/v${RELEASE_VERSION}/scripts/self-host-upgrade.sh"
+chmod +x self-host-upgrade.sh
+./self-host-upgrade.sh preflight "$TARGET_IMAGE"
+./self-host-upgrade.sh upgrade "$TARGET_IMAGE"
+```
+
+Helper сохраняет проверенный snapshot и диагностическую копию в `.moira-upgrade/`; если замена или
+health check завершились ошибкой, используйте `./self-host-upgrade.sh rollback`. Advanced-путь
+записывает точный образ в `.env`; чтобы вернуться в обычный release channel, после проверки задайте
+`MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest`.
 
 ## Добавление собственных workflow-флоу
 

@@ -21,6 +21,7 @@ describe("OSS image contract", () => {
     expect(dockerfile).toContain("ARG APP_BASE_PATH=/");
     expect(dockerfile).toContain("ARG MOIRA_HOST=localhost:8080");
     expect(dockerfile).toContain("ARG STATIC_ARTIFACTS_DOMAIN=static.localhost:8080");
+    expect(dockerfile).toContain('ENTRYPOINT ["/app/scripts/container-entrypoint.sh"]');
   });
 
   test("does not accept or embed a deployment environment file", () => {

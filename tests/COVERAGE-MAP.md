@@ -18,8 +18,9 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/unit/config/docker-image-contract.test.ts` — canonical parameterized OSS runtime image contract, explicit non-secret compile-time inputs, and prohibition on embedding deployment env files
 - `tests/unit/scripts/sqlite-online-backup.test.ts` — coherent SQLite online backup under concurrent WAL writes, integrity verification, and missing-source fail-closed behavior
-- `tests/unit/scripts/self-host-upgrade-contract.test.ts` — immutable image pins, isolated preflight, degraded self-host conflict policy, guarded replacement, health check, and backup-compatible rollback
-- `tests/unit/docs/self-host-upgrade-docs.test.ts` — executable EN/RU upgrade command parity, helper/sqlite prerequisites, quick-start immutable-pin consistency with Compose/env example, reconciliation recovery, integrity verification, and rollback instructions
+- `tests/unit/scripts/self-host-startup-guard.test.ts` — pre-Supervisor generation reset, real SQLite success, stale/ordered terminal sentinels, partial-init restore, interrupted existing/first-start recovery, removal/marker/sentinel faults, staging/restore symlink rejection, SIGTERM/SIGKILL recovery, prompt-manifest integrity, and bounded rotation including WAL sidecars
+- `tests/unit/scripts/self-host-upgrade-contract.test.ts` — latest-image quickstart, image-owned startup-guard wiring, plus optional pinned-image isolated preflight, health check, and rollback
+- `tests/unit/docs/self-host-upgrade-docs.test.ts` — executable EN/RU `pull`/`up` parity, automatic recovery location and semantics, latest consistency across Compose/env, and optional advanced preflight guidance
 - `tests/unit/scripts/test-email.test.ts` — explicit-recipient refusal and validation plus captured
   provider-boundary request for an IANA-reserved recipient
 
