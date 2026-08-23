@@ -179,26 +179,19 @@ notes({
 });
 ```
 
-## Real Example
+## Repository Example
 
-From `smart-purchase-assistant.json`:
+The non-production example at `workflows/examples/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
+uses a write-note node after it has collected the user's needs:
 
 ```json
 {
-  "id": "write-note-step-1",
+  "id": "write-note-01",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
-  "source": "{{step-1-identify}}",
+  "source": "{{analyze-user-needs}}",
   "tags": ["purchase-{{executionId}}", "smart-purchase"],
-  "connections": { "default": "step-2-research" }
-}
-```
-
-Later in the workflow:
-
-```json
-{
-  "directive": "Create final purchase report.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Research results:**\n{{note:purchase-{{executionId}}-02-research}}"
+  "connections": { "default": "research-product-category" }
 }
 ```
 

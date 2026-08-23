@@ -42,8 +42,9 @@ const MIGRATIONS_PATH = path.join(process.cwd(), "packages/web-backend/drizzle")
 const TEST_RUN_ID = Date.now().toString(36);
 const TEST_USER_HANDLE = `test-user-${TEST_RUN_ID}`;
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("smart-purchase-assistant", "public")!.graph as WorkflowGraph;
+function loadExampleWorkflow(): WorkflowGraph {
+  return findSystemCatalogEntry("smart-purchase-assistant", "public", "workflows/examples")!
+    .graph as WorkflowGraph;
 }
 
 describe("smart-purchase-assistant Scenarios", () => {
@@ -77,7 +78,7 @@ describe("smart-purchase-assistant Scenarios", () => {
       .onConflictDoNothing()
       .run();
 
-    workflow = loadProductionWorkflow();
+    workflow = loadExampleWorkflow();
   });
 
   afterAll(() => {

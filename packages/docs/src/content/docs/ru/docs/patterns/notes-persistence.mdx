@@ -180,26 +180,19 @@ notes({
 });
 ```
 
-## Реальный пример
+## Пример из репозитория
 
-Из `smart-purchase-assistant.json`:
+Непроизводственный пример `workflows/examples/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
+использует write-note после сбора потребностей пользователя:
 
 ```json
 {
-  "id": "write-note-step-1",
+  "id": "write-note-01",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
-  "source": "{{step-1-identify}}",
+  "source": "{{analyze-user-needs}}",
   "tags": ["purchase-{{executionId}}", "smart-purchase"],
-  "connections": { "default": "step-2-research" }
-}
-```
-
-Далее в workflow:
-
-```json
-{
-  "directive": "Создай финальный отчёт о покупке.\n\n**Потребности:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Результаты исследования:**\n{{note:purchase-{{executionId}}-02-research}}"
+  "connections": { "default": "research-product-category" }
 }
 ```
 
