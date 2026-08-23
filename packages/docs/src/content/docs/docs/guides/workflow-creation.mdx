@@ -479,15 +479,15 @@ flowchart LR
 
 The main problem: agent loses context (session archival, simple forgetting). Plans must be written so any step can be given to an agent WITHOUT the rest of the plan — and it can execute.
 
-| Requirement           | Why Important                       | Example                                                        |
-| --------------------- | ----------------------------------- | -------------------------------------------------------------- |
-| Flat linear list      | Easier to track without hierarchy   | 1, 2, 3... not 1.1, 1.2, 1.2.1                                 |
-| Self-sufficient steps | Any step executable without context | "Step 3: Create file X.ts with function Y" not "Continue work" |
-| Explicit actions      | Not "as usual", but specifically    | "Make commit" in every step where needed                       |
-| Measurable result     | Easy to verify completion           | "expected_output: file X.ts created and contains function Y"   |
-| Independence          | Minimal dependencies between steps  | Step 4 shouldn't require knowledge of step 2 details           |
-| Full file paths       | Agent shouldn't guess               | `/full/path/to/file.json`, not "in appropriate folder"         |
-| Redundancy allowed    | Better repeat than forget           | Repeat "make commit" in each step if needed                    |
+| Requirement                 | Why Important                         | Example                                                                    |
+| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------- |
+| Flat linear list            | Easier to track without hierarchy     | 1, 2, 3... not 1.1, 1.2, 1.2.1                                             |
+| Self-sufficient steps       | Any step executable without context   | "Step 3: Create file X.ts with function Y" not "Continue work"             |
+| Explicit actions            | Not "as usual", but specifically      | "Make commit" in every step where needed                                   |
+| Measurable result           | Easy to verify completion             | "expected_output: file X.ts created and contains function Y"               |
+| Independence                | Minimal dependencies between steps    | Step 4 shouldn't require knowledge of step 2 details                       |
+| Full file paths             | Agent shouldn't guess                 | `/full/path/to/file.json`, not "in appropriate folder"                     |
+| Redundancy where it applies | Repeat what this item genuinely needs | "Make commit" repeated in an item that ends in a commit, not in every item |
 
 ### Item Atomicity (S9)
 
@@ -495,9 +495,9 @@ Each plan or task item must be self-contained. An agent often receives ONE item'
 
 - Restate the nuances the item depends on.
 - Repeat the relevant original requirement inside the item.
-- Duplicate cross-cutting actions (progress report, run tests, commit) into EVERY item that needs them.
+- Repeat a cross-cutting action (progress report, run tests, commit) in the items it genuinely applies to.
 
-There is no shared or global scope across items. Redundancy is required, not a smell: repeating a cross-cutting action in every item is correct, because the agent cannot rely on having seen it in another item.
+There is no shared or global scope across items, so an item that leans on "as above" is unexecutable. The answer is what the executor needs when it is alone, judged item by item — not unconditional duplication: repeated text becomes a second source of truth that drifts, and an item required to carry everything grows until it carries the deliverable itself. See [Redundancy Required in Every Plan Item](/docs/patterns/anti-patterns/).
 
 ```json
 {
@@ -559,7 +559,7 @@ There is no shared or global scope across items. Redundancy is required, not a s
     {
       "id": "present-plan",
       "type": "agent-directive",
-      "directive": "Show plan to user.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Approve plan? (yes/no)'\n- STOP and wait for user to type response",
+      "directive": "Present the plan and ask whether it is approved. `approved` records the user's own answer; without one there is nothing to record.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -695,7 +695,7 @@ flowchart TD
 {
   "id": "ask-escalation-decision",
   "type": "agent-directive",
-  "directive": "Step failed after {{step_retry}} attempts.\n\nAsk user for decision:\n1. **revise_plan** — go back to planning and reconsider approach\n2. **ask_user** — request human help with specific problem\n3. **skip** — skip this step and continue\n\n⚠️ WAIT FOR USER RESPONSE",
+  "directive": "Step failed after {{step_retry}} attempts.\n\nAsk user for decision:\n1. **revise_plan** — go back to planning and reconsider approach\n2. **ask_user** — request human help with specific problem\n3. **skip** — skip this step and continue\n\n`decision` records the user's own choice: each of the three routes elsewhere, so an assumed answer picks a route on their behalf.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -1098,14 +1098,14 @@ When a workflow requires user confirmation, the agent may "optimize" by filling 
 
 **Why:** The agent sees it can fill the field and "optimizes" by not stopping to wait.
 
-### Solution: Explicit Wait Instructions
+### Solution: Say What the Answer Is
 
-Add explicit instructions that FORCE the agent to wait:
+State that the field records something that happened, and what happens if it did not:
 
 ```json
 {
   "id": "approve-plan",
-  "directive": "Show plan to user.\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask: 'Do you approve? (yes/no)'\n- STOP and wait for user to type response\n- DO NOT fill 'approved' field until user explicitly says yes or no\n- Showing information ≠ getting confirmation",
+  "directive": "Present the plan and ask whether it is approved. `approved` records the user's own answer: without one there is nothing to record, and an assumed answer sends the run down a branch the user never chose. `user_response_text` is that answer verbatim.",
   "completionCondition": "User explicitly responded yes or no (not assumed)",
   "inputSchema": {
     "properties": {
@@ -1122,10 +1122,12 @@ Add explicit instructions that FORCE the agent to wait:
 
 ### Key Techniques
 
-1. **Add "WAIT FOR USER RESPONSE"** — explicit instruction to stop
-2. **Require user_response_text** — forces agent to capture actual user input
-3. **State what NOT to do** — "DO NOT fill field until..."
-4. **Clarify the difference** — "Showing ≠ getting confirmation"
+1. **Say whose answer the field records** — `approved` holds the user's answer, so without one there
+   is nothing to put there
+2. **Require `user_response_text`** — the verbatim answer is what makes the record checkable later
+3. **Name the consequence of each answer** — where a no routes, what a yes closes; an assumed answer
+   sends the run down a branch the user never chose
+4. **Split the node when the risk justifies a turn** — see below
 
 ### Split into Two Nodes (Alternative)
 
@@ -1150,7 +1152,7 @@ First node only displays, second only captures response:
 },
 {
   "id": "get-plan-approval",
-  "directive": "User sees the plan above. Ask: 'Do you approve this plan? (yes/no)'\n\nWAIT for user response. DO NOT proceed until user types yes or no.",
+  "directive": "The plan is displayed above. Ask whether it is approved. `approved` records the user's own answer; an assumed one commits the run to a branch they never chose.",
   "inputSchema": {
     "properties": {
       "approved": { "type": "string", "enum": ["yes", "no"] }

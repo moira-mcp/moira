@@ -264,11 +264,10 @@ Add descriptions to help agents understand fields:
 ```json
 {
   "properties": {
-    "quality_score": {
+    "issues_count": {
       "type": "number",
-      "minimum": 1,
-      "maximum": 10,
-      "description": "Rate implementation quality from 1-10"
+      "minimum": 0,
+      "description": "Number of reproducible blocking findings in the report; zero is valid"
     },
     "evidence": {
       "type": "string",

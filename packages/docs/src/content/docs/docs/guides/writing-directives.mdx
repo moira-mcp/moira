@@ -142,12 +142,45 @@ Use template variables:
 }
 ```
 
-## Directive Patterns
+## Rules Are Outcomes, and Each Carries Its Reason
 
-### Step-by-Step Instructions
+Where a directive states a rule — what a plan must be, what a review may block on, what evidence
+counts — state the outcome the result must satisfy, and say why the opposite is bad.
+
+An outcome can be judged against a case its author never imagined; a procedure can only be replayed,
+so it is right exactly where the author's picture holds and quietly wrong everywhere else. The
+reason is what lets an executor apply a rule to an unforeseen case instead of guessing, and what
+lets a reviewer argue with the rule on the merits rather than on whether it was obeyed.
+
+Where a body of criteria is long enough to be walked item by item, open it by saying that a rule
+which does not apply to the current change is met and needs nothing produced to prove it
+inapplicable — otherwise it turns back into a checklist.
+
+❌ Procedure:
 
 ```
-"Complete the following steps in order:\n\n1. [First action]\n2. [Second action]\n3. [Third action]\n\nReport which steps completed successfully."
+"STEP 1: read the plan. STEP 2: check every item has a verification. STEP 3: report the count."
+```
+
+✅ Outcome with its reason:
+
+```
+"Every unit names the evidence that would accept it, in observable terms.\n\nWhy: acceptance criteria written as adjectives — robust, clean, complete — cannot be met or refused, so they end up decided by whoever is more insistent."
+```
+
+<Aside type="caution">
+  Raising the voice is not a substitute: MANDATORY, NEVER and CRITICAL add no state of the world in
+  which the rule holds or fails. See [Directive as a Drill Order](/docs/patterns/anti-patterns/).
+</Aside>
+
+## Directive Patterns
+
+### Sequenced Work
+
+Give the order only where the order is a real dependency, and say what makes it one:
+
+```
+"Migrate the schema before switching the reader, because the reader rejects rows the old schema still produces.\n\nReport the state after each of the two, with the command you used."
 ```
 
 ### Conditional Instructions

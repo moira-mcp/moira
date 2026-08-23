@@ -956,7 +956,7 @@ describe("software-development-flow v14.1", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("14.1.1");
+    expect(workflow.metadata.version).toBe("14.2.1");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -1028,6 +1028,84 @@ describe("software-development-flow v14.1", () => {
       { path: "standards/documentation.md", from: "documentation_standards" },
       { path: "standards/review.md", from: "review_standards" },
     ]);
+
+    // A plan unit fixes the outcome and its acceptance, never the deliverable. The rule lives in the
+    // planning standard, which is where every plan writer is pointed; the prose case is stated
+    // explicitly because the file-and-symbol wording above only catches the code one.
+    const planning = String(workflow.variableRegistry?.planning_standards?.default ?? "");
+    expect(planning).toContain("## A unit does not carry the deliverable");
+    expect(planning).toContain("work an intelligent executor still has to do remains");
+    expect(planning).toContain("satisfy by copying text out of the plan");
+    // The reason is its own obligation: the pre-existing "*Why.* appears somewhere" check cannot
+    // fail here, because the standard already carries nine of them.
+    expect(planning).toContain("nothing has independently judged the work");
+    // Each gate carries it too, bound to what that node may write. Only create-plan owns the whole
+    // revision: a breadth-first walk from the three execution nodes never reaches it. The other
+    // five do — repair-plan among them, despite its single incoming edge, because any revision goes
+    // back through review-plan and a blocking finding routes into it — so they answer only for the
+    // units they shape, since closed units stay as executed.
+    const gate = (nodeId: string) =>
+      (workflow.nodes.find((node) => node.id === nodeId) as { completionCondition: string })
+        .completionCondition;
+    // Closed work stays closed, and stays where it was closed: the unit account lives at
+    // step-<index>/, addressed by index and outside plan revisions, so a revision that keeps a
+    // closed unit's text but shifts its index makes the executor overwrite someone else's account.
+    // repair-plan carries it in both halves because it edits the revision in place; the four
+    // revise-* nodes already say it in their directives, so only their gates were missing it.
+    const repairPlan = workflow.nodes.find((node) => node.id === "repair-plan") as {
+      directive: string;
+      completionCondition: string;
+    };
+    expect(repairPlan.directive).toContain(
+      "Closed units stay as they were closed and keep the index they were closed at",
+    );
+    // Forbidding the repair of a closed unit would loop forever without a way out: this flow has no
+    // review-round limit at all, so the exit is the node's own, and it must cover a finding that
+    // reproduces but may no longer be fixed.
+    expect(repairPlan.directive).toContain(
+      "the finding cannot be corrected without touching a closed unit, that is a cause above repair",
+    );
+    for (const [nodeId, directiveClause] of [
+      ["revise-plan-after-rejection", "carry forward unaffected requirements and completed work"],
+      ["revise-plan-for-replan", "keep the index they were closed at"],
+      ["revise-plan-for-coverage", "Preserve prior revisions and completed work"],
+      ["revise-plan-after-feedback", "Preserve prior revisions and completed work"],
+    ] as const) {
+      expect(
+        (workflow.nodes.find((node) => node.id === nodeId) as { directive: string }).directive,
+      ).toContain(directiveClause);
+    }
+    // One wording for one obligation: the gates differ in what else they carry, but the closed-work
+    // clause reads the same everywhere, so a gate that drifts is visible.
+    for (const [nodeId, gateClause] of [
+      ["repair-plan", "the index they were closed at"],
+      ["revise-plan-after-rejection", "the index they were closed at"],
+      ["revise-plan-for-replan", "the index they were closed at"],
+      ["revise-plan-for-coverage", "the index they were closed at"],
+      ["revise-plan-after-feedback", "the index they were closed at"],
+    ] as const) {
+      expect(gate(nodeId)).toContain(gateClause);
+    }
+    // Upstream owns the rest of each gate; the new clause is appended to it rather than replacing
+    // it, so the gate still states the outcome it was written for.
+    expect(gate("revise-plan-after-rejection")).toContain("rejection feedback");
+    expect(gate("revise-plan-for-coverage")).toContain("every final coverage gap");
+    expect(gate("revise-plan-after-feedback")).toContain("final rejection feedback");
+
+    expect(gate("create-plan")).toContain(
+      "every unit fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
+    );
+    for (const nodeId of [
+      "repair-plan",
+      "revise-plan-after-rejection",
+      "revise-plan-for-replan",
+      "revise-plan-for-coverage",
+      "revise-plan-after-feedback",
+    ]) {
+      expect(gate(nodeId)).toContain(
+        "every unit it shapes fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
+      );
+    }
     const owner = workflow.nodes.find((node) => node.id === "capture-task-and-context");
     expect(owner?.directive).toContain("./moira-ws/software-development-flow-{task-name}");
     expect(owner?.connections).toEqual({ success: "materialize-development-standards" });

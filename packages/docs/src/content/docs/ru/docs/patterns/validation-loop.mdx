@@ -168,15 +168,16 @@ import { Aside } from "@astrojs/starlight/components";
 
 ## Числовая проверка качества
 
-Для измеримого качества:
+Для свойства, которое машина решает сама, маршрутизируйте по её же ответу — числу воспроизводимых
+находок, коду возврата, количеству пробелов покрытия:
 
 ```json
 {
   "inputSchema": {
     "properties": {
-      "quality_score": { "type": "number", "minimum": 0, "maximum": 10 }
+      "issues_count": { "type": "number", "minimum": 0 }
     },
-    "required": ["quality_score"]
+    "required": ["issues_count"]
   }
 }
 ```
@@ -184,12 +185,18 @@ import { Aside } from "@astrojs/starlight/components";
 ```json
 {
   "condition": {
-    "operator": "gte",
-    "left": { "contextPath": "quality_score" },
-    "right": 8
+    "operator": "eq",
+    "left": { "contextPath": "issues_count" },
+    "right": 0
   }
 }
 ```
+
+Не маршрутизируйте по баллу качества. Число, которое рецензент присваивает связности, глубине или
+архитектуре, не различает два состояния результата — семь против восьми не говорит читателю ничего
+проверяемого, — а порог достигается подгонкой самого числа. Там, где свойство качественное, гейт —
+это обоснованный вердикт рецензента и число находок, к которым он привёл. См. [Фиксированная оценка
+семантического качества](/ru/docs/patterns/anti-patterns/).
 
 ## Реальный пример
 
@@ -215,27 +222,21 @@ import { Aside } from "@astrojs/starlight/components";
 
 ### Паттерн директивы ворот валидации
 
-Всегда включайте эту инструкцию в директивы ворот валидации:
+Директива гейта говорит, что записывает её ответ и куда ведёт каждый вариант, — тогда агент видит,
+что честный ответ и есть единственный способ провести прогон правильно:
 
 ```
-CRITICALLY IMPORTANT - REACTION TO FEEDBACK:
-- If user said "yes" → approval = "yes"
-- If user gave ANY feedback or said "no" → approval = "no"
-- DO NOT fix yourself!
-- Reply approval = "no" and write user_feedback with feedback
-- Workflow will direct to fix branch itself
-- All fixes are done only through workflow, not independently
+`approval` записывает собственный ответ пользователя. Всё, кроме безоговорочного «да», — это «нет»,
+и замечания идут в `user_feedback`: флоу направляет «нет» той ответственности, которой принадлежит
+правка, поэтому исправление, сделанное здесь, — изменение, которого никто не рецензировал.
 ```
 
 ### Почему это важно
 
-Без явных инструкций агенты склонны:
-
-1. Интерпретировать обратную связь пользователя как мелкие правки и исправлять самостоятельно
-2. Сообщать `approval = "yes"` даже когда пользователь дал замечания
-3. Полностью пропускать ветку исправлений workflow
-
-Это нарушает цикл итераций workflow и препятствует надлежащему контролю качества.
+Гейт существует, чтобы передать решение тому, кому оно принадлежит. Агент, прочитавший ответ как
+«мелкие правки, которые я применю сам», выдаёт работу, не прошедшую путь правки и ревью, а
+`approval = "yes"`, записанное поверх замечаний, теряет сами замечания. Названное следствие — куда
+уходит «нет» и что закрывает «да» — и делает честный ответ полезным.
 
 ### Пример ворот валидации
 
@@ -243,7 +244,7 @@ CRITICALLY IMPORTANT - REACTION TO FEEDBACK:
 {
   "type": "agent-directive",
   "id": "approve-plan",
-  "directive": "Show user the plan and ask for confirmation.\n\nPlan: {{plan_summary}}\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself",
+  "directive": "Представь план и спроси, утверждён ли он.\n\nПлан: {{plan_summary}}\n\n`approval` записывает собственный ответ пользователя: всё, кроме безоговорочного «да», — это «нет», с точными словами в `user_feedback`. «Нет» ведёт к ответственности, которой принадлежит ревизия, поэтому исправление, сделанное здесь, — изменение, которого никто не рецензировал.",
   "completionCondition": "User confirmed or rejected plan",
   "inputSchema": {
     "type": "object",

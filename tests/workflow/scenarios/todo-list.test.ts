@@ -42,7 +42,7 @@ describe("todo-list minimal sequential checklist", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("3.3.0");
+    expect(workflow.metadata.version).toBe("3.4.5");
 
     expect(new Set(workflow.nodes.map((node) => node.id))).toEqual(
       new Set([
@@ -83,7 +83,34 @@ describe("todo-list minimal sequential checklist", () => {
     const obtain = workflow.nodes.find((node) => node.id === "obtain-tasks");
     expect(obtain?.type).toBe("agent-directive");
     if (obtain?.type !== "agent-directive") throw new Error("obtain-tasks missing");
-    expect(obtain.directive).toContain("return that array unchanged");
+    // Supplied content stays the author's; the order is the executor's. Both halves are pinned,
+    // because a directive that keeps only the first one is the defect this rule was written for.
+    // The two meanings this node lost once already: completeness of the checklist, and the branch
+    // condition that sends a draft to planning instead of to the "content is the author's" branch.
+    expect(obtain.directive).toContain("Obtain the complete checklist");
+    expect(obtain.directive).toContain("ready array matching the required schema");
+    expect(obtain.directive).toContain("with its wording and scope unchanged");
+    expect(obtain.directive).toContain("The order is yours to establish");
+    expect(obtain.directive).toContain("Place each item where its prerequisites already hold");
+    expect(obtain.directive).not.toContain("renumber");
+    // The gate is what the agent measures itself against, so every protection the directive states
+    // is pinned here separately: an unpinned clause is exactly how one of them disappeared before.
+    expect(obtain.completionCondition).toContain("supplied items keep their content");
+    expect(obtain.completionCondition).toContain("none is lost");
+    expect(obtain.completionCondition).toContain("nothing unrequested is added");
+    expect(obtain.completionCondition).toContain(
+      "every item stands where its prerequisites already hold",
+    );
+    // The one case where no such order exists stays passable, and the exception stays attached to
+    // that pair: naming one pair must not excuse leaving every other item unordered.
+    expect(obtain.completionCondition).toContain(
+      "except a pair that each need the other's result, which is named to the author",
+    );
+    // Clauses the gate must not lose: the planning branch it carried in 3.3.0, and the two
+    // obligations the directive states about a governing remark and about visible reordering.
+    expect(obtain.completionCondition).toContain("planned once from the current goal");
+    expect(obtain.completionCondition).toContain("constrains the items it governs");
+    expect(obtain.completionCondition).toContain("visible to the author before work starts");
     expect(obtain.directive).toContain("Otherwise plan the checklist once");
 
     const execute = workflow.nodes.find((node) => node.id === "execute-task");

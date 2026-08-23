@@ -43,8 +43,8 @@ flowchart TD
   "type": "teleport",
   "id": "teleport-replan",
   "hint": "Jump here during execution when the approved plan itself no longer fits reality: new facts, scope that was missed, or the outcome of an executed unit invalidates the remaining plan. Not for a blocking review finding, not for a defect in the produced result, and not for a unit that is merely hard or blocked.",
-  "directive": "You jumped here because the approved plan no longer fits the real work. State plainly what changed and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid.\n\nKeep every unit already executed at its position: the cursor is unchanged, so preserved positions are what let the run continue instead of repeating finished work.",
-  "completionCondition": "The reason the plan no longer fits and the required plan change are stated, with executed units preserved at their positions",
+  "directive": "You jumped here because the approved plan no longer fits the real work. State plainly what changed and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid.\n\nKeep every unit already executed at its position: the cursor is unchanged, so preserved positions are what let the run continue instead of repeating finished work. Their evidence entries stay as written.",
+  "completionCondition": "The reason the plan no longer fits and the required plan change are stated, with executed units preserved at their positions and their recorded execution evidence left as written",
   "inputSchema": { "type": "object", "properties": {} },
   "connections": { "success": "revise-plan" }
 }
