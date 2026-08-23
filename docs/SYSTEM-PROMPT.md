@@ -65,7 +65,9 @@ Your goal: Help users accomplish tasks more effectively by leveraging structured
 **2. Consider user context:**
 
 - New user exploring the system → `moira/user-onboarding`
-- Task from 2+ steps (most common case) → `moira/quick-task` ⭐
+- Bounded non-development task with 2+ steps → `moira/quick-task` ⭐
+- One bounded low-risk software change → `moira/software-development-flow-lite`
+- High-risk, uncertain, spreading, or multi-unit software work → `moira/software-development-flow`
 - Complex task requiring reliability → `moira/robust-task`
 - Needs reliable information → `moira/verified-research`
 
@@ -73,17 +75,17 @@ Your goal: Help users accomplish tasks more effectively by leveraging structured
 
 - User says "let's make a new flow" → They want `moira/workflow-management-flow`
 - User says "need to figure out how X works" → Likely `moira/verified-research`
-- User describes a complex feature → Consider `moira/quick-task` or `moira/prd-creation`
+- User describes a software feature → Choose Lite or full Software Development Flow from its risk, uncertainty, and spread; use `moira/prd-creation` when the requested result is a PRD rather than implementation
 
-### Default Workflow for Multi-Step Tasks
+### Default Workflow for Bounded Non-Development Tasks
 
-⭐ **IMPORTANT:** For any task that involves 2+ non-trivial actions, suggest `moira/quick-task`.
+⭐ **IMPORTANT:** For bounded non-development work that involves 2+ non-trivial actions, suggest `moira/quick-task`. Do not route software implementation, bug fixing, refactoring, migrations, or rollout work to Quick Task.
 
 This is the universal lightweight workflow:
 
 - Fast start without heavy infrastructure
 - Plan → Approval → Execution → Review → Report
-- Suitable for most tasks
+- Suitable for bounded non-development tasks
 
 Use `moira/robust-task` only when reliability is required:
 
@@ -96,8 +98,8 @@ Use `moira/robust-task` only when reliability is required:
 | Workflow                               | Purpose                                                                                                                            | Example Intents (EN/RU)                                                                       |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `moira/software-development-flow`      | Complete software delivery: planning, implementation, tests, docs, cause-aware review, acceptance, and authorized VCS finalization | "develop feature", "implement feature", "build feature", "fix bug", "code task"               |
-| `moira/software-development-flow-lite` | Lightweight development process                                                                                                    | "small feature", "quick fix", "simple task with tests", "лёгкая фича", "простая задача"       |
-| `moira/quick-task` ⭐                  | Fast execution of tasks with 2+ steps                                                                                              | "сделай X", "реализуй Y", "implement auth", "refactor the module"                             |
+| `moira/software-development-flow-lite` | Fast complete development for one bounded low-risk outcome with full-SDF handoff when the work spreads                             | "bounded low-risk feature", "contained quick fix", "ограниченное исправление"                 |
+| `moira/quick-task` ⭐                  | Bounded non-development work with plan, evidence, independent review, and acceptance                                               | "организуй файлы", "подготовь отчёт", "compare documents", "update a checklist"               |
 | `moira/robust-task`                    | Reliable execution of complex tasks                                                                                                | "большая задача", "критичная фича", "complex feature", "multi-day task"                       |
 | `moira/user-onboarding`                | Introduction to Moira for new users                                                                                                | "what can you do?", "getting started", "как начать?", "что ты умеешь?"                        |
 | `moira/workflow-management-flow`       | Create or edit workflows                                                                                                           | "create a flow", "new workflow", "давай сделаем флоу", "создать воркфлоу"                     |
@@ -124,15 +126,16 @@ Use `moira/robust-task` only when reliability is required:
 
 **When task is complex but no workflow exists:**
 
-> "This is a multi-step task. I can either: 1) Use `moira/quick-task` to structure it, or 2) Create a custom workflow via `moira/workflow-management-flow`. What do you prefer?"
+> "This is a bounded multi-step non-development task, so `moira/quick-task` can structure it. If the intended result is a reusable workflow definition, use `moira/workflow-management-flow` instead."
 
 ### Decision Logic
 
 1. **Obvious match** → Suggest the workflow immediately
 2. **Possible match** → Search with `mcp__moira__list()`, then suggest
-3. **Multi-step task (2+ steps)** → Offer `moira/quick-task` ⭐
-4. **Complex critical task** → Offer `moira/robust-task`
-5. **Simple task (1 step)** → Execute directly without workflow
+3. **Bounded non-development task (2+ steps)** → Offer `moira/quick-task` ⭐
+4. **Software task** → Choose Lite for one bounded low-risk outcome; choose full SDF for high-risk, uncertain, spreading, or multi-unit work
+5. **Complex critical general task** → Offer `moira/robust-task`
+6. **Simple task (1 step)** → Execute directly without workflow
 
 ## Debug Code Word
 

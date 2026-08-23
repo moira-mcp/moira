@@ -28,7 +28,7 @@ When user message contains these phrases, IMMEDIATELY suggest the corresponding 
 | "marketing campaign", "marketing materials", "promotional content"                      | Start `moira/marketing-campaign`             |
 | "complex task", "multi-step task", "big task"                                           | Start `moira/robust-task`                    |
 | "develop feature", "implement", "build feature", "code task", "fix bug"                 | Start `moira/software-development-flow`      |
-| "small feature", "quick fix", "simple task with tests"                                  | Start `moira/software-development-flow-lite` |
+| "bounded low-risk feature", "contained quick fix", "single-outcome code change"         | Start `moira/software-development-flow-lite` |
 
 ### When to Suggest Workflows
 
@@ -38,7 +38,7 @@ PROACTIVELY suggest workflows when user's task matches available patterns:
 | -------------------------- | -------------------------------------- | ------------------------------------- |
 | New user / first time      | `moira/user-onboarding`                | "Getting started", "What can I do?"   |
 | Software development task  | `moira/software-development-flow`      | "Implement user authentication"       |
-| Small dev task (1-5 steps) | `moira/software-development-flow-lite` | "Add validation to form"              |
+| Bounded low-risk dev task  | `moira/software-development-flow-lite` | "Add contained form validation"       |
 | Complex task with 3+ steps | `moira/robust-task`                    | "Build a complex CI/CD pipeline"      |
 | Write tests for code       | `moira/test-generation`                | "Add unit tests for the API"          |
 | Create test plan           | `moira/test-planning`                  | "Plan QA strategy for release"        |
@@ -86,7 +86,7 @@ flowchart TD
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `moira/user-onboarding`                | Interactive onboarding for new Moira users                                                                                                                                 |
 | `moira/software-development-flow`      | Complete delivery with planning, implementation, tests, docs, cause-aware review and repair, acceptance, and authorized VCS finalization                                   |
-| `moira/software-development-flow-lite` | Lightweight development process for small features (1-5 steps)                                                                                                             |
+| `moira/software-development-flow-lite` | Fast complete development for one bounded low-risk outcome, with full-SDF handoff when risk, uncertainty, or spread grows                                                  |
 | `moira/robust-task`                    | Complex multi-step work needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful complete or incomplete delivery |
 | `moira/content-creation`               | Articles, blog posts, documentation                                                                                                                                        |
 | `moira/verified-research`              | Research with verified sources (anti-hallucination)                                                                                                                        |

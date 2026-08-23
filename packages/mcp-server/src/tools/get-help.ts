@@ -438,11 +438,11 @@ function getTopicList(): string {
   result += `| User Request Contains | Start Workflow |\n`;
   result += `| --------------------- | -------------- |\n`;
   result += `| "develop feature", "implement", "build feature", "fix bug" | \`moira/software-development-flow\` |\n`;
-  result += `| "small feature", "quick fix", "simple task with tests" | \`moira/software-development-flow-lite\` |\n`;
+  result += `| one bounded low-risk software outcome with contained recovery; hand off when security, data, public contracts, rollout, uncertainty, or multiple units spread | \`moira/software-development-flow-lite\` |\n`;
   result += `| general plan-first task where only the current plan/evidence must remain durable | \`moira/simple-plan-execution\` |\n`;
   result += `| one bounded task needing decomposition, independent item review, changed retries, suffix revision, and filesystem or memory operation | \`moira/task-breakdown-flow\` |\n`;
   result += `| human-guided stream of tasks that are not known in advance | \`moira/infinite-task-loop\` |\n`;
-  result += `| filesystem-backed multi-step task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
+  result += `| bounded non-development filesystem task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
   result += `| complex critical task needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful incomplete delivery | \`moira/robust-task\` |\n`;
   result += `| "create workflow", "make workflow", "new workflow" | \`moira/workflow-management-flow\` |\n`;
   result += `| "write tests", "create tests", "add tests" | \`moira/test-generation\` |\n`;

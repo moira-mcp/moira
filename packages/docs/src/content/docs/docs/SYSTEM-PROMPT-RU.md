@@ -14,20 +14,20 @@ MCP Moira — Agent Workflow Engine на основе графов нод, ко�
 
 ПРОАКТИВНО предлагайте workflow, когда задача пользователя соответствует доступным паттернам:
 
-| Паттерн задачи                    | Рекомендуемый Workflow                 |
-| --------------------------------- | -------------------------------------- |
-| Разработка фичи / задача кодинга  | `moira/software-development-flow`      |
-| Небольшая задача (1-5 шагов)      | `moira/software-development-flow-lite` |
-| Сложная задача из 3+ шагов        | `moira/robust-task`                    |
-| Написать тесты для кода           | `moira/test-generation`                |
-| Создать тест-план                 | `moira/test-planning`                  |
-| Написать статью/пост/документацию | `moira/content-creation`               |
-| Исследование с источниками        | `moira/verified-research`              |
-| Создать PRD                       | `moira/prd-creation`                   |
-| Разработать UX/UI                 | `moira/ux-design`                      |
-| Анализ данных                     | `moira/data-analysis`                  |
-| Маркетинговые материалы           | `moira/marketing-campaign`             |
-| Создать/редактировать workflow    | `moira/workflow-management-flow`       |
+| Паттерн задачи                       | Рекомендуемый Workflow                 |
+| ------------------------------------ | -------------------------------------- |
+| Разработка фичи / задача кодинга     | `moira/software-development-flow`      |
+| Ограниченное низкорисковое изменение | `moira/software-development-flow-lite` |
+| Сложная задача из 3+ шагов           | `moira/robust-task`                    |
+| Написать тесты для кода              | `moira/test-generation`                |
+| Создать тест-план                    | `moira/test-planning`                  |
+| Написать статью/пост/документацию    | `moira/content-creation`               |
+| Исследование с источниками           | `moira/verified-research`              |
+| Создать PRD                          | `moira/prd-creation`                   |
+| Разработать UX/UI                    | `moira/ux-design`                      |
+| Анализ данных                        | `moira/data-analysis`                  |
+| Маркетинговые материалы              | `moira/marketing-campaign`             |
+| Создать/редактировать workflow       | `moira/workflow-management-flow`       |
 
 ### Правила проактивного поведения
 
@@ -64,7 +64,7 @@ flowchart TD
 | Workflow                               | Применение                                                                                                                                                                                             |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `moira/software-development-flow`      | Полная поставка изменения: план, реализация, тесты, документация, cause-aware review/repair, приёмка и разрешённая VCS-финализация                                                                     |
-| `moira/software-development-flow-lite` | Облегчённый процесс разработки для небольших фич (1-5 шагов)                                                                                                                                           |
+| `moira/software-development-flow-lite` | Быстрая полная разработка одного ограниченного низкорискового результата с handoff в полный SDF при росте риска, неопределённости или масштаба                                                         |
 | `moira/robust-task`                    | Сложная многошаговая работа с долговечным восстановлением, причинно-ориентированным независимым ревью, ограниченным repair результата/evidence, replanning и правдивой выдачей complete или incomplete |
 | `moira/content-creation`               | Статьи, блог-посты, документация                                                                                                                                                                       |
 | `moira/verified-research`              | Исследования с верифицированными источниками (анти-галлюцинация)                                                                                                                                       |

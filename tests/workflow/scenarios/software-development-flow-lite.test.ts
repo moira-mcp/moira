@@ -1,500 +1,757 @@
-/**
- * software-development-flow-lite Scenario Tests
- *
- * Simplified development flow for small tasks (1-5 steps).
- * Core loop: plan → implement → test → review → commit.
- * Coverage target: 100% nodes (42), 100% branches (8 conditions × 2)
- */
-
+/** Contract and route scenarios for moira/software-development-flow-lite v2. */
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
+import {
   runScenario,
-  type TestScenario,
+  type MockInput,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("software-development-flow-lite", "public")!.graph as WorkflowGraph;
+const entry = findSystemCatalogEntry("software-development-flow-lite", "public")!;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workspace = (executionId: string) =>
+  `./moira-ws/software-development-flow-lite-${executionId}`;
+
+function node(graph: WorkflowGraph, id: string): any {
+  const found = graph.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
 }
 
-describe("software-development-flow-lite Scenarios", () => {
-  let workflow: WorkflowGraph;
+function terminal(
+  status: "complete" | "handoff" | "blocked" | "aborted",
+  suffix: "/final-report.md" | "/handoff.md",
+  vcs: "committed" | "not_authorized" | "failed" | "not_applicable",
+): MockInput {
+  return ({ executionId }) => ({
+    delivery_status: status,
+    artifact_path: `${workspace(executionId)}${suffix}`,
+    summary: `Truthful ${status} Lite result.`,
+    vcs_status: vcs,
+  });
+}
 
-  beforeAll(() => {
-    workflow = loadProductionWorkflow();
+function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockInput> {
+  return {
+    intake: {
+      operating_mode: "autonomous",
+      commit_authorized: false,
+      task_summary: "Implement one bounded low-risk change with applicable tests and docs.",
+      preliminary_outcome: "eligible",
+    },
+    "materialize-workspace": {},
+    "plan-change": { planning_outcome: "eligible" },
+    "review-plan": { design_review_outcome: "pass" },
+    "repair-plan": {
+      repair_outcome: "changed",
+      changed_knowledge: "The reproduced plan defect is corrected.",
+    },
+    "present-plan": { decision: "approve" },
+    "revise-plan": {},
+    "reassess-contract": {
+      reassessment_outcome: "eligible",
+      changed_knowledge: "The invalid criterion now uses discriminating evidence.",
+    },
+    "implement-change": { implementation_outcome: "ready" },
+    "producer-completion": { completion_outcome: "ready" },
+    "validate-change": { validation_outcome: "pass" },
+    "repair-product": {
+      repair_outcome: "changed",
+      changed_knowledge: "The product cause is corrected across its bounded class.",
+    },
+    "repair-verification": {
+      repair_outcome: "changed",
+      changed_knowledge: "The stale fixture now observes current behavior.",
+    },
+    "semantic-review": { review_outcome: "pass" },
+    "present-result": { decision: "accept" },
+    "rework-result": { rework_outcome: "product_changed" },
+    "close-result": ({ executionId }) => ({
+      closure_outcome: "complete",
+      delivery_status: "complete",
+      artifact_path: `${workspace(executionId)}/final-report.md`,
+      summary: "The accepted bounded result remains local.",
+      vcs_status: "not_authorized",
+    }),
+    "finalize-handoff": terminal("handoff", "/handoff.md", "not_applicable"),
+    "finalize-blocked": terminal("blocked", "/final-report.md", "not_applicable"),
+    "finalize-workspace-blocked": {
+      delivery_status: "blocked",
+      summary: "The workspace could not be materialized.",
+      vcs_status: "not_applicable",
+    },
+    "finalize-aborted": terminal("aborted", "/final-report.md", "not_applicable"),
+    "teleport-revise-process": {},
+    ...overrides,
+  };
+}
+
+function configureMaterialize(engine: GraphExecutionEngine, error = false): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
+  if (!error) {
+    handlers.set(
+      "materialize",
+      new MaterializeHandler(
+        { createMaterializeToken: () => "scenario-token" },
+        () => "https://moira.example",
+      ),
+    );
+  } else {
+    handlers.set("materialize", {
+      getNodeType: () => "materialize",
+      execute: async (current: { id: string }) => ({
+        nodeId: current.id,
+        action: "continue",
+        outputPath: "error",
+        data: { error: "workspace unavailable" },
+      }),
+    });
+  }
+}
+
+async function run(scenario: TestScenario, materializeError = false): Promise<ScenarioResult> {
+  return runScenario(workflow(), scenario, {
+    engineSetup: (engine) => configureMaterialize(engine, materializeError),
+  });
+}
+
+describe("software-development-flow-lite", () => {
+  test("publishes the risk-based v2 identity and current selection contract", async () => {
+    const graph = workflow();
+    expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+    expect(entry.owner).toBe("system-moira");
+    expect(entry.visibility).toBe("public");
+    expect(graph.id).toBe("50c23256-c9d3-4d7e-94c6-763b295fc168");
+    expect(graph.metadata.version).toBe("2.0.0");
+    expect(graph.metadata.description).toContain("risk-based Lite eligibility");
+    expect(graph.metadata.description).toContain("durable full-SDF handoff");
+    expect(graph.metadata.description).toContain("No automatic notification");
+    expect(graph.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(false);
+    expect(graph.nodes.some((candidate) => candidate.type === "expression")).toBe(false);
+    expect(
+      graph.nodes.filter((candidate) => candidate.type === "agent-directive").length,
+    ).toBeLessThan(26);
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = {
-        id: `moira/${workflow.slug || "software-development-flow-lite"}`,
-        ...workflow,
-      };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
+  test("materializes one execution-correlated artifact contract", () => {
+    const graph = workflow();
+    expect(graph.variableRegistry?.workspace_path).toMatchObject({
+      const: "./moira-ws/software-development-flow-lite-{{executionId}}",
+      default: "./moira-ws/software-development-flow-lite-{{executionId}}",
     });
-
-    it("should have expected cycles (plan review, test fix, quality fix, validation fix, user fix, step loops)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles.length).toBeGreaterThan(0);
+    expect(
+      node(graph, "materialize-workspace").files.map((file: { path: string }) => file.path),
+    ).toEqual([
+      "process-id.txt",
+      "task-contract.md",
+      "plan.md",
+      "plan-review.md",
+      "implementation-evidence.md",
+      "validation-evidence.md",
+      "semantic-review.md",
+      "repair-account.md",
+      "handoff.md",
+      "final-report.md",
+    ]);
+    expect(node(graph, "finalize-handoff").inputSchema.xContextPathSuffixes).toEqual({
+      baseContextProperty: "workspace_path",
+      properties: { artifact_path: "/handoff.md" },
     });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(42);
+    expect(node(graph, "close-result").inputSchema.xContextPathSuffixes).toEqual({
+      baseContextProperty: "workspace_path",
+      properties: { artifact_path: "/final-report.md" },
     });
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        {
-          name: "Happy path - single step, all passes, no user approval",
-          description:
-            "Plan has no issues, approved immediately, tests pass, quality 15/15, agent validation clean, no user approval needed, single step completes",
-          mockInputs: {
-            "get-initial-requirements": {
-              test_info: "npm test -- --reporter=verbose",
-              startup_info: "npm run dev",
-              project_checklist: "Follow TypeScript strict mode",
-              agent_onboarding_info: "Use strict typing everywhere",
-              documentation_standards: "JSDoc comments on public APIs",
-              browser_ui_info: "skip",
-              project_summary: "REST API service built with Express and TypeScript",
-            },
-            "get-task-requirements": {
-              user_task_description: "Add health check endpoint that returns service status",
-              task_complexity_in_context: 2,
-              feature_name: "health-check",
-            },
-            "analyze-and-plan": {
-              development_plan: [
-                "Implement health check endpoint with status response and unit tests",
-              ],
-              development_plan_file: "./moira-ws/health-check-20240115-1200/development-plan.md",
-              plan_summary:
-                "Add a single health check endpoint returning service status and uptime",
-              acceptance_criteria:
-                "GET /health returns 200 with JSON status. Response includes uptime, version, and database connectivity. Unit tests cover all response fields and error scenarios.",
-            },
-            "agent-review-plan": {
-              review_issues_count: 0,
-              issues_found: [],
-            },
-            "present-plan-to-user": {
-              plan_approval: "yes",
-            },
-            "initialize-plan-tracking": {
-              current_step_name: "Health check endpoint",
-              total_steps: 1,
-            },
-            "implement-step": {
-              implemented_functionality:
-                "Created GET /health endpoint returning status JSON with uptime and version",
-            },
-            "run-all-tests": {
-              tests_passed_count: 24,
-              tests_failed_count: 0,
-            },
-            "check-code-quality-and-architecture": {
-              total_standards_met_count: 15,
-            },
-            "agent-validate-step": {
-              agent_review_file:
-                "./moira-ws/health-check-20240115-1200/step-1/iteration-1/gate-review.md",
-              agent_issues_found: "no",
-            },
-            "commit-step": {
-              commit_hash: "a1b2c3d",
-            },
-            "check-user-approval-needed": {
-              user_approval_needed: "no",
-              approval_reason: "Simple non-breaking addition",
-            },
-            "generate-final-report": {
-              final_report_file: "./moira-ws/health-check-20240115-1200/final-report.md",
-            },
-            "present-results": {
-              user_permission_to_continue: "yes",
-            },
-            "update-documentation": {
-              workflow_completion_summary:
-                "Health check endpoint implemented with full test coverage and documentation",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "start",
-              "get-initial-requirements",
-              "study-project-foundation",
-              "study-implementation-details",
-              "get-task-requirements",
-              "analyze-and-plan",
-              "agent-review-plan",
-              "check-agent-review-issues",
-              "notify-plan-ready",
-              "present-plan-to-user",
-              "check-plan-approval",
-              "initialize-plan-tracking",
-              "implement-step",
-              "run-all-tests",
-              "check-test-results",
-              "check-code-quality-and-architecture",
-              "route-code-quality-result",
-              "agent-validate-step",
-              "check-agent-validation-result",
-              "commit-step",
-              "check-user-approval-needed",
-              "route-user-approval",
-              "notify-step-complete",
-              "check-if-plan-complete",
-              "notify-development-complete",
-              "generate-final-report",
-              "present-results",
-              "update-documentation",
-              "notify-workflow-complete",
-              "end",
-            ],
-            avoids: [
-              "fix-plan-issues",
-              "refine-development-plan",
-              "analyze-test-failures",
-              "fix-implementation-for-tests-action",
-              "fix-code-quality-and-architecture-action",
-              "fix-agent-feedback-issues-action",
-              "user-review-step",
-              "fix-user-feedback-action",
-              "expr-increment-step",
-              "get-next-step-name",
-              "notify-step-start",
-            ],
-          },
-        },
-        {
-          name: "All failure branches - plan issues, rejection, test failures, quality issues, user approves step",
-          description:
-            "Agent review finds plan issues (fix loop), user rejects plan (refine loop), tests fail (fix loop), code quality below 15 (fix loop), user approval needed and approved",
-          mockInputs: {
-            "get-initial-requirements": {
-              test_info: "npx vitest run",
-              startup_info: "npm run start:dev",
-              project_checklist: "ESLint + Prettier enforced",
-              agent_onboarding_info: "Follow domain-driven design patterns",
-              documentation_standards: "README updates for new features",
-              browser_ui_info: "React SPA at http://localhost:3000",
-              project_summary: "Full-stack application with React frontend and Node backend",
-            },
-            "get-task-requirements": {
-              user_task_description: "Implement user profile editing with avatar upload support",
-              task_complexity_in_context: 4,
-              feature_name: "user-profile-edit",
-            },
-            "analyze-and-plan": {
-              development_plan: [
-                "Build profile editing form with avatar upload and validation tests",
-              ],
-              development_plan_file:
-                "./moira-ws/user-profile-edit-20240115-1400/development-plan.md",
-              plan_summary:
-                "Implement user profile editing UI with avatar upload, validation, and persistence",
-              acceptance_criteria:
-                "Users can edit name, email, bio. Avatar upload accepts JPEG/PNG under 5MB. Changes persist to database. Form validates required fields. All unit and integration tests pass.",
-            },
-            "agent-review-plan": [
-              {
-                review_issues_count: 1,
-                issues_found: [
-                  {
-                    issue: "Missing error handling for file upload failures",
-                    affected_step: "Step 1",
-                    suggested_fix: "Add retry logic and user-facing error messages",
-                  },
-                ],
-              },
-              {
-                review_issues_count: 0,
-                issues_found: [],
-              },
-            ],
-            "present-plan-to-user": [
-              {
-                plan_approval: "no",
-                user_feedback_on_plan: "Add image compression before upload",
-              },
-              {
-                plan_approval: "yes",
-              },
-            ],
-            "refine-development-plan": {
-              plan_file_updated: "yes",
-              development_plan: [
-                "Build profile editing with avatar upload, compression, and validation tests",
-              ],
-              plan_summary:
-                "Implement profile editing with avatar upload including client-side compression",
-              refinement_summary: "Added client-side image compression before upload",
-            },
-            "initialize-plan-tracking": {
-              current_step_name: "Profile editing with avatar",
-              total_steps: 1,
-            },
-            "implement-step": {
-              implemented_functionality:
-                "Built profile form with avatar upload, compression, and validation",
-            },
-            "run-all-tests": [
-              {
-                tests_passed_count: 18,
-                tests_failed_count: 3,
-              },
-              {
-                tests_passed_count: 21,
-                tests_failed_count: 0,
-              },
-            ],
-            "analyze-test-failures": {
-              failure_analysis:
-                "Three tests fail due to missing mock for image compression library",
-              fix_strategy: "fix_implementation",
-            },
-            "fix-implementation-for-tests-action": {
-              code_fixed: "yes",
-            },
-            "check-code-quality-and-architecture": [
-              {
-                total_standards_met_count: 11,
-              },
-              {
-                total_standards_met_count: 15,
-              },
-            ],
-            "fix-code-quality-and-architecture-action": {
-              problems_fixed: "yes",
-            },
-            "agent-validate-step": {
-              agent_review_file:
-                "./moira-ws/user-profile-edit-20240115-1400/step-1/iteration-1/gate-review.md",
-              agent_issues_found: "no",
-            },
-            "commit-step": {
-              commit_hash: "e4f5a6b",
-            },
-            "check-user-approval-needed": {
-              user_approval_needed: "yes",
-              approval_reason: "UI changes require visual review",
-            },
-            "user-review-step": {
-              user_step_approval: "approved",
-              user_step_feedback: "Looks great",
-            },
-            "generate-final-report": {
-              final_report_file: "./moira-ws/user-profile-edit-20240115-1400/final-report.md",
-            },
-            "present-results": {
-              user_permission_to_continue: "yes",
-            },
-            "update-documentation": {
-              workflow_completion_summary:
-                "Profile editing with avatar upload fully implemented and tested",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "check-agent-review-issues",
-              "fix-plan-issues",
-              "check-plan-approval",
-              "refine-development-plan",
-              "check-test-results",
-              "analyze-test-failures",
-              "fix-implementation-for-tests-action",
-              "route-code-quality-result",
-              "fix-code-quality-and-architecture-action",
-              "route-user-approval",
-              "user-review-step",
-              "check-user-step-decision",
-              "end",
-            ],
-          },
-        },
-        {
-          name: "Agent validation failure, user rejects step, multi-step plan",
-          description:
-            "Agent gate review finds issues (fix loop), user rejects step implementation (fix-user loop back to tests), 2-step plan exercises step increment loop",
-          mockInputs: {
-            "get-initial-requirements": {
-              test_info: "npm test",
-              startup_info: "docker compose up",
-              project_checklist: "Use PostgreSQL for persistence",
-              agent_onboarding_info: "Follow repository service pattern",
-              documentation_standards: "OpenAPI spec for all endpoints",
-              browser_ui_info: "skip",
-              project_summary: "E-commerce platform with microservice architecture",
-            },
-            "get-task-requirements": {
-              user_task_description: "Add shopping cart with item persistence across sessions",
-              task_complexity_in_context: 6,
-              feature_name: "shopping-cart",
-            },
-            "analyze-and-plan": {
-              development_plan: [
-                "Implement cart data model with CRUD operations and unit tests",
-                "Build cart REST API endpoints with integration tests",
-              ],
-              development_plan_file: "./moira-ws/shopping-cart-20240116-0900/development-plan.md",
-              plan_summary:
-                "Implement shopping cart in two steps: data model layer then API endpoints layer",
-              acceptance_criteria:
-                "Cart persists items across user sessions. Users can add, remove, update quantities. API validates input and returns proper error codes. All unit and integration tests pass with full coverage.",
-            },
-            "agent-review-plan": {
-              review_issues_count: 0,
-              issues_found: [],
-            },
-            "present-plan-to-user": {
-              plan_approval: "yes",
-            },
-            "initialize-plan-tracking": {
-              current_step_name: "Cart data model",
-              total_steps: 2,
-            },
-            "implement-step": [
-              {
-                implemented_functionality: "Created cart model with CRUD repository and unit tests",
-              },
-              {
-                implemented_functionality:
-                  "Built REST endpoints for cart operations with integration tests",
-              },
-            ],
-            "run-all-tests": [
-              { tests_passed_count: 15, tests_failed_count: 0 },
-              { tests_passed_count: 15, tests_failed_count: 0 },
-              { tests_passed_count: 28, tests_failed_count: 0 },
-            ],
-            "check-code-quality-and-architecture": [
-              { total_standards_met_count: 15 },
-              { total_standards_met_count: 15 },
-              { total_standards_met_count: 15 },
-            ],
-            "agent-validate-step": [
-              {
-                agent_review_file:
-                  "./moira-ws/shopping-cart-20240116-0900/step-1/iteration-1/gate-review.md",
-                agent_issues_found: "yes",
-              },
-              {
-                agent_review_file:
-                  "./moira-ws/shopping-cart-20240116-0900/step-1/iteration-1/gate-review.md",
-                agent_issues_found: "no",
-              },
-              {
-                agent_review_file:
-                  "./moira-ws/shopping-cart-20240116-0900/step-1/iteration-1/gate-review.md",
-                agent_issues_found: "no",
-              },
-              {
-                agent_review_file:
-                  "./moira-ws/shopping-cart-20240116-0900/step-2/iteration-1/gate-review.md",
-                agent_issues_found: "no",
-              },
-            ],
-            "fix-agent-feedback-issues-action": {
-              action_taken: "fixes_applied",
-              fixes_description: "Fixed cart model validation and concurrency handling",
-            },
-            "commit-step": [
-              { commit_hash: "abc1234" },
-              { commit_hash: "def5678" },
-              { commit_hash: "ghi9012" },
-            ],
-            "check-user-approval-needed": [
-              {
-                user_approval_needed: "yes",
-                approval_reason: "New data model requires review",
-              },
-              {
-                user_approval_needed: "yes",
-                approval_reason: "Revised implementation needs re-review",
-              },
-              {
-                user_approval_needed: "no",
-                approval_reason: "Standard API implementation following established patterns",
-              },
-            ],
-            "user-review-step": [
-              {
-                user_step_approval: "needs_fixes",
-                user_step_feedback: "Add input validation for item quantities",
-              },
-              {
-                user_step_approval: "approved",
-                user_step_feedback: "Validation looks correct now",
-              },
-            ],
-            "fix-user-feedback-action": {
-              action_taken: "fixes_applied",
-              fixes_description: "Added quantity validation with min 1 and max 999 constraints",
-            },
-            "get-next-step-name": {
-              current_step_name: "Cart API endpoints",
-            },
-            "generate-final-report": {
-              final_report_file: "./moira-ws/shopping-cart-20240116-0900/final-report.md",
-            },
-            "present-results": {
-              user_permission_to_continue: "yes",
-            },
-            "update-documentation": {
-              workflow_completion_summary:
-                "Shopping cart fully implemented with data model and API endpoints",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "check-agent-validation-result",
-              "fix-agent-feedback-issues-action",
-              "check-user-step-decision",
-              "fix-user-feedback-action",
-              "check-if-plan-complete",
-              "expr-increment-step",
-              "get-next-step-name",
-              "notify-step-start",
-              "end",
-            ],
-          },
-        },
-      ];
+  test("separates semantic judgment from route evidence and owns replan", () => {
+    const graph = workflow();
+    expect(node(graph, "validate-change").directive).toContain(
+      "Mechanical green proves only measured properties",
+    );
+    expect(node(graph, "semantic-review").directive).toContain(
+      "Structural/test green is not semantic completeness",
+    );
+    expect(node(graph, "semantic-review").directive).toContain("genuinely independent");
+    expect(node(graph, "review-plan").completionCondition).toContain(
+      "for blocked, a factual durable inability record exists",
+    );
+    expect(node(graph, "semantic-review").completionCondition).toContain(
+      "for blocked, a factual durable inability record exists",
+    );
+    expect(node(graph, "review-plan").inputSchema.properties.design_review_outcome.enum).toEqual([
+      "pass",
+      "repair",
+      "replan",
+      "blocked",
+    ]);
+    expect(node(graph, "semantic-review").inputSchema.properties.review_outcome.enum).toEqual([
+      "pass",
+      "repair",
+      "replan",
+      "blocked",
+    ]);
+    expect(node(graph, "repair-product").directive).toContain(
+      "repair-account.md when repair-verification returned product_required",
+    );
+    expect(node(graph, "repair-verification").directive).toContain(
+      "overwrite repair-account.md with that newly exposed product cause",
+    );
+    expect(node(graph, "reassess-contract").directive).toContain(
+      "changed wording alone is insufficient",
+    );
+    expect(node(graph, "teleport-revise-process").connections.success).toBe("reassess-contract");
+    expect(node(graph, "repair-verification").inputSchema.properties.repair_outcome.enum).toEqual([
+      "changed",
+      "product_required",
+      "reassess",
+      "blocked",
+    ]);
+  });
 
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+  test.each([
+    [
+      "eligible intake with route-only reason",
+      "intake",
+      {
+        preliminary_outcome: "eligible",
+        outcome_reason: "contradictory",
+        operating_mode: "autonomous",
+        commit_authorized: false,
+        task_summary: "task",
+      },
+    ],
+    [
+      "handoff intake without reason",
+      "intake",
+      {
+        preliminary_outcome: "handoff",
+        operating_mode: "autonomous",
+        commit_authorized: false,
+        task_summary: "task",
+      },
+    ],
+    [
+      "approved plan with revision feedback",
+      "present-plan",
+      { decision: "approve", feedback: "bad" },
+    ],
+    [
+      "semantic pass with repair owner",
+      "semantic-review",
+      { review_outcome: "pass", repair_owner: "product" },
+    ],
+    [
+      "accepted result with rework feedback",
+      "present-result",
+      { decision: "accept", feedback: "bad" },
+    ],
+    [
+      "complete closure with blocked status",
+      "close-result",
+      ({ executionId }: { executionId: string }) => ({
+        closure_outcome: "complete",
+        delivery_status: "blocked",
+        artifact_path: `${workspace(executionId)}/final-report.md`,
+        summary: "bad",
+        vcs_status: "not_authorized",
+      }),
+    ],
+  ])("rejects a contradictory strict response: %s", async (name, target, invalid) => {
+    const userGate = target === "present-plan" || target === "present-result";
+    const result = await run({
+      name: String(name),
+      mockInputs: inputs({
+        ...(userGate
+          ? {
+              intake: {
+                operating_mode: "interactive",
+                commit_authorized: false,
+                task_summary: "Bounded low-risk change.",
+                preliminary_outcome: "eligible",
+              },
+            }
+          : {}),
+        [String(target)]: invalid as MockInput,
+      }),
+      expect: { status: "failed" },
     });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain(`Input validation failed for node '${String(target)}'`);
+  });
+
+  test("rejects a final artifact path from another execution", async () => {
+    const result = await run({
+      name: "foreign final path",
+      mockInputs: inputs({
+        "close-result": {
+          closure_outcome: "complete",
+          delivery_status: "complete",
+          artifact_path: "./moira-ws/software-development-flow-lite-deadbeef/final-report.md",
+          summary: "Looks valid but belongs to another execution.",
+          vcs_status: "not_authorized",
+        },
+      }),
+      expect: { status: "failed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("must equal the current execution path");
+  });
+
+  test("covers every ordinary node and branch with distinct terminal classes", async () => {
+    const cases: Array<{
+      name: string;
+      overrides?: Record<string, MockInput>;
+      materializeError?: boolean;
+      teleportAfter?: TestScenario["teleportAfter"];
+      reaches?: string[];
+      avoids?: string[];
+    }> = [
+      {
+        name: "autonomous local complete",
+        reaches: ["end"],
+        avoids: ["present-plan", "present-result"],
+      },
+      {
+        name: "interactive revise and rework then committed",
+        overrides: {
+          intake: {
+            operating_mode: "interactive",
+            commit_authorized: true,
+            task_summary: "Bounded interactive change.",
+            preliminary_outcome: "eligible",
+          },
+          "review-plan": [{ design_review_outcome: "pass" }, { design_review_outcome: "pass" }],
+          "present-plan": [
+            { decision: "revise", feedback: "Clarify docs." },
+            { decision: "approve" },
+          ],
+          "semantic-review": [{ review_outcome: "pass" }, { review_outcome: "pass" }],
+          "present-result": [
+            { decision: "rework", feedback: "Clarify error behavior." },
+            { decision: "accept" },
+          ],
+          "close-result": ({ executionId }) => ({
+            closure_outcome: "complete",
+            delivery_status: "complete",
+            artifact_path: `${workspace(executionId)}/final-report.md`,
+            summary: "Accepted and committed.",
+            vcs_status: "committed",
+          }),
+        },
+        reaches: ["revise-plan", "rework-result", "end"],
+      },
+      {
+        name: "intake handoff",
+        overrides: {
+          intake: {
+            operating_mode: "autonomous",
+            commit_authorized: false,
+            task_summary: "Small auth migration.",
+            preliminary_outcome: "handoff",
+            outcome_reason: "Full SDF required.",
+          },
+        },
+        reaches: ["end-handoff"],
+      },
+      {
+        name: "intake blocked",
+        overrides: {
+          intake: {
+            operating_mode: "autonomous",
+            commit_authorized: false,
+            task_summary: "Unknown repository task.",
+            preliminary_outcome: "blocked",
+            outcome_reason: "Repository unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "materialize blocked",
+        materializeError: true,
+        reaches: ["finalize-workspace-blocked", "end-blocked"],
+      },
+      {
+        name: "plan handoff",
+        overrides: {
+          "plan-change": {
+            planning_outcome: "handoff",
+            outcome_reason: "Multiple vertical units.",
+          },
+        },
+        reaches: ["end-handoff"],
+      },
+      {
+        name: "plan blocked",
+        overrides: {
+          "plan-change": { planning_outcome: "blocked", outcome_reason: "Missing prerequisite." },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "plan repair",
+        overrides: {
+          "review-plan": [{ design_review_outcome: "repair" }, { design_review_outcome: "pass" }],
+        },
+        reaches: ["repair-plan", "end"],
+      },
+      {
+        name: "plan review blocked",
+        overrides: {
+          "review-plan": { design_review_outcome: "blocked" },
+        },
+        reaches: ["route-plan-review-blocked", "end-blocked"],
+      },
+      {
+        name: "plan repair reassess",
+        overrides: {
+          "review-plan": [{ design_review_outcome: "repair" }, { design_review_outcome: "pass" }],
+          "repair-plan": { repair_outcome: "reassess" },
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "plan replan handoff",
+        overrides: {
+          "review-plan": { design_review_outcome: "replan" },
+          "reassess-contract": {
+            reassessment_outcome: "handoff",
+            outcome_reason: "Lite is ineligible.",
+          },
+        },
+        reaches: ["end-handoff"],
+      },
+      {
+        name: "plan replan blocked",
+        overrides: {
+          "review-plan": { design_review_outcome: "replan" },
+          "reassess-contract": { reassessment_outcome: "blocked", outcome_reason: "No evidence." },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "interactive plan abort",
+        overrides: {
+          intake: {
+            operating_mode: "interactive",
+            commit_authorized: false,
+            task_summary: "Bounded change.",
+            preliminary_outcome: "eligible",
+          },
+          "present-plan": { decision: "abort" },
+        },
+        reaches: ["end-aborted"],
+      },
+      {
+        name: "implementation handoff",
+        overrides: {
+          "implement-change": { implementation_outcome: "handoff", outcome_reason: "Work spread." },
+        },
+        reaches: ["end-handoff"],
+      },
+      {
+        name: "implementation blocked",
+        overrides: {
+          "implement-change": {
+            implementation_outcome: "blocked",
+            outcome_reason: "Dependency unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "completion handoff",
+        overrides: {
+          "producer-completion": {
+            completion_outcome: "handoff",
+            outcome_reason: "Breaking contract found.",
+          },
+        },
+        reaches: ["end-handoff"],
+      },
+      {
+        name: "completion replan",
+        overrides: {
+          "producer-completion": [
+            { completion_outcome: "replan", outcome_reason: "Criterion invalid." },
+            { completion_outcome: "ready" },
+          ],
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "completion blocked",
+        overrides: {
+          "producer-completion": {
+            completion_outcome: "blocked",
+            outcome_reason: "Build unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "validation product repair",
+        overrides: {
+          "producer-completion": [{ completion_outcome: "ready" }, { completion_outcome: "ready" }],
+          "validate-change": [
+            { validation_outcome: "product_repair", cause_summary: "Product defect." },
+            { validation_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-product", "end"],
+      },
+      {
+        name: "validation evidence repair",
+        overrides: {
+          "validate-change": [
+            { validation_outcome: "verification_repair", cause_summary: "Stale fixture." },
+            { validation_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-verification", "end"],
+      },
+      {
+        name: "validation replan",
+        overrides: {
+          "validate-change": [
+            { validation_outcome: "replan", cause_summary: "Evidence invalid." },
+            { validation_outcome: "pass" },
+          ],
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "validation blocked",
+        overrides: {
+          "validate-change": {
+            validation_outcome: "blocked",
+            cause_summary: "Environment unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "product repair reassess",
+        overrides: {
+          "validate-change": [
+            { validation_outcome: "product_repair", cause_summary: "Mixed cause." },
+            { validation_outcome: "pass" },
+          ],
+          "repair-product": { repair_outcome: "reassess" },
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "product repair blocked",
+        overrides: {
+          "validate-change": {
+            validation_outcome: "product_repair",
+            cause_summary: "Unauthorized mutation.",
+          },
+          "repair-product": { repair_outcome: "blocked", blocker_reason: "No authority." },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "verification exposes product",
+        overrides: {
+          "producer-completion": [{ completion_outcome: "ready" }, { completion_outcome: "ready" }],
+          "validate-change": [
+            { validation_outcome: "verification_repair", cause_summary: "New fixture." },
+            { validation_outcome: "pass" },
+          ],
+          "repair-verification": {
+            repair_outcome: "product_required",
+            changed_knowledge: "Product defect reproduced.",
+          },
+        },
+        reaches: ["repair-product", "producer-completion", "end"],
+      },
+      {
+        name: "verification reassess",
+        overrides: {
+          "validate-change": [
+            { validation_outcome: "verification_repair", cause_summary: "Invalid method." },
+            { validation_outcome: "pass" },
+          ],
+          "repair-verification": { repair_outcome: "reassess" },
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "verification blocked",
+        overrides: {
+          "validate-change": {
+            validation_outcome: "verification_repair",
+            cause_summary: "Fixture unavailable.",
+          },
+          "repair-verification": { repair_outcome: "blocked", blocker_reason: "No replacement." },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "semantic product repair",
+        overrides: {
+          "producer-completion": [{ completion_outcome: "ready" }, { completion_outcome: "ready" }],
+          "validate-change": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [
+            { review_outcome: "repair", repair_owner: "product" },
+            { review_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-product", "end"],
+      },
+      {
+        name: "semantic evidence repair",
+        overrides: {
+          "validate-change": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [
+            { review_outcome: "repair", repair_owner: "verification" },
+            { review_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-verification", "end"],
+      },
+      {
+        name: "semantic replan",
+        overrides: {
+          "review-plan": [{ design_review_outcome: "pass" }, { design_review_outcome: "pass" }],
+          "validate-change": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "semantic review blocked",
+        overrides: {
+          "semantic-review": { review_outcome: "blocked" },
+        },
+        reaches: ["route-semantic-blocked", "end-blocked"],
+      },
+      {
+        name: "interactive result abort",
+        overrides: {
+          intake: {
+            operating_mode: "interactive",
+            commit_authorized: false,
+            task_summary: "Bounded change.",
+            preliminary_outcome: "eligible",
+          },
+          "present-result": { decision: "abort" },
+        },
+        reaches: ["end-aborted"],
+      },
+      {
+        name: "result rework reassess",
+        overrides: {
+          intake: {
+            operating_mode: "interactive",
+            commit_authorized: false,
+            task_summary: "Bounded change.",
+            preliminary_outcome: "eligible",
+          },
+          "review-plan": [{ design_review_outcome: "pass" }, { design_review_outcome: "pass" }],
+          "validate-change": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [{ review_outcome: "pass" }, { review_outcome: "pass" }],
+          "present-result": [
+            { decision: "rework", feedback: "Evidence contract is wrong." },
+            { decision: "accept" },
+          ],
+          "rework-result": { rework_outcome: "reassess", outcome_reason: "Criterion changes." },
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "result rework handoff",
+        overrides: {
+          intake: {
+            operating_mode: "interactive",
+            commit_authorized: false,
+            task_summary: "Bounded change.",
+            preliminary_outcome: "eligible",
+          },
+          "present-result": { decision: "rework", feedback: "Add migration." },
+          "rework-result": {
+            rework_outcome: "handoff",
+            outcome_reason: "Lite becomes ineligible.",
+          },
+        },
+        reaches: ["end-handoff"],
+      },
+      {
+        name: "result rework blocked",
+        overrides: {
+          intake: {
+            operating_mode: "interactive",
+            commit_authorized: false,
+            task_summary: "Bounded change.",
+            preliminary_outcome: "eligible",
+          },
+          "present-result": { decision: "rework", feedback: "Use unavailable access." },
+          "rework-result": { rework_outcome: "blocked", outcome_reason: "Access unavailable." },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "authorized commit failure",
+        overrides: {
+          intake: {
+            operating_mode: "autonomous",
+            commit_authorized: true,
+            task_summary: "Committed bounded change.",
+            preliminary_outcome: "eligible",
+          },
+          "close-result": ({ executionId }) => ({
+            closure_outcome: "blocked",
+            delivery_status: "blocked",
+            artifact_path: `${workspace(executionId)}/final-report.md`,
+            summary: "Accepted product remains local.",
+            vcs_status: "failed",
+          }),
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "guarded process revision",
+        overrides: {
+          "review-plan": [{ design_review_outcome: "pass" }, { design_review_outcome: "pass" }],
+        },
+        teleportAfter: { afterNode: "review-plan", teleportTo: "teleport-revise-process" },
+        reaches: ["teleport-revise-process", "reassess-contract", "end"],
+      },
+    ];
+
+    const results: ScenarioResult[] = [];
+    for (const current of cases) {
+      results.push(
+        await run(
+          {
+            name: current.name,
+            mockInputs: inputs(current.overrides),
+            teleportAfter: current.teleportAfter,
+            expect: {
+              status: "completed",
+              reaches: current.reaches,
+              avoids: current.avoids,
+            },
+          },
+          current.materializeError,
+        ),
+      );
+    }
+    expect(results.filter((result) => !result.passed)).toEqual([]);
+    const coverage = calculateCoverage(workflow(), results, { includeGapAnalysis: true });
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
   });
 });

@@ -59,23 +59,23 @@ mcp__moira__start({ workflowId: "moira/software-development-flow", parentExecuti
 
 ### software-development-flow-lite
 
-Simplified development flow for small features (1-5 steps). Core loop: plan → implement → test → review → commit.
+Fast complete delivery for one bounded low-risk software change. Lite uses risk-based eligibility, repository-grounded reviewed planning, one complete producer plus a fresh completion pass, applicable deterministic evidence, independent whole-result review, cause-owned repair or reassessment, and authority-bound local VCS closure.
 
 ```mermaid
 flowchart LR
-    A[Study] --> B[Plan] --> C[Approve] --> D[Implement] --> E[Test] --> F[Review] --> G[Commit]
-    G -->|more steps| D
-    G -->|done| H[Report]
+    A[Eligibility] --> B[Reviewed plan] --> C[Complete production] --> D[Completion pass]
+    D --> E[Applicable checks] --> F[Independent review] --> G[Authorized local closure]
+    A -. spreading or high-risk .-> H[Full-SDF handoff]
 ```
 
 | Feature | Description |
 |---------|-------------|
-| Iterative implementation | Step-by-step with validation cycle |
-| Plan review | Subagent validates plan before execution |
-| Numerical checks | Test counts, quality standards, gate review |
-| Lightweight | 42 nodes vs 153 in full SDF |
+| Risk-based Lite boundary | One coherent low-risk outcome; security, data, breaking-contract, multi-unit, rollout-heavy, or uncertain work hands off to full SDF |
+| Complete producer ownership | Applicable code, tests, documentation, schemas, generated output, compatibility, and integrations are completed together |
+| Matching evidence | Project checks prove measured properties; independent review owns semantic and architectural judgment |
+| Cause-aware convergence | Product and verification repair, contract reassessment, handoff, blocked, and abort remain distinct |
 
-**Use for:** Small features (1-5 steps), bug fixes, quick enhancements needing structured development with tests.
+**Use for:** One bounded low-risk feature or bug fix with known architecture and a contained recovery surface. Choose full SDF by risk and spread, not by a fixed file or step count.
 
 ```bash
 mcp__moira__start({ workflowId: "moira/software-development-flow-lite", parentExecutionId: "none" })
@@ -89,7 +89,7 @@ mcp__moira__start({ workflowId: "moira/software-development-flow-lite", parentEx
 
 ### quick-task (Recommended)
 
-Filesystem-backed execution for a bounded plan of 1-10 meaningful work units.
+Filesystem-backed execution for a bounded non-development plan of 1-10 meaningful work units.
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart LR
 | Independent gates | Plan review before approval and result review after execution |
 | Minimal context | Typed file references, plan length, cursor, and routing values only |
 
-**Use for:** Most bounded multi-step tasks executed by an agent with filesystem access. This is the recommended default workflow.
+**Use for:** Bounded multi-step non-development tasks executed by an agent with filesystem access. For software implementation, use Software Development Flow Lite or the full Software Development Flow according to risk and spread.
 
 ```bash
 mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
