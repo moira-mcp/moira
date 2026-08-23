@@ -17,8 +17,8 @@ import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-
 import { GraphValidator } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("artifacts-demo-dashboard-builder", "public")!
+function loadExampleWorkflow(): WorkflowGraph {
+  return findSystemCatalogEntry("artifacts-demo-dashboard-builder", "public", "workflows/examples")!
     .graph as WorkflowGraph;
 }
 
@@ -26,7 +26,7 @@ describe("artifacts-demo-dashboard-builder Scenarios", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
-    workflow = loadProductionWorkflow();
+    workflow = loadExampleWorkflow();
   });
 
   describe("Structural Validation", () => {
