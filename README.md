@@ -70,30 +70,27 @@ at `/docs/` for the full reference.
 
 ### Updating / Upgrading
 
-Use an immutable version tag or digest and the shipped upgrade helper. The helper creates and
-verifies a coherent SQLite backup, runs the exact incoming image against an isolated copy, and only
-then replaces the container:
+Update a normal self-host installation with the standard Compose commands:
 
 ```bash
-./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
-./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
-./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
+docker compose pull
+docker compose up -d
+docker compose ps
 ```
 
-Preflight mounts production data read-only and retains its snapshot and conflict evidence under
-`.moira-upgrade/`. If it reports managed-workflow reconciliation, keep the active instance running,
-use Workflow Management Flow to semantically merge the previous/current/incoming candidates, and
-retry the same pinned image. Do not use `--force` to discard local workflow changes.
+Older `.env` files may still override Compose with the removed `0.3.5` tag; change that line once to
+`MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest` before updating.
 
-If replacement or health verification fails after preflight, restore the verified database and
-previous image pin:
+The image protects existing self-host data before its startup migrations: it creates and verifies a
+coherent SQLite backup, includes the prompt manifest, and keeps three rotating recovery states under
+`data/.moira-startup-backups/`. If initialization fails, it restores the database and manifest before
+refusing to start the services. A persistent pending marker also restores the verified state before the
+next attempt if the container or host was interrupted mid-initialization. A fresh installation skips
+the nonexistent-database backup and uses only a temporary persistent marker so an interrupted first
+start is removed before retry.
 
-```bash
-./scripts/self-host-upgrade.sh rollback
-```
-
-The complete procedure, prerequisites, space/permission checks, version inspection, and recovery
-contract are in [Self-hosting: Safe Upgrade and Rollback](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#safe-upgrade-and-rollback), with a matching [Russian version](packages/docs/src/content/docs/ru/docs/getting-started/self-hosting.mdx#безопасное-обновление-и-откат). Release notes are on the [GitHub Releases](https://github.com/moira-mcp/moira/releases) page.
+The complete automatic recovery behavior and optional pinned-image preflight are documented in
+[Self-hosting: Updating and Recovery](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#updating-and-recovery), with a matching [Russian version](packages/docs/src/content/docs/ru/docs/getting-started/self-hosting.mdx#обновление-и-восстановление). Release notes are on the [GitHub Releases](https://github.com/moira-mcp/moira/releases) page.
 
 ### Local Development (from source)
 

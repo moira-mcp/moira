@@ -148,7 +148,14 @@ COPY drizzle.config.ts ./
 COPY workflows/ ./workflows/
 
 # Make health check scripts executable
-RUN chmod +x ./scripts/health-check.sh ./scripts/startup-ready.sh ./scripts/wait-for-init.sh ./scripts/init-database.sh
+RUN chmod +x \
+    ./scripts/health-check.sh \
+    ./scripts/startup-ready.sh \
+    ./scripts/wait-for-init.sh \
+    ./scripts/init-database.sh \
+    ./scripts/container-entrypoint.sh \
+    ./scripts/self-host-startup-guard.sh \
+    ./scripts/sqlite-online-backup.sh
 
 # Setup nginx for static files. Web UI dist destination depends on APP_BASE_PATH:
 #   "/"    (self-host) → /var/www/html/      (Web UI at root, no brand landing)
@@ -205,5 +212,6 @@ EXPOSE 80 9090
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:9090/health || exit 1
 
-# Start supervisor directly
+# Reset the per-container startup generation before Supervisor can spawn waiters.
+ENTRYPOINT ["/app/scripts/container-entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

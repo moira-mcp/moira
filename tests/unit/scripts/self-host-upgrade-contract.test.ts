@@ -5,12 +5,34 @@ import { describe, expect, test } from "@jest/globals";
 
 describe("self-host upgrade contract", () => {
   const script = readFileSync(resolve("scripts/self-host-upgrade.sh"), "utf8");
+  const startupGuard = readFileSync(resolve("scripts/self-host-startup-guard.sh"), "utf8");
   const compose = readFileSync(resolve("docker-compose.yml"), "utf8");
+  const supervisor = readFileSync(resolve("config/supervisord.conf"), "utf8");
+  const entrypoint = readFileSync(resolve("scripts/container-entrypoint.sh"), "utf8");
   const gitignore = readFileSync(resolve(".gitignore"), "utf8");
   const dockerignore = readFileSync(resolve(".dockerignore"), "utf8");
 
-  test("requires immutable pins and delegates coherent backup", () => {
-    expect(compose).toContain("${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:0.3.5}");
+  test("uses latest for quickstart and guards self-host initialization inside the image", () => {
+    expect(compose).toContain("${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}");
+    expect(supervisor).toContain(
+      "command=/app/scripts/self-host-startup-guard.sh /app/scripts/init-database.sh",
+    );
+    expect(supervisor).toContain("stopasgroup=true");
+    expect(supervisor).toContain("killasgroup=true");
+    expect(entrypoint).toContain(
+      'rm -f -- "$sentinel_dir/init-success" "$sentinel_dir/init-failed"',
+    );
+    expect(startupGuard).toContain("sqlite-online-backup.sh");
+    expect(startupGuard).toContain(".moira-startup-backups");
+    expect(startupGuard).toContain("initialization.pending");
+    expect(startupGuard).toContain("initialization.committed");
+    expect(startupGuard).toContain("MOIRA_INIT_SENTINEL_OWNER=guard");
+    expect(startupGuard).toContain('mktemp -d "$STATE_DIR/.next.XXXXXX"');
+    expect(startupGuard).toContain("STARTUP_RESTORE_OK");
+    expect(startupGuard).not.toContain("docker ");
+  });
+
+  test("keeps the advanced helper pinned and delegates coherent backup", () => {
     expect(script).toContain("mutable image tags are forbidden");
     expect(script).toContain("/app/scripts/sqlite-online-backup.sh");
     expect(script).toContain(":/source:ro");

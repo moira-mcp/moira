@@ -13,18 +13,18 @@ describe("self-host upgrade documentation parity", () => {
   );
   const envExample = readFileSync(resolve(".env.example"), "utf8");
   const compose = readFileSync(resolve("docker-compose.yml"), "utf8");
+  const readme = readFileSync(resolve("README.md"), "utf8");
   const commands = [
-    "MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5",
-    "MOIRA_VERSION=0.3.5",
-    'curl -fLO "$MOIRA_RELEASE/docker-compose.yml"',
-    'curl -fLo scripts/self-host-upgrade.sh "$MOIRA_RELEASE/scripts/self-host-upgrade.sh"',
-    "chmod +x scripts/self-host-upgrade.sh",
-    "docker compose exec -T moira cat /app/BUILD_INFO",
-    "df -h ./data && test -r ./data/moira.db && test -w ./data",
-    "./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6",
-    "./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6",
-    "./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6",
-    "./scripts/self-host-upgrade.sh rollback",
+    "docker compose pull",
+    "docker compose up -d",
+    "docker compose ps",
+    "docker compose logs moira",
+    "docker compose restart moira",
+    "/app/data/.moira-startup-backups/current/moira.db",
+    "RELEASE_VERSION=x.y.z",
+    './self-host-upgrade.sh preflight "$TARGET_IMAGE"',
+    './self-host-upgrade.sh upgrade "$TARGET_IMAGE"',
+    "./self-host-upgrade.sh rollback",
     "PRAGMA integrity_check;",
   ];
 
@@ -33,24 +33,27 @@ describe("self-host upgrade documentation parity", () => {
     expect(russian).toContain(command);
   });
 
-  test("documents reconciliation recovery and immutable pins in both languages", () => {
+  test("documents automatic recovery and optional advanced preflight in both languages", () => {
     for (const document of [english, russian]) {
       expect(document).toContain("Workflow Management Flow");
       expect(document).toContain("reconciliation");
-      expect(
-        document.slice(
-          0,
-          document.indexOf("## Safe Upgrade") > 0
-            ? document.indexOf("## Safe Upgrade")
-            : document.indexOf("## Безопасное обновление"),
-        ),
-      ).not.toContain(":latest");
-      expect(document).toContain(".moira-upgrade/preflight/");
-      expect(document).toContain("scripts/self-host-upgrade.sh");
-      expect(document).toContain("sqlite3");
+      expect(document).toContain("data/.moira-startup-backups/current/");
+      expect(document).toContain("previous-1/");
+      expect(document).toContain("previous-2/");
+      expect(document).toContain("/tmp/init-failed");
+      expect(document).toContain("ghcr.io/moira-mcp/moira:latest");
+      expect(document).toContain("self-host-upgrade.sh");
     }
-    expect(envExample).not.toContain("pulls ghcr.io/moira-mcp/moira:latest");
-    expect(envExample).toContain("MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5");
-    expect(compose).toContain("${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:0.3.5}");
+    expect(envExample).toContain("MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest");
+    expect(compose).toContain("${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}");
+    expect(readme).toContain("data/.moira-startup-backups/");
+    expect(english).toContain("persistent initialization-pending marker");
+    expect(english).toContain("without a fake database backup");
+    expect(russian).toContain("persistent-маркер незавершённой инициализации");
+    expect(russian).toContain("без фиктивной backup-БД");
+    for (const source of [english, russian, envExample, compose, readme]) {
+      expect(source).not.toContain("ghcr.io/moira-mcp/moira:0.3.5");
+      expect(source).not.toContain("ghcr.io/moira-mcp/moira:0.3.6");
+    }
   });
 });

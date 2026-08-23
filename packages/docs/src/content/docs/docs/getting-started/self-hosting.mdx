@@ -11,24 +11,17 @@ image from the registry — no source checkout or local build needed.
 ## Prerequisites
 
 - Docker with the Compose plugin (`docker compose`)
-- Host `sqlite3` CLI (used to verify preflight and rollback snapshots)
-- The self-host release bundle files: `docker-compose.yml`, `.env.example`, and
-  executable `scripts/self-host-upgrade.sh` (download the same release tag from the repository;
-  no source build or private repository is required)
+- The public `docker-compose.yml` and `.env.example`; no source build, private repository,
+  host SQLite CLI, or separate upgrade script is required for the normal path
 
 ## Quick Start
 
-Download the three files from one immutable release tag (replace `0.3.5` when selecting another
-release):
+Download the current public self-host files:
 
 ```bash
-MOIRA_VERSION=0.3.5
-MOIRA_RELEASE=https://raw.githubusercontent.com/moira-mcp/moira/v${MOIRA_VERSION}
-curl -fLO "$MOIRA_RELEASE/docker-compose.yml"
-curl -fLo .env.example "$MOIRA_RELEASE/.env.example"
-mkdir -p scripts
-curl -fLo scripts/self-host-upgrade.sh "$MOIRA_RELEASE/scripts/self-host-upgrade.sh"
-chmod +x scripts/self-host-upgrade.sh
+MOIRA_FILES=https://raw.githubusercontent.com/moira-mcp/moira/master
+curl -fLO "$MOIRA_FILES/docker-compose.yml"
+curl -fLo .env.example "$MOIRA_FILES/.env.example"
 ```
 
 <Steps>
@@ -47,8 +40,8 @@ chmod +x scripts/self-host-upgrade.sh
     docker compose up -d
     ```
 
-    Compose pulls the immutable `MOIRA_IMAGE` from `.env` (the shipped example pins
-    `ghcr.io/moira-mcp/moira:0.3.5`) and starts the container.
+    Compose pulls `ghcr.io/moira-mcp/moira:latest`, the current public release, and starts
+    the container.
 
 3.  **Open the Web UI**
 
@@ -213,46 +206,77 @@ http://localhost:8080/mcp
 Add it as an MCP server in your AI client and complete OAuth authentication. See
 [Quick Start](/docs/getting-started/quickstart/) for client configuration.
 
-## Safe Upgrade and Rollback
+## Updating and Recovery
 
-Keep an immutable image pin in `.env` (a version or digest, never `latest`):
-
-```bash
-MOIRA_IMAGE=ghcr.io/moira-mcp/moira:0.3.5
-docker compose pull moira
-docker compose exec -T moira cat /app/BUILD_INFO
-df -h ./data && test -r ./data/moira.db && test -w ./data
-```
-
-The shipped helper uses SQLite online backup and verifies `PRAGMA integrity_check` before it changes
-the active container:
+The ordinary update path does not require a version lookup or a repository-side helper:
 
 ```bash
-./scripts/self-host-upgrade.sh backup ghcr.io/moira-mcp/moira:0.3.6
-./scripts/self-host-upgrade.sh preflight ghcr.io/moira-mcp/moira:0.3.6
-./scripts/self-host-upgrade.sh upgrade ghcr.io/moira-mcp/moira:0.3.6
-docker compose ps && docker compose exec -T moira cat /app/BUILD_INFO
-```
-
-Preflight mounts production data read-only, writes its verified snapshot/evidence under
-`.moira-upgrade/`, and runs the exact incoming image against `.moira-upgrade/preflight/moira.db`,
-never the production DB.
-If it reports managed-workflow reconciliation, the active instance stays available. Ask your agent
-to run Workflow Management Flow, inspect the MCP `reconciliation` tool's previous/current/incoming
-candidates, submit the semantic merge, and retry the pinned upgrade. Do not use `--force` to discard
-local workflow changes.
-
-If replacement or health verification fails, restore the verified snapshot and previous pin:
-
-```bash
-./scripts/self-host-upgrade.sh rollback
+docker compose pull
+docker compose up -d
 docker compose ps
-docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
 ```
 
-Keep `.moira-upgrade/moira.db.upgrade-backup` until the new version has been verified. The helper
-preserves `.moira-upgrade/preflight/` as diagnostic/reconciliation evidence and replaces it on the
-next preflight.
+If an existing `.env` came from the older broken template and still contains the removed `0.3.5`
+tag, change it once before updating:
+
+```bash
+MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest
+```
+
+Before the new self-host image runs migrations against an existing database, its startup guard uses
+SQLite online backup and verifies `PRAGMA integrity_check`. It stores the database and matching
+`prompt-manifest.json` under `data/.moira-startup-backups/current/`, rotating the prior states to
+`previous-1/` and `previous-2/`. A genuine first start has no database to back up.
+
+The current slot carries a persistent initialization-pending marker. If the container or host is killed
+before initialization commits, the next start restores that verified slot before creating a new
+backup, so a partially migrated database cannot become the next baseline.
+On the first start, a marker without a fake database backup records that no database existed. An
+interrupted retry removes only the incomplete new database, WAL/SHM, and prompt manifest before
+starting clean; successful initialization removes the marker.
+
+If schema, prompt, or workflow initialization fails after writing data, the guard removes WAL/SHM,
+restores the verified database and prompt manifest, writes `/tmp/init-failed`, and keeps MCP, the API,
+and nginx stopped. The recovery copy remains available. Inspect and retry after correcting the
+configuration or catalog:
+
+```bash
+docker compose logs moira
+docker compose exec -T moira sqlite3 /app/data/moira.db 'PRAGMA integrity_check;'
+docker compose exec -T moira sqlite3 /app/data/.moira-startup-backups/current/moira.db 'PRAGMA integrity_check;'
+docker compose restart moira
+docker compose ps
+```
+
+`latest` intentionally follows the current public release. Automatic recovery protects persistent
+data; it cannot replace the Docker image itself. If the image cannot reach the startup guard, the
+database has not been migrated. Temporarily set `MOIRA_IMAGE` to a previous version from
+[GitHub Releases](https://github.com/moira-mcp/moira/releases), run `docker compose up -d`, and return
+to `latest` after a corrected release.
+
+Managed-workflow reconciliation conflicts remain non-fatal in self-host mode. Use
+Workflow Management Flow and the MCP `reconciliation` tool to inspect previous/current/incoming
+candidates and submit a semantic merge; do not use `--force` to discard local changes.
+
+### Optional preflight before downtime
+
+Operators who want to test an exact image on an isolated database copy before replacing the active
+container may download the advanced helper from that release. This is optional; normal updates use
+the two Compose commands above. The host `sqlite3` CLI is required only for this advanced path.
+
+```bash
+RELEASE_VERSION=x.y.z
+TARGET_IMAGE=ghcr.io/moira-mcp/moira:${RELEASE_VERSION}
+curl -fLo self-host-upgrade.sh "https://raw.githubusercontent.com/moira-mcp/moira/v${RELEASE_VERSION}/scripts/self-host-upgrade.sh"
+chmod +x self-host-upgrade.sh
+./self-host-upgrade.sh preflight "$TARGET_IMAGE"
+./self-host-upgrade.sh upgrade "$TARGET_IMAGE"
+```
+
+The helper retains its verified snapshot and diagnostic copy under `.moira-upgrade/`; use
+`./self-host-upgrade.sh rollback` if its replacement or health check fails. Because this advanced
+path writes the exact image to `.env`, set `MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest` afterward if
+you want to rejoin the normal release channel.
 
 ## Adding Your Own Workflow Flows
 

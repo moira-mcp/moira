@@ -16,7 +16,9 @@ services:
     # --- Option A: use the prebuilt public image (DEFAULT) ---
     # Pulled from GHCR — no source checkout or local build needed. This is the
     # recommended self-host path: `cp .env.example .env` then `docker compose up -d`.
-    image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:0.3.5}
+    # Update later with `docker compose pull` followed by `docker compose up -d`;
+    # image startup protects the mounted SQLite state before migrations.
+    image: ${MOIRA_IMAGE:-ghcr.io/moira-mcp/moira:latest}
 
     # --- Option B: build the image locally from source (advanced) ---
     # For contributors / customizers only. Requires the full source tree.

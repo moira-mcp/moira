@@ -3,8 +3,13 @@
 # On success: writes /tmp/init-success
 # On failure: writes /tmp/init-failed and exits with code 1
 
-# Clean up stale sentinel files from previous container runs
-rm -f /tmp/init-success /tmp/init-failed
+# The outer self-host startup guard owns both sentinels so it can publish a
+# terminal state only after backup commit or failure restoration. Direct/SaaS
+# invocations retain this script's standalone sentinel behavior.
+sentinel_owner=${MOIRA_INIT_SENTINEL_OWNER:-self}
+if [ "$sentinel_owner" != "guard" ]; then
+    rm -f /tmp/init-success /tmp/init-failed || exit 1
+fi
 
 # First-start secret bootstrap (self-host): generate missing secrets before
 # migrations so a fresh install boots without manual .env editing.
@@ -27,9 +32,13 @@ schema_ok() {
 }
 
 if [ "$chain_rc" -eq 0 ] && schema_ok; then
-    touch /tmp/init-success
+    if [ "$sentinel_owner" != "guard" ]; then
+        touch /tmp/init-success || exit 1
+    fi
 else
     echo "init-database: FAILED (exit code $chain_rc; database not initialized)" >&2
-    touch /tmp/init-failed
+    if [ "$sentinel_owner" != "guard" ]; then
+        touch /tmp/init-failed || true
+    fi
     exit 1
 fi

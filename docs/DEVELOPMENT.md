@@ -210,6 +210,7 @@ tests/integration/  # Workflow execution tests
 scripts/
 ├── run-migrations.ts         # Drizzle ORM migrations
 ├── migrate-workflows-in-docker.ts  # Workflow JSON → DB migration
+├── self-host-startup-guard.sh # Automatic self-host DB/manifest backup and failure restore
 ├── init-database.sh          # Migration wrapper with sentinel files
 └── wait-for-init.sh          # Service startup gate (polls for sentinel)
 ```
@@ -456,10 +457,22 @@ All services run inside single Docker container managed by supervisord:
 **Service Startup Order:**
 
 ```
-init-database (priority 10) → sentinel file → services (priority 50)
+container-entrypoint → Supervisor → self-host-startup-guard → init-database → sentinel → services
 ```
 
-`scripts/init-database.sh` runs DB migrations first, writes `/tmp/init-success` on completion. All services (`mcp-server`, `backend-api`, `nginx`) wait for this sentinel via `scripts/wait-for-init.sh` before starting. If migrations fail, `/tmp/init-failed` is written and services refuse to start.
+`scripts/container-entrypoint.sh` clears stale terminal sentinels before Supervisor exists, so a
+same-container restart cannot admit a waiter from the previous run. Supervisor then invokes
+`scripts/self-host-startup-guard.sh` before `scripts/init-database.sh`. In
+self-host mode, an existing SQLite database and its prompt manifest are copied coherently into three
+rotating slots under `data/.moira-startup-backups/`; a failed initialization restores that state, and
+a persistent pending marker recovers an interrupted initialization before the next backup. First start
+uses a marker without a fake DB backup so failure or interruption removes its incomplete state. SaaS
+bypasses this guard because its copied-DB preflight
+and swap are owned by deployment infrastructure. In self-host mode the outer guard exclusively owns
+both terminal sentinels: it clears stale values before backup, suppresses child publication, commits
+`/tmp/init-success` only after the recovery marker transitions to committed, and publishes
+`/tmp/init-failed` only after restore. All services (`mcp-server`,
+`backend-api`, `nginx`) wait through `scripts/wait-for-init.sh`; `/tmp/init-failed` keeps them stopped.
 
 ### Request Flow
 
