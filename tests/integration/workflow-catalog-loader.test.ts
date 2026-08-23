@@ -29,6 +29,7 @@ import {
   getWorkflowMutationService,
   installCatalogEntries,
   installCatalogEntry,
+  readWorkflowCatalog,
   readWorkflowCatalogs,
   getWorkflowsDirs,
   getSqliteInstance,
@@ -1621,7 +1622,12 @@ describe("Workflow Catalog Loader Integration", () => {
       // The merge over the single default dir loads the bundled public catalog (private flows live
       // in the separate private folder, merged only when WORKFLOWS_DIRS includes it).
       const entries = readWorkflowCatalogs(dirs);
-      expect(entries.length).toBeGreaterThanOrEqual(30);
+      const identities = entries.map((entry) => `${entry.owner}/${entry.slug}`).sort();
+      const directCatalogIdentities = readWorkflowCatalog()
+        .map((entry) => `${entry.owner}/${entry.slug}`)
+        .sort();
+      expect(identities).toEqual(directCatalogIdentities);
+      expect(identities).toContain("system-moira/workflow-management-flow");
     });
   });
 });
