@@ -198,10 +198,15 @@ jobs:
           docker run \
             --name ${{ env.DOCKER_IMAGE }}-self-host \
             -p 3031:80 \
+            --env-file .env.ci \
             -v $(pwd)/workflows:/app/workflows \
             -v $(pwd)/data-self-host:/app/data \
             -e DEPLOYMENT_MODE=self-host \
             -e MOIRA_HOST=localhost:3031 \
+            -e STATIC_ARTIFACTS_DOMAIN=static.localhost:3031 \
+            -e EMAIL_PROVIDER=none \
+            -e BREVO_API_KEY= \
+            -e EMAIL_TEST_RECIPIENTS=false \
             -e DISABLE_RATE_LIMIT=true \
             -d \
             ${{ env.DOCKER_IMAGE }}:latest
