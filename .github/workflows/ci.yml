@@ -181,7 +181,7 @@ jobs:
         # The primary API container intentionally runs in SaaS mode. The
         # self-host admission contract is exercised against a second,
         # explicitly self-host container below.
-        run: npx testfold api -e local -- --testPathIgnorePatterns=self-host-auth.test.ts
+        run: npx testfold api -e local -- --testPathIgnorePatterns='(self-host-auth|capability-boundary-api)\.test\.ts'
         env:
           CI: true
           TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
@@ -224,8 +224,10 @@ jobs:
           docker logs ${{ env.DOCKER_IMAGE }}-self-host
           exit 1
 
-      - name: Run self-host admission API tests
-        run: npx testfold api -e ci -f tests/api/auth/self-host-auth.test.ts
+      - name: Run self-host admission and capability API tests
+        run: |
+          npx testfold api -e ci -f tests/api/auth/self-host-auth.test.ts
+          npx testfold api -e ci -f tests/api/capability-boundary-api.test.ts
         env:
           CI: true
 
