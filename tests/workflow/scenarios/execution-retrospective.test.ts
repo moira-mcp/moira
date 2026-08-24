@@ -593,17 +593,15 @@ function independentlyReviewFinal(directory: string): string[] {
     if (JSON.stringify(Object.keys(candidate)) !== JSON.stringify(canonicalCandidateKeys)) {
       findings.push("A candidate does not use the canonical field contract.");
     }
-    if (
-      !(
-        candidate.target === "result" ||
-        candidate.target === "workflow" ||
-        candidate.target === "system_prompt" ||
-        candidate.target === "evaluator" ||
-        candidate.target === "tool_interface" ||
-        candidate.target === "observability" ||
-        candidate.target === "memory"
-      )
-    ) {
+    if (!(
+      candidate.target === "result" ||
+      candidate.target === "workflow" ||
+      candidate.target === "system_prompt" ||
+      candidate.target === "evaluator" ||
+      candidate.target === "tool_interface" ||
+      candidate.target === "observability" ||
+      candidate.target === "memory"
+    )) {
       findings.push("A candidate target is outside the canonical enum.");
     }
     if (!Array.isArray(candidate.evidence_refs) || candidate.evidence_refs.length === 0) {

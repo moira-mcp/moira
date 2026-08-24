@@ -436,8 +436,7 @@ function main(): void {
       }
       for (const node of nodes) {
         const props = (node.inputSchema as Json | undefined)?.properties as
-          | Record<string, Json>
-          | undefined;
+          Record<string, Json> | undefined;
         if (!props) continue;
         for (const [name, schema] of Object.entries(props)) {
           const src = safeSource(old, name);

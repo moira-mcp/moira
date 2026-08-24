@@ -52,8 +52,7 @@ describe("Upload Pipeline - Slug Handling", () => {
   function getWorkflow(id: string) {
     const db = getSqliteInstance();
     return db.prepare("SELECT * FROM workflow WHERE id = ?").get(id) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
   }
 
   function getRepo(): WorkflowRepository {

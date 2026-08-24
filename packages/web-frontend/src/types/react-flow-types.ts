@@ -218,13 +218,7 @@ export interface MoiraReactFlowEdge extends Edge {
   };
   data?: {
     connectionType:
-      | "default"
-      | "success"
-      | "error"
-      | "timeout"
-      | "true"
-      | "false"
-      | "maxRetriesExceeded";
+      "default" | "success" | "error" | "timeout" | "true" | "false" | "maxRetriesExceeded";
     label?: string;
     color?: string;
     style?: "solid" | "dashed" | "dotted";

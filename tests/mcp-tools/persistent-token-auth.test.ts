@@ -10,7 +10,11 @@ import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createAuthenticatedMCPClient, callMCPTool, verifyUserEmail } from "../utils/mcp-auth.js";
-import { getTestFetchUrl, getAdminCredentials } from "../utils/test-config.js";
+import {
+  getTestFetchUrl,
+  getTestRequestOrigin,
+  getAdminCredentials,
+} from "../utils/test-config.js";
 import { execSqliteInDocker } from "../utils/docker-command.js";
 
 const FETCH_URL = getTestFetchUrl();
@@ -32,7 +36,7 @@ let testUserId: string;
 async function signIn(email: string, password: string): Promise<string> {
   const res = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
     body: JSON.stringify({ email, password }),
   });
   const cookies = res.headers.get("set-cookie");
@@ -133,7 +137,7 @@ describe("MCP Persistent Token Authentication", () => {
     // Create test user
     const signUpRes = await fetch(`${FETCH_URL}/api/auth/sign-up/email`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Origin: getTestRequestOrigin() },
       body: JSON.stringify(TEST_USER),
     });
     const signUpData = (await signUpRes.json()) as { user?: { id: string } };

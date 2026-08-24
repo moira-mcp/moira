@@ -7,6 +7,10 @@ describe("OSS image contract", () => {
   const dockerignore = readFileSync(resolve(process.cwd(), ".dockerignore"), "utf8");
   const ci = readFileSync(resolve(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
   const e2e = readFileSync(resolve(process.cwd(), ".github", "workflows", "e2e.yml"), "utf8");
+  const apiTestConfig = readFileSync(
+    resolve(process.cwd(), "tests", "config", "jest.api.config.js"),
+    "utf8",
+  );
   const publish = readFileSync(
     resolve(process.cwd(), ".github", "workflows", "publish-image.yml"),
     "utf8",
@@ -15,6 +19,10 @@ describe("OSS image contract", () => {
     resolve(process.cwd(), "scripts", "docker-build-and-run.sh"),
     "utf8",
   );
+  const rootPackage = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
+  const docsPackage = JSON.parse(
+    readFileSync(resolve(process.cwd(), "packages", "docs", "package.json"), "utf8"),
+  );
 
   test("exports the canonical parameterized runtime target", () => {
     expect(dockerfile).toContain("FROM core AS runtime");
@@ -22,6 +30,14 @@ describe("OSS image contract", () => {
     expect(dockerfile).toContain("ARG MOIRA_HOST=localhost:8080");
     expect(dockerfile).toContain("ARG STATIC_ARTIFACTS_DOMAIN=static.localhost:8080");
     expect(dockerfile).toContain('ENTRYPOINT ["/app/scripts/container-entrypoint.sh"]');
+  });
+
+  test("uses one supported Node runtime across local, CI, docs, and Docker contracts", () => {
+    expect(rootPackage.engines.node).toBe(">=24.0.0");
+    expect(docsPackage.engines.node).toBe(">=24.0.0");
+    expect(dockerfile).toContain("FROM node:24-alpine AS core");
+    expect(ci.match(/node-version: "24"/g)).toHaveLength(4);
+    expect(e2e.match(/node-version: "24"/g)).toHaveLength(1);
   });
 
   test("does not accept or embed a deployment environment file", () => {
@@ -42,5 +58,18 @@ describe("OSS image contract", () => {
     expect(publish).toContain("BUILD_TIME=${{ steps.build-time.outputs.value }}");
     expect(buildScript).toContain("node scripts/git-tree-identity.mjs");
     expect(buildScript).not.toContain("git rev-parse --short HEAD");
+  });
+
+  test("runs deployment-specific API suites through non-empty root commands", () => {
+    expect(rootPackage.scripts["test:api"]).toBe("testfold api -e local");
+    expect(rootPackage.scripts["test:api:ci"]).toBe("testfold api -e ci");
+    expect(ci).toContain("run: npm run test:api");
+    expect(ci).toContain("API_TEST_TARGET: saas");
+    expect(ci).toContain("npm run test:api:ci -- --file tests/api/auth/self-host-auth.test.ts");
+    expect(ci).toContain("npm run test:api:ci -- --file tests/api/capability-boundary-api.test.ts");
+    expect(ci).not.toContain("testPathIgnorePatterns='");
+    expect(apiTestConfig).toContain('process.env.API_TEST_TARGET === "saas"');
+    expect(apiTestConfig).toContain('"self-host-auth\\\\.test\\\\.ts$"');
+    expect(apiTestConfig).toContain('"capability-boundary-api\\\\.test\\\\.ts$"');
   });
 });

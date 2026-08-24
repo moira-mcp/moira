@@ -16,7 +16,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/config/docker-image-contract.test.ts` — canonical parameterized OSS runtime image contract, explicit non-secret compile-time inputs, and prohibition on embedding deployment env files
+- `tests/unit/config/docker-image-contract.test.ts` — canonical parameterized OSS runtime image contract, one Node engine across package/docs/CI/Docker, explicit non-secret compile-time inputs, and prohibition on embedding deployment env files
 - `tests/unit/scripts/sqlite-online-backup.test.ts` — coherent SQLite online backup under concurrent WAL writes, integrity verification, and missing-source fail-closed behavior
 - `tests/unit/scripts/self-host-startup-guard.test.ts` — pre-Supervisor generation reset, real SQLite success, stale/ordered terminal sentinels, partial-init restore, interrupted existing/first-start recovery, removal/marker/sentinel faults, staging/restore symlink rejection, SIGTERM/SIGKILL recovery, prompt-manifest integrity, and bounded rotation including WAL sidecars
 - `tests/unit/scripts/self-host-upgrade-contract.test.ts` — latest-image quickstart, image-owned startup-guard wiring, plus optional pinned-image isolated preflight, health check, and rollback
@@ -118,6 +118,11 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/audit-log.spec.ts`
 
 ### auth
+
+**unit**
+
+- `tests/unit/shared/better-auth-schema-compatibility.test.ts` — fresh migration chain exposes the MCP OAuth `redirectUrls` column under Better Auth's exact logical field name, and the Drizzle model persists and reads the same stored representation
+- `tests/unit/shared/test-origin-fetch.test.ts` — direct Node.js test clients add the browser-equivalent Origin only to unsafe Better Auth requests while preserving explicit origins, safe methods, and unrelated endpoints
 
 **integration**
 

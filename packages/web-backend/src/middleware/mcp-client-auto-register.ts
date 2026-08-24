@@ -57,20 +57,20 @@ export function mcpClientAutoRegister() {
       if (existing) {
         // Client exists — check if redirect_uri needs updating
         const [full] = await db
-          .select({ redirectURLs: oauthApplication.redirectURLs })
+          .select({ redirectUrls: oauthApplication.redirectUrls })
           .from(oauthApplication)
           .where(eq(oauthApplication.clientId, clientId))
           .limit(1);
 
         if (full) {
-          const existingUrls = full.redirectURLs.split(",");
+          const existingUrls = full.redirectUrls.split(",");
           if (!existingUrls.includes(redirectUri)) {
             // MCP clients use ephemeral ports — add new redirect_uri
             existingUrls.push(redirectUri);
             await db
               .update(oauthApplication)
               .set({
-                redirectURLs: existingUrls.join(","),
+                redirectUrls: existingUrls.join(","),
                 updatedAt: new Date().toISOString(),
               })
               .where(eq(oauthApplication.clientId, clientId));
@@ -91,7 +91,7 @@ export function mcpClientAutoRegister() {
         name: "MCP Client (auto-registered)",
         clientId,
         clientSecret: "",
-        redirectURLs: redirectUri,
+        redirectUrls: redirectUri,
         type: "public",
         disabled: false,
         createdAt: now,

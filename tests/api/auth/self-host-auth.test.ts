@@ -523,14 +523,6 @@ describe("deployment-mode auth behavior", () => {
       error: { details: { code: "EMAIL_DELIVERY_UNAVAILABLE" } },
     });
 
-    const forgotPassword = await fetch(`${BASE_URL}/api/auth/forget-password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: BASE_URL },
-      body: JSON.stringify({ email, redirectTo: `${BASE_URL}/reset-password` }),
-    });
-    expect(forgotPassword.status).toBe(400);
-    expect(await forgotPassword.json()).toMatchObject({ code: "EMAIL_DELIVERY_UNAVAILABLE" });
-
     const publicReset = await fetch(`${BASE_URL}/api/auth/request-password-reset`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: BASE_URL },

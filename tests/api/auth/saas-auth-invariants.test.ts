@@ -211,7 +211,7 @@ describe("SaaS authentication invariants", () => {
       const refreshToken = randomUUID();
       const now = new Date().toISOString();
       execSqliteInDocker(
-        `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${randomUUID()}', '${accessToken}', '${refreshToken}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${client.client_id}', '${statusBody.data.id}', 'openid email profile', '${now}', '${now}')`,
+        `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${randomUUID()}', '${accessToken}', '${refreshToken}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${client.client_id}', '${statusBody.data.id}', 'openid email profile offline_access', '${now}', '${now}')`,
       );
       return { accessToken, refreshToken };
     };

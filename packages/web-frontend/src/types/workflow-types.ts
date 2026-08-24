@@ -3,17 +3,7 @@
  */
 
 export type ConditionOperator =
-  | "eq"
-  | "neq"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "contains"
-  | "exists"
-  | "and"
-  | "or"
-  | "not";
+  "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "exists" | "and" | "or" | "not";
 
 export type ConditionValue =
   | string

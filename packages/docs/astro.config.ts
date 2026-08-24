@@ -7,7 +7,6 @@ import tailwindcss from "@tailwindcss/vite";
 import sitemap from "@astrojs/sitemap";
 import mdx from "@astrojs/mdx";
 import icon from "astro-icon";
-import compress from "astro-compress";
 import starlight from "@astrojs/starlight";
 import mermaid from "astro-mermaid";
 import { loadEnv } from "vite";
@@ -258,19 +257,6 @@ export default defineConfig({
           "database",
         ],
       },
-    }),
-
-    compress({
-      CSS: true,
-      HTML: {
-        "html-minifier-terser": {
-          removeAttributeQuotes: false,
-        },
-      },
-      Image: false,
-      JavaScript: true,
-      SVG: false,
-      Logger: 1,
     }),
   ],
 

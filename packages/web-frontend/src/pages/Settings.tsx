@@ -148,19 +148,17 @@ export const Settings: React.FC = () => {
               </h2>
               <div className="space-y-6">
                 <SettingsEditor
-                  definitions={allDynamic.map(
-                    (def): EditorSettingDefinition => ({
-                      key: def.key,
-                      type: def.type,
-                      category: def.category,
-                      label: def.label,
-                      description: def.description || null,
-                      defaultValue: def.defaultValue,
-                      required: def.required,
-                      validation: def.validation,
-                      adminOnly: def.adminOnly,
-                    }),
-                  )}
+                  definitions={allDynamic.map((def): EditorSettingDefinition => ({
+                    key: def.key,
+                    type: def.type,
+                    category: def.category,
+                    label: def.label,
+                    description: def.description || null,
+                    defaultValue: def.defaultValue,
+                    required: def.required,
+                    validation: def.validation,
+                    adminOnly: def.adminOnly,
+                  }))}
                   values={values}
                   onSave={async (key, value) => {
                     await apiClient.updateUserSettings({ [key]: value });

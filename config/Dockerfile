@@ -7,7 +7,7 @@
 # ===================================
 # Core stage - shared between all
 # ===================================
-FROM node:20-alpine AS core
+FROM node:24-alpine AS core
 
 WORKDIR /app
 

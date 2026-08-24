@@ -91,7 +91,7 @@ test.describe("Forgot Password Flow E2E", () => {
     expect(result.success).toBe(true);
 
     // Request password reset via API (use page.request to go through browser on PC)
-    const forgotResponse = await page.request.post(`${BASE_URL}/api/auth/forget-password`, {
+    const forgotResponse = await page.request.post(`${BASE_URL}/api/auth/request-password-reset`, {
       headers: { "Content-Type": "application/json" },
       data: {
         email: testUserEmail,
@@ -121,7 +121,7 @@ test.describe("Forgot Password Flow E2E", () => {
     expect(result.success).toBe(true);
 
     // Request password reset (use page.request to go through browser on PC)
-    await page.request.post(`${BASE_URL}/api/auth/forget-password`, {
+    await page.request.post(`${BASE_URL}/api/auth/request-password-reset`, {
       headers: { "Content-Type": "application/json" },
       data: {
         email: testUserEmail,

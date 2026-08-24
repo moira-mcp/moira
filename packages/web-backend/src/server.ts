@@ -259,7 +259,7 @@ class MoiraApiServer {
     // Rate limiting for auth endpoints: 10 requests/minute
     // Auth audit logging handled via Better Auth hooks in auth config
     // Auto-register unknown MCP OAuth clients before Better Auth processes the request
-    this.app.all("/api/auth/*", authLimiter, mcpClientAutoRegister(), wrappedAuthHandler);
+    this.app.all("/api/auth/*authPath", authLimiter, mcpClientAutoRegister(), wrappedAuthHandler);
   }
 
   /**
@@ -416,7 +416,7 @@ class MoiraApiServer {
     });
 
     // Catch-all for unknown API routes
-    this.app.use("/api/*", (req, res) => {
+    this.app.use("/api/*apiPath", (req, res) => {
       res.status(404).json({
         success: false,
         error: {

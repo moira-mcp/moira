@@ -131,11 +131,7 @@ interface NoteUpdateResult {
 }
 
 type SessionInfoData =
-  | UserInfo
-  | ExecutionsResponse
-  | ExecutionContextData
-  | NoteUpdateResult
-  | string;
+  UserInfo | ExecutionsResponse | ExecutionContextData | NoteUpdateResult | string;
 
 export async function getSessionInfo(
   params: GetSessionInfoParams,

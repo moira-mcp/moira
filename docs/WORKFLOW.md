@@ -373,9 +373,7 @@ Node task-1: unclosed template bracket '{{' at position 15
     "version": "1.0.0",
     "description": "Purpose description"
   },
-  "nodes": [
-    /* Node array */
-  ]
+  "nodes": [/* Node array */]
 }
 ```
 
@@ -396,9 +394,7 @@ Node task-1: unclosed template bracket '{{' at position 15
   "type": "start",
   "id": "start",
   "connections": { "default": "next-node" },
-  "initialData": {
-    /* Optional */
-  }
+  "initialData": {/* Optional */}
 }
 ```
 
