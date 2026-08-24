@@ -38,14 +38,116 @@ npm run test:unit        # unit tests (no Docker needed)
 
 See `tests/TESTING-GUIDE.md` for details on the test categories.
 
+## Coordinate work through an issue
+
+Before starting substantial implementation, find or open a GitHub issue and wait
+until maintainers have made it claimable. An issue is claimable only when all of
+these conditions are visible at the same time:
+
+- it is open and is an issue, not a pull request;
+- it has no assignee;
+- it has exactly one status label, `status:ready`;
+- it has exactly one implementation type: `type:bug`, `type:feature`,
+  `type:chore`, or `type:docs`.
+
+Epics, questions, and issues waiting for triage, investigation, design, author
+input, a dependency, or current implementation are not claimable. Missing,
+unknown, duplicate, or contradictory `status:*` or `type:*` labels require maintainer
+recovery; do not guess which state was intended.
+
+### Claim an issue
+
+Add a comment containing exactly:
+
+```text
+/claim
+```
+
+The repository automation serializes changes for that issue and rechecks its
+current state. A successful claim has both of these public signals:
+
+- you are the issue's only assignee;
+- its only status is `status:in-progress`.
+
+The bot also publishes a confirmation naming you and the absolute activity
+deadline. Do not treat the issue as yours unless that confirmation appears. A
+rejection explains whether the issue is occupied, not ready, inconsistent, or
+requires maintainer recovery. A failed partial transition is rolled back when it
+is still safe; ambiguous external changes are preserved for a maintainer instead
+of being overwritten.
+
+### Keep the claim active
+
+The activity deadline is seven days after the latest qualifying activity. Only
+GitHub events attributable to the current assignee qualify:
+
+- a comment on the claimed issue, except `/release`;
+- opening a pull request in this repository that GitHub links to the issue through
+  a closing keyword such as `Closes #123` or `Fixes #123`;
+- a comment by the assignee on that closing-linked pull request.
+
+General pull-request `updated_at` changes do not qualify. Commits/pushes,
+synchronize or base-branch events, CI/check activity, reviews, reactions, labels,
+assignments, bot activity, other people's comments, cross-repository pull
+requests, and issue mentions without a closing reference do not renew a claim.
+Post a concise progress comment when in doubt.
+
+After seven inactive days, the next successful scheduled reconciliation posts one
+reminder. The three-day grace period starts at the trusted GitHub timestamp of
+that actual reminder, not at the original deadline. If no qualifying activity
+appears, the first successful reconciliation after the grace period releases the
+claim. GitHub Actions schedules can be delayed, so these are minimum intervals,
+not an exact promised release time. Later qualifying activity clears the reminder
+and starts a new seven-day activity period.
+
+### Release an issue
+
+If you stop working on a claimed issue, add a comment containing exactly:
+
+```text
+/release
+```
+
+Only the current sole assignee can release a managed claim. A successful release
+removes the assignee and changes the sole status back to `status:ready`. If a
+release cannot be completed safely, the bot either restores the active claim or
+marks it for maintainer recovery; never assume that a failed command released it.
+
+### Maintainer recovery and overrides
+
+Maintainer changes are authoritative. The automation does not replace a newer
+assignee or contradictory status merely to satisfy its previous lease record. An
+in-progress issue without a trusted bot lease record is treated as manually
+managed and is not expired automatically.
+
+To recover a damaged or partially applied managed claim:
+
+1. Coordinate with the visible assignee before changing ownership.
+2. Leave exactly one appropriate `status:*` and at most one intended assignee.
+3. Delete obsolete bot comments containing `moira-issue-claim-state:v1`,
+   `moira-issue-claim-reminder:v1`, or `moira-issue-claim-recovery:v1` when their
+   recorded owner no longer matches the intended state.
+4. For an available issue, leave it unassigned with `status:ready`; the next
+   contributor can run `/claim`. To preserve manual ownership, leave one assignee
+   with `status:in-progress`; it will not receive automatic lease expiry without a
+   managed state record.
+5. Run the **Issue claims** workflow manually with the issue number to verify a
+   repaired managed claim or inspect the failed workflow logs for the guarded API
+   boundary.
+
+Assignees are the ownership source of truth. `status:in-progress` communicates the
+lifecycle state but must not be used by itself to reserve work.
+
 ## Making changes
 
-1. Fork the repository and create a feature branch from `master`.
-2. Make your changes, keeping them focused and well-scoped.
-3. Add or update tests for any behavior change.
-4. Run the test suite and make sure it passes.
-5. Update documentation if you changed user-facing behavior.
-6. Open a pull request against `master` describing what and why.
+1. Claim a ready issue and wait for the bot's successful confirmation.
+2. Fork the repository and create a feature branch from `master`.
+3. Make your changes, keeping them focused and well-scoped.
+4. Add or update tests for any behavior change.
+5. Run the test suite and make sure it passes.
+6. Update documentation if you changed user-facing behavior.
+7. Open a pull request against `master`, use a closing reference to the claimed
+   issue, and describe what and why.
 
 ## Sign your commits (DCO)
 

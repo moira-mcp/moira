@@ -62,7 +62,15 @@ export default [
   },
   // Tests - relaxed rules
   {
-    files: ["tests/**/*.ts", "tests/**/*.tsx", "tests/**/*.js", "**/*.test.ts", "**/*.spec.ts"],
+    files: [
+      "tests/**/*.ts",
+      "tests/**/*.tsx",
+      "tests/**/*.js",
+      "tests/**/*.cjs",
+      "**/*.test.ts",
+      "**/*.test.cjs",
+      "**/*.spec.ts",
+    ],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -74,6 +82,7 @@ export default [
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-require-imports": "off",
       "no-console": "off",
       "no-restricted-syntax": "off",
     },
@@ -107,6 +116,22 @@ export default [
       },
     },
     rules: {
+      "no-console": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
+  // GitHub Actions helpers execute as CommonJS under actions/github-script.
+  {
+    files: [".github/scripts/**/*.cjs"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
       "no-console": "off",
       "no-restricted-syntax": "off",
     },
