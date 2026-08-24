@@ -10,7 +10,7 @@ By participating in this project you agree to abide by our
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 24+
 - Docker (for running the full stack and integration/e2e tests)
 
 ### Setup

@@ -31,7 +31,7 @@ describe("requestBodyLogger middleware", () => {
     app.use(requestBodyLogger());
 
     // Test endpoint that captures request details
-    app.all("/api/*", (req: Request, res: Response) => {
+    app.all("/api/*apiPath", (req: Request, res: Response) => {
       lastRequestDetails = {
         method: req.method,
         path: req.path,
@@ -162,7 +162,7 @@ describe("requestBodyLogger middleware", () => {
       });
       app.use(express.json());
       app.use(requestBodyLogger());
-      app.all("/api/*", (_req: Request, res: Response) => {
+      app.all("/api/*apiPath", (_req: Request, res: Response) => {
         res.json({ success: true });
       });
 
@@ -238,7 +238,7 @@ describe("requestBodyLogger middleware", () => {
       app.use(express.json());
       app.use(express.urlencoded({ extended: true }));
       app.use(requestBodyLogger());
-      app.all("/api/*", (req: Request, res: Response) => {
+      app.all("/api/*apiPath", (req: Request, res: Response) => {
         lastRequestDetails = {
           method: req.method,
           path: req.path,
@@ -262,7 +262,7 @@ describe("requestBodyLogger middleware", () => {
       app = express();
       app.use(express.json());
       app.use(requestBodyLogger({ maxBodySize: 50 }));
-      app.all("/api/*", (req: Request, res: Response) => {
+      app.all("/api/*apiPath", (req: Request, res: Response) => {
         lastRequestDetails = {
           method: req.method,
           path: req.path,
@@ -288,7 +288,7 @@ describe("requestBodyLogger middleware", () => {
           additionalExcludePatterns: [/^\/api\/custom-sensitive/],
         }),
       );
-      app.all("/api/*", (req: Request, res: Response) => {
+      app.all("/api/*apiPath", (req: Request, res: Response) => {
         lastRequestDetails = {
           method: req.method,
           path: req.path,

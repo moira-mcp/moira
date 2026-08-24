@@ -15,6 +15,10 @@ describe("OSS image contract", () => {
     resolve(process.cwd(), "scripts", "docker-build-and-run.sh"),
     "utf8",
   );
+  const rootPackage = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
+  const docsPackage = JSON.parse(
+    readFileSync(resolve(process.cwd(), "packages", "docs", "package.json"), "utf8"),
+  );
 
   test("exports the canonical parameterized runtime target", () => {
     expect(dockerfile).toContain("FROM core AS runtime");
@@ -22,6 +26,14 @@ describe("OSS image contract", () => {
     expect(dockerfile).toContain("ARG MOIRA_HOST=localhost:8080");
     expect(dockerfile).toContain("ARG STATIC_ARTIFACTS_DOMAIN=static.localhost:8080");
     expect(dockerfile).toContain('ENTRYPOINT ["/app/scripts/container-entrypoint.sh"]');
+  });
+
+  test("uses one supported Node runtime across local, CI, docs, and Docker contracts", () => {
+    expect(rootPackage.engines.node).toBe(">=24.0.0");
+    expect(docsPackage.engines.node).toBe(">=24.0.0");
+    expect(dockerfile).toContain("FROM node:24-alpine AS core");
+    expect(ci.match(/node-version: "24"/g)).toHaveLength(4);
+    expect(e2e.match(/node-version: "24"/g)).toHaveLength(1);
   });
 
   test("does not accept or embed a deployment environment file", () => {
