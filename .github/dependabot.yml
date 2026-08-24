@@ -1,0 +1,62 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    target-branch: master
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    labels:
+      - type:chore
+      - component:infrastructure
+    rebase-strategy: auto
+    commit-message:
+      prefix: build
+      prefix-development: build
+      include: scope
+    groups:
+      production-dependencies:
+        applies-to: version-updates
+        dependency-type: production
+        patterns:
+          - "*"
+      development-dependencies:
+        applies-to: version-updates
+        dependency-type: development
+        patterns:
+          - "*"
+      security-production-dependencies:
+        applies-to: security-updates
+        dependency-type: production
+        patterns:
+          - "*"
+      security-development-dependencies:
+        applies-to: security-updates
+        dependency-type: development
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: master
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 1
+    labels:
+      - type:chore
+      - component:infrastructure
+    rebase-strategy: auto
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"

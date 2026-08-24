@@ -318,6 +318,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/github/security-automation-contract.test.cjs` — grouped Dependabot sources/title prefixes, complete immutable external Action inventory, base-owned dependency/workflow security gate, trusted actionlint policy, tool inputs and SECURITY/CONTRIBUTING alignment
 - `tests/unit/github/pr-policy.test.cjs` — bounded title/body policy, same-repository issue linkage, permission-bound no-issue declarations, concrete Testing evidence, per-commit DCO, exact verified Dependabot exception, complete findings and input bounds
 - `tests/unit/github/pr-policy-adapter.test.cjs` — paginated GitHub commit/closing-reference collection, API fact mapping, permission failure semantics and bounded overflow
 - `tests/unit/github/pr-policy-workflow-contract.test.cjs` — stable read-only check, trusted default-branch execution, repair triggers, pinned Actions, contributor/template marker alignment and CODEOWNERS coverage

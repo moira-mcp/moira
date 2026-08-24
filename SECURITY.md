@@ -25,13 +25,10 @@ Please include as much of the following as you can:
 
 ## Response
 
-- We aim to acknowledge a report within **5 business days**.
-- We will keep you informed of the progress toward a fix and full announcement.
-- We may ask for additional information or guidance.
-- Once a fix is available, we will coordinate a disclosure timeline with you.
-
-We ask that you give us a reasonable amount of time to address the issue before
-any public disclosure.
+Reports are handled privately. Response and remediation timing depends on the
+issue's impact, reproducibility, and fix readiness; no fixed service timeline is
+guaranteed. Maintainers may request additional information and coordinate
+disclosure when a fix is ready.
 
 ## Supported Versions
 
@@ -50,3 +47,21 @@ This policy covers the Moira application code in this repository. The public
 self-host deployment model (Docker image, `docker-compose.yml`) is in scope.
 Issues in third-party dependencies should generally be reported upstream, but
 let us know if a dependency issue affects Moira so we can update or mitigate.
+
+## Automated Controls
+
+Dependabot schedules grouped root npm and GitHub Actions version updates weekly.
+Once security updates are enabled, npm security fixes are processed from security
+advisories and grouped separately by production or development dependency type;
+they do not wait for the weekly version-update schedule. Automated update PRs use
+the existing `type:chore` and `component:infrastructure` labels.
+
+The **Security Checks** pull-request gate checks newly introduced moderate-or-higher vulnerable
+dependencies across runtime, development, and unknown scopes. License policy is
+not part of this gate. GitHub Actions workflows are checked with actionlint, and
+every external Action must use an immutable commit SHA or image digest.
+
+These controls reduce new supply-chain risk; they do not mean that all existing
+dependency or code alerts are resolved. Current alerts are tracked and remediated
+through reviewed dependency or code changes. Continue to report suspected
+vulnerabilities privately through the process above.
