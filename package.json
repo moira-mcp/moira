@@ -50,7 +50,7 @@
     "@ant-design/icons": "^6.0.1",
     "@daveyplate/better-auth-ui": "^3.2.5",
     "@getbrevo/brevo": "^3.0.1",
-    "@modelcontextprotocol/sdk": "^1.17.5",
+    "@modelcontextprotocol/sdk": "^1.26.0",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
