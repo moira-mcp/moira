@@ -211,7 +211,25 @@ Dependabot may omit the human issue, Testing, and DCO fields only when GitHub
 identifies the pull request and every verified commit as the official
 `dependabot[bot]` account and the title uses `build(deps): …` or
 `build(deps-dev): …`. Other bots and partial identity matches follow the human
-requirements.
+requirements. Dependabot schedules grouped root npm and GitHub Actions version
+updates weekly. Once Dependabot security updates are enabled, npm security fixes
+are processed from security advisories and grouped separately by production or
+development dependency type; they do not wait for the weekly version-update
+schedule. Automated update PRs use the existing `type:chore` and
+`component:infrastructure` labels.
+
+### Automated security checks
+
+After activation, **Security Checks** reviews newly changed dependencies for
+moderate-or-higher vulnerabilities in runtime, development, and unknown scopes.
+It also validates every GitHub Actions workflow with actionlint and rejects any
+external Action that is not pinned to an immutable commit SHA or image digest.
+
+The workflow treats pull-request files as untrusted static input and never runs
+project scripts or dependencies. Fix a failure by updating the dependency or
+workflow itself; do not add an allowlist, warning-only mode, floating tag, or
+suppression file to bypass the check. Existing dependency alerts are remediated
+separately and are not evidence that a dependency-neutral pull request failed.
 
 ## Sign your commits (DCO)
 
@@ -263,9 +281,10 @@ secrets or manual steps are involved (the release uses only the built-in
 Self-host users upgrade simply by pulling the new image — see
 [Updating / Upgrading](README.md#updating--upgrading) in the README.
 
-**CI on pull requests** runs Lint, Unit, Integration, and a Docker build + API/MCP
-tests. The Playwright **E2E** suite is flaky on shared runners, so it runs nightly
-(and on demand) via `.github/workflows/e2e.yml` rather than gating PRs.
+**CI on pull requests** runs PR Policy, Security Checks, Lint, Unit, Integration,
+and a Docker build + API/MCP tests. The Playwright **E2E** suite is flaky on shared
+runners, so it runs nightly (and on demand) via `.github/workflows/e2e.yml` rather
+than gating PRs.
 
 ## License
 

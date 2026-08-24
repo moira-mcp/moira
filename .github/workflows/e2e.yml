@@ -19,10 +19,10 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: "npm"
@@ -39,10 +39,10 @@ jobs:
           cp .env.ci .env
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: ./config/Dockerfile
@@ -67,8 +67,8 @@ jobs:
             -e MCP_PORT=3000 \
             -e WEB_BACKEND_PORT=3001 \
             -e WEB_FRONTEND_PORT=3002 \
-            -v $(pwd)/workflows:/app/workflows \
-            -v $(pwd)/data:/app/data \
+            -v "$(pwd)/workflows:/app/workflows" \
+            -v "$(pwd)/data:/app/data" \
             -e DISABLE_RATE_LIMIT=true \
             -d \
             ${{ env.DOCKER_IMAGE }}:latest
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report
           path: playwright-report/
