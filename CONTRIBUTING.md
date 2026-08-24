@@ -146,8 +146,72 @@ lifecycle state but must not be used by itself to reserve work.
 4. Add or update tests for any behavior change.
 5. Run the test suite and make sure it passes.
 6. Update documentation if you changed user-facing behavior.
-7. Open a pull request against `master`, use a closing reference to the claimed
-   issue, and describe what and why.
+7. Open a pull request against `master`, follow the policy below, use a closing
+   reference to the claimed issue, and describe what and why.
+
+## Pull-request policy
+
+Every pull request to `master` is checked by **PR Policy**. The check reports all
+current findings together and runs again when the pull request is opened, edited,
+reopened, or receives new commits.
+
+Use this title form:
+
+```text
+type(scope)[!]: subject
+```
+
+Allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
+`refactor`, `revert`, `style`, and `test`. The scope is required, lowercase, and
+uses letters, digits, and internal hyphens. Replace `scope` and `subject` with
+specific values. The optional `!` marks a breaking product change. Keep the title
+within 160 characters. This form also keeps the title valid when it is used as a
+squash commit subject.
+
+### Link the work to an issue
+
+Outside contributors must make GitHub recognize a closing reference to an issue in
+this repository. Put a closing keyword in the pull-request body, for example:
+
+```text
+Closes #123
+```
+
+A plain issue mention does not count. Maintainers with effective `write`,
+`maintain`, or `admin` permission may omit an issue only for repository
+housekeeping whose title scope is `github`, `repo`, or `contributing`. Replace the
+closing line with one concrete reason:
+
+```text
+No issue: refresh repository policy metadata
+```
+
+Author association labels such as MEMBER or COLLABORATOR do not grant this
+exception, and product scopes cannot use it.
+
+### Record testing evidence
+
+Keep the `## Testing` section and record at least one concrete command or named
+manual observation plus its observed outcome:
+
+```markdown
+## Testing
+
+- Command: `npm run test:unit -- --file tests/unit/example.test.ts`
+- Outcome: tests passed
+```
+
+For a manual check, use `- Manual: <observation>` instead of `- Command:`. The
+policy verifies that both the verification and outcome are present; reviewers
+still judge whether the evidence is adequate for the change.
+
+### Automated dependency pull requests
+
+Dependabot may omit the human issue, Testing, and DCO fields only when GitHub
+identifies the pull request and every verified commit as the official
+`dependabot[bot]` account and the title uses `build(deps): …` or
+`build(deps-dev): …`. Other bots and partial identity matches follow the human
+requirements.
 
 ## Sign your commits (DCO)
 
