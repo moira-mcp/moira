@@ -33,6 +33,6 @@
     "not dead"
   ],
   "devDependencies": {
-    "copy-webpack-plugin": "^13.0.1"
+    "copy-webpack-plugin": "^14.0.0"
   }
 }
