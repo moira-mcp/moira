@@ -171,8 +171,14 @@ commit subjects accordingly:
 | -------------------------------------------------- | ----------------------- |
 | `fix: …`                                           | patch release (`0.0.X`) |
 | `feat: …`                                          | minor release (`0.X.0`) |
-| `feat!: …` or a `BREAKING CHANGE:` footer          | major release (`X.0.0`) |
+| `feat(scope)!: …` or a `BREAKING CHANGE:` footer   | major release (`X.0.0`) |
 | `docs:` / `chore:` / `refactor:` / `test:` / `ci:` | no release on their own |
+
+Scopes `github`, `repo`, and `contributing` are always release-neutral, including
+with `feat`, `fix`, `perf`, `!`, or a breaking-change footer. Use these scopes only
+for repository automation, repository maintenance, and contribution-process work.
+Product scopes such as `auth`, `workflow-engine`, `cli`, or `docs-site` keep the
+normal release behavior shown above.
 
 **How a release happens.** `master` is protected — there are no direct pushes, and
 only the maintainer merges PRs. Each merge to `master` runs the **Release** workflow:

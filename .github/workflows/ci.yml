@@ -53,6 +53,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+      - name: Verify release policy
+        run: npm run test:release-policy
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

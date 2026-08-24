@@ -43,6 +43,12 @@ jobs:
       - name: semantic-release
         id: semantic
         uses: cycjimmy/semantic-release-action@v6
+        with:
+          semantic_version: 24.2.9
+          extra_plugins: |
+            @semantic-release/commit-analyzer@13.0.1
+            @semantic-release/release-notes-generator@14.1.1
+            conventional-changelog-conventionalcommits@9.3.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
