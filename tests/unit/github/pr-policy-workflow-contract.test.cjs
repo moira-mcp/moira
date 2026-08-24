@@ -61,12 +61,15 @@ describe("PR Policy workflow and contributor contract", () => {
     expect(contributing).toContain("- Command:");
     expect(contributing).toContain("- Outcome:");
     expect(contributing).toContain(policy.DEPENDABOT.login);
+    expect(contributing).toContain("name exactly matches that");
+    expect(contributing).toContain("email matches the Git author email");
     expect(template).toContain("## Related issues");
     expect(template).toContain("Closes #");
     expect(template).toContain("No issue: concrete reason");
     expect(template).toContain("## Testing");
     expect(template).toContain("- Command:");
     expect(template).toContain("- Outcome:");
+    expect(template).toContain("matching its Git author name/email");
     expect(policy.validateTesting(template)).toBeTruthy();
   });
 

@@ -224,6 +224,13 @@ git commit -s -m "your message"
 ```
 
 This adds a `Signed-off-by: Your Name <your@email>` line to the commit message.
+**PR Policy** requires at least one such trailer whose name exactly matches that
+commit's Git author name and whose email matches the Git author email
+case-insensitively. `git commit -s` is the ordinary path when your configured Git
+identity is also the commit author. For an amended, rewritten, or cherry-picked
+commit, inspect its Git author and ensure the matching author trailer is already
+present. Change the author only when that authorship remains accurate; otherwise
+obtain the author's sign-off or omit the commit.
 
 ## Releases & versioning
 

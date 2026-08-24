@@ -24,7 +24,7 @@ Closes #
 
 ## Checklist
 
-- [ ] My commits are signed off (DCO): `git commit -s` (see CONTRIBUTING.md)
+- [ ] Every commit has a DCO `Signed-off-by` matching its Git author name/email (see CONTRIBUTING.md)
 - [ ] Added or updated tests for behavior changes
 - [ ] Updated documentation for user-facing behavior changes
 - [ ] I have read the [Code of Conduct](../CODE_OF_CONDUCT.md)
