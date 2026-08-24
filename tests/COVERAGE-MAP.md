@@ -119,6 +119,11 @@ level headings classify the tracked test paths listed beneath them.
 
 ### auth
 
+**unit**
+
+- `tests/unit/shared/better-auth-schema-compatibility.test.ts` — fresh migration chain exposes the MCP OAuth `redirectUrls` column under Better Auth's exact logical field name, and the Drizzle model persists and reads the same stored representation
+- `tests/unit/shared/test-origin-fetch.test.ts` — direct Node.js test clients add the browser-equivalent Origin only to unsafe Better Auth requests while preserving explicit origins, safe methods, and unrelated endpoints
+
 **integration**
 
 - `tests/integration/forced-password-reset.test.ts`

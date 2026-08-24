@@ -120,6 +120,13 @@
       "when": 1787342400000,
       "tag": "0015_managed_workflow_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1787609362000,
+      "tag": "0016_better_auth_redirect_urls",
+      "breakpoints": true
     }
   ]
 }

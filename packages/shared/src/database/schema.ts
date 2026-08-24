@@ -94,7 +94,8 @@ export const oauthApplication = sqliteTable("oauthApplication", {
   metadata: text("metadata"),
   clientId: text("clientId").notNull().unique(),
   clientSecret: text("clientSecret"),
-  redirectURLs: text("redirectURLs").notNull(),
+  // Better Auth 1.6 reads this field directly from SQLite as `redirectUrls`.
+  redirectUrls: text("redirectUrls").notNull(),
   type: text("type").notNull(),
   disabled: integer("disabled", { mode: "boolean" }).default(false),
   userId: text("userId").references(() => user.id, { onDelete: "cascade" }),

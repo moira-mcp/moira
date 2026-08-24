@@ -46,6 +46,20 @@ export function getTestFetchUrl(): string {
 }
 
 /**
+ * Get the public browser origin represented by the test target.
+ *
+ * Direct Node.js requests can use a different transport host in remote mode,
+ * but browser-origin checks must still receive the public origin that the
+ * application is configured to trust.
+ */
+export function getTestRequestOrigin(): string {
+  if (process.env.PLAYWRIGHT_REMOTE === "true") {
+    return new URL(resolveTestUrls().baseUrl).origin;
+  }
+  return new URL(getTestBaseUrl()).origin;
+}
+
+/**
  * Get test timeout in milliseconds
  * @returns Timeout value from env or default 30000ms
  */

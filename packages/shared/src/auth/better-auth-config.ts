@@ -61,7 +61,6 @@ const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
   "/sign-up/email",
   "/sign-in/email",
   "/sign-in/social",
-  "/forget-password",
   "/request-password-reset",
   "/reset-password",
   "/verify-email",
@@ -75,11 +74,7 @@ const PUBLIC_ACCOUNT_LIFECYCLE_PATHS = new Set([
   "/error",
 ]);
 
-const EMAIL_DELIVERY_PATHS = new Set([
-  "/forget-password",
-  "/request-password-reset",
-  "/send-verification-email",
-]);
+const EMAIL_DELIVERY_PATHS = new Set(["/request-password-reset", "/send-verification-email"]);
 
 function isPublicAccountLifecyclePath(path: string): boolean {
   return (

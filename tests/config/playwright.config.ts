@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { resolveTestUrls } from "../utils/remote-url-resolver.js";
+import "../setup-origin-fetch.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

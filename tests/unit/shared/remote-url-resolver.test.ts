@@ -3,8 +3,23 @@
  * Tests 2 modes: Local (Mac) and Remote (PC)
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { afterEach, describe, it, expect } from "@jest/globals";
 import { resolveTestUrls } from "../../utils/remote-url-resolver.js";
+import { getTestRequestOrigin } from "../../utils/test-config.js";
+
+const ORIGINAL_TEST_ENV = {
+  DOCKER_PORT: process.env.DOCKER_PORT,
+  PLAYWRIGHT_REMOTE: process.env.PLAYWRIGHT_REMOTE,
+  REMOTE_HOST: process.env.REMOTE_HOST,
+  TEST_BASE_URL: process.env.TEST_BASE_URL,
+};
+
+afterEach(() => {
+  for (const [key, value] of Object.entries(ORIGINAL_TEST_ENV)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+});
 
 describe("resolveTestUrls", () => {
   describe("Local mode (Mac)", () => {
@@ -83,6 +98,15 @@ describe("resolveTestUrls", () => {
           PLAYWRIGHT_REMOTE: "true",
         }),
       ).toThrow("REMOTE_HOST is required in remote mode");
+    });
+
+    it("uses the browser origin for direct auth requests", () => {
+      process.env.DOCKER_PORT = "3032";
+      process.env.PLAYWRIGHT_REMOTE = "true";
+      process.env.REMOTE_HOST = "192.0.2.1";
+      process.env.TEST_BASE_URL = "http://192.0.2.1:3032";
+
+      expect(getTestRequestOrigin()).toBe("http://localhost:3032");
     });
   });
 

@@ -184,9 +184,10 @@ jobs:
         # The primary API container intentionally runs in SaaS mode. The
         # self-host admission contract is exercised against a second,
         # explicitly self-host container below.
-        run: npx testfold api -e local -- --testPathIgnorePatterns='(self-host-auth|capability-boundary-api)\.test\.ts'
+        run: npm run test:api
         env:
           CI: true
+          API_TEST_TARGET: saas
           TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
 
       - name: Run MCP tools tests
@@ -237,8 +238,8 @@ jobs:
 
       - name: Run self-host admission and capability API tests
         run: |
-          npx testfold api -e ci -f tests/api/auth/self-host-auth.test.ts
-          npx testfold api -e ci -f tests/api/capability-boundary-api.test.ts
+          npm run test:api:ci -- --file tests/api/auth/self-host-auth.test.ts
+          npm run test:api:ci -- --file tests/api/capability-boundary-api.test.ts
         env:
           CI: true
 

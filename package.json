@@ -17,6 +17,7 @@
     "test:workflow": "testfold workflow",
     "test:integration": "testfold integration",
     "test:api": "testfold api -e local",
+    "test:api:ci": "testfold api -e ci",
     "test:mcp-tools": "testfold mcp-tools -e local",
     "test:e2e": "testfold e2e -e local",
     "test:release-policy": "node scripts/verify-release-policy.js",

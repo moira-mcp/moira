@@ -379,7 +379,7 @@ router.post(
   "/users/:id/block",
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
-    const { reason } = req.body;
+    const { reason } = req.body ?? {};
 
     // Prevent admin from blocking themselves
     const currentUserId = (req as AuthenticatedRequest).userId;
