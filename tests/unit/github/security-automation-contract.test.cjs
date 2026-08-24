@@ -1,6 +1,6 @@
 "use strict";
 
-const { readdirSync, readFileSync } = require("node:fs");
+const { existsSync, readdirSync, readFileSync } = require("node:fs");
 const { describe, expect, test } = require("@jest/globals");
 const yaml = require("js-yaml");
 
@@ -24,6 +24,11 @@ function externalUsesLines() {
 }
 
 describe("security automation contract", () => {
+  test("keeps npm resolution at the workspace root", () => {
+    expect(existsSync("package-lock.json")).toBe(true);
+    expect(existsSync("packages/web-backend/package-lock.json")).toBe(false);
+  });
+
   test("groups root npm and GitHub Actions updates with PR Policy-compatible prefixes", () => {
     const config = yaml.load(readFileSync(".github/dependabot.yml", "utf8"));
     expect(config.version).toBe(2);
