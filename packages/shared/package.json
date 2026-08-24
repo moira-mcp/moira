@@ -16,8 +16,8 @@
     "./errors": "./src/errors/index.ts"
   },
   "dependencies": {
-    "@getbrevo/brevo": "^3.0.1",
-    "dotenv": "^17.2.3",
+    "@getbrevo/brevo": "^6.0.3",
+    "dotenv": "^17.4.2",
     "nodemailer": "^9.0.5",
     "prom-client": "^15.1.3"
   },

@@ -13,7 +13,7 @@
   "dependencies": {
     "@mcp-moira/workflow-engine": "*",
     "@mcp-moira/shared": "*",
-    "tsx": "^4.20.6"
+    "tsx": "^4.23.12"
   },
   "private": true
 }
