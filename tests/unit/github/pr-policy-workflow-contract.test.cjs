@@ -13,16 +13,26 @@ describe("PR Policy workflow and contributor contract", () => {
   const codeowners = readFileSync(".github/CODEOWNERS", "utf8");
 
   test("uses a stable read-only check and trusted default-branch code for every repair trigger", () => {
+    expect(Object.keys(workflowDocument)).toEqual(["name", "on", "permissions", "jobs"]);
     expect(workflowDocument.name).toBe("PR Policy");
-    expect(Object.keys(workflowDocument.on)).toEqual(["pull_request"]);
-    expect(workflowDocument.on.pull_request).toEqual({
+    expect(Object.keys(workflowDocument.on)).toEqual(["pull_request_target"]);
+    expect(workflowDocument.on.pull_request_target).toEqual({
       branches: ["master"],
       types: ["opened", "edited", "reopened", "synchronize"],
     });
     expect(workflowDocument.permissions).toEqual({});
     expect(Object.keys(workflowDocument.jobs)).toEqual(["policy"]);
     const job = workflowDocument.jobs.policy;
+    expect(Object.keys(job)).toEqual([
+      "name",
+      "runs-on",
+      "timeout-minutes",
+      "permissions",
+      "steps",
+    ]);
     expect(job.name).toBe("PR Policy");
+    expect(job["runs-on"]).toBe("ubuntu-latest");
+    expect(job["timeout-minutes"]).toBe(10);
     expect(job.permissions).toEqual({ contents: "read", "pull-requests": "read" });
     expect(job.steps).toHaveLength(2);
     expect(job.steps[0]).toEqual({
@@ -43,10 +53,10 @@ describe("PR Policy workflow and contributor contract", () => {
       },
     });
     expect(job.steps.every((step) => step.run === undefined)).toBe(true);
-    expect(workflow).not.toContain("pull_request_target");
     expect(workflow).not.toMatch(
       /github\.(?:head_ref|event\.pull_request\.(?:head|merge_commit_sha))/,
     );
+    expect(workflow).not.toContain("secrets.");
     expect(workflow).not.toMatch(/uses: actions\/(checkout|github-script)@v\d/);
   });
 
