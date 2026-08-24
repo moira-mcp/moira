@@ -146,8 +146,72 @@ lifecycle state but must not be used by itself to reserve work.
 4. Add or update tests for any behavior change.
 5. Run the test suite and make sure it passes.
 6. Update documentation if you changed user-facing behavior.
-7. Open a pull request against `master`, use a closing reference to the claimed
-   issue, and describe what and why.
+7. Open a pull request against `master`, follow the policy below, use a closing
+   reference to the claimed issue, and describe what and why.
+
+## Pull-request policy
+
+Every pull request to `master` is checked by **PR Policy**. The check reports all
+current findings together and runs again when the pull request is opened, edited,
+reopened, or receives new commits.
+
+Use this title form:
+
+```text
+type(scope)[!]: subject
+```
+
+Allowed types are `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
+`refactor`, `revert`, `style`, and `test`. The scope is required, lowercase, and
+uses letters, digits, and internal hyphens. Replace `scope` and `subject` with
+specific values. The optional `!` marks a breaking product change. Keep the title
+within 160 characters. This form also keeps the title valid when it is used as a
+squash commit subject.
+
+### Link the work to an issue
+
+Outside contributors must make GitHub recognize a closing reference to an issue in
+this repository. Put a closing keyword in the pull-request body, for example:
+
+```text
+Closes #123
+```
+
+A plain issue mention does not count. Maintainers with effective `write`,
+`maintain`, or `admin` permission may omit an issue only for repository
+housekeeping whose title scope is `github`, `repo`, or `contributing`. Replace the
+closing line with one concrete reason:
+
+```text
+No issue: refresh repository policy metadata
+```
+
+Author association labels such as MEMBER or COLLABORATOR do not grant this
+exception, and product scopes cannot use it.
+
+### Record testing evidence
+
+Keep the `## Testing` section and record at least one concrete command or named
+manual observation plus its observed outcome:
+
+```markdown
+## Testing
+
+- Command: `npm run test:unit -- --file tests/unit/example.test.ts`
+- Outcome: tests passed
+```
+
+For a manual check, use `- Manual: <observation>` instead of `- Command:`. The
+policy verifies that both the verification and outcome are present; reviewers
+still judge whether the evidence is adequate for the change.
+
+### Automated dependency pull requests
+
+Dependabot may omit the human issue, Testing, and DCO fields only when GitHub
+identifies the pull request and every verified commit as the official
+`dependabot[bot]` account and the title uses `build(deps): …` or
+`build(deps-dev): …`. Other bots and partial identity matches follow the human
+requirements.
 
 ## Sign your commits (DCO)
 
@@ -160,6 +224,13 @@ git commit -s -m "your message"
 ```
 
 This adds a `Signed-off-by: Your Name <your@email>` line to the commit message.
+**PR Policy** requires at least one such trailer whose name exactly matches that
+commit's Git author name and whose email matches the Git author email
+case-insensitively. `git commit -s` is the ordinary path when your configured Git
+identity is also the commit author. For an amended, rewritten, or cherry-picked
+commit, inspect its Git author and ensure the matching author trailer is already
+present. Change the author only when that authorship remains accurate; otherwise
+obtain the author's sign-off or omit the commit.
 
 ## Releases & versioning
 
@@ -171,8 +242,14 @@ commit subjects accordingly:
 | -------------------------------------------------- | ----------------------- |
 | `fix: …`                                           | patch release (`0.0.X`) |
 | `feat: …`                                          | minor release (`0.X.0`) |
-| `feat!: …` or a `BREAKING CHANGE:` footer          | major release (`X.0.0`) |
+| `feat(scope)!: …` or a `BREAKING CHANGE:` footer   | major release (`X.0.0`) |
 | `docs:` / `chore:` / `refactor:` / `test:` / `ci:` | no release on their own |
+
+Scopes `github`, `repo`, and `contributing` are always release-neutral, including
+with `feat`, `fix`, `perf`, `!`, or a breaking-change footer. Use these scopes only
+for repository automation, repository maintenance, and contribution-process work.
+Product scopes such as `auth`, `workflow-engine`, `cli`, or `docs-site` keep the
+normal release behavior shown above.
 
 **How a release happens.** `master` is protected — there are no direct pushes, and
 only the maintainer merges PRs. Each merge to `master` runs the **Release** workflow:

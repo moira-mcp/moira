@@ -19,6 +19,7 @@
     "test:api": "testfold api -e local",
     "test:mcp-tools": "testfold mcp-tools -e local",
     "test:e2e": "testfold e2e -e local",
+    "test:release-policy": "node scripts/verify-release-policy.js",
     "test:remote": "testfold unit workflow integration api e2e mcp-tools -e remote",
     "test:api:remote": "testfold api -e remote",
     "test:mcp-tools:remote": "testfold mcp-tools -e remote",

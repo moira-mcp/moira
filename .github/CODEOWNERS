@@ -1,0 +1,15 @@
+# Repository governance and supply-chain boundaries
+/.github/workflows/ @witqq
+/.github/scripts/ @witqq
+/.github/CODEOWNERS @witqq
+/.github/dependabot.yml @witqq
+/.releaserc.json @witqq
+/SECURITY.md @witqq
+/config/Dockerfile @witqq
+/config/.dockerignore @witqq
+/config/docker-entrypoint.sh @witqq
+/docker-compose*.yml @witqq
+/package.json @witqq
+/package-lock.json @witqq
+/packages/*/package.json @witqq
+/packages/*/package-lock.json @witqq
