@@ -141,7 +141,9 @@ npm run test:mcp-tools:prod       # MCP on production
 
 ### File Naming
 
-- Unit/Integration/API/MCP: `*.test.ts`
+- Unit/Integration/API/MCP: `*.test.ts`; repository automation that executes as
+  CommonJS in GitHub Actions may use `*.test.cjs` to exercise the shipped module
+  without an interop wrapper.
 - E2E: `*.spec.ts`
 
 ### E2E Import Rule

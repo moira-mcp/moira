@@ -314,6 +314,14 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/mcp-tools/workflow-upload-visibility.test.ts`
 
+### github-collaboration
+
+**unit**
+
+- `tests/unit/github/issue-claim-transitions.test.cjs` — exact command parsing, centralized claim eligibility, ordered coalescing-safe command draining with trusted processed reactions, verified claim/release invariants, trusted human-readable lease record, fault-injected partial/silent GitHub mutations and response replay, ownership-safe compensation, external interleaving preservation, and owner-only release
+- `tests/unit/github/issue-claim-leases.test.cjs` — attributable issue/closing-PR activity, excluded external activity, direct and scheduled renewal, delayed reminder timestamps, retriable visible-reminder cleanup, post-reminder grace, expiry, interrupted/duplicate/malformed record recovery, manual-state preservation, repeat safety, and manual discovery targeting
+- `tests/unit/github/issue-claim-workflow-contract.test.cjs` — trusted default-branch checkout, least-privilege permissions, shared per-issue concurrency, command/schedule/manual triggers, and matrix reconciliation wiring
+
 ### health
 
 **e2e**

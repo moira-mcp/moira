@@ -2,7 +2,7 @@
 name: Bug report
 about: Report a problem so we can fix it
 title: ""
-labels: bug
+labels: "type:bug, status:needs-triage"
 assignees: ""
 ---
 

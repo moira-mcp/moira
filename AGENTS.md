@@ -3,6 +3,12 @@
 Agent guide for the Moira repository. Read this before making changes. Claude Code
 reads `CLAUDE.md`, which imports this file with `@AGENTS.md`.
 
+Before beginning any development work, read `CONTRIBUTING.md` completely. It is the
+source of truth for coordinating work through GitHub issues, claiming or releasing
+an issue, pull-request linkage, and the contributor/maintainer handoff. Do not start
+implementation from an issue until that contract says the issue is available and
+the claim has been confirmed.
+
 ## What Moira Is
 
 Moira is a node-graph **Agent Workflow Engine**. It guides AI agents (Claude, GPT,

@@ -4,7 +4,11 @@ import baseConfig from "./jest.base.config.js";
 export default {
   ...baseConfig,
   displayName: "Unit Tests",
-  testMatch: ["<rootDir>/tests/unit/**/*.test.ts", "<rootDir>/tests/unit/**/*.test.tsx"],
+  testMatch: [
+    "<rootDir>/tests/unit/**/*.test.ts",
+    "<rootDir>/tests/unit/**/*.test.tsx",
+    "<rootDir>/tests/unit/**/*.test.cjs",
+  ],
   testTimeout: 30000,
   // Use 50% of CPUs in CI (2 cores = 1 worker), more locally
   maxWorkers: process.env.CI ? "50%" : 6,

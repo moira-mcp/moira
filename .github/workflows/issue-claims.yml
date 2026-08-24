@@ -1,0 +1,115 @@
+name: Issue claims
+
+on:
+  issue_comment:
+    types: [created]
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Reconcile one issue instead of all in-progress issues
+        required: false
+        type: number
+
+permissions: {}
+
+jobs:
+  command:
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request == null
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    concurrency:
+      group: issue-claim-${{ github.repository }}-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out trusted default-branch automation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Process issue command
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const coordinator = require('./.github/scripts/issue-claim.cjs');
+            await coordinator.handleIssueEvent({ github, context, core });
+
+  lease_discovery:
+    name: Discover claim leases
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      issue_numbers: ${{ steps.discover.outputs.result }}
+    steps:
+      - name: Check out trusted default-branch automation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Discover claims to reconcile
+        id: discover
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const coordinator = require('./.github/scripts/issue-claim.cjs');
+            return coordinator.listClaimedIssueNumbers({ github, context });
+
+  lease_reconciliation:
+    name: Reconcile claim lease for #${{ matrix.issue_number }}
+    needs: lease_discovery
+    if: needs.lease_discovery.outputs.issue_numbers != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.lease_discovery.outputs.issue_numbers) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    concurrency:
+      group: issue-claim-${{ github.repository }}-${{ matrix.issue_number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out trusted default-branch automation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Reconcile claim lease
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          ISSUE_NUMBER: ${{ matrix.issue_number }}
+        with:
+          script: |
+            const coordinator = require('./.github/scripts/issue-claim.cjs');
+            await coordinator.drainIssueCommands({
+              github,
+              context,
+              core,
+              coordinates: {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: Number(process.env.ISSUE_NUMBER),
+              },
+            });
+            await coordinator.reconcileIssue({
+              github,
+              core,
+              coordinates: {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: Number(process.env.ISSUE_NUMBER),
+              },
+              now: new Date().toISOString(),
+            });
