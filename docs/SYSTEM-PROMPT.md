@@ -156,9 +156,7 @@ When executing a workflow step, you receive:
   "processId": "uuid",
   "directive": "Current step instruction",
   "completionCondition": "Success criteria for this step",
-  "inputSchema": {
-    /* if user input needed */
-  }
+  "inputSchema": {/* if user input needed */}
 }
 ```
 

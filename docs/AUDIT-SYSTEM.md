@@ -270,9 +270,7 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
   "nodeId": "current-node-id",
   "errorMessage": "Validation error description",
   "errorType": "validation",
-  "input": {
-    /* Full sanitized step input data */
-  }
+  "input": {/* Full sanitized step input data */}
 }
 ```
 
@@ -311,9 +309,7 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
   "workflowId": "workflow-id",
   "fromNodeId": "previous-node-id",
   "toNodeId": "current-node-id",
-  "input": {
-    /* step input data */
-  }
+  "input": {/* step input data */}
 }
 ```
 

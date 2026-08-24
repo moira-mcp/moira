@@ -34,9 +34,7 @@ interface MinimalSettingDef {
 }
 
 type SettingsData =
-  | Record<string, unknown>
-  | { key: string; updated: boolean }
-  | MinimalSettingDef[];
+  Record<string, unknown> | { key: string; updated: boolean } | MinimalSettingDef[];
 
 export async function manageSettings(
   params: ManageSettingsParams,

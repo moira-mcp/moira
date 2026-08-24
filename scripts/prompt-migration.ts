@@ -336,8 +336,7 @@ export function migratePrompts(config: PromptMigrationConfig): MigrationResult {
         if (!dbKey.startsWith("mcp.agent.") || activeKeys.has(dbKey)) continue;
 
         const dbRow = sqlite.prepare("SELECT value FROM globalSetting WHERE key = ?").get(dbKey) as
-          | { value: string | null }
-          | undefined;
+          { value: string | null } | undefined;
 
         if (dbRow && computeHash(dbRow.value ?? "") !== manifestEntry.hash) {
           result.conflicts.push(dbKey);

@@ -18,13 +18,7 @@ export type ErrorSeverity = "low" | "medium" | "high" | "critical";
  * Error category types
  */
 export type ErrorCategory =
-  | "network"
-  | "validation"
-  | "permission"
-  | "not-found"
-  | "server"
-  | "client"
-  | "unknown";
+  "network" | "validation" | "permission" | "not-found" | "server" | "client" | "unknown";
 
 /**
  * Enhanced error information

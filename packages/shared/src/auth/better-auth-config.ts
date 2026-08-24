@@ -576,8 +576,7 @@ const baseConfig = {
       // or authorization code before the plugin consumes either credential.
       if (ctx.path.endsWith("/mcp/token") && ctx.method === "POST") {
         const body = ctx.body as
-          | { grant_type?: string; refresh_token?: string; code?: string }
-          | undefined;
+          { grant_type?: string; refresh_token?: string; code?: string } | undefined;
         let userId: string | undefined;
 
         if (body?.grant_type === "refresh_token" && body.refresh_token) {
@@ -801,9 +800,7 @@ const baseConfig = {
               // Get the access token from the response body to find the correct token
               // ctx.context.returned contains the response - may be JSON or Response object
               const returned = ctx.context.returned as
-                | { access_token?: string }
-                | Response
-                | undefined;
+                { access_token?: string } | Response | undefined;
               let accessToken: string | undefined;
 
               if (returned && "access_token" in returned) {

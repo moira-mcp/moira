@@ -100,9 +100,7 @@ flowchart TD
   "processId": "uuid",
   "directive": "Инструкция текущего шага",
   "completionCondition": "Критерии успеха для этого шага",
-  "inputSchema": {
-    /* если нужен ввод пользователя */
-  }
+  "inputSchema": {/* если нужен ввод пользователя */}
 }
 ```
 

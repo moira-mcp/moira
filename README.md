@@ -212,9 +212,7 @@ type and its current contract, including automatic note operations and file mate
   "id": "task",
   "directive": "Task instruction",
   "completionCondition": "Success criteria",
-  "inputSchema": {
-    /* JSON Schema */
-  },
+  "inputSchema": {/* JSON Schema */},
   "connections": { "success": "next-node-id" }
 }
 ```
@@ -319,9 +317,7 @@ Pauses execution until explicitly unlocked. Sends PIN via Telegram with inline a
     "version": "1.0.0",
     "description": "What this workflow does"
   },
-  "nodes": [
-    /* Node definitions */
-  ]
+  "nodes": [/* Node definitions */]
 }
 ```
 
