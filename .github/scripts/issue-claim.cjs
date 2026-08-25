@@ -1317,7 +1317,12 @@ async function drainIssueCommands({ github, context, core, coordinates }) {
         comment,
       },
     };
-    const result = await handleIssueComment({ github, context: syntheticContext, core });
+    const result = await handleIssueComment({
+      github,
+      context: syntheticContext,
+      core,
+      coordinates,
+    });
     await markCommandProcessed(github, coordinates, comment.id);
     outcomes.push({ commentId: comment.id, result });
   }
@@ -1346,10 +1351,10 @@ async function handleIssueEvent({ github, context, core }) {
   return { outcome: "commands_drained", commands, renewal };
 }
 
-async function handleIssueComment({ github, context, core }) {
+async function handleIssueComment({ github, context, core, coordinates: suppliedCoordinates }) {
   const event = context.payload;
   const command = parseCommand(event.comment?.body);
-  const coordinates = {
+  const coordinates = suppliedCoordinates || {
     owner: context.repo.owner,
     repo: context.repo.repo,
     issue_number: event.issue.number,

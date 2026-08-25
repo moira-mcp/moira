@@ -211,7 +211,10 @@ Dependabot may omit the human issue, Testing, and DCO fields only when GitHub
 identifies the pull request and every verified commit as the official
 `dependabot[bot]` account and the title uses `build(deps): …` or
 `build(deps-dev): …`. Other bots and partial identity matches follow the human
-requirements. Dependabot schedules grouped root npm and GitHub Actions version
+requirements. Its generated dependency inventory may exceed the human pull-request
+body bound; PR Policy does not parse that body and relies on the exact bot identity,
+verified commits, bounded commit metadata, title, and Security Checks instead.
+Dependabot schedules grouped root npm and GitHub Actions version
 updates weekly. Npm security fixes from advisories use separate production and
 development groups. They do not wait for the weekly version-update schedule.
 Automated update PRs use the existing `type:chore` and

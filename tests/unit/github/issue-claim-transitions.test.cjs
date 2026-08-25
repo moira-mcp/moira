@@ -469,6 +469,37 @@ describe("guarded issue ownership transitions", () => {
     ).resolves.toEqual([]);
   });
 
+  test("drains claim and release commands when GitHub exposes repo as non-enumerable context behavior", async () => {
+    const harness = createHarness();
+    const claim = harness.addUserComment("contributor", "/claim", "2026-08-24T10:00:00Z");
+    const context = { payload: {} };
+    Object.defineProperty(context, "repo", {
+      enumerable: false,
+      value: { owner: "moira-mcp", repo: "moira" },
+    });
+
+    await expect(
+      coordinator.drainIssueCommands({
+        github: harness.github,
+        context,
+        core: harness.core,
+        coordinates,
+      }),
+    ).resolves.toMatchObject([{ commentId: claim.id, result: { outcome: "claimed" } }]);
+
+    const release = harness.addUserComment("contributor", "/release", "2026-08-24T10:00:01Z");
+    await expect(
+      coordinator.drainIssueCommands({
+        github: harness.github,
+        context,
+        core: harness.core,
+        coordinates,
+      }),
+    ).resolves.toMatchObject([{ commentId: release.id, result: { outcome: "released" } }]);
+    expect(harness.state.issue.assignees).toEqual([]);
+    expect(harness.state.issue.labels.map((label) => label.name)).toContain("status:ready");
+  });
+
   test("a later progress-event run drains an earlier pending release", async () => {
     const harness = await claimedHarness();
     harness.addUserComment("contributor", "/release", "2026-08-25T10:00:00Z");

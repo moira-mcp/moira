@@ -184,9 +184,6 @@ function validatePullRequest(input) {
   if (!title.ok) findings.push(finding("title", title.reason));
 
   const body = typeof input?.body === "string" ? input.body : "";
-  if (input?.bodyOverflow || body.length > MAX_BODY_LENGTH) {
-    findings.push(finding("body-too-large", `body exceeds ${MAX_BODY_LENGTH} characters`));
-  }
   const commits = Array.isArray(input?.commits) ? input.commits : [];
   if (input?.commitsOverflow || commits.length > MAX_COMMITS) {
     findings.push(finding("commits-too-many", `pull request exceeds ${MAX_COMMITS} commits`));
@@ -203,6 +200,10 @@ function validatePullRequest(input) {
 
   if (isExactDependabot({ ...input, commits }, title)) {
     return { ok: findings.length === 0, findings };
+  }
+
+  if (input?.bodyOverflow || body.length > MAX_BODY_LENGTH) {
+    findings.push(finding("body-too-large", `body exceeds ${MAX_BODY_LENGTH} characters`));
   }
 
   const boundedBody = !input?.bodyOverflow && body.length <= MAX_BODY_LENGTH ? body : "";
