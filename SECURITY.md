@@ -50,10 +50,12 @@ let us know if a dependency issue affects Moira so we can update or mitigate.
 
 ## Automated Controls
 
-Dependabot schedules grouped root npm and GitHub Actions version updates weekly.
-Npm security fixes from advisories use separate production and development groups.
-They do not wait for the weekly version-update schedule. Automated update PRs use
-the existing `type:chore` and `component:infrastructure` labels.
+Dependabot schedules grouped root npm minor and patch updates plus GitHub Actions
+updates weekly. Major npm updates remain separate for compatibility review. Npm
+security fixes from advisories use separate production and development groups at
+any required semantic version; they do not wait for the weekly version-update
+schedule. Automated update PRs use the existing `type:chore` and
+`component:infrastructure` labels.
 
 The **Security Checks** pull-request gate checks newly introduced moderate-or-higher vulnerable
 dependencies across runtime, development, and unknown scopes. License policy is
