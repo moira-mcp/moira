@@ -4,7 +4,7 @@
  * so both edits must be exact, validated, and must not disturb the rest of the file.
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -12,8 +12,11 @@ import { randomUUID } from "crypto";
 
 const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/src/workflow-tool.ts");
 
-function runWorkflowTool(args: string): string {
-  return execSync(`npx tsx ${WORKFLOW_TOOL} ${args}`, { encoding: "utf-8", cwd: process.cwd() });
+function runWorkflowTool(args: string[]): string {
+  return execFileSync(process.execPath, ["--import", "tsx", WORKFLOW_TOOL, ...args], {
+    encoding: "utf-8",
+    cwd: process.cwd(),
+  });
 }
 
 function createTempWorkflow(): string {
@@ -50,7 +53,7 @@ describe("workflow-tool identity commands", () => {
 
   describe("set-name", () => {
     test("replaces the display name and reports the previous one", () => {
-      const output = runWorkflowTool(`${file} set-name "Deep Corpus Research (expensive)"`);
+      const output = runWorkflowTool([file, "set-name", "Deep Corpus Research (expensive)"]);
 
       expect(read(file).metadata.name).toBe("Deep Corpus Research (expensive)");
       expect(output).toContain("Old name: Old Name");
@@ -58,7 +61,7 @@ describe("workflow-tool identity commands", () => {
     });
 
     test("leaves slug, owner, description and nodes untouched", () => {
-      runWorkflowTool(`${file} set-name "Another Name"`);
+      runWorkflowTool([file, "set-name", "Another Name"]);
       const workflow = read(file);
 
       expect(workflow.slug).toBe("old-slug");
@@ -68,14 +71,14 @@ describe("workflow-tool identity commands", () => {
     });
 
     test("bumps the version because the content changed", () => {
-      runWorkflowTool(`${file} set-name "Renamed"`);
+      runWorkflowTool([file, "set-name", "Renamed"]);
       expect(read(file).metadata.version).not.toBe("1.0.0");
     });
   });
 
   describe("set-slug", () => {
     test("replaces the catalog slug and warns that a new catalog entry is created", () => {
-      const output = runWorkflowTool(`${file} set-slug deep-corpus-research`);
+      const output = runWorkflowTool([file, "set-slug", "deep-corpus-research"]);
 
       expect(read(file).slug).toBe("deep-corpus-research");
       expect(output).toContain("Old slug: old-slug");
@@ -83,15 +86,15 @@ describe("workflow-tool identity commands", () => {
     });
 
     test("rejects a slug that is not kebab-case and leaves the file unchanged", () => {
-      expect(() => runWorkflowTool(`${file} set-slug "Deep Corpus Research"`)).toThrow();
+      expect(() => runWorkflowTool([file, "set-slug", "Deep Corpus Research"])).toThrow();
       expect(read(file).slug).toBe("old-slug");
 
-      expect(() => runWorkflowTool(`${file} set-slug Deep_Corpus`)).toThrow();
+      expect(() => runWorkflowTool([file, "set-slug", "Deep_Corpus"])).toThrow();
       expect(read(file).slug).toBe("old-slug");
     });
 
     test("keeps the display name and node graph intact", () => {
-      runWorkflowTool(`${file} set-slug another-slug`);
+      runWorkflowTool([file, "set-slug", "another-slug"]);
       const workflow = read(file);
 
       expect(workflow.metadata.name).toBe("Old Name");

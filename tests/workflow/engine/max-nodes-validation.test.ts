@@ -135,4 +135,24 @@ describe("MAX_NODES Validation", () => {
     expect(result.valid).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
+
+  test("rejects excessively deep input before JSON Schema traversal", async () => {
+    const deeplyNested: Record<string, unknown> = {};
+    let cursor = deeplyNested;
+    for (let depth = 0; depth < 100; depth++) {
+      const next: Record<string, unknown> = {};
+      cursor.next = next;
+      cursor = next;
+    }
+
+    const result = await validator.validateUnified(deeplyNested);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        type: "schema",
+        message: "Workflow exceeds validation depth or entry limits",
+      }),
+    );
+  });
 });

@@ -6,6 +6,7 @@
 import { Router, Request, Response } from "express";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
+import { apiLimiter } from "../middleware/rate-limit-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
 import { auth } from "../auth.js";
 import {
@@ -1192,6 +1193,7 @@ router.post(
  */
 router.post(
   "/database/backup",
+  apiLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const fs = await import("fs");
     const path = await import("path");

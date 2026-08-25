@@ -321,6 +321,15 @@ describe("sanitizeInput", () => {
       const { inputData } = sanitizeInput("simple string");
       expect(inputData).toBe("simple string");
     });
+
+    it("handles adversarial email-like input in bounded time", () => {
+      const input = `${"a.".repeat(20_000)}@example.com`;
+      const startedAt = performance.now();
+      const { inputData } = sanitizeInput(input);
+
+      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(typeof inputData).toBe("string");
+    });
   });
 });
 

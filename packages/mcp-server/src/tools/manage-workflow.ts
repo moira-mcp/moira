@@ -90,7 +90,10 @@ const ManageWorkflowParamsSchema = z.object({
   offset: z.number().optional().describe("Pagination offset (get only)"),
   limit: z.number().optional().describe("Pagination limit (get only)"),
   nodeId: z.string().optional().describe("Node ID (required for get-node, clone-node)"),
-  query: z.string().optional().describe("Search query (required for search-nodes, supports regex)"),
+  query: z
+    .string()
+    .optional()
+    .describe("Search query (required for search-nodes; use | for literal alternatives)"),
   // Variable management parameters
   variableName: z
     .string()

@@ -75,9 +75,7 @@ try {
   console.log("Account-approval downgrade preparation complete:");
   console.log(`  Pending users blocked: ${result.pendingUsers}`);
   console.log(`  Sessions revoked: ${result.sessions}`);
-  console.log(`  API tokens revoked: ${result.apiTokens}`);
-  console.log(`  OAuth tokens revoked: ${result.oauthTokens}`);
-  console.log(`  OAuth consents revoked: ${result.oauthConsents}`);
+  console.log("  API and OAuth credentials revoked");
 } finally {
   sqlite.close();
 }

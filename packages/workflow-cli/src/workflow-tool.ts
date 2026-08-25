@@ -19,7 +19,7 @@
  *   sync <dest-file>                 Replace an existing workflow copy, preserving identity
  *   move <node-id> --after <target>  Move node after target in array
  *   add <node-json-file>             Add nodes from JSON file
- *   search <text>                    Search nodes (supports regex: "a|b")
+ *   search <text>                    Search nodes (literal alternatives: "a|b")
  *   list [--type <type>]             List all nodes (with type filter)
  *   structure [--graph]              Show workflow structure and connections
  *   schema                           Print one deterministic control-flow schema
@@ -1309,7 +1309,7 @@ ${c("cyan", "Commands:")}
   sync <dest-file>                 Validate and replace a workflow copy, preserving identity
   move <node-id> --after <target>  Move node after target in array
   add <node-json-file>             Add nodes from JSON file
-  search <text>                    Search nodes (supports regex: "a|b")
+  search <text>                    Search nodes (literal alternatives: "a|b")
   list [--type <type>]             List all nodes (with type filter)
   structure [--graph] [--detailed] Show workflow structure
   schema                           Print one deterministic control-flow schema

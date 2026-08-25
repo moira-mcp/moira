@@ -123,33 +123,74 @@ export function getNode(workflow: WorkflowGraph, nodeId: string): GraphNode | nu
   return workflow.nodes.find((n) => n.id === nodeId) || null;
 }
 
+function getSearchTerms(query: string): string[] {
+  const terms = query
+    .split("|")
+    .map((term) => term.trim().toLowerCase())
+    .filter(Boolean);
+  return terms.length > 0 ? terms : [query.toLowerCase()];
+}
+
+function matchesSearchTerms(text: string | undefined, terms: string[]): boolean {
+  if (!text) return false;
+  const normalized = text.toLowerCase();
+  return terms.some((term) => normalized.includes(term));
+}
+
+function isIdentifierStart(character: string | undefined): boolean {
+  return character === "_" || (!!character && character.toLowerCase() !== character.toUpperCase());
+}
+
+function isIdentifierCharacter(character: string | undefined): boolean {
+  return isIdentifierStart(character) || (!!character && character >= "0" && character <= "9");
+}
+
+function extractComparedContextPaths(condition: string): string[] {
+  const paths: string[] = [];
+  const operators = ["===", "!==", "<=", ">=", "==", "!=", "<", ">"];
+
+  for (let index = 0; index < condition.length;) {
+    if (!isIdentifierStart(condition[index])) {
+      index++;
+      continue;
+    }
+
+    const pathStart = index;
+    index++;
+    while (index < condition.length) {
+      if (isIdentifierCharacter(condition[index])) {
+        index++;
+        continue;
+      }
+      if (condition[index] === "." && isIdentifierStart(condition[index + 1])) {
+        index += 2;
+        continue;
+      }
+      break;
+    }
+
+    const path = condition.slice(pathStart, index);
+    let operatorIndex = index;
+    while (operatorIndex < condition.length && /\s/.test(condition[operatorIndex])) {
+      operatorIndex++;
+    }
+    if (operators.some((operator) => condition.startsWith(operator, operatorIndex))) {
+      paths.push(path);
+    }
+  }
+
+  return paths;
+}
+
 /**
  * Search nodes by text query
- * Supports regex patterns (if query contains |, *, +, etc.)
+ * Supports bounded literal alternatives separated by `|`.
  */
 export function searchNodes(workflow: WorkflowGraph, query: string): NodeSearchResult[] {
   const results: NodeSearchResult[] = [];
 
-  // Detect if query should be treated as regex
-  const isRegex = /[|*+?[\](){}^$\\]/.test(query);
-  let matcher: RegExp | null = null;
-
-  if (isRegex) {
-    try {
-      matcher = new RegExp(query, "i");
-    } catch {
-      // Invalid regex, fall back to includes
-      matcher = null;
-    }
-  }
-
-  const matchText = (text: string | undefined): boolean => {
-    if (!text) return false;
-    if (matcher) {
-      return matcher.test(text);
-    }
-    return text.toLowerCase().includes(query.toLowerCase());
-  };
+  const searchTerms = getSearchTerms(query);
+  const matchText = (text: string | undefined): boolean => matchesSearchTerms(text, searchTerms);
 
   for (const node of workflow.nodes) {
     const matchedIn: ("directive" | "completionCondition" | "message" | "id")[] = [];
@@ -192,10 +233,10 @@ export function searchNodes(workflow: WorkflowGraph, query: string): NodeSearchR
 
 function extractSnippet(text: string, query: string): string {
   const lines = text.split("\n");
-  const lowerQuery = query.toLowerCase();
+  const searchTerms = getSearchTerms(query);
 
   // Find the first line containing the query
-  const matchingLine = lines.find((line) => line.toLowerCase().includes(lowerQuery));
+  const matchingLine = lines.find((line) => matchesSearchTerms(line, searchTerms));
   if (matchingLine) {
     const trimmed = matchingLine.trim();
     return trimmed.length > 100 ? trimmed.substring(0, 100) + "..." : trimmed;
@@ -712,11 +753,8 @@ export function analyzeVariableUsage(workflow: WorkflowGraph): VariableAnalysis 
     // Handle string format
     if (typeof condition !== "string") return;
 
-    const conditionRegex =
-      /([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*(?:===|!==|==|!=|<|>|<=|>=)/g;
-    let match;
-    while ((match = conditionRegex.exec(condition)) !== null) {
-      const varName = match[1].split(".")[0];
+    for (const contextPath of extractComparedContextPaths(condition)) {
+      const varName = contextPath.split(".")[0];
       addUsage(varName, { nodeId, field: "condition", context: condition });
     }
   };
@@ -840,7 +878,7 @@ export interface SearchOptions {
 
 /**
  * Search workflow nodes and optionally variables
- * Supports regex patterns (detected automatically)
+ * Supports bounded literal alternatives separated by `|`.
  */
 export function searchWorkflow(
   workflow: WorkflowGraph,
@@ -850,34 +888,18 @@ export function searchWorkflow(
   const { snippetMode = false, includeVariables = false } = options;
   const results: SearchResult[] = [];
 
-  // Detect if query should be treated as regex
-  const isRegex = /[|*+?[\](){}^$\\]/.test(query);
-  let matcher: RegExp | null = null;
-
-  if (isRegex) {
-    try {
-      matcher = new RegExp(query, "i");
-    } catch {
-      matcher = null;
-    }
-  }
-
-  const matchText = (text: string | undefined): boolean => {
-    if (!text) return false;
-    if (matcher) {
-      return matcher.test(text);
-    }
-    return text.toLowerCase().includes(query.toLowerCase());
-  };
+  const searchTerms = getSearchTerms(query);
+  const matchText = (text: string | undefined): boolean => matchesSearchTerms(text, searchTerms);
 
   const extractSnippet = (text: string, maxLength = 100): string => {
-    const lowerQuery = query.toLowerCase();
-    const index = text.toLowerCase().indexOf(lowerQuery);
+    const normalizedText = text.toLowerCase();
+    const matchedTerm = searchTerms.find((term) => normalizedText.includes(term));
+    const index = matchedTerm ? normalizedText.indexOf(matchedTerm) : -1;
     if (index === -1) {
       return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
     }
     const start = Math.max(0, index - 25);
-    const end = Math.min(text.length, index + query.length + 25);
+    const end = Math.min(text.length, index + (matchedTerm?.length ?? 0) + 25);
     let snippet = text.substring(start, end);
     if (start > 0) snippet = "..." + snippet;
     if (end < text.length) snippet = snippet + "...";

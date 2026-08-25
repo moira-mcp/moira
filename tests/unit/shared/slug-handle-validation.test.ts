@@ -155,6 +155,14 @@ describe("Slug Validation", () => {
       expect(slug).toMatch(/^workflow-[a-z0-9]{8}$/);
     });
 
+    it("normalizes long punctuation runs without regex backtracking", () => {
+      const startedAt = performance.now();
+      const slug = generateSlugFromName(`alpha${"-".repeat(50_000)}omega`);
+
+      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(slug).toBe("alpha-omega");
+    });
+
     it("adds random suffix for short names", () => {
       const slug = generateSlugFromName("ab");
       // Short names get random suffix to meet minimum length

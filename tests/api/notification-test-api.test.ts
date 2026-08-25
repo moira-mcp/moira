@@ -8,6 +8,7 @@ import { getTestFetchUrl, getAdminCredentials } from "../utils/test-config.js";
 
 const BASE_URL = getTestFetchUrl();
 const ADMIN_CREDENTIALS = getAdminCredentials();
+const VALID_LOOKING_TOKEN = `${"1".repeat(9)}:${"A".repeat(35)}`;
 const TEST_USER = {
   email: `notification-api-test-${Date.now()}@example.com`,
   password: "TestPass123!",
@@ -97,7 +98,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: "000000000:INVALIDTOKENFORMAT",
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "12345",
       }),
     });
@@ -123,7 +124,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: "9999999999:AAFake_Token_For_Test_Only_Invalid",
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "nonexistent-chat-999",
       }),
     });
@@ -147,7 +148,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: "1234567890:AAHello_Invalid_Token_For_Testing",
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "12345",
       }),
     });
@@ -179,7 +180,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        botToken: "123456789:ABCDEFGH",
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "12345",
       }),
     });

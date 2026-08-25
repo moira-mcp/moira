@@ -228,7 +228,7 @@ describe("CLI/MCP Parity Verification", () => {
       expect(analyzeResult?.snippet).toContain("retries");
     });
 
-    it("supports regex patterns", () => {
+    it("supports bounded literal alternatives", () => {
       const results = searchWorkflow(testWorkflow, "Analyze|Validate");
 
       expect(results.length).toBe(2);

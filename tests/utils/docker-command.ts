@@ -9,8 +9,7 @@
  * are routed through the specified Docker context (SSH to remote host).
  */
 
-import { execSync } from "child_process";
-import { exec, execFile } from "child_process";
+import { exec, execFile, execFileSync } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
@@ -39,10 +38,16 @@ export function getContainerName(): string {
  * Execute a command inside the Docker container (sync)
  * Equivalent to: docker [--context ctx] exec <container> <command>
  */
-export function dockerExecSync(command: string, container?: string): string {
+export function dockerExecSync(command: string[], container?: string): string {
   const containerName = container || getContainerName();
-  const prefix = getDockerPrefix();
-  return execSync(`${prefix} exec ${containerName} ${command}`, {
+  const context = process.env.REMOTE_DOCKER_CONTEXT;
+  const dockerArguments = [
+    ...(context ? ["--context", context] : []),
+    "exec",
+    containerName,
+    ...command,
+  ];
+  return execFileSync("docker", dockerArguments, {
     encoding: "utf-8",
   }).trim();
 }
@@ -59,9 +64,7 @@ export function execSqliteInDocker(
   dbPath: string = "/app/data/moira.db",
   container?: string,
 ): string {
-  const escapedSql = sql.replace(/"/g, '\\"');
-  // Use -cmd option to set busy_timeout before executing SQL
-  return dockerExecSync(`sqlite3 -cmd ".timeout 5000" ${dbPath} "${escapedSql}"`, container);
+  return dockerExecSync(["sqlite3", "-cmd", ".timeout 5000", dbPath, sql], container);
 }
 
 /**

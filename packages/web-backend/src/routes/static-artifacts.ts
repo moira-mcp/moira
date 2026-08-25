@@ -75,13 +75,28 @@ const WRAPPER_I18N: Record<WrapperLang, Record<string, string>> = {
   },
 };
 
+function getRequestCookie(req: Request, name: string): string | undefined {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return undefined;
+  for (const pair of cookieHeader.split(";")) {
+    const separator = pair.indexOf("=");
+    if (separator === -1 || pair.slice(0, separator).trim() !== name) continue;
+    try {
+      return decodeURIComponent(pair.slice(separator + 1).trim());
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 /**
  * Pick the wrapper language. Priority: explicit cookie/override → first matching
  * Accept-Language tag → English default. (navigator.language gives the same
  * signal as Accept-Language for the wrapper; an in-page toggle sets the cookie.)
  */
 function pickWrapperLang(req: Request): WrapperLang {
-  const cookieLang = req.cookies?.[LANG_COOKIE];
+  const cookieLang = getRequestCookie(req, LANG_COOKIE);
   if (cookieLang === "ru" || cookieLang === "en") {
     return cookieLang;
   }
@@ -194,6 +209,7 @@ function renderWrapperPage(
 ): string {
   const baseUrl = getBaseUrl();
   const safeName = escapeHtmlText(name);
+  const safeNameAttribute = escapeHtmlAttribute(name);
   const safeUuid = escapeHtmlAttribute(uuid);
   const t = WRAPPER_I18N[lang];
 
@@ -224,7 +240,7 @@ function renderWrapperPage(
     src="${routeBase}/__frame/${safeUuid}"
     sandbox="allow-scripts"
     referrerpolicy="no-referrer"
-    title="${safeName}"
+    title="${safeNameAttribute}"
   ></iframe>
   <div class="moira-branding-footer">
     <span class="moira-footer-brand">
@@ -399,7 +415,7 @@ const serveWrapper = asyncHandler(async (req: Request, res: Response) => {
   }
 
   const acknowledged =
-    req.query.ack === "1" || req.cookies?.[INTERSTITIAL_COOKIE_PREFIX + uuid] === "1";
+    req.query.ack === "1" || getRequestCookie(req, INTERSTITIAL_COOKIE_PREFIX + uuid) === "1";
 
   // Persist acknowledgment so the interstitial is shown only on first visit.
   // Cookie is scoped to this artifact's origin (per-subdomain) for isolation.

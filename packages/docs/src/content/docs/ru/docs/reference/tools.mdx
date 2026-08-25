@@ -344,7 +344,7 @@ manage({ action: "get-node", workflowId: "my-workflow", nodeId: "step-1" })
 
 - `action`: `"search-nodes"` (обязательный)
 - `workflowId` (string, обязательный) - ID workflow
-- `query` (string, обязательный) - Текст поиска
+- `query` (string, обязательный) - Текст поиска; ограниченные буквальные альтернативы разделяются символом `|`
 - `limit` (number, опционально) - Максимум результатов
 - `offset` (number, опционально) - Смещение для пагинации
 

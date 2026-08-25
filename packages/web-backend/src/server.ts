@@ -7,7 +7,6 @@
 
 import express from "express";
 import helmet from "helmet";
-import cookieParser from "cookie-parser";
 import { fileURLToPath } from "url";
 import path from "path";
 import { toNodeHandler } from "better-auth/node";
@@ -170,7 +169,6 @@ class MoiraApiServer {
     this.app.use(setupCorsMiddleware());
 
     // Cookie parser for session management
-    this.app.use(cookieParser());
   }
 
   /**

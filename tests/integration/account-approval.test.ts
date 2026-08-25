@@ -210,9 +210,7 @@ describe("account approval migration", () => {
     );
     expect(output).toContain("Pending users blocked: 1");
     expect(output).toContain("Sessions revoked: 1");
-    expect(output).toContain("API tokens revoked: 1");
-    expect(output).toContain("OAuth tokens revoked: 1");
-    expect(output).toContain("OAuth consents revoked: 1");
+    expect(output).toContain("API and OAuth credentials revoked");
 
     sqlite = new Database(dbPath);
     const pending = sqlite

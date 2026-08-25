@@ -56,6 +56,12 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
 jest.unstable_mockModule("@mcp-moira/shared", () => ({
   AuthorizationError: class extends Error {},
   AuditAction: {},
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  }),
   MCP_AGENT_CATEGORY: "agent",
   MCP_MODEL_CATEGORY: "model",
   MCP_TEXT_KEYS: {},
@@ -66,11 +72,15 @@ jest.unstable_mockModule("@mcp-moira/shared", () => ({
   getFeatureResolver: () => ({ isEnabled }),
   getGlobalSettingsService: jest.fn(),
   getLockService: jest.fn(),
+  getLoadTestSecret: jest.fn(),
   getMcpTextService: jest.fn(),
+  getRateLimitWhitelist: () => [],
   getSqliteInstance: jest.fn(),
   getUserService: () => ({ approveAccount }),
   getWorkflowReconciliationStatusSummary: jest.fn(() => reconciliationState),
   isEmailConfigured: jest.fn(),
+  isRateLimitDisabled: () => true,
+  isTestEnvironment: () => true,
   logAuditEvent: jest.fn(),
 }));
 

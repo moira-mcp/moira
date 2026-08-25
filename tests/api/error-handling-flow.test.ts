@@ -39,85 +39,23 @@ function formatSessionCookie(baseUrl: string, sessionCookie: string): string {
 }
 
 /**
- * Count log entries matching a pattern in Docker logs since a timestamp
- *
- * @param pattern - Grep pattern to match
- * @param sinceTimestamp - ISO timestamp to filter logs
- * @returns Number of matching log entries
- */
-async function countLogsMatching(pattern: string, sinceTimestamp: string): Promise<number> {
-  try {
-    const stdout = await dockerLogsRecent(
-      `grep '${pattern}' | grep -c '"timestamp":"${sinceTimestamp.substring(0, 16)}'`,
-    );
-    return parseInt(stdout.trim(), 10) || 0;
-  } catch {
-    // grep returns non-zero if no matches - that's okay
-    return 0;
-  }
-}
-
-/**
- * Flush Docker log buffers AND grep for a pattern in a single SSH round-trip.
+ * Flush Docker log buffers and find one request log in a single SSH round-trip.
  * Combines buffer flush (50 health curls) with log file search to halve
  * the number of SSH calls per retry, critical for remote Docker perf.
  */
-function flushAndGrep(grepPattern: string): string {
-  // Single docker exec: flush buffers, then grep log files.
-  // Winston rotates logs with maxFiles, creating numbered files like
-  // backend-api1.log, backend-api2.log (not plain backend-api.log).
-  const escapedPattern = grepPattern.replace(/'/g, `'"'"'`);
-  return dockerExecSync(
-    `sh -c 'for i in $(seq 1 50); do curl -s http://localhost:3001/api/health > /dev/null; done; cat /var/log/app/backend-api*.log /var/log/app/mcp-server*.log 2>/dev/null | ${escapedPattern}'`,
-  );
-}
-
-async function countLogsForRequestId(
-  requestId: string,
-  retries: number = 4,
-  delayMs: number = 1000,
-): Promise<{ warn: number; error: number }> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    // Flush log buffers
-    flushDockerLogs();
-
-    try {
-      // Single call reading from Winston file logs inside container
-      const stdout = await dockerLogsRecent(`grep '"requestId":"${requestId}"'`);
-
-      if (stdout.trim()) {
-        const lines = stdout.trim().split("\n");
-        const result = {
-          warn: lines.filter((l) => l.includes('"level":"warn"')).length,
-          error: lines.filter((l) => l.includes('"level":"error"')).length,
-        };
-
-        if (result.warn > 0 || result.error > 0) {
-          return result;
-        }
-      }
-
-      // Wait before retry (logs may not be flushed yet)
-      if (attempt < retries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    } catch {
-      // Continue to next retry
-      if (attempt < retries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
-    }
-  }
-
-  return { warn: 0, error: 0 };
-}
-
-/**
- * Get the last N log entries for analysis
- */
-async function getRecentLogs(count: number = 50): Promise<string[]> {
-  const stdout = await dockerLogsAsync(`tail -${count}`);
-  return stdout.split("\n").filter((line) => line.trim());
+function flushAndFindLog(requestId: string, level: "warn" | "error"): string {
+  const script = [
+    "for i in $(seq 1 50); do curl -s http://localhost:3001/api/health > /dev/null; done",
+    'cat /var/log/app/backend-api*.log /var/log/app/mcp-server*.log 2>/dev/null | grep -F -- "$1" | grep -F -- "$2" | head -1',
+  ].join("; ");
+  return dockerExecSync([
+    "sh",
+    "-c",
+    script,
+    "log-search",
+    `"requestId":"${requestId}"`,
+    `"level":"${level}"`,
+  ]);
 }
 
 /**
@@ -127,9 +65,11 @@ async function getRecentLogs(count: number = 50): Promise<string[]> {
  */
 function flushDockerLogs(): void {
   try {
-    dockerExecSync(
-      "sh -c 'for i in $(seq 1 10); do curl -s http://localhost:3001/api/health > /dev/null; done && sync'",
-    );
+    dockerExecSync([
+      "sh",
+      "-c",
+      "for i in $(seq 1 10); do curl -s http://localhost:3001/api/health > /dev/null; done && sync",
+    ]);
   } catch {
     // Ignore flush errors
   }
@@ -146,14 +86,23 @@ let internalCookieJarReady = false;
 function ensureInternalCookieJar(): void {
   if (internalCookieJarReady) return;
   const { email, password } = getAdminCredentials();
-  // Write sign-in JSON body to file (avoids shell escaping issues with quotes)
-  dockerExecSync(
-    `sh -c 'printf '"'"'{"email":"${email}","password":"${password}","rememberMe":true}'"'"' > /tmp/test-signin.json'`,
-  );
-  // Sign in and save cookies to jar
-  dockerExecSync(
-    `sh -c 'curl -s -c /tmp/test-jar.txt -X POST "http://localhost:3001/api/auth/sign-in/email" -H "Content-Type: application/json" -d @/tmp/test-signin.json -o /dev/null'`,
-  );
+  dockerExecSync([
+    "curl",
+    "-s",
+    "-c",
+    "/tmp/test-jar.txt",
+    "-X",
+    "POST",
+    "http://localhost:3001/api/auth/sign-in/email",
+    "-H",
+    "Content-Type: application/json",
+    "-H",
+    "Origin: http://localhost:3030",
+    "--data-binary",
+    JSON.stringify({ email, password, rememberMe: true }),
+    "-o",
+    "/dev/null",
+  ]);
   internalCookieJarReady = true;
 }
 
@@ -173,12 +122,26 @@ function makeInternalDockerRequest(path: string): {
 } {
   ensureInternalCookieJar();
 
-  const statusCode = dockerExecSync(
-    `sh -c 'curl -s -b /tmp/test-jar.txt -D /tmp/test-h.txt -o /tmp/test-b.txt -w "%{http_code}" "http://localhost:3001${path}"'`,
-  );
+  if (!path.startsWith("/") || /[\r\n\0]/.test(path)) {
+    throw new Error("Internal Docker request path must be an absolute HTTP path");
+  }
 
-  const rawHeaders = dockerExecSync(`cat /tmp/test-h.txt`);
-  const body = dockerExecSync(`cat /tmp/test-b.txt`);
+  const statusCode = dockerExecSync([
+    "curl",
+    "-s",
+    "-b",
+    "/tmp/test-jar.txt",
+    "-D",
+    "/tmp/test-h.txt",
+    "-o",
+    "/tmp/test-b.txt",
+    "-w",
+    "%{http_code}",
+    `http://localhost:3001${path}`,
+  ]);
+
+  const rawHeaders = dockerExecSync(["cat", "/tmp/test-h.txt"]);
+  const body = dockerExecSync(["cat", "/tmp/test-b.txt"]);
 
   // Extract X-Request-Id (case-insensitive)
   const match = rawHeaders.match(/X-Request-Id:\s*(\S+)/i);
@@ -197,13 +160,14 @@ function makeInternalDockerRequest(path: string): {
  * Flushes Node.js stdout buffer on each retry to ensure logs are written.
  */
 async function waitForLogEntry(
-  grepPattern: string,
+  requestId: string,
+  level: "warn" | "error",
   { retries = 10, delayMs = 2000 }: { retries?: number; delayMs?: number } = {},
 ): Promise<string> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       // Single SSH round-trip: flush buffers + grep log files
-      const result = flushAndGrep(grepPattern);
+      const result = flushAndFindLog(requestId, level);
       if (result.trim()) return result.trim();
     } catch {
       // grep returns non-zero if no matches
@@ -212,7 +176,7 @@ async function waitForLogEntry(
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
-  throw new Error(`Log entry not found after ${retries} retries: ${grepPattern}`);
+  throw new Error(`Log entry not found after ${retries} retries for request ${requestId}`);
 }
 
 describe("Error Handling Flow - Log Once Validation", () => {
@@ -436,9 +400,7 @@ describe("Error Handling Flow - Log Once Validation", () => {
       expect(requestId).toBeTruthy();
 
       // Get the actual log entry with warn level (with retry for remote Docker)
-      const stdout = await waitForLogEntry(
-        `grep '"requestId":"${requestId}"' | grep '"level":"warn"' | head -1`,
-      );
+      const stdout = await waitForLogEntry(requestId, "warn");
 
       // Parse the log entry
       const logEntry = JSON.parse(stdout);
@@ -460,9 +422,7 @@ describe("Error Handling Flow - Log Once Validation", () => {
       expect(status).toBe(404);
 
       // Get the log entry (with retry for remote Docker)
-      const stdout = await waitForLogEntry(
-        `grep '"requestId":"${requestId}"' | grep '"level":"warn"' | head -1`,
-      );
+      const stdout = await waitForLogEntry(requestId, "warn");
 
       const logEntry = JSON.parse(stdout);
 

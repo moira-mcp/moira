@@ -395,7 +395,12 @@ export class ExecutionRepository {
       const container = cursor as Record<string | number, unknown>;
       if (container[seg] === null || typeof container[seg] !== "object") {
         // Create an object/array container based on the next segment's type.
-        container[seg] = typeof path[i + 1] === "number" ? [] : {};
+        Object.defineProperty(container, seg, {
+          value: typeof path[i + 1] === "number" ? [] : Object.create(null),
+          configurable: true,
+          enumerable: true,
+          writable: true,
+        });
       }
       cursor = container[seg];
     }
@@ -405,7 +410,12 @@ export class ExecutionRepository {
     const leafKey = path[path.length - 1];
     const parent = cursor as Record<string | number, unknown>;
     const oldValue = parent[leafKey];
-    parent[leafKey] = value;
+    Object.defineProperty(parent, leafKey, {
+      value,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    });
 
     const updatedContext = { ...execution.globalContext, variables };
 

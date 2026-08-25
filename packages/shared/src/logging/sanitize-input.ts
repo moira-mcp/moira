@@ -67,7 +67,26 @@ function maskEmail(email: string): string {
  * Check if a string looks like an email
  */
 function isEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  let atIndex = -1;
+  let lastDotIndex = -1;
+
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (/\s/.test(character)) return false;
+    if (character === "@") {
+      if (atIndex !== -1) return false;
+      atIndex = index;
+    } else if (character === "." && atIndex !== -1) {
+      lastDotIndex = index;
+    }
+  }
+
+  return (
+    atIndex > 0 &&
+    atIndex < value.length - 1 &&
+    lastDotIndex > atIndex + 1 &&
+    lastDotIndex < value.length - 1
+  );
 }
 
 /**

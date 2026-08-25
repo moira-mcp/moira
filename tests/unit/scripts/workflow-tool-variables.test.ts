@@ -3,7 +3,7 @@
  * Tests variable extraction from workflows
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -11,8 +11,8 @@ import { randomUUID } from "crypto";
 
 const WORKFLOW_TOOL = path.join(process.cwd(), "packages/workflow-cli/bin/moira-workflow.js");
 
-function runWorkflowTool(args: string, cwd = process.cwd()): string {
-  return execSync(`${process.execPath} ${WORKFLOW_TOOL} ${args}`, {
+function runWorkflowTool(args: string[], cwd = process.cwd()): string {
+  return execFileSync(process.execPath, [WORKFLOW_TOOL, ...args], {
     encoding: "utf-8",
     cwd,
   });
@@ -27,7 +27,7 @@ function createTempWorkflow(workflow: object): string {
 
 describe("agent-facing CLI diagnostics", () => {
   test("--version identifies both the package version and exact source checkout", () => {
-    const output = runWorkflowTool("--version", os.tmpdir());
+    const output = runWorkflowTool(["--version"], os.tmpdir());
 
     expect(output).toContain("@mcp-moira/workflow-cli 0.4.0");
     expect(output).toContain(path.normalize("packages/workflow-cli/src/workflow-tool.ts"));
@@ -40,7 +40,7 @@ describe("agent-facing CLI diagnostics", () => {
       nodes: [{ id: "start", type: "start", connections: { default: "missing-node" } }],
     });
     try {
-      expect(() => runWorkflowTool(`${tmpFile} validate`)).toThrow();
+      expect(() => runWorkflowTool([tmpFile, "validate"])).toThrow();
     } finally {
       fs.unlinkSync(tmpFile);
     }
@@ -67,7 +67,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("project_name");
         expect(output).toContain("feature_branch");
         expect(output).toContain("[initial]");
@@ -98,7 +98,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("user_choice");
         expect(output).toContain("confirm");
       } finally {
@@ -121,7 +121,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("workspace_path");
         expect(output).toContain("feature_name");
       } finally {
@@ -142,7 +142,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("has_tests");
       } finally {
         fs.unlinkSync(tmpFile);
@@ -162,7 +162,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         // Output shows the full path like user.email
         expect(output).toContain("user");
       } finally {
@@ -190,7 +190,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("step_count");
       } finally {
         fs.unlinkSync(tmpFile);
@@ -213,7 +213,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("counter");
         expect(output).toContain("offset");
         expect(output).toContain("result");
@@ -236,7 +236,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         expect(output).toContain("counter");
         expect(output).toContain("is_positive");
         // Should NOT contain JS keywords as variables (true/false are keywords)
@@ -277,7 +277,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables --usage`);
+        const output = runWorkflowTool([tmpFile, "variables", "--usage"]);
         expect(output).toContain("my_var");
         // With --usage flag, should show node ID and field where variable is used
         expect(output).toContain("use-var");
@@ -308,7 +308,7 @@ describe("workflow-tool variables command", () => {
     test("get-variable reads a declared global from variableRegistry", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
-        const output = runWorkflowTool(`${tmpFile} get-variable report_template`);
+        const output = runWorkflowTool([tmpFile, "get-variable", "report_template"]);
         expect(output).toContain("report_template");
         expect(output).toContain("HTML report template");
       } finally {
@@ -319,7 +319,7 @@ describe("workflow-tool variables command", () => {
     test("set-variable creates a new global in variableRegistry (not initialData)", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
-        runWorkflowTool(`${tmpFile} set-variable new_flag "true value"`);
+        runWorkflowTool([tmpFile, "set-variable", "new_flag", "true value"]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.variableRegistry.new_flag).toBeDefined();
         expect(saved.variableRegistry.new_flag.default).toBe("true value");
@@ -334,7 +334,7 @@ describe("workflow-tool variables command", () => {
     test("set-variable preserves description/type of an existing global", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
-        runWorkflowTool(`${tmpFile} set-variable report_template "<new/>"`);
+        runWorkflowTool([tmpFile, "set-variable", "report_template", "<new/>"]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.variableRegistry.report_template.default).toBe("<new/>");
         expect(saved.variableRegistry.report_template.description).toBe("HTML report template");
@@ -347,9 +347,13 @@ describe("workflow-tool variables command", () => {
     test("set-variable-schema accepts --force without including it in JSON", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
-        runWorkflowTool(
-          `${tmpFile} set-variable-schema result '{"type":"array","description":"Result history","items":{"type":"string"},"default":[]}' --force`,
-        );
+        runWorkflowTool([
+          tmpFile,
+          "set-variable-schema",
+          "result",
+          '{"type":"array","description":"Result history","items":{"type":"string"},"default":[]}',
+          "--force",
+        ]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.variableRegistry.result).toEqual({
           type: "array",
@@ -379,7 +383,14 @@ describe("workflow-tool variables command", () => {
       };
       fs.writeFileSync(schemaFile, JSON.stringify(schema, null, 2));
       try {
-        runWorkflowTool(`${tmpFile} set-variable-schema result --file ${schemaFile} --force`);
+        runWorkflowTool([
+          tmpFile,
+          "set-variable-schema",
+          "result",
+          "--file",
+          schemaFile,
+          "--force",
+        ]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.variableRegistry.result).toEqual(schema);
         expect(saved.metadata.version).toBe("1.0.0");
@@ -392,7 +403,7 @@ describe("workflow-tool variables command", () => {
     test("delete-variable removes a global from variableRegistry", () => {
       const tmpFile = createTempWorkflow(registryWorkflow());
       try {
-        runWorkflowTool(`${tmpFile} delete-variable report_template`);
+        runWorkflowTool([tmpFile, "delete-variable", "report_template"]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.variableRegistry.report_template).toBeUndefined();
       } finally {
@@ -412,7 +423,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        runWorkflowTool(`${tmpFile} set-description "New workflow description" --force`);
+        runWorkflowTool([tmpFile, "set-description", "New workflow description", "--force"]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.metadata.description).toBe("New workflow description");
         expect(saved.metadata.version).toBe("1.0.0");
@@ -433,7 +444,7 @@ describe("workflow-tool variables command", () => {
       const descriptionFile = path.join(os.tmpdir(), `workflow-description-${randomUUID()}.txt`);
       fs.writeFileSync(descriptionFile, "First paragraph.\n\nSecond paragraph.\n");
       try {
-        runWorkflowTool(`${tmpFile} set-description --file ${descriptionFile} --force`);
+        runWorkflowTool([tmpFile, "set-description", "--file", descriptionFile, "--force"]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.metadata.description).toBe("First paragraph.\n\nSecond paragraph.");
         expect(saved.metadata.version).toBe("1.0.0");
@@ -487,7 +498,7 @@ describe("workflow-tool variables command", () => {
         }),
       );
       try {
-        runWorkflowTool(`${tmpFile} replace produce ${replacementFile} --force`);
+        runWorkflowTool([tmpFile, "replace", "produce", replacementFile, "--force"]);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.nodes.map((node: { id: string }) => node.id)).toEqual([
           "start",
@@ -504,7 +515,7 @@ describe("workflow-tool variables command", () => {
     test("update --final-output configures an End projection", () => {
       const tmpFile = createTempWorkflow(migrationWorkflow());
       try {
-        runWorkflowTool(`${tmpFile} update end --final-output '["global_result"]'`);
+        runWorkflowTool([tmpFile, "update", "end", "--final-output", '["global_result"]']);
         const saved = JSON.parse(fs.readFileSync(tmpFile, "utf-8"));
         expect(saved.nodes[2].finalOutput).toEqual(["global_result"]);
         expect(saved.metadata.version).toBe("2.0.1");
@@ -534,7 +545,7 @@ describe("workflow-tool variables command", () => {
         },
       });
       try {
-        runWorkflowTool(`${source} sync ${destination}`);
+        runWorkflowTool([source, "sync", destination]);
         const saved = JSON.parse(fs.readFileSync(destination, "utf-8"));
         expect(saved).toEqual({
           ...sourceWorkflow,
@@ -572,7 +583,7 @@ describe("workflow-tool variables command", () => {
       });
       const before = fs.readFileSync(destination);
       try {
-        expect(() => runWorkflowTool(`${source} sync ${destination}`)).toThrow();
+        expect(() => runWorkflowTool([source, "sync", destination])).toThrow();
         expect(fs.readFileSync(destination)).toEqual(before);
       } finally {
         fs.unlinkSync(source);
@@ -595,7 +606,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         // Output has ANSI codes, so check parts separately
         expect(output).toContain("Total:");
         expect(output).toContain("0");
@@ -614,7 +625,7 @@ describe("workflow-tool variables command", () => {
       };
       const tmpFile = createTempWorkflow(workflow);
       try {
-        const output = runWorkflowTool(`${tmpFile} variables`);
+        const output = runWorkflowTool([tmpFile, "variables"]);
         // Output has ANSI codes, so check parts separately
         expect(output).toContain("Total:");
         expect(output).toContain("0");
