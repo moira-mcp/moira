@@ -56,10 +56,12 @@ moira-workflow ./workflow.json set-description --file ./description.txt
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
-Для полной спланированной замены `sync` сохраняет идентичность целевого workflow и валидирует
-полностью синхронизированный граф до записи. При ошибке валидации целевой файл не меняется.
-Отдельная команда `validate` завершается с ненулевым кодом при наличии ошибок, поэтому агент или
-CI может использовать её как настоящий гейт.
+Для полной спланированной замены `sync` сохраняет идентичность целевого workflow и его catalog
+migration aliases в `previousSlugs`. Catalog reader проверяет aliases отдельно, а в engine validator
+передаётся только executable graph. Aliases всегда берутся из реальной цели, а не из workspace-копии.
+При ошибке metadata или graph validation целевой файл не меняется. Отдельная команда `validate`
+завершается с ненулевым кодом для обоих классов ошибок, поэтому агент или CI может использовать её
+как настоящий гейт без ослабления runtime/upload graph validation.
 
 ```bash
 moira-workflow ./workspace/workflow.json sync ./workflows/production/flows/<flow>.json

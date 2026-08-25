@@ -45,6 +45,50 @@ describe("agent-facing CLI diagnostics", () => {
       fs.unlinkSync(tmpFile);
     }
   });
+
+  test("validate accepts catalog migration aliases while keeping executable validation strict", () => {
+    const tmpFile = createTempWorkflow({
+      id: "renamed-workflow",
+      slug: "current-workflow",
+      previousSlugs: ["legacy-workflow"],
+      owner: "system-moira",
+      visibility: "public",
+      metadata: { name: "Renamed", version: "1.0.0", description: "Renamed workflow" },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "end" } },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      expect(runWorkflowTool([tmpFile, "validate"])).toContain("Workflow is valid");
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  test.each([
+    ["non-array", "legacy-workflow"],
+    ["duplicate", ["legacy-workflow", "legacy-workflow"]],
+    ["current slug", ["current-workflow"]],
+  ])("validate rejects %s catalog migration aliases", (_name, previousSlugs) => {
+    const tmpFile = createTempWorkflow({
+      id: "renamed-workflow",
+      slug: "current-workflow",
+      previousSlugs,
+      owner: "system-moira",
+      visibility: "public",
+      metadata: { name: "Renamed", version: "1.0.0", description: "Renamed workflow" },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "end" } },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      expect(() => runWorkflowTool([tmpFile, "validate"])).toThrow();
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
 });
 
 describe("workflow-tool variables command", () => {
@@ -534,6 +578,7 @@ describe("workflow-tool variables command", () => {
         ...migrationWorkflow(),
         id: "catalog-workflow",
         slug: "catalog-slug",
+        previousSlugs: ["legacy-catalog-slug"],
         owner: "catalog-owner",
         visibility: "public",
         metadata: {
@@ -551,6 +596,7 @@ describe("workflow-tool variables command", () => {
           ...sourceWorkflow,
           id: "catalog-workflow",
           slug: "catalog-slug",
+          previousSlugs: ["legacy-catalog-slug"],
           owner: "catalog-owner",
           visibility: "public",
           metadata: {
