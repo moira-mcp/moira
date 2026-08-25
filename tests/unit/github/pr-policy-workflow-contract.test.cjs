@@ -37,7 +37,7 @@ describe("PR Policy workflow and contributor contract", () => {
     expect(job.steps).toHaveLength(2);
     expect(job.steps[0]).toEqual({
       name: "Check out trusted default-branch policy",
-      uses: "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       with: {
         ref: "${{ github.event.repository.default_branch }}",
         "persist-credentials": false,
@@ -45,7 +45,7 @@ describe("PR Policy workflow and contributor contract", () => {
     });
     expect(job.steps[1]).toEqual({
       name: "Validate pull request",
-      uses: "actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b",
+      uses: "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
       with: {
         script:
           "const adapter = require('./.github/scripts/pr-policy-adapter.cjs');\n" +
