@@ -61,11 +61,13 @@ describe("security automation contract", () => {
         "applies-to": "version-updates",
         "dependency-type": "production",
         patterns: ["*"],
+        "update-types": ["minor", "patch"],
       },
       "development-dependencies": {
         "applies-to": "version-updates",
         "dependency-type": "development",
         patterns: ["*"],
+        "update-types": ["minor", "patch"],
       },
       "security-production-dependencies": {
         "applies-to": "security-updates",
@@ -197,7 +199,8 @@ describe("security automation contract", () => {
     }
     expect(security).toContain("do not mean that all existing");
     for (const document of [contributing, security]) {
-      expect(document).toMatch(/version\s+updates weekly/);
+      expect(document).toMatch(/grouped root npm minor and patch updates/);
+      expect(document).toMatch(/Major npm updates remain separate/);
       expect(document).toMatch(/do not wait for the weekly version-update\s+schedule/);
       expect(document).toContain("`type:chore`");
       expect(document).not.toContain("5 business days");

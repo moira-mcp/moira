@@ -148,7 +148,17 @@ export async function renderMaterializeFiles(
 export async function createMaterializeTar(files: RenderedMaterializeFile[]): Promise<Buffer> {
   const archive = pack();
   const chunks: Buffer[] = [];
-  archive.on("data", (chunk: Buffer) => chunks.push(chunk));
+  archive.on("data", (chunk: unknown) => {
+    if (Buffer.isBuffer(chunk)) {
+      chunks.push(chunk);
+      return;
+    }
+    if (chunk instanceof Uint8Array) {
+      chunks.push(Buffer.from(chunk));
+      return;
+    }
+    archive.destroy(new TypeError("Materialize tar stream emitted a non-binary chunk"));
+  });
   const completed = new Promise<Buffer>((resolve, reject) => {
     archive.once("end", () => resolve(Buffer.concat(chunks)));
     archive.once("error", reject);

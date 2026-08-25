@@ -15,7 +15,7 @@
   "scripts": {},
   "dependencies": {
     "@mcp-moira/shared": "*",
-    "tar-stream": "^3.2.0"
+    "tar-stream": "^3.2.1"
   },
   "devDependencies": {
     "@types/tar-stream": "^3.1.4"
