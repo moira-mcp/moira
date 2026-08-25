@@ -204,6 +204,13 @@ describe("DCO and bot boundaries", () => {
       ],
     });
     expect(policy.validatePullRequest(exact)).toEqual({ ok: true, findings: [] });
+    expect(
+      policy.validatePullRequest({
+        ...exact,
+        body: "",
+        bodyOverflow: true,
+      }),
+    ).toEqual({ ok: true, findings: [] });
 
     for (const override of [
       { author: { ...bot, id: 999 } },
