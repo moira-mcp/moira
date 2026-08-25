@@ -449,7 +449,7 @@ function getTopicList(): string {
   result += `| "test plan", "QA strategy" | \`moira/test-planning\` |\n`;
   result += `| "audit tests", "test suite audit", "find test gaps or redundancy" | \`moira/test-suite-audit\` |\n`;
   result += `| "write article", "create post", "write docs" | \`moira/content-creation\` |\n`;
-  result += `| "research", "investigate", "look up" | \`moira/verified-research\` |\n`;
+  result += `| one bounded external-source question needing durable evidence, independent semantic review, and truthful complete or limited local delivery | \`moira/verified-research\` |\n`;
   result += `| external research needing durable source evidence, repeated independent zero-issue review, and changed repair | \`moira/iterative-research\` |\n`;
   result += `| portable adaptive research needing filesystem-or-memory operation, pre-access authority review, evidence readiness, exact-zero final review, and separately authorized delivery | \`moira/universal-research-workflow\` |\n`;
   result += `| "create PRD", "requirements document" | \`moira/prd-creation\` |\n`;

@@ -180,19 +180,22 @@ mcp__moira__start({ workflowId: "content-creation" })
 
 ### verified-research
 
-Research with verified and reproducible sources. Solves AI hallucination and fake source problems.
+Bounded external-source research for one specific question and one durable local answer. The workflow creates an execution-correlated source register and critical readings, preserves meaningful disagreement, separates sourced facts from inference and uncertainty, supports useful explicitly limited outcomes, and requires genuinely independent semantic review before complete or limited delivery.
 
 ```mermaid
 flowchart LR
-    A[Question] --> B[Methodology] --> C[Gather] --> D[Read] --> E[Synthesize] --> F[Output]
+    A[Intake] --> B[Evidence package] --> C[Answer and limitations] --> D[Deterministic checks] --> E[Independent review] --> F[Complete or limited local report]
 ```
 
 | Feature | Description |
 |---------|-------------|
-| URL verification | All sources must be accessible |
-| Alternative viewpoints | Minimum 2 opposing opinions |
-| Citations | Each conclusion linked to source |
-| Limitations | Explicit gaps and biases section |
+| Proportionate evidence | Source breadth follows the question; no invented source-count threshold |
+| Durable traceability | Source register, readings, alternatives, answer, limitations, validation, findings, and repair stay at stable paths |
+| Truthful evidence class | One independently reviewed `ready` or `limited` class drives the terminal result |
+| Cause-aware convergence | Answer and evidence defects invalidate different stale cones; invalid criteria replan |
+| Local authority | No upload, notification, VCS, deployment, or production mutation |
+
+**Use for:** One bounded question needing a source-linked answer with independent review. Choose Iterative Research for repeated durable improvement, Universal Research for adaptive filesystem-or-memory and authority modes, or Deep Corpus Research for separately authorized corpus-scale exhaustive reading.
 
 ```bash
 mcp__moira__start({ workflowId: "moira/verified-research", parentExecutionId: "none" })

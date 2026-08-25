@@ -90,7 +90,7 @@ flowchart TD
 | `moira/software-development-flow-lite` | Fast complete development for one bounded low-risk outcome, with full-SDF handoff when risk, uncertainty, or spread grows                                                  |
 | `moira/robust-task`                    | Complex multi-step work needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful complete or incomplete delivery |
 | `moira/content-creation`               | Articles, blog posts, documentation                                                                                                                                        |
-| `moira/verified-research`              | Research with verified sources (anti-hallucination)                                                                                                                        |
+| `moira/verified-research`              | One bounded external-source question with durable evidence, independent semantic review, and a truthful complete or limited local answer                                   |
 | `moira/prd-creation`                   | Product Requirements Documents                                                                                                                                             |
 | `moira/ux-design`                      | UX/UI design with accessibility checks                                                                                                                                     |
 | `moira/test-generation`                | Generate unit/integration/e2e test code                                                                                                                                    |

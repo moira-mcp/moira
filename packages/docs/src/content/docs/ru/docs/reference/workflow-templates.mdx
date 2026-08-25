@@ -180,19 +180,22 @@ mcp__moira__start({ workflowId: "content-creation" })
 
 ### verified-research
 
-Исследование с верифицированными и воспроизводимыми источниками. Решает проблему AI галлюцинаций и фейковых источников.
+Ограниченное исследование внешних источников для одного конкретного вопроса и одного долговечного локального ответа. Workflow создаёт execution-correlated source register и critical readings, сохраняет значимые разногласия, отделяет sourced facts от inference и uncertainty, поддерживает полезный явно limited-результат и требует настоящего independent semantic review перед complete- или limited-выдачей.
 
 ```mermaid
 flowchart LR
-    A[Вопрос] --> B[Методология] --> C[Сбор] --> D[Чтение] --> E[Синтез] --> F[Отчёт]
+    A[Intake] --> B[Evidence package] --> C[Ответ и ограничения] --> D[Deterministic checks] --> E[Independent review] --> F[Complete или limited local report]
 ```
 
 | Особенность | Описание |
 |-------------|----------|
-| Верификация URL | Все источники должны быть доступны |
-| Альтернативные viewpoints | Минимум 2 противоположных мнения |
-| Цитирование | Каждый вывод связан с источником |
-| Limitations | Явная секция gaps и biases |
+| Пропорциональные evidence | Ширина источников определяется вопросом без выдуманного минимального количества |
+| Долговечная traceability | Source register, readings, alternatives, answer, limitations, validation, findings и repair имеют стабильные пути |
+| Честный evidence class | Один независимо проверенный `ready` или `limited` управляет terminal result |
+| Cause-aware convergence | Дефекты answer и evidence инвалидируют разные stale cones, ошибочные критерии приводят к replan |
+| Локальные полномочия | Нет upload, уведомлений, VCS, deploy или production mutation |
+
+**Применение:** Один ограниченный вопрос, которому нужен source-linked ответ с independent review. Для повторяющегося durable improvement используйте Iterative Research, для адаптивных filesystem-or-memory и authority modes — Universal Research, для отдельно разрешённого exhaustive чтения большого корпуса — Deep Corpus Research.
 
 ```bash
 mcp__moira__start({ workflowId: "moira/verified-research" })
