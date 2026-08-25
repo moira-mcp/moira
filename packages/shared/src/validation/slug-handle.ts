@@ -28,6 +28,23 @@ function hasValidSlugCharacters(value: string): boolean {
   return true;
 }
 
+function normalizeIdentifierCharacters(value: string): string {
+  let identifier = "";
+  let separatorPending = false;
+
+  for (const character of value.toLowerCase()) {
+    if (isLowerAlphanumeric(character)) {
+      if (separatorPending && identifier.length > 0) identifier += "-";
+      identifier += character;
+      separatorPending = false;
+    } else {
+      separatorPending = identifier.length > 0;
+    }
+  }
+
+  return identifier;
+}
+
 // ===== Validation Functions =====
 
 /**
@@ -148,8 +165,7 @@ export function normalizeHandle(handle: string): string {
  */
 export function generateHandleFromEmail(email: string): string {
   const prefix = email.split("@")[0] || "";
-  let handle = prefix.toLowerCase().replace(/[^a-z0-9]/g, "-");
-  handle = handle.replace(/-+/g, "-").replace(/^-+|-+$/g, "");
+  let handle = normalizeIdentifierCharacters(prefix);
 
   while (handle.length < HANDLE_MIN_LENGTH) {
     handle += Math.random().toString(36).charAt(2);
@@ -191,17 +207,7 @@ export function generateDefaultSlug(): string {
  * @returns Generated slug
  */
 export function generateSlugFromName(name: string): string {
-  let slug = "";
-  let separatorPending = false;
-  for (const character of name.toLowerCase()) {
-    if (isLowerAlphanumeric(character)) {
-      if (separatorPending && slug.length > 0) slug += "-";
-      slug += character;
-      separatorPending = false;
-    } else {
-      separatorPending = slug.length > 0;
-    }
-  }
+  let slug = normalizeIdentifierCharacters(name);
 
   // Ensure minimum length
   if (slug.length < SLUG_MIN_LENGTH) {

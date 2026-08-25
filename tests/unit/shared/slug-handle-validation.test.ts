@@ -10,6 +10,7 @@ import {
   normalizeSlug,
   normalizeHandle,
   generateDefaultSlug,
+  generateHandleFromEmail,
   generateSlugFromName,
   parseWorkflowReference,
   createWorkflowReference,
@@ -251,6 +252,16 @@ describe("Handle Validation", () => {
     it("does basic normalization only (lowercase and trim)", () => {
       // normalizeHandle only lowercases and trims, does not transform characters
       expect(normalizeHandle("john_doe")).toBe("john_doe");
+    });
+  });
+
+  describe("generateHandleFromEmail", () => {
+    it("normalizes long punctuation runs in bounded time", () => {
+      const startedAt = performance.now();
+      const handle = generateHandleFromEmail(`john${"-".repeat(50_000)}doe@example.com`);
+
+      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(handle).toBe("john-doe");
     });
   });
 });
