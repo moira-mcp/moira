@@ -212,9 +212,7 @@ describe("security automation contract", () => {
     for (const document of [contributing, security]) {
       expect(document).toMatch(/grouped root npm minor and patch updates/);
       expect(document).toMatch(/Scheduled npm version updates exclude majors/);
-      expect(document).toMatch(
-        /do\s+not\s+wait\s+for\s+the\s+weekly\s+version-update\s+schedule/,
-      );
+      expect(document).toMatch(/do\s+not\s+wait\s+for\s+the\s+weekly\s+version-update\s+schedule/);
       expect(document).toContain("`type:chore`");
       expect(document).not.toContain("5 business days");
     }
