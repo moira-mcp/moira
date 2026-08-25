@@ -13,23 +13,16 @@ import { createLogger, InternalError } from "@mcp-moira/shared";
 const router = Router();
 const logger = createLogger({ component: "MonitoringTest" });
 
-function getMonitoringDelay(value: unknown): number {
-  switch (Number(value)) {
-    case 100:
-      return 100;
-    case 500:
-      return 500;
-    case 1000:
-      return 1000;
-    case 3000:
-      return 3000;
-    case 5000:
-      return 5000;
-    case 10000:
-      return 10000;
-    default:
-      return 3000;
+export function normalizeMonitoringDelay(value: unknown): number | null {
+  if (
+    (typeof value !== "number" && typeof value !== "string") ||
+    (typeof value === "string" && value.trim() === "")
+  ) {
+    return null;
   }
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return null;
+  return Math.min(Math.max(numericValue, 100), 10000);
 }
 
 /**
@@ -96,7 +89,10 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { delayMs = 3000 } = req.body;
 
-    const delay = getMonitoringDelay(delayMs);
+    const delay = normalizeMonitoringDelay(delayMs);
+    if (delay === null) {
+      throw createApiError.validationFailed("delayMs must be a finite number");
+    }
 
     logger.info("Monitoring test slow request started", {
       testType: "slow-request",

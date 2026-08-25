@@ -93,7 +93,7 @@ const ManageWorkflowParamsSchema = z.object({
   query: z
     .string()
     .optional()
-    .describe("Search query (required for search-nodes; use | for literal alternatives)"),
+    .describe("Search text or bounded RE2-compatible regex (required for search-nodes)"),
   // Variable management parameters
   variableName: z
     .string()

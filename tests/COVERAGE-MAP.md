@@ -40,6 +40,7 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/web-backend/operational-metrics.test.ts`
+- `tests/unit/web-backend/monitoring-test-delay.test.ts` — monitoring slow-request delay preserves every finite 100-10000 ms value, clamps both boundaries, rejects malformed/non-finite input, and projects the production validation error contract
 - `tests/unit/shared/admin-workflow-list.test.ts` — admin workflow repository listing, ownership metadata, filtering, sorting, and pagination
 
 **e2e**
