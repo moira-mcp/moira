@@ -62,6 +62,32 @@ export interface WorkflowLoadResult {
   parseError?: string;
 }
 
+function exceedsValidationComplexity(input: unknown): boolean {
+  const MAX_VALIDATION_DEPTH = 64;
+  const MAX_VALIDATION_ENTRIES = 100_000;
+  const stack: Array<{ value: unknown; depth: number }> = [{ value: input, depth: 0 }];
+  const seen = new WeakSet<object>();
+  let entries = 0;
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (current.depth > MAX_VALIDATION_DEPTH) return true;
+    if (current.value === null || typeof current.value !== "object") continue;
+    if (seen.has(current.value)) continue;
+    seen.add(current.value);
+
+    const keys = Object.keys(current.value);
+    entries += keys.length;
+    if (entries > MAX_VALIDATION_ENTRIES) return true;
+    const record = current.value as Record<string, unknown>;
+    for (const key of keys) {
+      stack.push({ value: record[key], depth: current.depth + 1 });
+    }
+  }
+
+  return false;
+}
+
 export class GraphValidator {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private ajv: any;
@@ -305,6 +331,19 @@ export class GraphValidator {
     const issues: UnifiedValidationIssue[] = [];
 
     try {
+      if (exceedsValidationComplexity(graph)) {
+        return {
+          valid: false,
+          issues: [
+            {
+              type: "schema",
+              severity: "error",
+              message: "Workflow exceeds validation depth or entry limits",
+            },
+          ],
+        };
+      }
+
       // 1. JSON Schema validation
       const validate = this.ajv.compile(this.schema);
       const valid = validate(graph);

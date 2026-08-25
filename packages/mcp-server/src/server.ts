@@ -22,6 +22,8 @@ import {
   oauthAccessToken,
   apiToken,
   getBaseUrl,
+  getBrowserOriginAllowlist,
+  isBrowserOriginAllowed,
   getContactEmail,
   getLogLevelEnv,
   getMcpPort,
@@ -86,6 +88,26 @@ import { sanitizeMcpError } from "./utils/error-sanitizer.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
+
+function parseBearerToken(authorization: string | undefined): string | undefined {
+  if (!authorization || authorization.length > 4096) return undefined;
+  const separator = authorization.indexOf(" ");
+  if (separator === -1 || authorization.slice(0, separator).toLowerCase() !== "bearer") {
+    return undefined;
+  }
+  const token = authorization.slice(separator + 1).trim();
+  return token && !token.includes(" ") ? token : undefined;
+}
+
+function isOAuthAccessToken(token: string): boolean {
+  if (token.length !== 32) return false;
+  for (const character of token) {
+    const isLetter = character.toLowerCase() !== character.toUpperCase();
+    const isDigit = character >= "0" && character <= "9";
+    if (!isLetter && !isDigit) return false;
+  }
+  return true;
+}
 
 // Set log level from environment variable
 const logLevel = getLogLevelEnv();
@@ -915,9 +937,11 @@ app.use(requestLogger({ logger: httpLogger }));
 app.use(geoipLogger({ logger: httpLogger }));
 
 app.use(express.json({ limit: "10mb" }));
+const mcpOriginAllowlist = getBrowserOriginAllowlist();
 app.use(
   cors({
-    origin: true, // Allow all origins for development
+    origin: (origin, callback) =>
+      callback(null, isBrowserOriginAllowed(origin, mcpOriginAllowlist)),
     credentials: true,
     exposedHeaders: ["Mcp-Session-Id"],
   }),
@@ -948,7 +972,7 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
     });
 
     // Extract Bearer token for auth routing
-    const bearerToken = req.headers.authorization?.replace("Bearer ", "");
+    const bearerToken = parseBearerToken(req.headers.authorization);
 
     // --- Persistent API token authentication (moira_ prefix) ---
     // Persistent tokens skip OAuth and version check entirely
@@ -1177,7 +1201,7 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
     // Better Auth getMcpSession doesn't return custom fields like toolsVersion,
     // so we query the token directly from the database
     let tokenToolsVersion: string | null = null;
-    if (bearerToken) {
+    if (bearerToken && isOAuthAccessToken(bearerToken)) {
       const database = getDatabase();
       const [tokenData] = await database
         .select({ toolsVersion: oauthAccessToken.toolsVersion })

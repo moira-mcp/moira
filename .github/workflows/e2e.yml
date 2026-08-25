@@ -10,6 +10,9 @@ on:
     - cron: "0 3 * * *" # 03:00 UTC daily
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
   DOCKER_IMAGE: mcp-moira-ci
   DOCKER_PORT: 3030

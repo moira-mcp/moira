@@ -156,30 +156,57 @@ function stripFrontmatter(content: string): string {
  * Strip MDX/JSX imports and components
  */
 function stripJsx(content: string): string {
-  // Remove import statements
-  let result = content.replace(/^import\s+.*?;\s*$/gm, "");
+  const withoutImports = content
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("import "))
+    .join("\n");
+  let result = "";
 
-  // Remove self-closing JSX tags like <Component />
-  result = result.replace(/<[A-Z][a-zA-Z]*\s*[^>]*\/>/g, "");
+  for (let index = 0; index < withoutImports.length;) {
+    if (withoutImports[index] !== "<") {
+      result += withoutImports[index++];
+      continue;
+    }
 
-  // Remove JSX component blocks like <Card>...</Card>, <CardGrid>...</CardGrid>
-  // Handle nested components by iterating until no more matches
-  let prevResult = "";
-  while (prevResult !== result) {
-    prevResult = result;
-    result = result.replace(/<([A-Z][a-zA-Z]*)[^>]*>[\s\S]*?<\/\1>/g, (match) => {
-      // Extract text content from inside the component for readability
-      const innerText = match
-        .replace(/<[^>]+>/g, "") // Remove all tags
-        .trim();
-      return innerText ? innerText : "";
-    });
+    const marker =
+      withoutImports[index + 1] === "/" ? withoutImports[index + 2] : withoutImports[index + 1];
+    if (!marker || marker < "A" || marker > "Z") {
+      result += withoutImports[index++];
+      continue;
+    }
+
+    let quote: "'" | '"' | null = null;
+    let end = index + 1;
+    for (; end < withoutImports.length; end++) {
+      const character = withoutImports[end];
+      if (quote) {
+        if (character === quote) quote = null;
+      } else if (character === "'" || character === '"') {
+        quote = character;
+      } else if (character === ">") {
+        break;
+      }
+    }
+    if (end >= withoutImports.length) {
+      result += withoutImports[index++];
+      continue;
+    }
+    index = end + 1;
   }
 
-  // Clean up multiple blank lines
-  result = result.replace(/\n{3,}/g, "\n\n");
-
-  return result.trim();
+  const lines = result.split("\n");
+  const compact: string[] = [];
+  let blankLines = 0;
+  for (const line of lines) {
+    if (line.trim() === "") {
+      blankLines++;
+      if (blankLines > 1) continue;
+    } else {
+      blankLines = 0;
+    }
+    compact.push(line);
+  }
+  return compact.join("\n").trim();
 }
 
 /**
@@ -452,6 +479,7 @@ async function generateHelpContent(topic: string, _workflowsDir?: string): Promi
 
 // Export for testing
 export const _testing = {
+  stripJsx,
   extractFrontmatter,
   filePathToTopicId,
   resolveTopicId,

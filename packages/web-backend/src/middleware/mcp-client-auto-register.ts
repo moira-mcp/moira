@@ -16,16 +16,15 @@
 import type { Request, Response, NextFunction } from "express";
 import { getDatabase, oauthApplication, createLogger } from "@mcp-moira/shared";
 import { eq } from "drizzle-orm";
-import { randomBytes } from "crypto";
+import { randomInt } from "crypto";
 
 const logger = createLogger({ component: "MCPAutoRegister" });
 
 function generateId(length: number): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = randomBytes(length);
   let result = "";
   for (let i = 0; i < length; i++) {
-    result += chars[bytes[i] % chars.length];
+    result += chars[randomInt(chars.length)];
   }
   return result;
 }

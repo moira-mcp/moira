@@ -715,6 +715,32 @@ describe("WorkflowQueryService", () => {
       const analysis = analyzeVariableUsage(workflow);
       expect(analysis.status.usages.some((u) => u.field === "completionCondition")).toBe(true);
     });
+
+    test("should find compared context paths without regex backtracking", () => {
+      const workflow = createWorkflow({
+        variableRegistry: {
+          review: { type: "object" },
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "decision" } },
+          {
+            id: "decision",
+            type: "condition",
+            condition: `${"noise.".repeat(20_000)} review.outcome === "pass"`,
+            connections: { true: "end", false: "end" },
+          },
+          { id: "end", type: "end" },
+        ] as WorkflowNode[],
+      });
+
+      const startedAt = performance.now();
+      const analysis = analyzeVariableUsage(workflow);
+
+      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(analysis.review.usages).toContainEqual(
+        expect.objectContaining({ nodeId: "decision", field: "condition" }),
+      );
+    });
   });
 
   describe("searchWorkflow", () => {
@@ -772,7 +798,7 @@ describe("WorkflowQueryService", () => {
       expect(results[0].snippet!.length).toBeLessThan(100);
     });
 
-    test("should support regex patterns", () => {
+    test("should support bounded literal alternatives", () => {
       const workflow = createWorkflow({
         nodes: [
           { id: "start", type: "start", connections: { default: "analyze" } },
@@ -794,6 +820,23 @@ describe("WorkflowQueryService", () => {
 
       const results = searchWorkflow(workflow, "analyze|validate");
       expect(results).toHaveLength(2);
+    });
+
+    test("should treat regex metacharacters other than alternatives literally", () => {
+      const workflow = createWorkflow({
+        nodes: [
+          { id: "start", type: "start", connections: { default: "literal" } },
+          {
+            id: "literal",
+            type: "agent-directive",
+            directive: "Match a+b exactly",
+            connections: { default: "end" },
+          },
+          { id: "end", type: "end" },
+        ] as WorkflowNode[],
+      });
+
+      expect(searchWorkflow(workflow, "a+b").map((result) => result.nodeId)).toEqual(["literal"]);
     });
   });
 });

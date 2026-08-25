@@ -14,8 +14,19 @@ export const SLUG_MAX_LENGTH = 80;
 export const HANDLE_MIN_LENGTH = 4;
 export const HANDLE_MAX_LENGTH = 40;
 
-// Pattern: alphanumeric and hyphens, must start and end with alphanumeric
-const VALID_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+function isLowerAlphanumeric(character: string): boolean {
+  return (character >= "a" && character <= "z") || (character >= "0" && character <= "9");
+}
+
+function hasValidSlugCharacters(value: string): boolean {
+  if (!value || !isLowerAlphanumeric(value[0]) || !isLowerAlphanumeric(value[value.length - 1])) {
+    return false;
+  }
+  for (const character of value) {
+    if (character !== "-" && !isLowerAlphanumeric(character)) return false;
+  }
+  return true;
+}
 
 // ===== Validation Functions =====
 
@@ -45,7 +56,7 @@ export function validateSlug(slug: string): { valid: boolean; error?: string } {
     };
   }
 
-  if (!VALID_PATTERN.test(normalized)) {
+  if (!hasValidSlugCharacters(normalized)) {
     return {
       valid: false,
       error:
@@ -90,7 +101,7 @@ export function validateHandle(handle: string): { valid: boolean; error?: string
     };
   }
 
-  if (!VALID_PATTERN.test(normalized)) {
+  if (!hasValidSlugCharacters(normalized)) {
     return {
       valid: false,
       error:
@@ -180,14 +191,17 @@ export function generateDefaultSlug(): string {
  * @returns Generated slug
  */
 export function generateSlugFromName(name: string): string {
-  // Convert to lowercase and replace invalid chars with hyphens
-  let slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-
-  // Remove leading/trailing hyphens
-  slug = slug.replace(/^-+|-+$/g, "");
-
-  // Replace consecutive hyphens
-  slug = slug.replace(/-+/g, "-");
+  let slug = "";
+  let separatorPending = false;
+  for (const character of name.toLowerCase()) {
+    if (isLowerAlphanumeric(character)) {
+      if (separatorPending && slug.length > 0) slug += "-";
+      slug += character;
+      separatorPending = false;
+    } else {
+      separatorPending = slug.length > 0;
+    }
+  }
 
   // Ensure minimum length
   if (slug.length < SLUG_MIN_LENGTH) {
@@ -197,8 +211,7 @@ export function generateSlugFromName(name: string): string {
   // Truncate to max length (leaving room for collision suffix)
   if (slug.length > SLUG_MAX_LENGTH - 5) {
     slug = slug.substring(0, SLUG_MAX_LENGTH - 5);
-    // Remove trailing hyphen if any
-    slug = slug.replace(/-+$/, "");
+    while (slug.endsWith("-")) slug = slug.slice(0, -1);
   }
 
   // Final validation - if still invalid, generate random

@@ -153,6 +153,15 @@ describe("ArtifactService", () => {
       expect(result.valid).toBe(false);
       expect(result.error).toContain("valid HTML");
     });
+
+    it("rejects long unterminated tag-like content in bounded time", () => {
+      const content = "<a".repeat(50_000);
+      const startedAt = performance.now();
+      const result = validateHtmlContent(content);
+
+      expect(performance.now() - startedAt).toBeLessThan(100);
+      expect(result.valid).toBe(false);
+    });
   });
 
   describe("validateArtifactName", () => {

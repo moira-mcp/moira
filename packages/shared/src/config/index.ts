@@ -24,6 +24,8 @@ export {
   setHost,
 } from "./urls.js";
 
+export { getBrowserOriginAllowlist, isBrowserOriginAllowed } from "./origins.js";
+
 // MCP Server Version (#196)
 export { setMcpServerVersion, getMcpServerVersion } from "./mcp-version.js";
 

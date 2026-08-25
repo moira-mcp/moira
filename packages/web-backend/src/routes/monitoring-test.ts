@@ -13,6 +13,25 @@ import { createLogger, InternalError } from "@mcp-moira/shared";
 const router = Router();
 const logger = createLogger({ component: "MonitoringTest" });
 
+function getMonitoringDelay(value: unknown): number {
+  switch (Number(value)) {
+    case 100:
+      return 100;
+    case 500:
+      return 500;
+    case 1000:
+      return 1000;
+    case 3000:
+      return 3000;
+    case 5000:
+      return 5000;
+    case 10000:
+      return 10000;
+    default:
+      return 3000;
+  }
+}
+
 /**
  * POST /api/admin/monitoring-test/error - Generate a 500 error with logging
  * Used to test error logging pipeline and error rate alerts
@@ -77,8 +96,7 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { delayMs = 3000 } = req.body;
 
-    // Clamp delay between 100ms and 10s
-    const delay = Math.min(Math.max(Number(delayMs), 100), 10000);
+    const delay = getMonitoringDelay(delayMs);
 
     logger.info("Monitoring test slow request started", {
       testType: "slow-request",

@@ -15,51 +15,20 @@
 
 import cors from "cors";
 import { CorsOptions } from "cors";
-import { getBaseUrl, getExtraTrustedOrigins, getCorsAllowedOrigins } from "@mcp-moira/shared";
-
-/**
- * Localhost dev origins allowed by default so a local self-host install works
- * without any CORS configuration. Covers the web-frontend dev server (4200) and
- * the backend port; both 127.0.0.1 and localhost forms.
- */
-const LOCALHOST_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
-
-/**
- * Build the set of explicitly allowed origins from configuration.
- */
-function buildAllowlist(): Set<string> {
-  const origins = new Set<string>();
-
-  // Own public origin (may throw if MOIRA_HOST unset in non-test runtime; in
-  // that case the app would already have failed earlier, so this is safe here).
-  try {
-    origins.add(getBaseUrl());
-  } catch {
-    // MOIRA_HOST not configured — rely on localhost pattern + explicit lists.
-  }
-
-  for (const o of getExtraTrustedOrigins()) origins.add(o.trim());
-  for (const o of getCorsAllowedOrigins()) origins.add(o);
-
-  return origins;
-}
+import { getBrowserOriginAllowlist, isBrowserOriginAllowed } from "@mcp-moira/shared";
 
 /**
  * Decide whether an Origin is allowed.
  */
 export function isOriginAllowed(origin: string | undefined, allowlist: Set<string>): boolean {
-  // No Origin header: not a cross-origin browser request — allow.
-  if (!origin) return true;
-  if (allowlist.has(origin)) return true;
-  if (LOCALHOST_ORIGIN_PATTERN.test(origin)) return true;
-  return false;
+  return isBrowserOriginAllowed(origin, allowlist);
 }
 
 /**
  * Setup CORS middleware with an explicit origin allowlist.
  */
 export function setupCorsMiddleware() {
-  const allowlist = buildAllowlist();
+  const allowlist = getBrowserOriginAllowlist();
 
   return cors({
     origin: (origin, callback) => {

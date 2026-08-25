@@ -97,7 +97,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: "000000000:INVALIDTOKENFORMAT",
+        botToken: validLookingToken,
         chatId: "12345",
       }),
     });
@@ -116,6 +116,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
   test("returns structured error with invalid chat ID", async () => {
     // Use a valid-looking but non-existent bot token to reach the Telegram API
     // The token format must pass local validation (digits:alphanumeric)
+    const validLookingToken = `${"1".repeat(9)}:${"A".repeat(35)}`;
     const response = await fetch(`${BASE_URL}/api/notifications/test`, {
       method: "POST",
       headers: {
@@ -123,7 +124,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: "9999999999:AAFake_Token_For_Test_Only_Invalid",
+        botToken: validLookingToken,
         chatId: "nonexistent-chat-999",
       }),
     });
@@ -147,7 +148,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: "1234567890:AAHello_Invalid_Token_For_Testing",
+        botToken: validLookingToken,
         chatId: "12345",
       }),
     });
@@ -179,7 +180,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        botToken: "123456789:ABCDEFGH",
+        botToken: validLookingToken,
         chatId: "12345",
       }),
     });

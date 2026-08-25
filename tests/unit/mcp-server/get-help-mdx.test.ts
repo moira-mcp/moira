@@ -5,8 +5,14 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { _testing } from "../../../packages/mcp-server/src/tools/get-help.js";
 
-const { extractFrontmatter, filePathToTopicId, resolveTopicId, getTopicList, resetCache } =
-  _testing;
+const {
+  stripJsx,
+  extractFrontmatter,
+  filePathToTopicId,
+  resolveTopicId,
+  getTopicList,
+  resetCache,
+} = _testing;
 
 describe("MDX Processing", () => {
   describe("stripFrontmatter", () => {
@@ -59,29 +65,6 @@ tags:
   });
 
   describe("stripJsx", () => {
-    const stripJsx = (content: string): string => {
-      // Remove import statements
-      let result = content.replace(/^import\s+.*?;\s*$/gm, "");
-
-      // Remove self-closing JSX tags
-      result = result.replace(/<[A-Z][a-zA-Z]*\s*[^>]*\/>/g, "");
-
-      // Remove JSX component blocks
-      let prevResult = "";
-      while (prevResult !== result) {
-        prevResult = result;
-        result = result.replace(/<([A-Z][a-zA-Z]*)[^>]*>[\s\S]*?<\/\1>/g, (match) => {
-          const innerText = match.replace(/<[^>]+>/g, "").trim();
-          return innerText ? innerText : "";
-        });
-      }
-
-      // Clean up multiple blank lines
-      result = result.replace(/\n{3,}/g, "\n\n");
-
-      return result.trim();
-    };
-
     it("should remove import statements", () => {
       const input = `import { Aside, Card } from '@astrojs/starlight/components';
 

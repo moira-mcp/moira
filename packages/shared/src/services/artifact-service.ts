@@ -104,6 +104,25 @@ const GLOBAL_SETTINGS_KEYS = {
   defaultMaxFiles: "artifacts.default_max_files",
 } as const;
 
+function containsHtmlTag(content: string): boolean {
+  let insideTagCandidate = false;
+
+  for (let index = 0; index < content.length; index++) {
+    if (insideTagCandidate) {
+      if (content[index] === ">") return true;
+      continue;
+    }
+
+    if (content[index] !== "<") continue;
+    const firstTagCharacter = content[index + 1]?.toLowerCase();
+    if (firstTagCharacter && firstTagCharacter >= "a" && firstTagCharacter <= "z") {
+      insideTagCandidate = true;
+      index++;
+    }
+  }
+  return false;
+}
+
 // ===== Validation Functions =====
 
 /**
@@ -126,7 +145,7 @@ export function validateHtmlContent(content: string): { valid: boolean; error?: 
   const hasDoctype = lowerContent.startsWith("<!doctype");
   const hasHtmlTag = lowerContent.includes("<html");
   const hasBodyTag = lowerContent.includes("<body");
-  const hasAnyHtmlTag = /<[a-z][^>]*>/i.test(trimmed);
+  const hasAnyHtmlTag = containsHtmlTag(trimmed);
 
   if (!hasDoctype && !hasHtmlTag && !hasBodyTag && !hasAnyHtmlTag) {
     return { valid: false, error: "Content must be valid HTML" };
