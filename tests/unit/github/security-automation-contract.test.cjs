@@ -69,9 +69,18 @@ describe("security automation contract", () => {
       },
     ]);
     expect(npm.ignore).toEqual([
-      { "dependency-name": "@daveyplate/better-auth-ui", versions: ["3.4.0"] },
-      { "dependency-name": "@hookform/resolvers", versions: ["5.9.1"] },
-      { "dependency-name": "better-auth", versions: ["1.7.1"] },
+      {
+        "dependency-name": "@daveyplate/better-auth-ui",
+        "update-types": ["version-update:semver-minor"],
+      },
+      {
+        "dependency-name": "@hookform/resolvers",
+        "update-types": ["version-update:semver-minor"],
+      },
+      {
+        "dependency-name": "better-auth",
+        "update-types": ["version-update:semver-minor"],
+      },
       { "dependency-name": "@xyflow/react", versions: ["12.11.4"] },
     ]);
     expect(npm.groups).toEqual({
