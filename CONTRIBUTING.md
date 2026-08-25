@@ -212,15 +212,14 @@ identifies the pull request and every verified commit as the official
 `dependabot[bot]` account and the title uses `build(deps): …` or
 `build(deps-dev): …`. Other bots and partial identity matches follow the human
 requirements. Dependabot schedules grouped root npm and GitHub Actions version
-updates weekly. Once Dependabot security updates are enabled, npm security fixes
-are processed from security advisories and grouped separately by production or
-development dependency type; they do not wait for the weekly version-update
-schedule. Automated update PRs use the existing `type:chore` and
+updates weekly. Npm security fixes from advisories use separate production and
+development groups. They do not wait for the weekly version-update schedule.
+Automated update PRs use the existing `type:chore` and
 `component:infrastructure` labels.
 
 ### Automated security checks
 
-After activation, **Security Checks** reviews newly changed dependencies for
+**Security Checks** reviews newly changed dependencies for
 moderate-or-higher vulnerabilities in runtime, development, and unknown scopes.
 It also validates every GitHub Actions workflow with actionlint and rejects any
 external Action that is not pinned to an immutable commit SHA or image digest.
