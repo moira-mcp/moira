@@ -29,11 +29,11 @@ updates:
           - version-update:semver-patch
     ignore:
       - dependency-name: "@daveyplate/better-auth-ui"
-        versions: ["3.4.0"]
+        update-types: ["version-update:semver-minor"]
       - dependency-name: "@hookform/resolvers"
-        versions: ["5.9.1"]
+        update-types: ["version-update:semver-minor"]
       - dependency-name: better-auth
-        versions: ["1.7.1"]
+        update-types: ["version-update:semver-minor"]
       - dependency-name: "@xyflow/react"
         versions: ["12.11.4"]
     groups:
