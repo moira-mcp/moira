@@ -8,6 +8,7 @@ import { getTestFetchUrl, getAdminCredentials } from "../utils/test-config.js";
 
 const BASE_URL = getTestFetchUrl();
 const ADMIN_CREDENTIALS = getAdminCredentials();
+const VALID_LOOKING_TOKEN = `${"1".repeat(9)}:${"A".repeat(35)}`;
 const TEST_USER = {
   email: `notification-api-test-${Date.now()}@example.com`,
   password: "TestPass123!",
@@ -97,7 +98,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: validLookingToken,
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "12345",
       }),
     });
@@ -116,7 +117,6 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
   test("returns structured error with invalid chat ID", async () => {
     // Use a valid-looking but non-existent bot token to reach the Telegram API
     // The token format must pass local validation (digits:alphanumeric)
-    const validLookingToken = `${"1".repeat(9)}:${"A".repeat(35)}`;
     const response = await fetch(`${BASE_URL}/api/notifications/test`, {
       method: "POST",
       headers: {
@@ -124,7 +124,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: validLookingToken,
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "nonexistent-chat-999",
       }),
     });
@@ -148,7 +148,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
         Cookie: authCookie,
       },
       body: JSON.stringify({
-        botToken: validLookingToken,
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "12345",
       }),
     });
@@ -180,7 +180,7 @@ describe("POST /api/notifications/test - Structured Error Responses", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        botToken: validLookingToken,
+        botToken: VALID_LOOKING_TOKEN,
         chatId: "12345",
       }),
     });
