@@ -46,6 +46,7 @@ describe("security automation contract", () => {
       "rebase-strategy",
       "commit-message",
       "allow",
+      "ignore",
       "groups",
     ]);
     expect(npm).toMatchObject({
@@ -66,6 +67,12 @@ describe("security automation contract", () => {
         "dependency-type": "development",
         "update-types": ["version-update:semver-minor", "version-update:semver-patch"],
       },
+    ]);
+    expect(npm.ignore).toEqual([
+      { "dependency-name": "@daveyplate/better-auth-ui", versions: ["3.4.0"] },
+      { "dependency-name": "@hookform/resolvers", versions: ["5.9.1"] },
+      { "dependency-name": "better-auth", versions: ["1.7.1"] },
+      { "dependency-name": "@xyflow/react", versions: ["12.11.4"] },
     ]);
     expect(npm.groups).toEqual({
       "production-dependencies": {

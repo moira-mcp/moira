@@ -77,6 +77,12 @@ the exact installed versions of native/tooling packages. A version change must a
 the new exact entry only after reviewing the package script; stale entries are
 removed in the same dependency refresh.
 
+Dependabot ignores only the exact currently unusable releases named in
+`.github/dependabot.yml`: Better Auth 1.7.1, Auth UI 3.4.0, Resolvers 5.9.1, and
+Xyflow 12.11.4. Successor versions remain eligible, as do security updates that
+resolve to another version. Remove an ignore entry in the same change that proves
+its replacement passes the corresponding removal trigger above.
+
 ### Docker Build Configuration
 
 **Build IDs for cache isolation:**
