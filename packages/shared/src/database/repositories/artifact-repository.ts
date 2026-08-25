@@ -15,7 +15,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { artifact, artifactToken } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 
 const ARTIFACT_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt" | "name" | "size"> = {
@@ -467,8 +467,8 @@ export class ArtifactRepository {
     } = options;
 
     const now = new Date();
-    const id = uuidv4();
-    const uuid = uuidv4();
+    const id = randomUUID();
+    const uuid = randomUUID();
     const size = Buffer.byteLength(content, "utf8");
     const expiresAt = new Date(now.getTime() + ttlMs);
 
@@ -752,7 +752,7 @@ export class ArtifactRepository {
    * Create an upload token
    */
   async createToken(userId: string, ttlMs: number = DEFAULT_TOKEN_TTL_MS): Promise<string> {
-    const token = uuidv4();
+    const token = randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlMs);
 

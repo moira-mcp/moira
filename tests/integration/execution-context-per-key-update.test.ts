@@ -15,7 +15,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { ExecutionRepository, AuditRepository, ExecutionService } from "@mcp-moira/shared";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
 import path from "path";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 
 import * as schema from "../../packages/shared/src/database/schema.js";
 
@@ -66,7 +66,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
     auditRepo = new AuditRepository(db);
     service = new ExecutionService(executionRepo, auditRepo);
 
-    workflowId = `wf-${uuidv4()}`;
+    workflowId = `wf-${randomUUID()}`;
   });
 
   afterEach(() => {
@@ -74,7 +74,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
   });
 
   it("updates only the provided variable key and preserves all other variables", async () => {
-    const executionId = uuidv4();
+    const executionId = randomUUID();
     await executionRepo.save(
       buildExecution(executionId, workflowId, {
         alpha: "a-original",
@@ -97,7 +97,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
   });
 
   it("does not clobber a variable that changed on the server when the caller omits it (stale-view safety)", async () => {
-    const executionId = uuidv4();
+    const executionId = randomUUID();
     await executionRepo.save(
       buildExecution(executionId, workflowId, {
         editable: "old",
@@ -122,7 +122,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
   });
 
   it("can add a brand-new variable key without touching existing ones", async () => {
-    const executionId = uuidv4();
+    const executionId = randomUUID();
     await executionRepo.save(buildExecution(executionId, workflowId, { existing: "keep" }));
 
     await service.updateContext(executionId, TEST_USER_ID, {
@@ -135,7 +135,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
   });
 
   it("records the changed variable keys in the audit entry", async () => {
-    const executionId = uuidv4();
+    const executionId = randomUUID();
     await executionRepo.save(
       buildExecution(executionId, workflowId, { tracked: "before", other: "untouched" }),
     );
@@ -157,7 +157,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
   });
 
   it("returns false for a non-existent execution and writes no audit entry", async () => {
-    const ok = await service.updateContext(uuidv4(), TEST_USER_ID, {
+    const ok = await service.updateContext(randomUUID(), TEST_USER_ID, {
       variables: { x: 1 },
     });
     expect(ok).toBe(false);
@@ -169,10 +169,10 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
   it("tolerates a row with a malformed context column when listing (no crash)", async () => {
     // A single corrupt context row must not crash listing of all executions
     // (e.g. analytics endpoints that map over every execution).
-    const goodId = uuidv4();
+    const goodId = randomUUID();
     await executionRepo.save(buildExecution(goodId, workflowId, { ok: true }));
 
-    const badId = uuidv4();
+    const badId = randomUUID();
     sqlite
       .prepare(
         `INSERT INTO workflowExecution
@@ -194,7 +194,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
 
   describe("per-path update (updateContextPath)", () => {
     it("sets a nested value without overwriting siblings or other variables", async () => {
-      const executionId = uuidv4();
+      const executionId = randomUUID();
       await executionRepo.save(
         buildExecution(executionId, workflowId, {
           review: { blocking: 0, remarks: 2 },
@@ -216,7 +216,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
     });
 
     it("updates a value inside an array by index", async () => {
-      const executionId = uuidv4();
+      const executionId = randomUUID();
       await executionRepo.save(buildExecution(executionId, workflowId, { items: ["a", "b", "c"] }));
 
       const ok = await service.updateContextPath(executionId, TEST_USER_ID, ["items", 1], "B");
@@ -227,7 +227,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
     });
 
     it("creates missing intermediate containers along the path", async () => {
-      const executionId = uuidv4();
+      const executionId = randomUUID();
       await executionRepo.save(buildExecution(executionId, workflowId, {}));
 
       const ok = await service.updateContextPath(
@@ -243,7 +243,7 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
     });
 
     it("records an audit entry with the dotted path and old/new value", async () => {
-      const executionId = uuidv4();
+      const executionId = randomUUID();
       await executionRepo.save(
         buildExecution(executionId, workflowId, { review: { blocking: 0 } }),
       );
@@ -258,12 +258,12 @@ describe("ExecutionService.updateContext (per-key merge)", () => {
     });
 
     it("returns false for a non-existent execution", async () => {
-      const ok = await service.updateContextPath(uuidv4(), TEST_USER_ID, ["x"], 1);
+      const ok = await service.updateContextPath(randomUUID(), TEST_USER_ID, ["x"], 1);
       expect(ok).toBe(false);
     });
 
     it("rejects prototype-pollution path segments and leaves Object.prototype untouched", async () => {
-      const executionId = uuidv4();
+      const executionId = randomUUID();
       await executionRepo.save(buildExecution(executionId, workflowId, { safe: 1 }));
 
       for (const bad of ["__proto__", "constructor", "prototype"]) {

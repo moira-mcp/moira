@@ -6,7 +6,7 @@
  * Prefix: first 12 chars (moira_ + 6 hex) for visual identification
  */
 
-import { randomBytes, createHash } from "crypto";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
 
 export const TOKEN_PREFIX = "moira_";
 export const TOKEN_HEX_LENGTH = 40;
@@ -81,7 +81,7 @@ export function validateTokenRecord(record: {
  * Generate a new token ID (UUID v4-like).
  */
 export function generateTokenId(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 /**

@@ -15,7 +15,7 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { note, noteVersion } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { executeListQuery, clampPagination, type ListQueryConfig } from "../list-query-builder.js";
 
 const NOTE_LIST_CONFIG: ListQueryConfig<"updatedAt" | "createdAt" | "key"> = {
@@ -462,7 +462,7 @@ export class NoteRepository {
 
       // Insert new version
       await this.db.insert(noteVersion).values({
-        id: uuidv4(),
+        id: randomUUID(),
         noteId: existingNote.id,
         version: newVersion,
         value,
@@ -494,7 +494,7 @@ export class NoteRepository {
       return { id: existingNote.id, version: newVersion };
     } else {
       // Create new note
-      const noteId = uuidv4();
+      const noteId = randomUUID();
       const version = 1;
 
       // Insert note
@@ -511,7 +511,7 @@ export class NoteRepository {
 
       // Insert first version
       await this.db.insert(noteVersion).values({
-        id: uuidv4(),
+        id: randomUUID(),
         noteId,
         version,
         value,

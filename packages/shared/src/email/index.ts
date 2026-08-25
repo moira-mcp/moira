@@ -9,7 +9,7 @@ import { TestEmailProvider } from "./test-provider.js";
 import { SmtpProvider } from "./smtp-provider.js";
 import { getDatabase } from "../database/connection.js";
 import { emailLog } from "../database/schema.js";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { createLogger } from "../logging/logger.js";
 import {
   getEmailDeliveryStatus,
@@ -165,7 +165,7 @@ export async function sendEmail(
     ? new TestEmailProvider()
     : getEmailProvider();
   const db = getDatabase();
-  const logId = uuidv4();
+  const logId = randomUUID();
   const now = new Date().toISOString();
 
   try {
