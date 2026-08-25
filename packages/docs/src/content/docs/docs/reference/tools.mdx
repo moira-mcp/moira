@@ -20,6 +20,7 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 - `session` - Get user, executions, or step info
 - `settings` - Manage user settings
 - `notes` - Persistent note storage with versioning
+- `lock` - Inspect, create, or unlock execution locks
 
 ### Content & Artifacts
 
@@ -37,21 +38,27 @@ Moira exposes workflow execution capabilities through MCP tools. This reference 
 
 ## list
 
-Lists all available workflow templates with validation status.
+Lists workflows accessible to the current user with filtering, sorting, and pagination.
 
-**Parameters:** None
+**Parameters:**
+
+- `search` (string, optional) - Search workflow names and descriptions
+- `visibility` (`"public" | "private" | "all"`, optional) - Visibility filter
+- `sort` (`"createdAt" | "name"`, optional, default: `"createdAt"`) - Sort field
+- `sortOrder` (`"asc" | "desc"`, optional, default: `"desc"`) - Sort order
+- `limit` (number, optional, default: 20) - Results per page (1–100)
+- `offset` (number, optional, default: 0) - Pagination offset
 
 **Returns:**
 
-- Array of workflow objects with metadata
-- Validation status for each workflow
-- File paths and last modified timestamps
+- `workflows` - Workflow summaries with ID, slug, owner handle, name, version, description, visibility, and creation time
+- `total` - Total number matching the filters
 
 **Example:**
 
 ```json
-list()
-→ [{ id: "example", name: "Example Workflow", valid: true, ... }]
+list({ search: "review", visibility: "public", limit: 20, offset: 0 })
+→ { workflows: [{ id: "moira/review", slug: "review", ownerHandle: "moira", ... }], total: 1 }
 ```
 
 ---
@@ -76,17 +83,17 @@ Starts new workflow execution.
 **Example:**
 
 ```json
-start({ workflowId: "example", note: "Feature implementation task" })
+start({ workflowId: "example", note: "Feature implementation task", parentExecutionId: "none" })
 → { processId: "abc-123", directive: "...", ... }
 ```
 
 **Parent Execution Linking:**
 
 ```json
-start({ workflowId: "sub-workflow", parentExecutionId: "parent-abc-123" })
+start({ workflowId: "sub-workflow", parentExecutionId: "123e4567-e89b-42d3-a456-426614174000" })
 ```
 
-When child workflow completes, system returns continuation info for the parent execution.
+Replace the example UUID with the `processId` of an existing parent execution. When the child workflow completes, the system returns continuation info for that parent.
 
 ---
 
@@ -97,7 +104,8 @@ Advances workflow execution with agent input.
 **Parameters:**
 
 - `processId` (string, required) - Process ID from start
-- `input` (any) - Agent response matching inputSchema
+- `input` (any, optional) - Agent response matching inputSchema
+- `teleportTo` (string, optional) - Teleport node ID. Do not provide `input` when teleporting
 
 **Returns:**
 
@@ -113,6 +121,12 @@ step({
   input: { result: "completed", confidence: 9 }
 })
 → { directive: "Next task...", ... }
+```
+
+To jump through a workflow-defined teleport entry:
+
+```json
+step({ processId: "abc-123", teleportTo: "teleport-replan" })
 ```
 
 **Magic Variable - execution_note:**
@@ -196,7 +210,7 @@ Do not mechanically merge JSON. Run WMF, compare all three candidates semantical
 
 ## manage
 
-Unified tool for workflow CRUD operations.
+Unified tool for workflow definition, inspection, node, variable, and sharing operations.
 
 ### Action: create
 
@@ -206,6 +220,11 @@ Creates new workflow from JSON definition with validation.
 
 - `action`: `"create"` (required)
 - `workflow` (object, required) - Workflow definition
+  - `id` (string, optional) - Workflow ID; generated when omitted
+  - `metadata` (object, required) - Name, semantic version, and description
+  - `nodes` (object[], required) - Workflow nodes
+  - `variableRegistry` (object, optional) - Declared global variables
+  - `visibility` (`"public" | "private"`, optional, default: `"private"`)
   - `systemReminder` (string, optional) - Per-workflow system reminder that overrides global setting
 - `overwrite` (boolean, optional) - Allow overwriting existing workflow
 
@@ -239,9 +258,11 @@ Edits existing workflow with partial updates.
 - `workflowId` (string, required) - ID of workflow to edit
 - `changes` (object, required) - Changes to apply
   - `metadata` - Update name, version, description
+  - `variableRegistry` - Replace the declared global variable registry
   - `addNodes` - Array of nodes to add
   - `removeNodes` - Array of node IDs to remove
   - `updateNodes` - Array of objects with nodeId and changes properties
+  - `removeConnections` - Array of node ID and connection-key pairs to remove
   - `systemReminder` - Per-workflow system reminder (set to empty string to clear)
 
 **Returns:**
@@ -261,7 +282,7 @@ manage({
     addNodes: [{ type: "end", id: "new-end", ... }]
   }
 })
-→ { success: true, changesSummary: {...}, validation: {...} }
+→ { success: true, workflowId: "...", changes: { metadataUpdated: true, nodesAdded: 1, ... }, validation: { valid: true } }
 ```
 
 ### Action: get
@@ -304,21 +325,19 @@ Gets workflow structure (metadata + node graph) without full node content. Usefu
 
 - `action`: `"get-structure"` (required)
 - `workflowId` (string, required) - ID of workflow to analyze
-- `graph` (boolean, optional) - Include ASCII flow visualization
-- `detailed` (boolean, optional) - Include directive previews for each node
 
 **Returns:**
 
 - Workflow metadata
 - Node graph with connections
-- ASCII visualization (if graph=true)
-- Node previews (if detailed=true)
+- Node counts by type
+- Visibility and workflow system reminder
 
 **Example:**
 
 ```json
-manage({ action: "get-structure", workflowId: "my-workflow", graph: true, detailed: true })
-→ { metadata: {...}, graph: "start → step-1 → step-2 → end", nodesPreview: [...] }
+manage({ action: "get-structure", workflowId: "my-workflow" })
+→ { metadata: {...}, stats: {...}, graph: [{ nodeId: "start", type: "start", connections: {...} }], visibility: "private" }
 ```
 
 ### Action: get-node
@@ -341,7 +360,7 @@ Gets specific node by ID with full content.
 
 ```json
 manage({ action: "get-node", workflowId: "my-workflow", nodeId: "step-1" })
-→ { id: "step-1", type: "agent-directive", directive: "...", ... }
+→ { success: true, workflowId: "my-workflow", node: { id: "step-1", type: "agent-directive", directive: "...", ... } }
 ```
 
 ### Action: search-nodes
@@ -353,44 +372,46 @@ Searches nodes by text in directive, completionCondition, or ID. Queries contain
 - `action`: `"search-nodes"` (required)
 - `workflowId` (string, required) - Workflow ID
 - `query` (string, required) - Search text or a bounded RE2-compatible regular expression
-- `includeVariables` (boolean, optional) - Search in workflow variables
-- `snippetMode` (boolean, optional) - Return matched text with context only
-- `limit` (number, optional) - Max results
-- `offset` (number, optional) - Pagination offset
 
 **Returns:**
 
 - Array of matching nodes
 - Match context (where text was found)
-- Variable matches (if includeVariables=true)
 
 **Example:**
 
 ```json
-manage({ action: "search-nodes", workflowId: "my-workflow", query: "validation", includeVariables: true, snippetMode: true })
-→ { results: [{ nodeId: "validate-step", matches: ["directive"], snippet: "...run validation..." }] }
+manage({ action: "search-nodes", workflowId: "my-workflow", query: "validation" })
+→ { resultCount: 1, results: [{ nodeId: "validate-step", matchedIn: ["directive"], snippet: "...run validation...", node: {...} }] }
 ```
 
 ### Action: validate
 
-Validates workflow structure and returns errors/warnings.
+Validates a supplied workflow definition and returns errors/warnings without saving it.
 
 **Parameters:**
 
 - `action`: `"validate"` (required)
-- `workflowId` (string, required) - Workflow ID
+- `workflow` (object, required) - Complete workflow definition
 
 **Returns:**
 
 - Validation status (valid/invalid)
+- Error and warning counts
 - Errors array (blocking issues)
 - Warnings array (non-blocking issues)
 
 **Example:**
 
 ```json
-manage({ action: "validate", workflowId: "my-workflow" })
-→ { valid: true, errors: [], warnings: ["Node 'old-step' is unreachable"] }
+manage({
+  action: "validate",
+  workflow: {
+    metadata: { name: "Example", version: "1.0.0", description: "Example workflow" },
+    nodes: [{ id: "start", type: "start", connections: { default: "end" } }, { id: "end", type: "end" }]
+  }
+})
+→ { valid: true, errorCount: 0, warningCount: 0, errors: [], warnings: [] }
 ```
 
 ### Action: list-variables
@@ -455,7 +476,7 @@ Sets or creates a declared global variable in the workflow `variableRegistry`.
 
 ```json
 manage({ action: "set-variable", workflowId: "my-workflow", variableName: "test_directive", variableValue: "Run npm test -- --coverage" })
-→ { variableName: "test_directive", oldValue: "Run npm test", newValue: "Run npm test -- --coverage" }
+→ { variableName: "test_directive", oldValue: { type: "string", description: "Test command", value: "Run npm test" }, newValue: "Run npm test -- --coverage" }
 ```
 
 ### Action: delete-variable
@@ -477,7 +498,7 @@ Deletes a declared global variable from the workflow `variableRegistry`.
 
 ```json
 manage({ action: "delete-variable", workflowId: "my-workflow", variableName: "unused_var" })
-→ { variableName: "unused_var", deletedValue: "old value" }
+→ { variableName: "unused_var", deletedValue: { type: "string", description: "Unused value", value: "old value" } }
 ```
 
 ### Action: diff
@@ -501,7 +522,7 @@ Compares two workflows and shows differences in metadata and nodes.
 
 ```json
 manage({ action: "diff", workflowId: "workflow-v1", compareWorkflowId: "workflow-v2" })
-→ { metadataDiff: { version: { old: "1.0.0", new: "2.0.0" } }, addedNodes: ["new-step"], removedNodes: [], modifiedNodes: [...] }
+→ { identical: false, summary: { metadataChanges: 1, nodesAdded: 1, nodesRemoved: 0, nodesModified: 0, systemReminderChanged: false }, details: { metadata: { version: { old: "1.0.0", new: "2.0.0" } }, addedNodes: ["new-step"] } }
 ```
 
 ### Action: copy
@@ -523,96 +544,177 @@ Creates a copy of existing workflow with new ID.
 
 ```json
 manage({ action: "copy", workflowId: "template-workflow", newName: "My Copy" })
-→ { newWorkflowId: "template-workflow-copy-123", success: true }
+→ { success: true, workflowId: "...", slug: "my-copy", sourceWorkflowId: "template-workflow", visibility: "private" }
 ```
 
-### Action: list-nodes
+### Action: clone-node
 
-Gets compact list of workflow nodes without full content.
+Clones a node within a workflow and inserts the clone after its source.
 
 **Parameters:**
 
-- `action`: `"list-nodes"` (required)
+- `action`: `"clone-node"` (required)
 - `workflowId` (string, required) - Workflow ID
-- `typeFilter` (string, optional) - Filter by node type
-- `includePreview` (boolean, optional) - Include directive preview
-- `previewLength` (number, optional) - Preview character limit
+- `nodeId` (string, required) - Source node ID
+- `newId` (string, optional) - ID for the clone; generated when omitted
 
 **Returns:**
 
-- Node count
-- Array of compact nodes (id, type, connections)
+- Source and cloned node IDs
+- The complete cloned node
 
 **Example:**
 
 ```json
-manage({ action: "list-nodes", workflowId: "my-workflow", typeFilter: "agent-directive" })
-→ { nodeCount: 5, nodes: [{ id: "step-1", type: "agent-directive", connections: ["step-2"] }] }
+manage({ action: "clone-node", workflowId: "my-workflow", nodeId: "step-1", newId: "step-1-copy" })
+→ { sourceNodeId: "step-1", clonedNodeId: "step-1-copy", clonedNode: {...} }
 ```
 
-### Action: get-nodes
+### Action: move-node
 
-Gets multiple nodes by ID array in single request.
+Moves a node to another numeric position in the workflow's node array. Moving does not change authored connections.
 
 **Parameters:**
 
-- `action`: `"get-nodes"` (required)
+- `action`: `"move-node"` (required)
 - `workflowId` (string, required) - Workflow ID
-- `nodeIds` (string[], required) - Array of node IDs
+- `nodeId` (string, required) - Node ID to move
+- `targetIndex` (number, required) - Zero-based target position; values above the last position are clamped
 
 **Returns:**
 
-- Found nodes
-- Not found node IDs
+- Previous and resulting positions
+- Success message
 
 **Example:**
 
 ```json
-manage({ action: "get-nodes", workflowId: "my-workflow", nodeIds: ["step-1", "step-2"] })
-→ { foundCount: 2, nodes: [...], notFound: [] }
+manage({ action: "move-node", workflowId: "my-workflow", nodeId: "step-2", targetIndex: 1 })
+→ { nodeId: "step-2", fromIndex: 3, toIndex: 1 }
 ```
 
-### Action: analyze-variables
+### Action: create-invite
 
-Analyzes variable sources and usages across workflow.
+Creates an owner-authorized invite link for a workflow.
 
 **Parameters:**
 
-- `action`: `"analyze-variables"` (required)
+- `action`: `"create-invite"` (required)
 - `workflowId` (string, required) - Workflow ID
+- `ttlMs` (number, optional) - Invite lifetime in milliseconds (default: 7 days)
 
 **Returns:**
 
-- Variable count
-- Analysis with sources and usages per variable
+- Invite ID, token, expiration, and remaining lifetime
+- Shareable invite URL
 
 **Example:**
 
 ```json
-manage({ action: "analyze-variables", workflowId: "my-workflow" })
-→ { variableCount: 3, analysis: { "task_name": { sources: [...], usages: [...] } } }
+manage({ action: "create-invite", workflowId: "my-workflow", ttlMs: 86400000 })
+→ { workflowId: "...", invite: { id: "invite-1", token: "...", expiresAt: "...", remainingMs: 86399950 }, inviteUrl: "https://.../invites/..." }
 ```
 
-### Action: set-visibility
+### Action: list-access
 
-Changes workflow visibility (public/private).
+Lists users with shared access to an owned workflow.
 
 **Parameters:**
 
-- `action`: `"set-visibility"` (required)
+- `action`: `"list-access"` (required)
 - `workflowId` (string, required) - Workflow ID
-- `visibility` (string, required) - "public" or "private"
+- `limit` (number, optional) - Maximum records to return
+- `offset` (number, optional) - Pagination offset
 
 **Returns:**
 
-- Previous and new visibility
+- Total and returned counts plus `hasMore`
+- Users with identity and grant metadata
 
 **Example:**
 
 ```json
-manage({ action: "set-visibility", workflowId: "my-workflow", visibility: "public" })
-→ { previousVisibility: "private", newVisibility: "public" }
+manage({ action: "list-access", workflowId: "my-workflow", limit: 20, offset: 0 })
+→ { totalCount: 1, returnedCount: 1, hasMore: false, users: [{ userId: "user-1", handle: "alex", ... }] }
 ```
+
+### Action: list-invites
+
+Lists invite links created for an owned workflow.
+
+**Parameters:**
+
+- `action`: `"list-invites"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `activeOnly` (boolean, optional, default: true) - Return only unused active invites
+- `limit` (number, optional) - Maximum records to return
+- `offset` (number, optional) - Pagination offset
+
+**Returns:**
+
+- Active filter, total and returned counts, and `hasMore`
+- Invites with token, creation/expiration, remaining lifetime, and use metadata
+
+**Example:**
+
+```json
+manage({ action: "list-invites", workflowId: "my-workflow", activeOnly: true })
+→ { activeOnly: true, totalCount: 1, returnedCount: 1, hasMore: false, invites: [{ id: "invite-1", ... }] }
+```
+
+### Action: revoke-access
+
+Revokes one user's shared access to an owned workflow.
+
+**Parameters:**
+
+- `action`: `"revoke-access"` (required)
+- `workflowId` (string, required) - Workflow ID
+- `targetUserId` (string, required) - User whose access is revoked
+
+**Returns:**
+
+- Workflow and target user IDs
+- Success message
+
+**Example:**
+
+```json
+manage({ action: "revoke-access", workflowId: "my-workflow", targetUserId: "user-1" })
+→ { workflowId: "...", targetUserId: "user-1", message: "Access revoked for user 'user-1'" }
+```
+
+### Action: revoke-invite
+
+Revokes an invite owned by the current user.
+
+**Parameters:**
+
+- `action`: `"revoke-invite"` (required)
+- `inviteId` (string, required) - Invite ID
+
+**Returns:**
+
+- Revoked invite ID
+- Success message
+
+**Example:**
+
+```json
+manage({ action: "revoke-invite", inviteId: "invite-1" })
+→ { inviteId: "invite-1", message: "Invite 'invite-1' revoked" }
+```
+
+### Failure behavior
+
+`manage` returns an error without applying the requested mutation when required input is missing, a workflow or node cannot be resolved for the current user, or the resulting workflow fails validation. In particular:
+
+- `create` requires a complete valid definition and rejects an existing ID unless `overwrite` is true; `edit` requires non-empty changes and rejects missing/duplicate nodes or an invalid result;
+- stored-workflow reads, variable actions, `diff`, `copy`, `clone-node`, `move-node`, and workflow-scoped sharing actions require an accessible `workflowId`; their action-specific node, variable, comparison, or target IDs are also required;
+- `clone-node` rejects a missing source or duplicate clone ID; `move-node` rejects a missing node, absent or negative `targetIndex`, and any reordered graph that no longer validates;
+- invite/access creation and listing require workflow-owner authority; revoke actions reject a missing target and an invite/access record the current owner cannot revoke.
+
+Errors are returned through the MCP tool response and do not turn a failed action into success.
 
 ---
 
@@ -647,17 +749,24 @@ List active workflow executions for current user.
 **Parameters:**
 
 - `action`: `"executions"` (required)
+- `status` (string[], optional, default: `["running"]`) - Filter by `running`, `waiting`, `completed`, `failed`, or `locked`; legacy statuses are normalized
+- `workflowId` (string, optional) - Filter by workflow ID
+- `search` (string, optional) - Search execution notes
+- `sort` (`"createdAt" | "updatedAt"`, optional, default: `"updatedAt"`) - Sort field
+- `sortOrder` (`"asc" | "desc"`, optional, default: `"desc"`) - Sort order
+- `limit` (number, optional, default: 20) - Results per page (1–100)
+- `offset` (number, optional, default: 0) - Pagination offset
 
 **Returns:**
 
-- Array of active execution objects
-- Status, workflow ID, start time for each
+- `executions` - Execution objects with status, workflow identity, node, note, parent, timestamps, and error count
+- `total` - Total number matching the filters
 
 **Example:**
 
 ```json
-session({ action: "executions" })
-→ [{ executionId: "abc-123", workflowId: "example", status: "waiting", note: "Feature task", ... }]
+session({ action: "executions", status: ["running", "locked"], limit: 20 })
+→ { executions: [{ executionId: "abc-123", workflowId: "example", status: "locked", note: "Feature task", ... }], total: 1 }
 ```
 
 ### Action: execution_context
@@ -738,6 +847,96 @@ Updates execution note for easier identification in execution lists.
 ```json
 session({ action: "update-note", executionId: "abc-123", note: "Step 5: Integration tests" })
 → { success: true, executionId: "abc-123", note: "Step 5: Integration tests" }
+```
+
+---
+
+## lock
+
+Inspects, creates, or unlocks an execution lock. Every action requires an execution owned by the current user.
+
+### Action: status
+
+Returns the active lock, if any.
+
+**Parameters:**
+
+- `action`: `"status"` (required)
+- `executionId` (string, required) - Execution ID
+
+**Returns:**
+
+- `locked` - Whether an active lock exists
+- `lock` - Lock ID, execution/node IDs, reason, status, and timestamps when locked
+
+**Example:**
+
+```json
+lock({ action: "status", executionId: "abc-123" })
+→ { locked: true, lock: { lockId: "lock-1", executionId: "abc-123", reason: "Approval", ... } }
+```
+
+### Action: list
+
+Returns the execution's lock history.
+
+**Parameters:**
+
+- `action`: `"list"` (required)
+- `executionId` (string, required) - Execution ID
+
+**Returns:**
+
+- `locks` - Active and unlocked lock records
+- `total` - Number of records
+
+**Example:**
+
+```json
+lock({ action: "list", executionId: "abc-123" })
+→ { locks: [{ lockId: "lock-1", status: "active", ... }], total: 1 }
+```
+
+### Action: lock
+
+Locks a running execution that does not already have an active lock.
+
+**Parameters:**
+
+- `action`: `"lock"` (required)
+- `executionId` (string, required) - Running execution ID
+- `reason` (string, required) - Reason for the lock
+
+**Returns:**
+
+- New lock ID and `locked: true`
+
+**Example:**
+
+```json
+lock({ action: "lock", executionId: "abc-123", reason: "Awaiting approval" })
+→ { lockId: "lock-1", locked: true }
+```
+
+### Action: unlock
+
+Unlocks the active lock after validating its PIN.
+
+**Parameters:**
+
+- `action`: `"unlock"` (required)
+- `executionId` (string, required) - Execution ID
+- `pin` (string, required) - Lock PIN
+
+**Returns:**
+
+- Lock ID and `unlocked: true`
+
+**Example:**
+
+```json
+lock({ action: "unlock", executionId: "abc-123", pin: "123456" })
+→ { unlocked: true, lockId: "lock-1" }
 ```
 
 ---
@@ -886,8 +1085,10 @@ Create or update a note.
 
 - `action`: `"save"` (required)
 - `key` (string, required) - Note key (1-100 chars, alphanumeric/underscore/hyphen)
-- `value` (string, required) - Note content (max 100 KB)
+- `value` (string, required) - Note content (default max 100 KB)
 - `tags` (string[], optional) - Tags (max 10, each 1-50 chars)
+
+Administrators can change the per-note size, total user storage, and retained-version limits through global settings.
 
 **Returns:**
 
@@ -1005,7 +1206,7 @@ artifacts({
 })
 → {
     uuid: "abc-123",
-    url: "https://{STATIC_DOMAIN}/abc-123.html",
+    url: "https://abc-123.{STATIC_ARTIFACTS_DOMAIN}/",
     name: "analysis-report.html",
     size: 48,
     expiresAt: "2024-02-15T10:00:00Z"
@@ -1072,7 +1273,7 @@ List user's artifacts with pagination.
 
 **Returns:**
 
-- `artifacts` - Array of artifact objects with uuid, url, name, size, mimeType, expiresAt, createdAt, updatedAt
+- `artifacts` - Array of artifact objects with uuid, url, name, size, mimeType, executionId, expiresAt, createdAt, updatedAt
 - `total` - Total count
 
 **Example:**
@@ -1082,10 +1283,11 @@ artifacts({ action: "list", limit: 10 })
 → {
     artifacts: [{
       uuid: "abc-123",
-      url: "https://{STATIC_DOMAIN}/abc-123.html",
+      url: "https://abc-123.{STATIC_ARTIFACTS_DOMAIN}/",
       name: "report.html",
       size: 1024,
       mimeType: "text/html",
+      executionId: null,
       expiresAt: "2024-02-15T10:00:00Z",
       createdAt: "2024-01-15T10:00:00Z",
       updatedAt: "2024-01-15T10:00:00Z"
@@ -1153,10 +1355,14 @@ artifacts({ action: "token", ttlMinutes: 30 })
 
 ### Quotas
 
+Defaults:
+
 - Max file size: 5 MB per artifact
 - Max total storage: 100 MB per user
 - Max artifact count: 50 per user
-- Default TTL: 30 days
+- TTL: 30 days
+
+Administrators can change active quotas globally or per user.
 
 ---
 
