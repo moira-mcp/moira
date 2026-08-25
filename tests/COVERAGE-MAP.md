@@ -819,7 +819,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/infinite-task-loop.test.ts` — public identity/version and detailed neighboring-flow description; exact current-task state; atomic cross-task reset; strict decision and feedback schemas; authority and persistence boundaries; plan revision, result rework, and complete executable node and branch coverage
 - `tests/workflow/scenarios/iterative-research.test.ts` — public identity/version and detailed neighboring-flow description; execution workspace and engine-owned identity gate; bounded review and repair schemas; invalid identity and publication-coupling rejection; local, published, notified, failed, limited, aborted, repair, materialize-error, and process-revision outcomes
 - `tests/workflow/scenarios/lock-node.test.ts`
-- `tests/workflow/scenarios/marketing-campaign.test.ts`
+- `tests/workflow/scenarios/marketing-campaign.test.ts` — v2 evidence-aware local campaign contract; immutable source authority; strict active-request schemas; complete/limited, pre/post-workspace blocked, materialize-error, interactive rework and guarded process revision outcomes; deterministic versus semantic gates and six source-specific strategy/evidence/package repair cones
 - `tests/workflow/scenarios/notes-demo-metrics-collector.test.ts`
 - `tests/workflow/scenarios/notes-demo-metrics-reporter.test.ts`
 - `tests/workflow/scenarios/prd-creation.test.ts` — public identity, planning and review contracts, repair routes, terminal outcomes, and executable node and branch coverage

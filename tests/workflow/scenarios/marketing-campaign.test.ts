@@ -1,441 +1,297 @@
-/**
- * marketing-campaign Scenario Tests
- *
- * Linear marketing campaign creation workflow.
- * Path: product → audience → competitive → positioning → proof → brand → create → review → end
- *
- * Coverage target: 100% nodes (10), 100% branches
- */
-
+/** Behavioral contracts for moira/marketing-campaign v2.0.2. */
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import {
   runScenario,
-  type TestScenario,
+  type MockInput,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("marketing-campaign", "public")!.graph as WorkflowGraph;
+const entry = findSystemCatalogEntry("marketing-campaign", "public")!;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const sentinel = "No active revision request.";
+const changed = { repair_outcome: "changed", changed_knowledge: "The reproduced class changed." };
+const completion = {
+  completion_outcome: "ready",
+  result_status: "complete",
+  campaign_summary: "A channel-ready campaign package supports the stated objective.",
+  limitation_summary: "Evidence and applicability limits remain explicit.",
+  revision_request: sentinel,
+};
+
+function terminal(status: "complete" | "limited" | "blocked" | "aborted"): MockInput {
+  return ({ executionId }) => ({
+    artifact_path: `./moira-ws/marketing-campaign-${executionId}/final-report.md`,
+    terminal_status: status,
+  });
 }
 
-describe("marketing-campaign Scenarios", () => {
-  let workflow: WorkflowGraph;
+function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockInput> {
+  return {
+    intake: {
+      intake_outcome: "ready",
+      operating_mode: "autonomous",
+      campaign_goal: "Launch the authorized offer to the stated audience.",
+      campaign_use: "Generate qualified demo requests.",
+      campaign_scope: ["Landing page", "Email"],
+    },
+    "initialize-contract": { contract_outcome: "ready" },
+    "frame-strategy": { strategy_outcome: "ready", revision_request: sentinel },
+    "build-evidence": { evidence_status: "ready", revision_request: sentinel },
+    "create-package": { package_outcome: "ready", revision_request: sentinel },
+    "complete-package": completion,
+    "validate-package": { validation_outcome: "pass" },
+    "semantic-review": { review_outcome: "pass" },
+    "repair-package-validation": changed,
+    "repair-package-semantic": changed,
+    "repair-evidence-validation": changed,
+    "repair-evidence-semantic": changed,
+    "repair-strategy-validation": changed,
+    "repair-strategy-semantic": changed,
+    "reassess-contract": {
+      reassessment_outcome: "corrected",
+      changed_knowledge: "The cumulative supplement preserves prior accepted corrections.",
+      reentry_owner: "completion",
+    },
+    "corrected-contract-review": { contract_review_outcome: "pass", revision_request: sentinel },
+    "interactive-acceptance": { user_decision: "accept" },
+    "finalize-complete": terminal("complete"),
+    "finalize-limited": terminal("limited"),
+    "finalize-blocked": terminal("blocked"),
+    "finalize-aborted": terminal("aborted"),
+    "finalize-workspace-blocked": {
+      terminal_reason: "Workspace unavailable.",
+      terminal_status: "blocked",
+    },
+    "finalize-intake-blocked": { terminal_status: "blocked" },
+    "revise-process": { revision_request: "The campaign criterion cannot distinguish states." },
+    ...overrides,
+  };
+}
 
-  beforeAll(() => {
-    workflow = loadProductionWorkflow();
+function configureMaterialize(engine: GraphExecutionEngine, error = false): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
+  if (error) {
+    handlers.set("materialize", {
+      getNodeType: () => "materialize",
+      execute: async (current: { id: string }) => ({
+        nodeId: current.id,
+        action: "continue",
+        outputPath: "error",
+        data: {},
+      }),
+    });
+    return;
+  }
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
+async function run(scenario: TestScenario, materializeError = false): Promise<ScenarioResult> {
+  return runScenario(workflow(), scenario, {
+    engineSetup: (engine) => configureMaterialize(engine, materializeError),
+  });
+}
+
+describe("marketing-campaign", () => {
+  test("publishes the evidence-aware local-only v2 contract", async () => {
+    const graph = workflow();
+    expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+    expect(entry.owner).toBe("system-moira");
+    expect(entry.visibility).toBe("public");
+    expect(graph.metadata.version).toBe("2.0.2");
+    expect(graph.metadata.description).toContain("channel-ready marketing campaign package");
+    expect(graph.metadata.description).toContain("does not publish, notify, spend budget");
+    expect(graph.nodes.some((node) => node.type === "telegram-notification")).toBe(false);
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "marketing-campaign"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
-
-    it("should have no cycles (linear workflow)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles).toHaveLength(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(10);
-    });
+  test("separates mechanical validation, semantic judgment, and source-specific repair", () => {
+    const byId = (id: string): any => workflow().nodes.find((node) => node.id === id);
+    expect(byId("validate-package").directive).toContain("deterministic");
+    expect(byId("semantic-review").directive).toContain("genuinely independent");
+    expect(byId("repair-package-validation").directive).toContain("package-validation.md");
+    expect(byId("repair-package-semantic").directive).toContain("semantic-review.md");
+    expect(byId("corrected-contract-review").directive).toContain(
+      "complete current cumulative supplement",
+    );
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        // Scenario 1: Complete marketing campaign
-        {
-          name: "Complete marketing campaign workflow",
-          description: "Full marketing campaign creation",
-          expect: { status: "completed" },
-          mockInputs: {
-            product: {
-              product_description: "CloudSync Pro - SaaS cloud sync solution",
-              problem_solved: "Data loss, slow sync, high costs",
-              usps: ["Real-time sync", "Offline mode", "Team collaboration"],
-              competitive_advantage: "$29/month - affordable enterprise features",
-            },
-            audience: {
-              personas: [
-                {
-                  name: "Small Business Owner",
-                  pain_points: ["Data loss anxiety", "Slow sync speeds"],
-                  decision_criteria: ["Price", "Ease of use"],
-                },
-                {
-                  name: "Remote Team Lead",
-                  pain_points: ["Collaboration difficulties", "Unreliable sync"],
-                  decision_criteria: ["Reliability", "Customer support"],
-                },
-              ],
-              primary_persona: "Small business owners aged 25-45",
-            },
-            competitive: {
-              competitors: [
-                {
-                  name: "Dropbox",
-                  positioning: "Simple file sharing for everyone",
-                  weaknesses: ["Slow sync", "Expensive for teams"],
-                },
-                {
-                  name: "Google Drive",
-                  positioning: "Integrated with Google Workspace",
-                  weaknesses: ["Requires Google account", "Limited offline"],
-                },
-                {
-                  name: "OneDrive",
-                  positioning: "Microsoft ecosystem integration",
-                  weaknesses: ["Complex interface", "Unreliable sync"],
-                },
-              ],
-              market_gaps: ["Speed", "Offline reliability", "Affordable pricing"],
-            },
-            positioning: {
-              positioning_statement: "The fastest cloud sync for busy professionals",
-              key_messages: [
-                "Never wait for sync again",
-                "Work anywhere, anytime",
-                "Save 50% on cloud storage costs",
-              ],
-              value_proposition: "3x faster sync at half the price",
-              differentiator: "Fastest offline-first architecture",
-            },
-            proof: {
-              claims: [
-                {
-                  claim: "99.9% uptime",
-                  proof_type: "data",
-                  proof_content: "Based on 12-month SLA reports and monitoring data",
-                },
-                {
-                  claim: "3x faster",
-                  proof_type: "data",
-                  proof_content: "Independent benchmark by TechReview comparing sync speeds",
-                },
-                {
-                  claim: "Acme reduced sync time 80%",
-                  proof_type: "case_study",
-                  proof_content:
-                    "Acme Corp case study showing 80% reduction in sync time after migration",
-                },
-              ],
-            },
-            brand: {
-              tone: "Professional yet friendly",
-              style: "Confident, helpful, action-oriented",
-              banned_phrases: ["Best in class", "Revolutionary", "Synergy"],
-              examples: ["Use action verbs", "Focus on time savings"],
-            },
-            create: {
-              materials: [
-                {
-                  type: "headline",
-                  content: "Never Wait for Sync Again - CloudSync Pro",
-                  proof_used: ["3x faster"],
-                },
-                {
-                  type: "body",
-                  content:
-                    "Experience lightning-fast cloud sync with offline-first architecture. Save 50% compared to competitors while getting 3x the speed.",
-                  proof_used: ["3x faster", "Acme reduced sync time 80%"],
-                },
-                { type: "cta", content: "Start Your Free Trial Today", proof_used: [] },
-              ],
-            },
-            review: {
-              checklist: [
-                { item: "Brand voice consistent", passed: true, notes: "Matches brand guidelines" },
-                {
-                  item: "Claims substantiated",
-                  passed: true,
-                  notes: "All claims backed by proof points",
-                },
-                { item: "CTAs clear", passed: true, notes: "Clear call to action" },
-                {
-                  item: "Target audience addressed",
-                  passed: true,
-                  notes: "Resonates with small business owners",
-                },
-                {
-                  item: "Differentiation clear",
-                  passed: true,
-                  notes: "Speed advantage highlighted",
-                },
-              ],
-              approved: true,
-              improvements_needed: ["Tighten headline"],
-            },
-          },
+  test.each([
+    ["strategy replan without active cause", "frame-strategy", { strategy_outcome: "replan" }, {}],
+    ["evidence success without reset", "build-evidence", { evidence_status: "ready" }, {}],
+    ["semantic repair without owner", "semantic-review", { review_outcome: "repair" }, {}],
+    [
+      "interactive rework without active request",
+      "interactive-acceptance",
+      { user_decision: "rework", rework_owner: "evidence" },
+      {
+        intake: {
+          intake_outcome: "ready",
+          operating_mode: "interactive",
+          campaign_goal: "Goal",
+          campaign_use: "Use",
+          campaign_scope: ["Email"],
         },
-
-        // Scenario 2: Simple campaign
-        {
-          name: "Simple marketing campaign",
-          description: "Minimal campaign for product launch",
-          expect: { status: "completed" },
-          mockInputs: {
-            product: {
-              product_description: "Feature X - Add-on capability",
-              problem_solved: "Missing functionality requested by users",
-              usps: ["First to market", "Seamless integration"],
-            },
-            audience: {
-              personas: [
-                {
-                  name: "Existing Customer",
-                  pain_points: ["Missing functionality", "Feature requests unfulfilled"],
-                  decision_criteria: ["Feature availability", "Integration with existing workflow"],
-                },
-              ],
-              primary_persona: "Existing customers",
-            },
-            competitive: {
-              competitors: [
-                {
-                  name: "Legacy solution",
-                  positioning: "Basic functionality",
-                  weaknesses: ["No new features", "Outdated interface"],
-                },
-              ],
-              market_gaps: ["First to market with this specific feature"],
-            },
-            positioning: {
-              positioning_statement: "New capability for existing users",
-              key_messages: [
-                "Now available for all users",
-                "Seamlessly integrated",
-                "No additional cost",
-              ],
-              value_proposition: "Extend your capabilities",
-              differentiator: "Only solution with this feature",
-            },
-            proof: {
-              claims: [
-                {
-                  claim: "Beta user approved",
-                  proof_type: "testimonial",
-                  proof_content: "Positive feedback from 50 beta users",
-                },
-                {
-                  claim: "Seamless integration",
-                  proof_type: "data",
-                  proof_content: "Zero integration issues reported in 30-day beta",
-                },
-                {
-                  claim: "Immediate productivity boost",
-                  proof_type: "case_study",
-                  proof_content: "Beta users reported 25% time savings on average",
-                },
-              ],
-            },
-            brand: {
-              tone: "Consistent with main product",
-              style: "Informative",
-              banned_phrases: [],
-            },
-            create: {
-              materials: [
-                {
-                  type: "headline",
-                  content: "New Feature X Now Available",
-                  proof_used: ["Beta user approved"],
-                },
-                {
-                  type: "body",
-                  content:
-                    "Seamlessly integrated into your existing workflow with zero learning curve. Start using Feature X today at no additional cost.",
-                  proof_used: ["Seamless integration", "Immediate productivity boost"],
-                },
-                { type: "cta", content: "Activate Feature X Now", proof_used: [] },
-              ],
-            },
-            review: {
-              checklist: [
-                { item: "Brand consistent", passed: true },
-                { item: "Message clear", passed: true },
-                { item: "Claims backed by proof", passed: true },
-                { item: "CTA actionable", passed: true },
-                { item: "Audience targeted", passed: true },
-              ],
-              approved: true,
-            },
-          },
-        },
-
-        // Scenario 3: Enterprise B2B campaign
-        {
-          name: "Enterprise B2B marketing campaign",
-          description: "Comprehensive B2B enterprise campaign",
-          expect: { status: "completed" },
-          mockInputs: {
-            product: {
-              product_description: "Enterprise Security Suite - Complete cybersecurity platform",
-              problem_solved: "Complex security management, compliance burden, fragmented tools",
-              usps: [
-                "Zero-trust architecture",
-                "AI threat detection",
-                "Compliance automation",
-                "24/7 SOC",
-              ],
-              competitive_advantage: "Only platform with integrated compliance automation",
-            },
-            audience: {
-              personas: [
-                {
-                  name: "CISO",
-                  pain_points: ["Complex security management", "Compliance burden"],
-                  decision_criteria: ["Risk reduction", "Compliance automation"],
-                },
-                {
-                  name: "IT Director",
-                  pain_points: ["Fragmented tooling", "Integration overhead"],
-                  decision_criteria: ["Integration capabilities", "Reliability"],
-                },
-                {
-                  name: "Compliance Officer",
-                  pain_points: ["Audit preparation time", "Manual reporting"],
-                  decision_criteria: ["Audit readiness", "Total cost of ownership"],
-                },
-              ],
-              primary_persona:
-                "CISOs at 1000+ employee companies in Finance, Healthcare, Government",
-            },
-            competitive: {
-              competitors: [
-                {
-                  name: "CrowdStrike",
-                  positioning: "Cloud-native endpoint protection",
-                  weaknesses: ["High price point", "Complex deployment"],
-                },
-                {
-                  name: "Palo Alto",
-                  positioning: "Enterprise network security",
-                  weaknesses: ["Fragmented product line", "Steep learning curve"],
-                },
-                {
-                  name: "Microsoft",
-                  positioning: "Bundled with enterprise licenses",
-                  weaknesses: ["Not best-of-breed", "Limited customization"],
-                },
-              ],
-              market_gaps: ["Integrated compliance", "Faster deployment", "Better ROI"],
-            },
-            positioning: {
-              positioning_statement: "Complete security that proves compliance automatically",
-              key_messages: [
-                "Reduce risk, prove compliance",
-                "Unified platform, API-first",
-                "Lower TCO, faster ROI",
-              ],
-              value_proposition: "Reduce compliance audit prep by 90%",
-              differentiator: "Only platform with automated compliance proof",
-            },
-            proof: {
-              claims: [
-                {
-                  claim: "50% reduction in incidents",
-                  proof_type: "case_study",
-                  proof_content: "Bank of X case study showing 50% reduction in security incidents",
-                },
-                {
-                  claim: "Audit prep: 2 weeks vs 2 months",
-                  proof_type: "case_study",
-                  proof_content: "Hospital Y reduced audit preparation from 2 months to 2 weeks",
-                },
-                {
-                  claim: "Gartner Leader",
-                  proof_type: "data",
-                  proof_content: "Named a Leader in Gartner Magic Quadrant 2024",
-                },
-              ],
-            },
-            brand: {
-              tone: "Authoritative, trustworthy, expert",
-              style: "Professional, reassuring, technical",
-              banned_phrases: [
-                "Fear-based messaging",
-                "Unsubstantiated claims",
-                "Jargon without explanation",
-              ],
-              examples: ["Lead with outcomes", "Use specific numbers"],
-            },
-            create: {
-              materials: [
-                {
-                  type: "headline",
-                  content: "Complete Security That Proves Compliance Automatically",
-                  proof_used: ["Gartner Leader"],
-                },
-                {
-                  type: "body",
-                  content:
-                    "Reduce compliance audit prep by 90% with our automated compliance proof platform. Trusted by leading enterprises with 50% reduction in security incidents.",
-                  proof_used: ["50% reduction in incidents", "Audit prep: 2 weeks vs 2 months"],
-                },
-                { type: "cta", content: "Request Enterprise Demo", proof_used: [] },
-              ],
-            },
-            review: {
-              checklist: [
-                { item: "Legal review passed", passed: true, notes: "Reviewed by legal team" },
-                {
-                  item: "Compliance review passed",
-                  passed: true,
-                  notes: "GDPR and SOC2 compliant",
-                },
-                {
-                  item: "Brand voice consistent",
-                  passed: true,
-                  notes: "Authoritative and trustworthy",
-                },
-                {
-                  item: "Claims substantiated",
-                  passed: true,
-                  notes: "All claims backed by case studies",
-                },
-                {
-                  item: "Target audience addressed",
-                  passed: true,
-                  notes: "CISO and IT Directors addressed",
-                },
-              ],
-              approved: true,
-              improvements_needed: ["Clarify SLA guarantees", "Add more proof points"],
-            },
-          },
-        },
-      ];
-
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+      },
+    ],
+  ])("rejects contradictory response: %s", async (_name, target, invalid, setup) => {
+    const result = await run({
+      name: String(_name),
+      mockInputs: inputs({ ...(setup as Record<string, MockInput>), [String(target)]: invalid }),
+      expect: { status: "failed" },
     });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain(`Input validation failed for node '${String(target)}'`);
+  });
+
+  test("rejects the neutral sentinel as a teleport cause", async () => {
+    const result = await run({
+      name: "teleport sentinel",
+      mockInputs: inputs({ "revise-process": { revision_request: sentinel } }),
+      teleportAfter: { afterNode: "frame-strategy", teleportTo: "revise-process" },
+      expect: { status: "failed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'revise-process'");
+  });
+
+  test("executes principal outcomes and repair cones", async () => {
+    const cases: Array<{ scenario: TestScenario; materializeError?: boolean }> = [
+      {
+        scenario: {
+          name: "complete",
+          mockInputs: inputs(),
+          expect: { status: "completed", reaches: ["end"] },
+        },
+      },
+      {
+        scenario: {
+          name: "limited",
+          mockInputs: inputs({
+            "build-evidence": { evidence_status: "limited", revision_request: sentinel },
+            "complete-package": { ...completion, result_status: "limited" },
+          }),
+          expect: { status: "completed", reaches: ["end-limited"] },
+        },
+      },
+      {
+        scenario: {
+          name: "pre-workspace blocked",
+          mockInputs: inputs({
+            intake: {
+              intake_outcome: "blocked",
+              operating_mode: "autonomous",
+              terminal_reason: "Authority missing.",
+            },
+          }),
+          expect: {
+            status: "completed",
+            reaches: ["end-intake-blocked"],
+            avoids: ["materialize-workspace", "finalize-blocked"],
+          },
+        },
+      },
+      {
+        materializeError: true,
+        scenario: {
+          name: "workspace blocked",
+          mockInputs: inputs(),
+          expect: { status: "completed", reaches: ["end-workspace-blocked"] },
+        },
+      },
+      {
+        scenario: {
+          name: "interactive evidence rework",
+          mockInputs: inputs({
+            intake: {
+              intake_outcome: "ready",
+              operating_mode: "interactive",
+              campaign_goal: "Goal",
+              campaign_use: "Use",
+              campaign_scope: ["Email"],
+            },
+            "interactive-acceptance": [
+              {
+                user_decision: "rework",
+                rework_owner: "evidence",
+                revision_request: "Separate customer assertions.",
+              },
+              { user_decision: "accept" },
+            ],
+          }),
+          expect: {
+            status: "completed",
+            reaches: ["route-rework-evidence", "build-evidence", "end"],
+          },
+        },
+      },
+      {
+        scenario: {
+          name: "process revision",
+          mockInputs: inputs({
+            "reassess-contract": {
+              reassessment_outcome: "corrected",
+              changed_knowledge: "The cumulative method changed.",
+              reentry_owner: "strategy",
+            },
+          }),
+          teleportAfter: { afterNode: "frame-strategy", teleportTo: "revise-process" },
+          expect: {
+            status: "completed",
+            reaches: ["revise-process", "corrected-contract-review", "end"],
+          },
+        },
+      },
+    ];
+
+    for (const owner of ["package", "evidence", "strategy"] as const) {
+      for (const source of ["validation", "semantic"] as const) {
+        const repair = `repair-${owner}-${source}`;
+        cases.push({
+          scenario: {
+            name: `${repair} changed`,
+            mockInputs: inputs(
+              source === "validation"
+                ? {
+                    "validate-package": [
+                      { validation_outcome: "repair", repair_owner: owner },
+                      { validation_outcome: "pass" },
+                    ],
+                  }
+                : {
+                    "validate-package": [
+                      { validation_outcome: "pass" },
+                      { validation_outcome: "pass" },
+                    ],
+                    "semantic-review": [
+                      { review_outcome: "repair", repair_owner: owner },
+                      { review_outcome: "pass" },
+                    ],
+                  },
+            ),
+            expect: { status: "completed", reaches: [repair, "complete-package", "end"] },
+          },
+        });
+      }
+    }
+
+    for (const current of cases) {
+      const result = await run(current.scenario, current.materializeError);
+      if (!result.passed) throw new Error(`${current.scenario.name}: ${JSON.stringify(result)}`);
+    }
   });
 });

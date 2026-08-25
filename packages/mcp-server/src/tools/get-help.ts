@@ -457,7 +457,7 @@ function getTopicList(): string {
   result += `| "validate startup idea", "assess startup hypothesis", "should we build this startup" | \`moira/startup-idea-validation\` |\n`;
   result += `| "design UI", "wireframe", "mockup" | \`moira/ux-design\` |\n`;
   result += `| "analyze data", "data analysis" | \`moira/data-analysis\` |\n`;
-  result += `| "marketing campaign", "promotional content" | \`moira/marketing-campaign\` |\n\n`;
+  result += `| evidence-aware campaign strategy plus channel materials, proof mapping, independent review, and truthful local delivery | \`moira/marketing-campaign\` |\n\n`;
   result += `Start: \`mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })\``;
 
   return result;
