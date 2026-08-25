@@ -2643,9 +2643,11 @@ Authentication: Required (admin role)
 
 Simulate slow API response for latency testing.
 
-Query parameters:
+Request body:
 
-- `delay`: Response delay in ms (100-10000, default 3000)
+- `delayMs`: Finite response delay in milliseconds. Values are clamped to
+  100-10000; omitted defaults to 3000. Malformed or non-finite values return a
+  validation error.
 
 Response:
 
@@ -2653,8 +2655,8 @@ Response:
 {
   success: boolean;
   data: {
-    requestedDelay: number;
-    actualDelay: number;
+    delayMs: number;
+    message: string;
   }
   timestamp: string;
 }

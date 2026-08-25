@@ -9,6 +9,7 @@
  */
 
 import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
+import { RE2JS } from "re2js";
 import type { UnifiedValidationIssue, UnifiedValidationResult } from "../types/validation-types.js";
 
 // ============================================================================
@@ -123,18 +124,41 @@ export function getNode(workflow: WorkflowGraph, nodeId: string): GraphNode | nu
   return workflow.nodes.find((n) => n.id === nodeId) || null;
 }
 
-function getSearchTerms(query: string): string[] {
-  const terms = query
-    .split("|")
-    .map((term) => term.trim().toLowerCase())
-    .filter(Boolean);
-  return terms.length > 0 ? terms : [query.toLowerCase()];
+interface SearchMatcher {
+  test(text: string | undefined): boolean;
+  indexIn(text: string): number;
 }
 
-function matchesSearchTerms(text: string | undefined, terms: string[]): boolean {
-  if (!text) return false;
-  const normalized = text.toLowerCase();
-  return terms.some((term) => normalized.includes(term));
+function hasRegexSyntax(query: string): boolean {
+  const metacharacters = "|*+?[](){}^$\\";
+  for (const character of query) {
+    if (metacharacters.includes(character)) return true;
+  }
+  return false;
+}
+
+function createSearchMatcher(query: string): SearchMatcher {
+  if (hasRegexSyntax(query)) {
+    try {
+      const pattern = RE2JS.compile(query, RE2JS.CASE_INSENSITIVE);
+      return {
+        test: (text) => !!text && pattern.test(text),
+        indexIn: (text) => {
+          const match = pattern.exec(text) as (RegExpExecArray & { index: number }) | null;
+          return match?.index ?? -1;
+        },
+      };
+    } catch {
+      // Preserve the baseline contract: malformed or unsupported regex syntax
+      // falls back to case-insensitive literal search.
+    }
+  }
+
+  const normalizedQuery = query.toLowerCase();
+  return {
+    test: (text) => !!text && text.toLowerCase().includes(normalizedQuery),
+    indexIn: (text) => text.toLowerCase().indexOf(normalizedQuery),
+  };
 }
 
 function isIdentifierStart(character: string | undefined): boolean {
@@ -184,31 +208,30 @@ function extractComparedContextPaths(condition: string): string[] {
 
 /**
  * Search nodes by text query
- * Supports bounded literal alternatives separated by `|`.
+ * Supports bounded RE2-compatible regular expressions when regex syntax is present.
  */
 export function searchNodes(workflow: WorkflowGraph, query: string): NodeSearchResult[] {
   const results: NodeSearchResult[] = [];
 
-  const searchTerms = getSearchTerms(query);
-  const matchText = (text: string | undefined): boolean => matchesSearchTerms(text, searchTerms);
+  const matcher = createSearchMatcher(query);
 
   for (const node of workflow.nodes) {
     const matchedIn: ("directive" | "completionCondition" | "message" | "id")[] = [];
     let snippet: string | undefined;
 
     // Check ID
-    if (matchText(node.id)) {
+    if (matcher.test(node.id)) {
       matchedIn.push("id");
     }
 
     // Check directive
-    if ("directive" in node && matchText(node.directive as string)) {
+    if ("directive" in node && matcher.test(node.directive as string)) {
       matchedIn.push("directive");
       snippet = extractSnippet(node.directive as string, query);
     }
 
     // Check completionCondition
-    if ("completionCondition" in node && matchText(node.completionCondition as string)) {
+    if ("completionCondition" in node && matcher.test(node.completionCondition as string)) {
       matchedIn.push("completionCondition");
       if (!snippet) {
         snippet = extractSnippet(node.completionCondition as string, query);
@@ -216,7 +239,7 @@ export function searchNodes(workflow: WorkflowGraph, query: string): NodeSearchR
     }
 
     // Check message (for notification nodes)
-    if ("message" in node && matchText(node.message as string)) {
+    if ("message" in node && matcher.test(node.message as string)) {
       matchedIn.push("message");
       if (!snippet) {
         snippet = extractSnippet(node.message as string, query);
@@ -233,10 +256,10 @@ export function searchNodes(workflow: WorkflowGraph, query: string): NodeSearchR
 
 function extractSnippet(text: string, query: string): string {
   const lines = text.split("\n");
-  const searchTerms = getSearchTerms(query);
+  const matcher = createSearchMatcher(query);
 
   // Find the first line containing the query
-  const matchingLine = lines.find((line) => matchesSearchTerms(line, searchTerms));
+  const matchingLine = lines.find((line) => matcher.test(line));
   if (matchingLine) {
     const trimmed = matchingLine.trim();
     return trimmed.length > 100 ? trimmed.substring(0, 100) + "..." : trimmed;
@@ -878,7 +901,7 @@ export interface SearchOptions {
 
 /**
  * Search workflow nodes and optionally variables
- * Supports bounded literal alternatives separated by `|`.
+ * Supports bounded RE2-compatible regular expressions when regex syntax is present.
  */
 export function searchWorkflow(
   workflow: WorkflowGraph,
@@ -888,18 +911,15 @@ export function searchWorkflow(
   const { snippetMode = false, includeVariables = false } = options;
   const results: SearchResult[] = [];
 
-  const searchTerms = getSearchTerms(query);
-  const matchText = (text: string | undefined): boolean => matchesSearchTerms(text, searchTerms);
+  const matcher = createSearchMatcher(query);
 
   const extractSnippet = (text: string, maxLength = 100): string => {
-    const normalizedText = text.toLowerCase();
-    const matchedTerm = searchTerms.find((term) => normalizedText.includes(term));
-    const index = matchedTerm ? normalizedText.indexOf(matchedTerm) : -1;
+    const index = matcher.indexIn(text);
     if (index === -1) {
       return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
     }
     const start = Math.max(0, index - 25);
-    const end = Math.min(text.length, index + (matchedTerm?.length ?? 0) + 25);
+    const end = Math.min(text.length, index + Math.max(query.length, 1) + 25);
     let snippet = text.substring(start, end);
     if (start > 0) snippet = "..." + snippet;
     if (end < text.length) snippet = snippet + "...";
@@ -912,12 +932,12 @@ export function searchWorkflow(
     let snippet: string | undefined;
 
     // Check ID
-    if (matchText(node.id)) {
+    if (matcher.test(node.id)) {
       matchedIn.push("id");
     }
 
     // Check directive
-    if ("directive" in node && matchText(node.directive as string)) {
+    if ("directive" in node && matcher.test(node.directive as string)) {
       matchedIn.push("directive");
       if (!snippet) {
         snippet = extractSnippet(node.directive as string);
@@ -925,7 +945,7 @@ export function searchWorkflow(
     }
 
     // Check completionCondition
-    if ("completionCondition" in node && matchText(node.completionCondition as string)) {
+    if ("completionCondition" in node && matcher.test(node.completionCondition as string)) {
       matchedIn.push("completionCondition");
       if (!snippet) {
         snippet = extractSnippet(node.completionCondition as string);
@@ -933,7 +953,7 @@ export function searchWorkflow(
     }
 
     // Check message
-    if ("message" in node && matchText(node.message as string)) {
+    if ("message" in node && matcher.test(node.message as string)) {
       matchedIn.push("message");
       if (!snippet) {
         snippet = extractSnippet(node.message as string);
@@ -962,20 +982,20 @@ export function searchWorkflow(
       let snippet: string | undefined;
 
       // Check variable name
-      if (matchText(varName)) {
+      if (matcher.test(varName)) {
         matchedIn.push("name");
       }
 
       // Check variable value
       const valueStr =
         typeof varInfo.value === "string" ? varInfo.value : JSON.stringify(varInfo.value);
-      if (matchText(valueStr)) {
+      if (matcher.test(valueStr)) {
         matchedIn.push("value");
         snippet = extractSnippet(valueStr);
       }
 
       // Check description
-      if (matchText(varInfo.description)) {
+      if (matcher.test(varInfo.description)) {
         matchedIn.push("description");
         if (!snippet) {
           snippet = extractSnippet(varInfo.description);

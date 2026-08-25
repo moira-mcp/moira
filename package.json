@@ -159,9 +159,6 @@
     "@esbuild-kit/core-utils": {
       "esbuild": "^0.25.12"
     },
-    "@esbuild-kit/esm-loader": {
-      "esbuild": "^0.25.12"
-    },
     "@types/express-serve-static-core": "5.0.7",
     "@triplit/client": "npm:empty-npm-package@1.0.0",
     "@triplit/react": "npm:empty-npm-package@1.0.0",

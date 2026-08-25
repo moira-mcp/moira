@@ -346,13 +346,13 @@ manage({ action: "get-node", workflowId: "my-workflow", nodeId: "step-1" })
 
 ### Action: search-nodes
 
-Searches nodes by text in directive, completionCondition, or ID. Use `|` to provide bounded literal alternatives; other regex metacharacters are matched literally.
+Searches nodes by text in directive, completionCondition, or ID. Queries containing regex metacharacters use bounded RE2-compatible syntax; malformed or unsupported patterns fall back to case-insensitive literal search.
 
 **Parameters:**
 
 - `action`: `"search-nodes"` (required)
 - `workflowId` (string, required) - Workflow ID
-- `query` (string, required) - Search text; separate bounded literal alternatives with `|`
+- `query` (string, required) - Search text or a bounded RE2-compatible regular expression
 - `includeVariables` (boolean, optional) - Search in workflow variables
 - `snippetMode` (boolean, optional) - Return matched text with context only
 - `limit` (number, optional) - Max results

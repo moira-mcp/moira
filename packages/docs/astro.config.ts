@@ -65,73 +65,161 @@ export default defineConfig({
       sidebar: [
         {
           label: "Getting Started",
+          translations: { ru: "Начало работы" },
           items: [
             {
               label: "Introduction",
+              translations: { ru: "Введение" },
               slug: "docs/getting-started/introduction",
             },
-            { label: "Quick Start", slug: "docs/getting-started/quickstart" },
-            { label: "Self-Hosting", slug: "docs/getting-started/self-hosting" },
+            {
+              label: "Quick Start",
+              translations: { ru: "Быстрый старт" },
+              slug: "docs/getting-started/quickstart",
+            },
+            {
+              label: "Self-Hosting",
+              translations: { ru: "Самостоятельный хостинг" },
+              slug: "docs/getting-started/self-hosting",
+            },
           ],
         },
         {
           label: "Concepts",
+          translations: { ru: "Концепции" },
           items: [
-            { label: "Workflows", slug: "docs/concepts/workflows" },
-            { label: "Nodes", slug: "docs/concepts/nodes" },
-            { label: "Templates", slug: "docs/concepts/templates" },
-            { label: "Notes", slug: "docs/concepts/notes" },
-            { label: "Artifacts", slug: "docs/concepts/artifacts" },
+            {
+              label: "Workflows",
+              translations: { ru: "Воркфлоу" },
+              slug: "docs/concepts/workflows",
+            },
+            {
+              label: "Nodes",
+              translations: { ru: "Ноды" },
+              slug: "docs/concepts/nodes",
+            },
+            {
+              label: "Templates",
+              translations: { ru: "Шаблоны" },
+              slug: "docs/concepts/templates",
+            },
+            {
+              label: "Notes",
+              translations: { ru: "Заметки" },
+              slug: "docs/concepts/notes",
+            },
+            {
+              label: "Artifacts",
+              translations: { ru: "Артефакты" },
+              slug: "docs/concepts/artifacts",
+            },
           ],
         },
         {
           label: "Patterns",
+          translations: { ru: "Паттерны" },
           items: [
-            { label: "Overview", slug: "docs/patterns" },
-            { label: "Minimal Graph", slug: "docs/patterns/minimal-graph" },
+            { label: "Overview", translations: { ru: "Обзор" }, slug: "docs/patterns" },
+            {
+              label: "Minimal Graph",
+              translations: { ru: "Минимальный граф" },
+              slug: "docs/patterns/minimal-graph",
+            },
             {
               label: "Information Collection",
+              translations: { ru: "Сбор информации" },
               slug: "docs/patterns/information-collection",
             },
-            { label: "Skip Pattern", slug: "docs/patterns/skip" },
-            { label: "Validation Loop", slug: "docs/patterns/validation-loop" },
-            { label: "Repair Reach", slug: "docs/patterns/repair-reach" },
-            { label: "Branching", slug: "docs/patterns/branching" },
-            { label: "Dynamic Files", slug: "docs/patterns/dynamic-files" },
+            {
+              label: "Skip Pattern",
+              translations: { ru: "Пропуск" },
+              slug: "docs/patterns/skip",
+            },
+            {
+              label: "Validation Loop",
+              translations: { ru: "Цикл валидации" },
+              slug: "docs/patterns/validation-loop",
+            },
+            {
+              label: "Repair Reach",
+              translations: { ru: "Область исправления" },
+              slug: "docs/patterns/repair-reach",
+            },
+            {
+              label: "Branching",
+              translations: { ru: "Ветвление" },
+              slug: "docs/patterns/branching",
+            },
+            {
+              label: "Dynamic Files",
+              translations: { ru: "Динамические файлы" },
+              slug: "docs/patterns/dynamic-files",
+            },
             {
               label: "Step Verification",
+              translations: { ru: "Проверка шага" },
               slug: "docs/patterns/step-verification",
             },
-            { label: "Escalation", slug: "docs/patterns/escalation" },
-            { label: "Subagent Review", slug: "docs/patterns/subagent-review" },
+            {
+              label: "Escalation",
+              translations: { ru: "Эскалация" },
+              slug: "docs/patterns/escalation",
+            },
+            {
+              label: "Subagent Review",
+              translations: { ru: "Ревью субагентом" },
+              slug: "docs/patterns/subagent-review",
+            },
             {
               label: "Process Revision",
+              translations: { ru: "Пересмотр процесса" },
               slug: "docs/patterns/process-revision",
             },
-            { label: "Replan", slug: "docs/patterns/replan" },
-            { label: "Operating Mode", slug: "docs/patterns/operating-mode" },
-            { label: "Self Review", slug: "docs/patterns/self-review" },
-            { label: "Workspace", slug: "docs/patterns/workspace" },
+            {
+              label: "Replan",
+              translations: { ru: "Перепланирование" },
+              slug: "docs/patterns/replan",
+            },
+            {
+              label: "Operating Mode",
+              translations: { ru: "Режим работы" },
+              slug: "docs/patterns/operating-mode",
+            },
+            {
+              label: "Self Review",
+              translations: { ru: "Самопроверка" },
+              slug: "docs/patterns/self-review",
+            },
+            {
+              label: "Workspace",
+              translations: { ru: "Рабочая область" },
+              slug: "docs/patterns/workspace",
+            },
             {
               label: "Notes Persistence",
+              translations: { ru: "Хранение заметок" },
               slug: "docs/patterns/notes-persistence",
             },
             {
               label: "Artifacts Publishing",
+              translations: { ru: "Публикация артефактов" },
               slug: "docs/patterns/artifacts-publishing",
             },
             {
               label: "Anti-patterns",
+              translations: { ru: "Антипаттерны" },
               slug: "docs/patterns/anti-patterns",
             },
             {
               label: "Static Configuration",
+              translations: { ru: "Статическая конфигурация" },
               slug: "docs/patterns/static-configuration",
             },
           ],
         },
         {
           label: "Guides",
+          translations: { ru: "Руководства" },
           items: [
             {
               label: "Creating Workflows",
@@ -149,6 +237,7 @@ export default defineConfig({
         },
         {
           label: "Integration",
+          translations: { ru: "Интеграция" },
           items: [
             { label: "Claude Code", slug: "docs/integration/claude-code" },
             { label: "MCP Clients", slug: "docs/integration/mcp-clients" },
@@ -163,6 +252,7 @@ export default defineConfig({
         },
         {
           label: "Reference",
+          translations: { ru: "Справочник" },
           items: [
             { label: "MCP Tools", slug: "docs/reference/tools" },
             {
@@ -187,6 +277,7 @@ export default defineConfig({
         },
         {
           label: "Workflow Catalog",
+          translations: { ru: "Каталог воркфлоу" },
           items: [
             {
               label: "Content Creation",

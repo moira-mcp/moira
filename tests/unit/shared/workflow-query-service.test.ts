@@ -798,7 +798,7 @@ describe("WorkflowQueryService", () => {
       expect(results[0].snippet!.length).toBeLessThan(100);
     });
 
-    test("should support bounded literal alternatives", () => {
+    test("should support bounded regex alternatives", () => {
       const workflow = createWorkflow({
         nodes: [
           { id: "start", type: "start", connections: { default: "analyze" } },
@@ -822,21 +822,61 @@ describe("WorkflowQueryService", () => {
       expect(results).toHaveLength(2);
     });
 
-    test("should treat regex metacharacters other than alternatives literally", () => {
+    test("should preserve anchors, repetition, classes, and grouping", () => {
       const workflow = createWorkflow({
         nodes: [
-          { id: "start", type: "start", connections: { default: "literal" } },
+          { id: "start", type: "start", connections: { default: "regex" } },
           {
-            id: "literal",
+            id: "regex",
             type: "agent-directive",
-            directive: "Match a+b exactly",
+            directive: "Name aaab check",
             connections: { default: "end" },
           },
           { id: "end", type: "end" },
         ] as WorkflowNode[],
       });
 
-      expect(searchWorkflow(workflow, "a+b").map((result) => result.nodeId)).toEqual(["literal"]);
+      expect(
+        searchWorkflow(workflow, "^name (a+)[b] check$").map((result) => result.nodeId),
+      ).toEqual(["regex"]);
+    });
+
+    test("should fall back to literal search for unsupported regex syntax", () => {
+      const workflow = createWorkflow({
+        nodes: [
+          { id: "start", type: "start", connections: { default: "literal" } },
+          {
+            id: "literal",
+            type: "agent-directive",
+            directive: "Keep [unfinished literal text",
+            connections: { default: "end" },
+          },
+          { id: "end", type: "end" },
+        ] as WorkflowNode[],
+      });
+
+      expect(searchWorkflow(workflow, "[unfinished").map((result) => result.nodeId)).toEqual([
+        "literal",
+      ]);
+    });
+
+    test("should reject a catastrophic backtracking shape in bounded time", () => {
+      const workflow = createWorkflow({
+        nodes: [
+          { id: "start", type: "start", connections: { default: "poison" } },
+          {
+            id: "poison",
+            type: "agent-directive",
+            directive: `${"a".repeat(50_000)}!`,
+            connections: { default: "end" },
+          },
+          { id: "end", type: "end" },
+        ] as WorkflowNode[],
+      });
+
+      const startedAt = performance.now();
+      expect(searchWorkflow(workflow, "(a+)+$")).toEqual([]);
+      expect(performance.now() - startedAt).toBeLessThan(100);
     });
   });
 });

@@ -88,6 +88,9 @@ empty-npm-package@1.0.0 (ISC) — a zero-code stub package used to satisfy the
   npm overrides for @triplit/* and @instantdb/* peer-dependencies (see LICENSE
   REMEDIATION NOTES above). It contains no functional code.
 
+re2js@2.8.6 (MIT) — pure-JavaScript RE2-compatible regular-expression engine
+  used for bounded user-supplied workflow search patterns.
+
 
 FULL DEPENDENCY LIST (alphabetical)
 ------------------------------------
@@ -534,6 +537,7 @@ range-parser@1.2.1  (MIT)
 raw-body@2.5.2  (MIT)
 raw-body@3.0.1  (MIT)
 rc@1.2.8  ((BSD-2-Clause OR MIT OR Apache-2.0))
+re2js@2.8.6  (MIT)
 react@18.3.1  (MIT)
 react-async-script@1.2.0  (MIT)
 react-dom@18.3.1  (MIT)
