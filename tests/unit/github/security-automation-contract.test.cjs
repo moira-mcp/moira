@@ -45,6 +45,7 @@ describe("security automation contract", () => {
       "labels",
       "rebase-strategy",
       "commit-message",
+      "allow",
       "groups",
     ]);
     expect(npm).toMatchObject({
@@ -56,6 +57,16 @@ describe("security automation contract", () => {
       "rebase-strategy": "auto",
       "commit-message": { prefix: "build", "prefix-development": "build", include: "scope" },
     });
+    expect(npm.allow).toEqual([
+      {
+        "dependency-type": "production",
+        "update-types": ["version-update:semver-minor", "version-update:semver-patch"],
+      },
+      {
+        "dependency-type": "development",
+        "update-types": ["version-update:semver-minor", "version-update:semver-patch"],
+      },
+    ]);
     expect(npm.groups).toEqual({
       "production-dependencies": {
         "applies-to": "version-updates",
@@ -200,7 +211,7 @@ describe("security automation contract", () => {
     expect(security).toContain("do not mean that all existing");
     for (const document of [contributing, security]) {
       expect(document).toMatch(/grouped root npm minor and patch updates/);
-      expect(document).toMatch(/Major npm updates remain separate/);
+      expect(document).toMatch(/Scheduled npm version updates exclude majors/);
       expect(document).toMatch(/do not wait for the weekly version-update\s+schedule/);
       expect(document).toContain("`type:chore`");
       expect(document).not.toContain("5 business days");

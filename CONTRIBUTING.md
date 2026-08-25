@@ -215,10 +215,11 @@ requirements. Its generated dependency inventory may exceed the human pull-reque
 body bound; PR Policy does not parse that body and relies on the exact bot identity,
 verified commits, bounded commit metadata, title, and Security Checks instead.
 Dependabot schedules grouped root npm minor and patch updates plus GitHub Actions
-updates weekly. Major npm updates remain separate so each breaking compatibility
-boundary can be reviewed and tested on its own. Npm security fixes from advisories
-use separate production and development groups at any required semantic version.
-They do not wait for the weekly version-update schedule.
+updates weekly. Scheduled npm version updates exclude majors; maintainers initiate
+those documented compatibility migrations with owner-authored commits. Npm security
+fixes from advisories use separate production and development groups at any required
+semantic version. They are not restricted by the version-update allowlist and do
+not wait for the weekly version-update schedule.
 Automated update PRs use the existing `type:chore` and
 `component:infrastructure` labels.
 

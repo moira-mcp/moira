@@ -59,8 +59,9 @@ npx prettier --check . # Prettier
 
 `npm outdated` must have no available update inside the declared ranges before a
 dependency-refresh pull request is complete. Dependabot groups minor and patch
-version updates; major updates remain separate because they can change product or
-tooling contracts. The following intentional boundaries explain every current
+version updates; scheduled major version updates are excluded and must be initiated
+by a maintainer because they can change product or tooling contracts. Security
+updates remain independent of that version-update allowlist. The following intentional boundaries explain every current
 direct major hold and state when it can be removed:
 
 | Boundary                                                                                                                                      | Current reason                                                                                                                                                                             | Removal trigger                                                                                                                                                            |
