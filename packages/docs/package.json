@@ -19,11 +19,11 @@
     "vite": "^7.3.1"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.5",
+    "@astrojs/check": "^0.9.10",
     "@astrojs/mdx": "^7.0.8",
     "@iconify-json/flat-color-icons": "^1.2.1",
-    "@iconify-json/tabler": "^1.2.20",
-    "@tailwindcss/vite": "^4.1.17",
+    "@iconify-json/tabler": "^1.2.38",
+    "@tailwindcss/vite": "^4.3.3",
     "mdast-util-to-string": "^4.0.0",
     "prettier": "^3.6.2",
     "prettier-plugin-astro": "^0.14.1",
