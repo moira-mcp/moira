@@ -1,90 +1,37 @@
 ---
 title: Content Creation
-description: Text content creation workflow for articles, posts, documentation
+description: One reviewed text deliverable with durable evidence, cause-owned repair, and separately authorized delivery effects.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-Workflow for creating text content with structured research, validation loops, and user approval gates. Supports articles, blog posts, and technical documentation.
-
-## Start
+Content Creation produces one bounded text deliverable—article, post, documentation, script, email, landing copy, or another requested format—from an authorized brief.
 
 ```bash
-mcp__moira__start({ workflowId: "content-creation" })
+mcp__moira__start({ workflowId: "moira/content-creation", parentExecutionId: "none" })
 ```
 
-## Process
+Use it when the result is the text itself. Use [Marketing Campaign](/docs/reference/workflows/marketing-campaign/) for campaign positioning and multi-channel materials, a research workflow when evidence discovery is the result, or Software Development Flow for repository implementation.
+
+## Durable process
+
+The workflow creates an execution-correlated workspace with an immutable content contract, cumulative independently reviewed corrections, content brief, evidence register, structure, draft, final content, limitations, validation observations, independent findings, repair account, and final report.
 
 ```mermaid
 flowchart LR
-    A[Get Brief] --> B[Research]
-    B --> C[Outline]
-    C --> D[Write Draft]
-    D --> E[Review & Edit]
-    E --> F[Finalize]
+  A[Intake] --> B[Brief]
+  B --> C[Evidence]
+  C --> D[Structure, draft, final content]
+  D --> E[Producer completion]
+  E --> F[Deterministic checks]
+  F --> G[Independent review]
+  G --> H[Complete or limited local result]
 ```
 
-## Steps
+Evidence distinguishes sourced facts and quotations, supplied assertions, inference, assumptions, creative invention, and unavailable material. Fixed source, section, word, score, issue, or retry quotas do not determine semantic quality.
 
-| Step | Action | Output |
-|------|--------|--------|
-| 1. Get Brief | Collect requirements: topic, format, audience, tone, constraints | Structured brief |
-| 2. Research | Research topic from authoritative sources | Min 3 sources, 3 key facts |
-| 3. Outline | Create content structure | User-approved outline |
-| 4. Write Draft | Write following structure and tone | Draft matching brief |
-| 5. Review & Edit | Edit for clarity and engagement | Polished content |
-| 6. Finalize | Final approval and publication prep | Ready-to-publish content |
+Content, evidence, and brief findings have source-specific repair owners and repeat every stale downstream responsibility. Invalid criteria use cumulative corrected-contract review. Autonomous mode skips only final user acceptance; interactive mode supports accept, abort, or one concrete brief/evidence/content/contract rework request.
 
-## Features
+## Optional effects
 
-<Aside type="tip">
-Research validation requires minimum 3 authoritative sources and 3 key facts before proceeding to outline.
-</Aside>
+Local delivery is sufficient. Publication requires originating authority for a concrete destination and uses the exact accepted revision. Telegram requires separate originating authority. Outcomes remain `not_requested`, `declined`, `succeeded`/`sent`, or `failed`, and never reclassify complete versus reviewed-limited content.
 
-### Content Formats
-
-| Format | Description |
-|--------|-------------|
-| `article` | Long-form article |
-| `post` | Blog post or social media |
-| `documentation` | Technical documentation |
-| `other` | Custom format |
-
-### Tone Options
-
-| Tone | Description |
-|------|-------------|
-| `formal` | Professional, formal language |
-| `casual` | Conversational, friendly |
-| `technical` | Technical, precise |
-| `mixed` | Combination based on context |
-
-### Validation Loops
-
-- **Research validation**: Completeness check (min 3 sources, 3 facts)
-- **Draft validation**: Structure and tone compliance check
-
-### User Approval Gates
-
-- **Outline approval**: Confirm structure before writing
-- **Content approval**: Final content sign-off
-
-## Example Node Configuration
-
-```json
-{
-  "id": "research-topic",
-  "type": "agent-directive",
-  "directive": "Research the topic from authoritative sources. Find minimum 3 sources and extract 3 key facts.",
-  "completionCondition": "Research complete with 3+ verified sources and 3+ key facts documented",
-  "connections": {
-    "next": "validate-research"
-  }
-}
-```
-
-## Related
-
-- [Verified Research](/docs/reference/workflows/verified-research/) — For in-depth research with source verification
-- [Robust Task](/docs/reference/workflows/robust-task/) — For multi-step task execution
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+The workflow does not commit, release, deploy, mutate product code, contact customers, or infer source/effect authority.

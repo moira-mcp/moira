@@ -1,738 +1,3396 @@
 {
   "slug": "content-creation",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "83cfde40-7021-4798-8c0d-af274b269dc3",
   "metadata": {
     "name": "Content Creation",
-    "version": "1.4.0",
-    "description": "Workflow for creating text content (articles, posts, documentation). Guides through stages: requirements gathering, topic research, structure creation, draft writing, review and editing, finalization. Supports different content formats and tones."
+    "version": "2.0.2",
+    "description": "Creates one reviewed text deliverable from an authorized brief. Captures audience, use, format, language, tone, constraints, evidence and effect authority; materializes a durable workspace; develops a content brief, source/provenance notes, structure, draft, final content and limitations; and requires producer completion, deterministic reference checks and genuinely independent semantic review. Complete and reviewed-limited results remain distinct; brief, evidence and content defects use source-specific repair and invalid criteria use cumulative independently reviewed correction. Autonomous mode skips only final acceptance. Local delivery is sufficient; target-bound publication and Telegram notification are separate optional effects whose failures do not reclassify content quality. The workflow does not commit, release, deploy or mutate product code. Choose Marketing Campaign for campaign strategy and multi-channel materials, a research workflow when evidence discovery is the result, or Software Development Flow for repository implementation."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "get-brief"
+        "default": "intake"
       }
     },
     {
-      "id": "get-brief",
+      "id": "intake",
       "type": "agent-directive",
-      "directive": "Get content brief from user.\n\nAsk:\n1. Content topic - what to write about?\n2. Format - article, post, documentation, other?\n3. Target audience - for whom?\n4. Tone - formal, casual, technical?\n5. Constraints - volume, deadline, special requirements?\n\nIMPORTANT: WAIT FOR USER RESPONSE\n- Ask questions and STOP\n- DO NOT fill fields until user explicitly responds\n- Record in user_response_text exactly what user wrote",
-      "completionCondition": "User provided content information",
+      "directive": "Resolve one bounded text-content goal, audience/use, format, language, tone, requested structure or length constraints, supplied evidence and source authority, brand/legal/privacy constraints, operating mode, and separate target-bound publication and Telegram authority. Ask only for material unknowns and never invent a source, quote, statistic, permission or destination. Return ready or blocked.",
+      "completionCondition": "The content boundary and authority are actionable or the missing prerequisite is explicit",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "topic": {
-            "type": "string",
-            "minLength": 5,
-            "description": "Content topic"
-          },
-          "format": {
+          "intake_outcome": {
             "type": "string",
             "enum": [
-              "article",
-              "post",
-              "documentation",
-              "other"
-            ],
-            "description": "Content format"
-          },
-          "target_audience": {
-            "type": "string",
-            "description": "Target audience"
-          },
-          "tone": {
-            "type": "string",
-            "enum": [
-              "formal",
-              "casual",
-              "technical",
-              "mixed"
-            ],
-            "description": "Tone"
-          }
-        },
-        "required": [
-          "topic",
-          "format",
-          "target_audience",
-          "tone",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "constraints",
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "research-topic"
-      }
-    },
-    {
-      "id": "research-topic",
-      "type": "agent-directive",
-      "directive": "Research the topic: {{get-brief.topic}}\n\nFor audience: {{get-brief.target_audience}}\nFormat: {{get-brief.format}}\n\nUse planning standards: {{planning_standards}}\n\nTasks:\n1. Find authoritative sources on the topic\n2. Gather key facts, statistics, examples\n3. Study different viewpoints\n4. Verify information currency\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave research issues to `{{workspace_path}}/research-issues.md` with format:\n```\n# Research Issues\n\n## SOURCE QUALITY\n1. [Issue with source]\n\n## COVERAGE GAPS\n1. [Missing topic aspect]\n\n## FACT VERIFICATION\n1. [Unverified claim]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `research_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Minimum 3 authoritative sources\n2. Main topic aspects covered\n3. Facts verified from primary sources\n4. Different viewpoints considered\n\nReturn `issues_count` = number of issues found (0 if research complete).",
-      "completionCondition": "Research completed, key information gathered",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 3,
-            "description": "List of sources used"
-          },
-          "key_facts": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 3,
-            "description": "Key facts and thesis points"
-          },
-          "research_summary": {
-            "type": "string",
-            "minLength": 50,
-            "description": "Brief research summary"
-          },
-          "research_complete": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
+              "ready",
+              "blocked"
             ]
           }
         },
         "required": [
-          "sources",
-          "key_facts",
-          "research_summary",
-          "research_complete"
+          "intake_outcome",
+          "operating_mode"
+        ],
+        "globalInputs": [
+          "operating_mode",
+          "content_goal",
+          "content_use",
+          "content_scope",
+          "terminal_reason",
+          "publication_authority",
+          "publication_target",
+          "notification_authority"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "intake_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "intake_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_goal",
+                "content_use",
+                "content_scope"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "content_goal"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "content_use"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "content_scope"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "publication_authority": {
+                  "const": "authorized"
+                }
+              },
+              "required": [
+                "publication_authority"
+              ]
+            },
+            "then": {
+              "required": [
+                "publication_target"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "publication_target"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "check-research"
+        "success": "route-intake-ready"
       }
     },
     {
-      "id": "check-research",
+      "id": "route-intake-ready",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "research-topic.research_complete"
+          "contextPath": "intake.intake_outcome"
         },
-        "right": "yes"
+        "right": "ready"
       },
       "connections": {
-        "true": "create-outline",
-        "false": "expr-inc-research-fix"
+        "true": "materialize-workspace",
+        "false": "finalize-intake-blocked"
       }
     },
     {
-      "id": "fix-research",
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "content-contract.md",
+          "content": ""
+        },
+        {
+          "path": "content-brief.md",
+          "content": ""
+        },
+        {
+          "path": "evidence-register.md",
+          "content": ""
+        },
+        {
+          "path": "content-guidance.md",
+          "content": ""
+        },
+        {
+          "path": "final-content.md",
+          "content": ""
+        },
+        {
+          "path": "limitations.md",
+          "content": ""
+        },
+        {
+          "path": "package-validation.md",
+          "content": ""
+        },
+        {
+          "path": "semantic-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "corrected-contract.md",
+          "content": ""
+        },
+        {
+          "path": "corrected-contract-findings.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "initialize-contract",
+        "error": "finalize-workspace-blocked"
+      }
+    },
+    {
+      "id": "initialize-contract",
       "type": "agent-directive",
-      "directive": "Fix research issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/research-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `research_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Find additional sources or verify facts\n3. Update research summary\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.\n\nTopic: {{get-brief.topic}}\nCurrent sources: {{research-topic.sources}}\nCurrent facts: {{research-topic.key_facts}}",
-      "completionCondition": "Research completed",
+      "directive": "Work only in {{workspace_path}}. As sole writer of content-contract.md, record the originating goal, audience/use, format, language, tone, scope, supplied evidence, constraints and authority. Never incorporate later corrections. Return ready or blocked.",
+      "completionCondition": "The immutable content contract exists or its irreducible absence is recorded",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "contract_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked"
+            ]
+          }
+        },
         "required": [
-          "additional_sources",
-          "additional_facts"
+          "contract_outcome"
         ],
         "globalInputs": [
-          "additional_sources",
-          "additional_facts"
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "contract_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "research-topic"
+        "success": "route-contract-ready"
       }
     },
     {
-      "id": "create-outline",
+      "id": "route-contract-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "initialize-contract.contract_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "frame-brief",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "frame-brief",
       "type": "agent-directive",
-      "directive": "Create content structure (outline).\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\nAudience: {{get-brief.target_audience}}\nTone: {{get-brief.tone}}\n\nResearch: {{research-topic.research_summary}}\nKey facts: {{research-topic.key_facts}}\n\nUse planning standards: {{planning_standards}}\n\nCreate logical structure with:\n1. Clear headline\n2. Hook in introduction\n3. Main sections with key points\n4. Conclusion with takeaways\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave outline issues to `{{workspace_path}}/outline-issues.md` with format:\n```\n# Outline Issues\n\n## REQUIREMENTS COVERAGE\n1. [Brief requirement not addressed]\n\n## STANDARDS COMPLIANCE\n1. [Planning standard not followed]\n\n## STRUCTURE ISSUES\n1. [Logical flow problem]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `outline_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - all brief points addressed\n2. STANDARDS COMPLIANCE - follows {{planning_standards}}\n3. Logical flow from section to section\n4. Appropriate for target audience\n\nReturn `issues_count` = number of issues found (0 if outline complete).",
-      "completionCondition": "Content structure created",
+      "directive": "Work only in {{workspace_path}}. Read immutable content-contract.md, accepted corrected-contract.md and current revision_request {{revision_request}}. Apply any active request. Write content-brief.md with audience, purpose, format, required claims/sections, success criteria and explicit omissions. Return ready, replan or blocked; ready resets the request sentinel.",
+      "completionCondition": "A truthful content brief is ready or the earliest invalid prerequisite is classified",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "outline": {
-            "type": "array",
-            "items": {
-              "type": "object",
+          "brief_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "brief_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
               "properties": {
-                "section": {
-                  "type": "string"
+                "brief_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "brief_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              },
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "brief_outcome": {
+                    "const": "replan"
+                  }
                 },
-                "key_points": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
+                "required": [
+                  "brief_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-brief-ready"
+      }
+    },
+    {
+      "id": "route-brief-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-brief.brief_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "build-evidence",
+        "false": "route-brief-replan"
+      }
+    },
+    {
+      "id": "route-brief-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-brief.brief_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "build-evidence",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the effective contract and content brief plus current revision_request {{revision_request}}. Apply any active request. Write evidence-register.md and content-guidance.md. Distinguish sourced facts/quotations, supplied assertions, inference, creative invention, assumptions and unavailable evidence. Return evidence_status ready, limited, replan or blocked; success resets the request sentinel.",
+      "completionCondition": "The proof, provenance, brand and legal boundary is usable or honestly classified",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "evidence_status"
+        ],
+        "globalInputs": [
+          "evidence_status",
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "evidence_status": {
+                  "enum": [
+                    "ready",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "evidence_status"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              },
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "evidence_status": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "evidence_status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-usable"
+      }
+    },
+    {
+      "id": "route-evidence-usable",
+      "type": "condition",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "evidence_status"
+            },
+            "right": "ready"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "evidence_status"
+            },
+            "right": "limited"
+          }
+        ]
+      },
+      "connections": {
+        "true": "create-content",
+        "false": "route-evidence-replan"
+      }
+    },
+    {
+      "id": "route-evidence-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_status"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "create-content",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the effective contract, brief, evidence, guidance and current revision_request {{revision_request}}. Apply any active request. Write content-structure.md, content-draft.md, final-content.md and limitations.md, preserving audience, format, tone and source references without arbitrary section or word quotas. Return ready, replan or blocked; ready resets the request sentinel.",
+      "completionCondition": "A coherent content package exists or its earliest blocker is classified",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "package_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "package_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "package_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "package_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              },
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "package_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "package_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-content-ready"
+      }
+    },
+    {
+      "id": "route-content-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "create-content.package_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "complete-content",
+        "false": "route-content-replan"
+      }
+    },
+    {
+      "id": "route-content-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "create-content.package_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "complete-content",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Perform a fresh producer-completion pass over the exact effective contract, brief, evidence, structure, draft, final content and limitations. Close foreseeable omissions. Alone write result_status complete|limited plus content_summary and limitation_summary. Return ready, replan or blocked; ready resets the request sentinel.",
+      "completionCondition": "The exact package and truthful current result class are producer-complete",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completion_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "completion_outcome"
+        ],
+        "globalInputs": [
+          "result_status",
+          "content_summary",
+          "limitation_summary",
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completion_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "completion_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "result_status",
+                "content_summary",
+                "limitation_summary",
+                "revision_request"
+              ],
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              },
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "completion_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "completion_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "result_status"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "content_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "result_status"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "content_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-completion-ready"
+      }
+    },
+    {
+      "id": "route-completion-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "complete-content.completion_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "validate-package",
+        "false": "route-completion-replan"
+      }
+    },
+    {
+      "id": "route-completion-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "complete-content.completion_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "validate-package",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Overwrite package-validation.md with deterministic required-file, parseability, source/reference and link observations only. Return pass, repair with one content|evidence|brief owner, replan or blocked.",
+      "completionCondition": "Deterministic observations are current and cause-routed",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "validation_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "content",
+              "evidence",
+              "brief"
+            ]
+          }
+        },
+        "required": [
+          "validation_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "validation_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "validation_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "repair_owner"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "if": {
+                  "properties": {
+                    "validation_outcome": {
+                      "const": "blocked"
+                    }
+                  },
+                  "required": [
+                    "validation_outcome"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "terminal_reason"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "else": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "terminal_reason"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-validation-pass"
+      }
+    },
+    {
+      "id": "route-validation-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-validation-repair"
+      }
+    },
+    {
+      "id": "route-validation-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "route-validation-package",
+        "false": "route-validation-replan"
+      }
+    },
+    {
+      "id": "route-validation-package",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.repair_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "repair-content-validation",
+        "false": "route-validation-evidence"
+      }
+    },
+    {
+      "id": "route-validation-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.repair_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "repair-evidence-validation",
+        "false": "repair-brief-validation"
+      }
+    },
+    {
+      "id": "route-validation-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "semantic-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate a genuinely independent whole-content reviewer. Read the effective contract, brief, evidence, structure, final content, limitations, deterministic observations and authorized sources. Judge factual support, audience fit, structure, coherence, tone, originality, usefulness and legal/brand risk. Overwrite semantic-review.md and return pass only at zero blockers, repair with one content|evidence|brief owner, replan or blocked.",
+      "completionCondition": "Independent whole-package findings are complete and cause-routed",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "content",
+              "evidence",
+              "brief"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "review_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "review_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "repair_owner"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "if": {
+                  "properties": {
+                    "review_outcome": {
+                      "const": "blocked"
+                    }
+                  },
+                  "required": [
+                    "review_outcome"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "terminal_reason"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "else": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "terminal_reason"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-review-pass"
+      }
+    },
+    {
+      "id": "route-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-mode",
+        "false": "route-review-repair"
+      }
+    },
+    {
+      "id": "route-review-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "route-review-package",
+        "false": "route-review-replan"
+      }
+    },
+    {
+      "id": "route-review-package",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "repair-content-semantic",
+        "false": "route-review-evidence"
+      }
+    },
+    {
+      "id": "route-review-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "repair-evidence-semantic",
+        "false": "repair-brief-semantic"
+      }
+    },
+    {
+      "id": "route-review-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-content-validation",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read exactly package-validation.md, reproduce every owner-local blocker, repair the complete confirmed class in content-structure.md, content-draft.md, final-content.md and limitations.md, and record changed knowledge in repair-account.md. Return changed, reassess or blocked.",
+      "completionCondition": "The confirmed repair class changed or its non-local cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "reassess"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-content-validation-changed"
+      }
+    },
+    {
+      "id": "repair-content-validation-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-content-validation.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "complete-content",
+        "false": "repair-content-validation-blocked"
+      }
+    },
+    {
+      "id": "repair-content-validation-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-content-validation.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "repair-content-semantic",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read exactly semantic-review.md, reproduce every owner-local blocker, repair the complete confirmed class in content-structure.md, content-draft.md, final-content.md and limitations.md, and record changed knowledge in repair-account.md. Return changed, reassess or blocked.",
+      "completionCondition": "The confirmed repair class changed or its non-local cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "reassess"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-content-semantic-changed"
+      }
+    },
+    {
+      "id": "repair-content-semantic-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-content-semantic.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "complete-content",
+        "false": "repair-content-semantic-blocked"
+      }
+    },
+    {
+      "id": "repair-content-semantic-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-content-semantic.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "repair-evidence-validation",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read exactly package-validation.md, reproduce every owner-local blocker, repair the complete confirmed class in evidence-register.md and content-guidance.md, and record changed knowledge in repair-account.md. Return changed, reassess or blocked.",
+      "completionCondition": "The confirmed repair class changed or its non-local cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "reassess"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-evidence-validation-changed"
+      }
+    },
+    {
+      "id": "repair-evidence-validation-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence-validation.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "create-content",
+        "false": "repair-evidence-validation-blocked"
+      }
+    },
+    {
+      "id": "repair-evidence-validation-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence-validation.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "repair-evidence-semantic",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read exactly semantic-review.md, reproduce every owner-local blocker, repair the complete confirmed class in evidence-register.md and content-guidance.md, and record changed knowledge in repair-account.md. Return changed, reassess or blocked.",
+      "completionCondition": "The confirmed repair class changed or its non-local cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "reassess"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-evidence-semantic-changed"
+      }
+    },
+    {
+      "id": "repair-evidence-semantic-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence-semantic.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "create-content",
+        "false": "repair-evidence-semantic-blocked"
+      }
+    },
+    {
+      "id": "repair-evidence-semantic-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence-semantic.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "repair-brief-validation",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read exactly package-validation.md, reproduce every owner-local blocker, repair the complete confirmed class in content-brief.md, and record changed knowledge in repair-account.md. Return changed, reassess or blocked.",
+      "completionCondition": "The confirmed repair class changed or its non-local cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "reassess"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-brief-validation-changed"
+      }
+    },
+    {
+      "id": "repair-brief-validation-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-brief-validation.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "build-evidence",
+        "false": "repair-brief-validation-blocked"
+      }
+    },
+    {
+      "id": "repair-brief-validation-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-brief-validation.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "repair-brief-semantic",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read exactly semantic-review.md, reproduce every owner-local blocker, repair the complete confirmed class in content-brief.md, and record changed knowledge in repair-account.md. Return changed, reassess or blocked.",
+      "completionCondition": "The confirmed repair class changed or its non-local cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "reassess"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "repair-brief-semantic-changed"
+      }
+    },
+    {
+      "id": "repair-brief-semantic-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-brief-semantic.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "build-evidence",
+        "false": "repair-brief-semantic-blocked"
+      }
+    },
+    {
+      "id": "repair-brief-semantic-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-brief-semantic.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Reassess current revision_request {{revision_request}} against immutable content-contract.md. When the cause comes from corrected-contract-review, read corrected-contract-findings.md as the canonical complete diagnosis. Preserve every still-valid accepted correction; rewrite corrected-contract.md as the complete cumulative supplement, recording deliberate supersession and cause. Never rewrite the original. Return corrected with earliest reentry_owner or blocked.",
+      "completionCondition": "The invalid derived contract is corrected without authority erosion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "corrected",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "globalInputs": [
+          "reentry_owner",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "corrected"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge",
+                "reentry_owner"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "changed_knowledge"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "reentry_owner"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-corrected"
+      }
+    },
+    {
+      "id": "route-reassessment-corrected",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "corrected"
+      },
+      "connections": {
+        "true": "corrected-contract-review",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "corrected-contract-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate independent review of corrected-contract.md against immutable content-contract.md and every previously accepted correction. Overwrite corrected-contract-findings.md with the complete current finding set or explicit zero findings. Judge the complete cumulative effective contract and typed re-entry owner. Return pass with revision_request reset to the neutral sentinel, replan with a new active request, or blocked.",
+      "completionCondition": "The correction and re-entry are independently accepted",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "contract_review_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_review_outcome": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "contract_review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "contract_review_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "contract_review_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "required": [
+                    "terminal_reason"
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "required": [
+                    "revision_request"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-contract-review-pass"
+      }
+    },
+    {
+      "id": "route-contract-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.contract_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-reentry-brief",
+        "false": "route-contract-review-blocked"
+      }
+    },
+    {
+      "id": "route-contract-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.contract_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-reentry-brief",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "brief"
+      },
+      "connections": {
+        "true": "frame-brief",
+        "false": "route-reentry-evidence"
+      }
+    },
+    {
+      "id": "route-reentry-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "build-evidence",
+        "false": "route-reentry-content"
+      }
+    },
+    {
+      "id": "route-reentry-content",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "create-content",
+        "false": "complete-content"
+      }
+    },
+    {
+      "id": "route-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "interactive-acceptance",
+        "false": "route-publication-authorized"
+      }
+    },
+    {
+      "id": "interactive-acceptance",
+      "type": "agent-directive",
+      "directive": "Present the independently accepted local package. Ask to accept, abort, or request one concrete rework owner brief|evidence|content|contract with active revision_request.",
+      "completionCondition": "The user accepts, aborts, or supplies actionable rework",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "rework_owner": {
+            "type": "string",
+            "enum": [
+              "brief",
+              "evidence",
+              "content",
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "user_decision"
+        ],
+        "globalInputs": [
+          "revision_request"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "user_decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "user_decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "rework_owner",
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "not": {
+                    "const": "No active revision request."
                   }
                 }
               }
             },
-            "minItems": 3
-          },
-          "outline_summary": {
-            "type": "string",
-            "description": "Brief structure description"
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "rework_owner"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  }
+                ]
+              }
+            }
           }
-        },
-        "required": [
-          "outline",
-          "outline_summary"
         ]
       },
       "connections": {
-        "success": "notify-outline"
+        "success": "route-user-accept"
       }
     },
     {
-      "id": "notify-outline",
-      "type": "telegram-notification",
-      "message": "*Content structure ready*\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\n\nAwaiting structure confirmation.",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "approve-outline",
-        "error": "approve-outline"
-      }
-    },
-    {
-      "id": "approve-outline",
-      "type": "agent-directive",
-      "directive": "Show user the content structure and get confirmation.\n\nStructure:\n{{create-outline.outline_summary}}\n\nSections:\n{{create-outline.outline}}\n\nIMPORTANT: WAIT FOR USER RESPONSE\n- Show structure and ask 'Do you approve the structure? (yes/no)'\n- DO NOT fill outline_approved until user explicitly responds\n- Record in user_response_text exactly what user responded\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User confirmed or rejected structure",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "outline_approved": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          },
-          "outline_feedback": {
-            "type": "string",
-            "description": "Structure feedback"
-          }
-        },
-        "required": [
-          "outline_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-outline-approval"
-      }
-    },
-    {
-      "id": "route-outline-approval",
+      "id": "route-user-accept",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "approve-outline.outline_approved"
+          "contextPath": "interactive-acceptance.user_decision"
         },
-        "right": "yes"
+        "right": "accept"
       },
       "connections": {
-        "true": "write-draft",
-        "false": "revise-outline"
+        "true": "route-publication-authorized",
+        "false": "route-user-abort"
       }
     },
     {
-      "id": "revise-outline",
-      "type": "agent-directive",
-      "directive": "Revise content structure based on feedback.\n\nUser feedback: {{approve-outline.outline_feedback}}\n\n{{#if has_file_access}}\n**FILE MODE:**\nAlso read `{{workspace_path}}/outline-issues.md` for additional issues.\n{{else}}\n**CONTEXT MODE:**\nAlso use `outline_issues` from previous validation.\n{{/if}}\n\nAddress EACH issue one by one:\n1. User feedback points\n2. Requirements coverage gaps\n3. Standards compliance issues\n4. Structure problems\n\nDO NOT skip any issue. All issues must be addressed.\n\nCurrent outline: {{create-outline.outline}}",
-      "completionCondition": "Structure revised",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "revised_outline"
-        ],
-        "globalInputs": [
-          "revised_outline"
-        ]
-      },
-      "connections": {
-        "success": "create-outline"
-      }
-    },
-    {
-      "id": "write-draft",
-      "type": "agent-directive",
-      "directive": "Write content draft following approved structure.\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\nAudience: {{get-brief.target_audience}}\nTone: {{get-brief.tone}}\n\nStructure: {{create-outline.outline}}\nSources: {{research-topic.sources}}\nFacts: {{research-topic.key_facts}}\n\nUse planning standards: {{planning_standards}}\n\nQuality criteria:\n- Clear and engaging writing\n- Facts properly attributed\n- Tone consistent throughout\n- Appropriate for audience level\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave draft issues to `{{workspace_path}}/draft-issues.md` with format:\n```\n# Draft Issues\n\n## REQUIREMENTS COVERAGE\n1. [Outline section not fully covered]\n\n## TONE CONSISTENCY\n1. [Tone shift detected]\n\n## QUALITY ISSUES\n1. [Clarity/engagement problem]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `draft_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - all outline sections covered\n2. TONE CONSISTENCY - matches specified tone throughout\n3. AUDIENCE FIT - appropriate language level\n4. QUALITY - clear, engaging, no filler\n\nReturn `issues_count` = number of issues found (0 if draft complete).",
-      "completionCondition": "Draft written",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "draft_content": {
-            "type": "string",
-            "minLength": 200,
-            "description": "Draft text"
-          },
-          "draft_complete": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          }
-        },
-        "required": [
-          "draft_content",
-          "word_count",
-          "draft_complete"
-        ],
-        "globalInputs": [
-          "word_count"
-        ]
-      },
-      "connections": {
-        "success": "check-draft"
-      }
-    },
-    {
-      "id": "check-draft",
+      "id": "route-user-abort",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "write-draft.draft_complete"
+          "contextPath": "interactive-acceptance.user_decision"
         },
-        "right": "yes"
+        "right": "abort"
       },
       "connections": {
-        "true": "review-edit",
-        "false": "expr-inc-draft-fix"
+        "true": "finalize-aborted",
+        "false": "route-rework-brief"
       }
     },
     {
-      "id": "fix-draft",
-      "type": "agent-directive",
-      "directive": "Fix draft issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/draft-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `draft_issues` from previous validation.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Revise the affected section\n3. Verify fix resolves issue\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.\n\nCurrent draft: {{write-draft.draft_content}}\nStructure: {{create-outline.outline}}",
-      "completionCondition": "Draft completed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "improvements_made"
-        ],
-        "globalInputs": [
-          "improvements_made"
-        ]
-      },
-      "connections": {
-        "success": "write-draft"
-      }
-    },
-    {
-      "id": "review-edit",
-      "type": "agent-directive",
-      "directive": "Edit and improve the draft.\n\nDraft: {{write-draft.draft_content}}\n\nUse planning standards: {{planning_standards}}\n\nEditing tasks:\n1. Check logic and coherence\n2. Remove repetitions and filler\n3. Improve readability\n4. Fact-check against sources: {{research-topic.sources}}\n5. Verify tone consistency\n6. Polish language and style\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave review issues to `{{workspace_path}}/review-issues.md` with format:\n```\n# Final Review Issues\n\n## STANDARDS COMPLIANCE\n1. [Standard not met]\n\n## QUALITY ISSUES\n1. [Remaining quality problem]\n\n## FACT CHECK\n1. [Verification needed]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `review_issues` field as array.\n{{/if}}\n\n**FINAL CHECKS:**\n1. STANDARDS COMPLIANCE - follows all {{planning_standards}}\n2. No filler or redundancy\n3. All facts verified\n4. Ready for publication\n\nReturn `issues_count` = number of issues found (0 if ready).",
-      "completionCondition": "Content edited",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "edited_content": {
-            "type": "string",
-            "minLength": 200
-          },
-          "changes_made": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "List of changes made"
-          }
-        },
-        "required": [
-          "edited_content",
-          "changes_made"
-        ]
-      },
-      "connections": {
-        "success": "approve-content"
-      }
-    },
-    {
-      "id": "approve-content",
-      "type": "agent-directive",
-      "directive": "Show user final content for approval.\n\nContent:\n{{review-edit.edited_content}}\n\nChanges made: {{review-edit.changes_made}}\n\nIMPORTANT: WAIT FOR USER RESPONSE\n- Show content and ask 'Do you approve? (yes/no)'\n- DO NOT fill content_approved until user explicitly responds\n- Record in user_response_text exactly what user responded\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User confirmed or rejected content",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "content_approved": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          },
-          "content_feedback": {
-            "type": "string",
-            "description": "Content feedback"
-          }
-        },
-        "required": [
-          "content_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-content-approval"
-      }
-    },
-    {
-      "id": "route-content-approval",
+      "id": "route-rework-brief",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "approve-content.content_approved"
+          "contextPath": "interactive-acceptance.rework_owner"
         },
-        "right": "yes"
+        "right": "brief"
       },
       "connections": {
-        "true": "finalize",
-        "false": "revise-content"
+        "true": "frame-brief",
+        "false": "route-rework-evidence"
       }
     },
     {
-      "id": "revise-content",
+      "id": "route-rework-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "build-evidence",
+        "false": "route-rework-content"
+      }
+    },
+    {
+      "id": "route-rework-content",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "create-content",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-final-status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "result_status"
+        },
+        "right": "complete"
+      },
+      "connections": {
+        "true": "finalize-complete",
+        "false": "finalize-limited"
+      }
+    },
+    {
+      "id": "finalize-complete",
       "type": "agent-directive",
-      "directive": "User did not confirm content.\n\nFeedback: {{approve-content.content_feedback}}\n\nRevise content considering feedback and reset retry_count.",
-      "completionCondition": "Content revised",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md from the accepted complete package without reclassification. Record publication_status, notification_status, public_url only on successful publication, and any factual optional-effect failure reason in final-report.md without changing content quality status.",
+      "completionCondition": "The exact complete package has a local final report",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "retry_count"
+          "artifact_path",
+          "terminal_status"
         ],
         "globalInputs": [
-          "retry_count"
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "complete"
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "review-edit"
+        "success": "end"
       }
     },
     {
-      "id": "finalize",
+      "id": "finalize-limited",
       "type": "agent-directive",
-      "directive": "Finalize content and prepare for publication.\n\nFinal content: {{review-edit.edited_content}}\n\nTasks:\n1. Add final formatting\n2. Verify everything is ready for publication\n3. Prepare summary\n\nSave final version.",
-      "completionCondition": "Content finalized and ready for publication",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md from the accepted limited package, prominently preserving limitations. Record publication_status, notification_status, public_url only on successful publication, and any factual optional-effect failure reason in final-report.md without changing content quality status.",
+      "completionCondition": "The exact reviewed-limited package has a local final report",
       "inputSchema": {
         "type": "object",
-        "properties": {
-          "final_word_count": {
-            "type": "number"
-          }
-        },
+        "additionalProperties": false,
+        "properties": {},
         "required": [
-          "final_content",
-          "final_word_count",
-          "final_summary"
+          "artifact_path",
+          "terminal_status"
         ],
         "globalInputs": [
-          "final_content",
-          "final_summary"
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "limited"
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "notify-complete"
+        "success": "end-limited"
       }
     },
     {
-      "id": "notify-complete",
-      "type": "telegram-notification",
-      "message": "*Content ready*\n\nTopic: {{get-brief.topic}}\nFormat: {{get-brief.format}}\nWords: {{finalize.final_word_count}}",
-      "parseMode": "Markdown",
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md with useful completed work, terminal_reason and recovery action; do not claim acceptance.",
+      "completionCondition": "The blocked result is truthful and recoverable",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
       "connections": {
-        "default": "end",
-        "error": "end"
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md with the user's abort and useful completed work.",
+      "completionCondition": "The abort is recorded without acceptance",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "aborted"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "finalize-workspace-blocked",
+      "type": "agent-directive",
+      "directive": "Report the observed materialization failure and recovery action.",
+      "completionCondition": "Workspace failure is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "terminal_reason",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "terminal_reason",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-workspace-blocked"
       }
     },
     {
       "id": "end",
       "type": "end",
       "finalOutput": [
-        "final_content",
-        "final_word_count",
-        "final_summary",
-        "topic",
-        "format"
+        "terminal_status",
+        "artifact_path",
+        "content_summary",
+        "limitation_summary",
+        "publication_status",
+        "notification_status",
+        "public_url",
+        "publication_failure_reason",
+        "notification_failure_reason"
       ]
     },
     {
-      "type": "expression",
-      "id": "expr-inc-research-fix",
-      "expressions": [
-        "fix_research_iteration = fix_research_iteration + 1"
-      ],
-      "connections": {
-        "default": "check-research-fix-limit"
-      }
+      "id": "end-limited",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "content_summary",
+        "limitation_summary",
+        "publication_status",
+        "notification_status",
+        "public_url",
+        "publication_failure_reason",
+        "notification_failure_reason"
+      ]
     },
     {
-      "type": "condition",
-      "id": "check-research-fix-limit",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "fix_research_iteration"
-        },
-        "right": {
-          "contextPath": "max_self_fix_iterations"
-        }
-      },
-      "connections": {
-        "true": "fix-research",
-        "false": "ask-user-research-fix-limit-reached"
-      }
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "terminal_reason"
+      ]
     },
     {
-      "type": "expression",
-      "id": "expr-inc-draft-fix",
-      "expressions": [
-        "fix_draft_iteration = fix_draft_iteration + 1"
-      ],
-      "connections": {
-        "default": "check-draft-fix-limit"
-      }
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path"
+      ]
     },
     {
-      "type": "condition",
-      "id": "check-draft-fix-limit",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "fix_draft_iteration"
-        },
-        "right": {
-          "contextPath": "max_self_fix_iterations"
-        }
-      },
-      "connections": {
-        "true": "fix-draft",
-        "false": "ask-user-draft-fix-limit-reached"
-      }
+      "id": "end-workspace-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "terminal_reason"
+      ]
     },
     {
-      "type": "agent-directive",
-      "id": "ask-user-research-fix-limit-reached",
-      "directive": "The research fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
-      "completionCondition": "User has made a decision on how to proceed",
+      "id": "revise-process",
+      "type": "teleport",
+      "hint": "Use only when the content method, interpretation or criterion itself is invalid, not for an ordinary review finding.",
+      "directive": "Return one active revision_request preserving the original goal and authority; identify still-valid work. Do not bypass an ordinary gate.",
+      "completionCondition": "The legitimate process correction is explicit",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "decision"
+          "revision_request"
         ],
         "globalInputs": [
-          "decision"
+          "revision_request"
+        ],
+        "allOf": [
+          {
+            "not": {
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "required": [
+                "revision_request"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-research-fix-limit-decision"
+        "success": "reassess-contract"
       }
     },
     {
-      "type": "condition",
-      "id": "route-research-fix-limit-decision",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "decision"
-        },
-        "right": "reset"
-      },
-      "connections": {
-        "true": "expr-reset-research-fix-counter",
-        "false": "create-outline"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-reset-research-fix-counter",
-      "expressions": [
-        "fix_research_iteration = 0"
-      ],
-      "connections": {
-        "default": "fix-research"
-      }
-    },
-    {
+      "id": "finalize-intake-blocked",
       "type": "agent-directive",
-      "id": "ask-user-draft-fix-limit-reached",
-      "directive": "The draft fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
-      "completionCondition": "User has made a decision on how to proceed",
+      "directive": "Report the pre-workspace intake blocker and recovery action without creating or claiming a local artifact path.",
+      "completionCondition": "The intake blocker is truthful and no workspace artifact is claimed",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "decision"
+          "terminal_status"
         ],
         "globalInputs": [
-          "decision"
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-draft-fix-limit-decision"
+        "success": "end-intake-blocked"
       }
     },
     {
+      "id": "end-intake-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "terminal_reason"
+      ]
+    },
+    {
+      "id": "route-publication-authorized",
       "type": "condition",
-      "id": "route-draft-fix-limit-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "decision"
+          "contextPath": "publication_authority"
         },
-        "right": "reset"
+        "right": "authorized"
       },
       "connections": {
-        "true": "expr-reset-draft-fix-counter",
-        "false": "review-edit"
+        "true": "publish-content",
+        "false": "route-publication-declined"
       }
     },
     {
+      "id": "publish-content",
+      "type": "agent-directive",
+      "directive": "Publish only the accepted exact current final-content.md to publication_target {{publication_target}} using the supported publisher under resolved authority. Return succeeded with actual public_url, declined when the concrete authorized target cannot be attempted without guessing, or failed after a real attempt; record the factual reason for declined/failed. Do not change content or broaden destination/audience.",
+      "completionCondition": "The target-bound optional effect is observed",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "publication_status"
+        ],
+        "globalInputs": [
+          "publication_status",
+          "public_url",
+          "publication_failure_reason"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "publication_status": {
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "declined"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "public_url"
+              ],
+              "not": {
+                "required": [
+                  "publication_failure_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "publication_failure_reason"
+              ],
+              "not": {
+                "required": [
+                  "public_url"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-notification-authorized"
+      }
+    },
+    {
+      "id": "route-notification-authorized",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "notification_authority"
+        },
+        "right": "authorized"
+      },
+      "connections": {
+        "true": "send-notification",
+        "false": "route-notification-declined"
+      }
+    },
+    {
+      "id": "send-notification",
+      "type": "agent-directive",
+      "directive": "Send one authorized Telegram completion notification to the engine-configured recipient. Include public_url only when publication succeeded. Return sent or failed from actual observation; do not alter content. On failure record one bounded factual notification_failure_reason.",
+      "completionCondition": "Notification outcome is observed",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "notification_status"
+        ],
+        "globalInputs": [
+          "notification_status",
+          "notification_failure_reason"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "enum": [
+                  "sent",
+                  "failed"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "notification_status": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "notification_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "notification_failure_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "notification_failure_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-final-status"
+      }
+    },
+    {
+      "id": "route-publication-declined",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "publication_authority"
+        },
+        "right": "declined"
+      },
+      "connections": {
+        "true": "set-publication-declined",
+        "false": "route-notification-authorized"
+      }
+    },
+    {
+      "id": "set-publication-declined",
       "type": "expression",
-      "id": "expr-reset-draft-fix-counter",
       "expressions": [
-        "fix_draft_iteration = 0"
+        "publication_status = 'declined'"
       ],
       "connections": {
-        "default": "fix-draft"
+        "default": "route-notification-authorized"
+      }
+    },
+    {
+      "id": "route-notification-declined",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "notification_authority"
+        },
+        "right": "declined"
+      },
+      "connections": {
+        "true": "set-notification-declined",
+        "false": "route-final-status"
+      }
+    },
+    {
+      "id": "set-notification-declined",
+      "type": "expression",
+      "expressions": [
+        "notification_status = 'declined'"
+      ],
+      "connections": {
+        "default": "route-final-status"
       }
     }
   ],
   "variableRegistry": {
-    "retry_count": {
-      "type": "number",
-      "description": "Stores retry count",
-      "default": 0
-    },
-    "max_retries": {
-      "type": "number",
-      "description": "Stores max retries",
-      "default": 3
-    },
-    "process_requirements": {
+    "operating_mode": {
       "type": "string",
-      "description": "Product requirements",
-      "default": "CONTENT CREATION PROCESS:\n\n1. REQUIREMENTS GATHERING:\n- Define topic and key questions\n- Clarify format (article, post, documentation)\n- Define target audience\n- Clarify tone (formal, casual, technical)\n- Volume constraints\n\n2. RESEARCH:\n- Study topic from authoritative sources\n- Gather facts, statistics, examples\n- Find opposing viewpoints\n- Verify information currency\n\n3. STRUCTURING:\n- Create logical outline\n- Define key thesis points\n- Distribute information across sections\n- Ensure natural flow\n\n4. WRITING:\n- Follow the structure\n- Write for target audience\n- Use examples and analogies\n- Maintain consistent tone\n\n5. EDITING:\n- Check logic and coherence\n- Remove repetitions and filler\n- Improve readability\n- Fact-check"
-    },
-    "quality_standards": {
-      "type": "string",
-      "description": "Stores quality standards",
-      "default": "CONTENT QUALITY STANDARDS:\n\n1. CLARITY:\n- One paragraph = one idea\n- Short sentences (up to 20 words)\n- Active voice preferred\n- Avoid jargon without explanation\n\n2. STRUCTURE:\n- Clear headings and subheadings\n- Logical transitions between sections\n- Introduction → Main body → Conclusion\n- Visual breaks every 3-5 paragraphs\n\n3. ENGAGEMENT:\n- Hook in first paragraph\n- Questions to reader\n- Examples and stories\n- Actionable takeaways\n\n4. CREDIBILITY:\n- Facts backed by sources\n- Quotes attributed\n- Statistics current\n- No misleading claims"
-    },
-    "validation_criteria": {
-      "type": "string",
-      "description": "Criteria for validation",
-      "default": "CONTENT VALIDATION CRITERIA:\n\n1. BRIEF COMPLIANCE:\n- Topic fully covered\n- Format matches request\n- Tone maintained\n- Volume within requirements\n\n2. RESEARCH COMPLETENESS:\n- Minimum 3-5 sources\n- Main topic aspects covered\n- Opposing views considered\n- No obvious gaps\n\n3. STRUCTURE QUALITY:\n- Outline is logical\n- All sections connected\n- No repetitions\n- Natural flow\n\n4. READABILITY:\n- Clear to target audience\n- No long unreadable paragraphs\n- Visual breaks present"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Stores common mistakes",
-      "default": "COMMON CONTENT CREATION MISTAKES:\n\n- Starting to write without research → Research first, write second\n- Writing for yourself, not audience → Always keep reader persona in mind\n- Long paragraphs without breaks → One paragraph = one idea, max 4-5 sentences\n- Ignoring structure → Outline before writing\n- Weak introduction → Hook in first 2-3 sentences\n- No call-to-action → What should reader do/understand after reading\n- Copy-paste without adaptation → Adapt to your voice and audience\n- Not fact-checking → Verify everything from primary sources"
-    },
-    "planning_standards": {
-      "type": "string",
-      "description": "Content creation planning standards",
-      "default": "CONTENT CREATION PLANNING STANDARDS:\n\n1. ARTICLE STRUCTURE:\n- Clear headline that captures attention\n- Hook in first paragraph\n- Logical section progression\n- Strong conclusion with takeaways\n- Visual breaks every 3-5 paragraphs\n\n2. TONE OF VOICE:\n- Consistent throughout the piece\n- Matches target audience expectations\n- Formal/casual/technical as specified\n- No jarring shifts in register\n- Authentic and engaging\n\n3. AUDIENCE FIT:\n- Language appropriate for reader level\n- Examples relevant to audience\n- Addresses audience pain points\n- Answers likely questions\n- Actionable for the reader\n\n4. CONTENT QUALITY:\n- Facts verified from sources\n- No filler or redundancy\n- Each section adds value\n- Clear and concise writing\n- Proper attribution"
-    },
-    "fix_research_iteration": {
-      "type": "number",
-      "description": "Counter for research fix loop",
-      "default": 0
-    },
-    "fix_draft_iteration": {
-      "type": "number",
-      "description": "Counter for draft fix loop",
-      "default": 0
-    },
-    "max_self_fix_iterations": {
-      "type": "number",
-      "description": "Max iterations for self-fix loops before proceeding",
-      "default": 3
-    },
-    "additional_facts": {
-      "type": "array",
-      "description": "Workflow-global additional_facts",
-      "items": {
-        "type": "string"
-      }
-    },
-    "additional_sources": {
-      "type": "array",
-      "description": "Workflow-global additional_sources",
-      "items": {
-        "type": "string"
-      }
-    },
-    "constraints": {
-      "type": "string",
-      "description": "Workflow-global constraints"
-    },
-    "decision": {
-      "type": "string",
-      "description": "Workflow-global decision",
       "enum": [
-        "continue",
-        "reset"
-      ]
-    },
-    "final_content": {
-      "type": "string",
-      "description": "Workflow-global final_content",
-      "minLength": 200
-    },
-    "final_summary": {
-      "type": "string",
-      "description": "Workflow-global final_summary"
-    },
-    "improvements_made": {
-      "type": "string",
-      "description": "Workflow-global improvements_made"
-    },
-    "revised_outline": {
-      "type": "string",
-      "description": "Workflow-global revised_outline"
-    },
-    "user_response_text": {
-      "type": "string",
-      "description": "Workflow-global user_response_text",
-      "minLength": 2
-    },
-    "word_count": {
-      "type": "number",
-      "description": "Workflow-global word_count"
+        "autonomous",
+        "interactive"
+      ],
+      "default": "autonomous",
+      "description": "Whether final user acceptance is enabled for this execution."
     },
     "workspace_path": {
       "type": "string",
-      "description": "Workflow-global workspace_path"
+      "minLength": 1,
+      "default": "./moira-ws/content-creation-{{executionId}}",
+      "description": "Execution-correlated local content workspace."
     },
-    "has_file_access": {
-      "type": "boolean",
-      "description": "Agent can read/write local files"
+    "workspace_process_id_file": {
+      "type": "string",
+      "minLength": 1,
+      "default": "{{executionId}}",
+      "description": "Registry-backed execution identifier for process-id.txt."
+    },
+    "content_goal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000,
+      "description": "Canonical bounded content objective."
+    },
+    "content_use": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Audience decision or use the content must support."
+    },
+    "content_scope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      },
+      "minItems": 1,
+      "maxItems": 40,
+      "description": "Format, language, tone, deliverables, constraints and authority."
+    },
+    "evidence_status": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "limited",
+        "replan",
+        "blocked"
+      ],
+      "description": "Current proof and provenance readiness class."
+    },
+    "result_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited"
+      ],
+      "description": "Producer-completion class reviewed with the exact content package."
+    },
+    "content_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Bounded summary of the exact producer-complete content."
+    },
+    "limitation_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Bounded summary of current content limitations."
+    },
+    "revision_request": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "default": "No active revision request.",
+      "description": "Current bounded process correction or user rework request."
+    },
+    "reentry_owner": {
+      "type": "string",
+      "enum": [
+        "brief",
+        "evidence",
+        "content",
+        "completion"
+      ],
+      "description": "Earliest normal responsibility made stale by a corrected contract."
+    },
+    "terminal_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Current irreducible blocker observed by its owning responsibility."
+    },
+    "terminal_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited",
+        "blocked",
+        "aborted"
+      ],
+      "default": "blocked",
+      "description": "Truthful terminal class for the content execution."
+    },
+    "artifact_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Safe path to the final local content report."
+    },
+    "publication_authority": {
+      "type": "string",
+      "enum": [
+        "authorized",
+        "declined",
+        "undecided"
+      ],
+      "default": "undecided",
+      "description": "Originating authority for one concrete content publication effect."
+    },
+    "publication_target": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Concrete destination scope for publication of the accepted current revision."
+    },
+    "notification_authority": {
+      "type": "string",
+      "enum": [
+        "authorized",
+        "declined",
+        "undecided"
+      ],
+      "default": "undecided",
+      "description": "Originating authority for optional Telegram notification."
+    },
+    "publication_status": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "declined",
+        "succeeded",
+        "failed"
+      ],
+      "default": "not_requested",
+      "description": "Observed target-bound publication outcome."
+    },
+    "notification_status": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "declined",
+        "sent",
+        "failed"
+      ],
+      "default": "not_requested",
+      "description": "Observed optional notification outcome."
+    },
+    "public_url": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000,
+      "description": "Observed URL from successful publication."
+    },
+    "publication_failure_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "description": "Factual reason for a declined or failed publication effect."
+    },
+    "notification_failure_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "description": "Factual reason for a failed notification effect."
     }
-  }
+  },
+  "owner": "system-moira",
+  "visibility": "public"
 }

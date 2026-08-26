@@ -448,7 +448,7 @@ function getTopicList(): string {
   result += `| "write tests", "create tests", "add tests" | \`moira/test-generation\` |\n`;
   result += `| "test plan", "QA strategy" | \`moira/test-planning\` |\n`;
   result += `| "audit tests", "test suite audit", "find test gaps or redundancy" | \`moira/test-suite-audit\` |\n`;
-  result += `| "write article", "create post", "write docs" | \`moira/content-creation\` |\n`;
+  result += `| one reviewed article, post, documentation, email or other bounded text with durable evidence and optional target-bound delivery | \`moira/content-creation\` |\n`;
   result += `| one bounded external-source question needing durable evidence, independent semantic review, and truthful complete or limited local delivery | \`moira/verified-research\` |\n`;
   result += `| separately authorized expensive research that must read and synthesize a defined corpus as a whole | \`moira/deep-corpus-research\` |\n`;
   result += `| external research needing durable source evidence, repeated independent zero-issue review, and changed repair | \`moira/iterative-research\` |\n`;
