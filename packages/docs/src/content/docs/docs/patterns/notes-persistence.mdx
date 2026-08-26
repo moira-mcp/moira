@@ -179,10 +179,13 @@ notes({
 });
 ```
 
-## Repository Example
+## Historical example
 
-The non-production example at `workflows/examples/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
-uses a write-note node after it has collected the user's needs:
+Smart Purchase Assistant previously demonstrated per-stage write-note persistence. Its current
+production definition at `workflows/production/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
+uses one execution-correlated filesystem package instead, because duplicating the same detailed
+content in notes and workflow variables creates competing sources of truth. A write-note remains
+appropriate when the note itself is the canonical durable value:
 
 ```json
 {
@@ -190,7 +193,7 @@ uses a write-note node after it has collected the user's needs:
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
   "source": "{{analyze-user-needs}}",
-  "tags": ["purchase-{{executionId}}", "smart-purchase"],
+  "tags": ["analysis-{{executionId}}", "research"],
   "connections": { "default": "research-product-category" }
 }
 ```
@@ -200,7 +203,7 @@ uses a write-note node after it has collected the user's needs:
 ### Tag Strategy
 
 - Use execution-specific tag: `purchase-{{executionId}}`
-- Use category tag: `smart-purchase`, `research-flow`
+- Use category tag: `research`, `research-flow`
 - Enables efficient filtering and cleanup
 
 ### Error Handling

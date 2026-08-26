@@ -1,0 +1,1755 @@
+{
+  "slug": "smart-purchase-assistant",
+  "owner": "system-moira",
+  "visibility": "public",
+  "id": "b33e227c-cc2c-4931-ae5d-2de69932e41e",
+  "metadata": {
+    "name": "Smart Purchase Assistant",
+    "version": "4.0.0",
+    "description": "Produces a durable, evidence-linked purchase decision package for one product need: it captures use, region, currency, budget, constraints, source and privacy limits, operating mode, and separate publication/notification authority; researches current category trade-offs, relevant variants, specifications, prices, availability, seller terms and review evidence without fixed quotas or fabricated certainty; and creates a buyer guide, comparison, profile-specific recommendations, direct observed links, limitations, pre-purchase checks, readable Markdown and self-contained HTML. A filesystem workspace, deterministic HTML observations and genuinely independent semantic review precede cause-owned evidence/report repair or contract reassessment. Outcomes distinguish complete, reviewed-limited, blocked and interactive-aborted local results; optional artifact upload and Telegram transport cannot invalidate an accepted local report. The workflow never buys, reserves, contacts sellers, submits forms, spends money, changes settings, commits, publishes without authority or mutates production. Because the graph contains an optional Telegram node, start it with skipTelegramCheck: true; actual notification configuration is observed only on the authorized delivery route. Choose it for product selection; use a research workflow for evidence synthesis without purchase semantics or Data Analysis for supplied datasets."
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "connections": {
+        "default": "intake"
+      }
+    },
+    {
+      "id": "intake",
+      "type": "agent-directive",
+      "directive": "Reuse the originating purchase request and every explicit decision already present. Capture the bounded complete request as purchase_request, then resolve the product need, intended use, region and currency, budget, material constraints, decision deadline, desired depth, source/privacy limits, operating mode, filesystem availability, and separate artifact-publication and Telegram-notification authority. Ask only for a material unknown; in autonomous mode an unresolved prerequisite is blocked and absent external-effect authority is false. Filesystem availability comes from the actual tool set, not a guessed receipt. The workflow is advisory and has no authority to purchase, reserve, contact sellers, submit forms or spend money. Return actionable only when responsible durable research can begin.",
+      "completionCondition": "The bounded purchase request, real filesystem prerequisite, mode, privacy ceiling and separate delivery authority are resolved without invented permission",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "intake_outcome": {
+            "type": "string",
+            "enum": [
+              "actionable",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "intake_outcome",
+          "filesystem_available",
+          "operating_mode",
+          "publication_authorized",
+          "notification_authorized",
+          "purchase_request"
+        ],
+        "globalInputs": [
+          "filesystem_available",
+          "operating_mode",
+          "publication_authorized",
+          "notification_authorized",
+          "purchase_request"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "intake_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "intake_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-intake-actionable"
+      }
+    },
+    {
+      "id": "route-intake-actionable",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "intake.intake_outcome"
+        },
+        "right": "actionable"
+      },
+      "connections": {
+        "true": "route-filesystem",
+        "false": "finalize-no-workspace"
+      }
+    },
+    {
+      "id": "route-filesystem",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "filesystem_available"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "materialize-workspace",
+        "false": "finalize-no-workspace"
+      }
+    },
+    {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "decision-contract.md",
+          "content": ""
+        },
+        {
+          "path": "source-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "purchase-report.md",
+          "content": ""
+        },
+        {
+          "path": "purchase-report.html",
+          "content": ""
+        },
+        {
+          "path": "validation-observations.md",
+          "content": ""
+        },
+        {
+          "path": "review-findings.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "frame-contract",
+        "error": "finalize-no-workspace"
+      }
+    },
+    {
+      "id": "frame-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write decision-contract.md once from the bounded originating request between these markers: ---BEGIN REQUEST--- {{purchase_request}} ---END REQUEST--- and the resolved authority. Define product/use, region/currency, budget, constraints, deadline, proportionate depth, relevant category/variant boundary, source and privacy ceiling, evidence distinctions, advisory boundary, operating mode, publication authority, notification authority, observable success, useful-limited boundary and blockers. Do not prescribe fixed counts, sources, stores, model variants, steps or report length. Return ready, reassess for an invalid interpretation/evidence method, or blocked for a factual prerequisite.",
+      "completionCondition": "One complete authority-preserving purchase decision contract is durable and actionable or truthfully non-actionable",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "contract_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "contract_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-frame-ready"
+      }
+    },
+    {
+      "id": "route-frame-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-contract.contract_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-frame-reassess"
+      }
+    },
+    {
+      "id": "route-frame-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-contract.contract_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "research-evidence",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read decision-contract.md and any current feedback or changed-knowledge account in repair-account.md, then research the purchase decision proportionately from public or explicitly authorized sources. Overwrite source-evidence.md with category types/trade-offs, relevant variants, decision criteria, current candidates, specifications, price/availability, seller terms, warranty/returns/delivery, independent and customer evidence, comparisons and calculations. For each material claim record URL or source identity, publisher/seller, observed date, access outcome, geography, claim support, conflicts, sponsorship/aggregation limits, inference and unknowns. Prefer primary evidence for specifications/terms and disclose unverifiable review status. Never fabricate fields or claim exhaustive market coverage. Return ready with evidence_status sufficient or limited, or return blocked or reassess without an evidence status.",
+      "completionCondition": "Current purchase evidence is traceable and proportionate, with uncertainty and limits explicit rather than padded",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "research_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked",
+              "reassess"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "research_outcome"
+        ],
+        "globalInputs": [
+          "evidence_status"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "research_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "research_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "evidence_status"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "required": [
+                  "evidence_status"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-research-blocked"
+      }
+    },
+    {
+      "id": "route-research-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research-evidence.research_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-research-reassess"
+      }
+    },
+    {
+      "id": "route-research-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research-evidence.research_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "produce-report"
+      }
+    },
+    {
+      "id": "produce-report",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the current decision-contract.md, source-evidence.md and any current feedback or changed-knowledge account in repair-account.md. Own the complete decision package and ordinary completion before review. Overwrite purchase-report.md with a decision summary, category and buyer guide, evidence-linked comparison, profile-specific recommendations, direct observed product/seller links, purchase-condition caveats, reasoning, uncertainty, limitations and pre-purchase checks. Overwrite purchase-report.html as the same current content in self-contained readable HTML with inline assets only: no CDN, fetch/XHR/WebSocket, forms, external scripts/styles/fonts, credentials, unrelated personal data or tracking. Run cheap applicable checks and overwrite validation-observations.md with each check, applicability and direct observation for readable files, parseable/self-contained HTML, forbidden network/form constructs and internal references. These observations do not prove semantic quality. Set result_class to limited whenever evidence_status={{evidence_status}} is limited; otherwise complete only when supported. Return ready, blocked or reassess; write result and bounded summaries only for a ready package.",
+      "completionCondition": "A complete or explicitly limited current report and self-contained HTML exist with current bounded mechanical observations",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "production_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked",
+              "reassess"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "production_outcome"
+        ],
+        "globalInputs": [
+          "result_class",
+          "recommendation_summary",
+          "limitations_summary"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "production_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "production_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "result_class": {
+                  "enum": [
+                    "complete",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "result_class",
+                "recommendation_summary",
+                "limitations_summary"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "result_class"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "recommendation_summary"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "limitations_summary"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-production-ready"
+      }
+    },
+    {
+      "id": "route-production-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "produce-report.production_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-production-blocked"
+      }
+    },
+    {
+      "id": "route-production-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "produce-report.production_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "semantic-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate one genuinely independent whole-result review and retain the same reviewer context for rereview where supported. The reviewer reads decision-contract.md, source-evidence.md, purchase-report.md, purchase-report.html, validation-observations.md and repair-account.md plus primary sources needed to test material claims. It verifies any changed-knowledge claim in repair-account.md and the bounded terminal projections against the current package: result_class={{result_class}}, recommendation_summary={{recommendation_summary}}, limitations_summary={{limitations_summary}}. It overwrites review-findings.md with the complete current reproducible blocker set, diagnoses without repair, and checks evidence provenance, comparison fairness, recommendation reasoning, buyer guidance, limits, privacy, HTML meaning and authority. Mechanical checks prove only their direct observations. Return pass only at zero blockers; repair only for one evidence or report owner under a sound contract; reassess for mixed/upstream/criterion/validation-method defects or a repeated root without stronger knowledge; blocked when independence or a prerequisite is unavailable.",
+      "completionCondition": "One independent primary-source review records all current blockers and a cause-correct aggregate outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "evidence",
+              "report"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "repair_owner"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-review-pass"
+      }
+    },
+    {
+      "id": "route-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-mode",
+        "false": "route-review-blocked"
+      }
+    },
+    {
+      "id": "route-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-review-reassess"
+      }
+    },
+    {
+      "id": "route-review-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-repair-owner"
+      }
+    },
+    {
+      "id": "route-repair-owner",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "repair-evidence",
+        "false": "repair-report"
+      }
+    },
+    {
+      "id": "repair-evidence",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read review-findings.md, decision-contract.md, source-evidence.md and relevant primary sources. Reproduce every evidence-owned blocker, repair every real manifestation of its confirmed class, overwrite source-evidence.md, and record root class plus changed relevant source knowledge in repair-account.md. Return changed only after mutation; reassess for invalid/mixed/unreproduced/repeated-without-stronger-knowledge causes; blocked for an irreducible evidence prerequisite. Report and HTML are now stale and must be recomputed after changed evidence.",
+      "completionCondition": "Evidence defects change coherently before all dependent conclusions rerun, or non-local causes do not loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-changed"
+      }
+    },
+    {
+      "id": "route-evidence-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-evidence-reassess"
+      }
+    },
+    {
+      "id": "route-evidence-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-report",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read review-findings.md and the current canonical package. Reproduce every report/HTML-owned blocker and repair all real manifestations without changing sound evidence or authority. Overwrite purchase-report.md, purchase-report.html and validation-observations.md so observations match the changed bytes; update result_class, recommendation_summary and limitations_summary to the same current package; and record root class plus changed relevant knowledge in repair-account.md. Return changed only after mutation and current bounded projections; reassess for invalid validation/evidence methods, mixed/unreproduced/repeated roots; blocked for an irreducible local repair.",
+      "completionCondition": "Report defects and current mechanical observations change together, or non-report causes do not loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "result_class",
+          "recommendation_summary",
+          "limitations_summary"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "result_class": {
+                  "enum": [
+                    "complete",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "changed_knowledge",
+                "result_class",
+                "recommendation_summary",
+                "limitations_summary"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "result_class"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "recommendation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitations_summary"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "result_class"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "recommendation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitations_summary"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-report-changed"
+      }
+    },
+    {
+      "id": "route-report-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-report.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-report-reassess"
+      }
+    },
+    {
+      "id": "route-report-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-report.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the originating request/authority, current decision-contract.md, review-findings.md, repair-account.md and relevant primary evidence. Consume whichever immediate cause exists: {{#if frame-contract.outcome_reason}}frame={{frame-contract.outcome_reason}}; {{/if}}{{#if research-evidence.outcome_reason}}research={{research-evidence.outcome_reason}}; {{/if}}{{#if produce-report.outcome_reason}}production={{produce-report.outcome_reason}}; {{/if}}{{#if repair-evidence.blocker_reason}}evidence_repair={{repair-evidence.blocker_reason}}; {{/if}}{{#if repair-report.blocker_reason}}report_repair={{repair-report.blocker_reason}}.{{/if}} Correct only the earliest invalid derived interpretation, criterion, scope, evidence method or authority while preserving the user's goal and authority ceiling. Overwrite decision-contract.md and record changed relevant knowledge in repair-account.md. Return eligible only after material correction or blocked for an irreducible prerequisite. Reassessment cannot claim user abort; only present-result.decision=abort owns that outcome.",
+      "completionCondition": "The earliest invalid derived contract is corrected for independent review or ends truthfully",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "eligible"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "required": [
+                  "changed_knowledge"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-eligible"
+      }
+    },
+    {
+      "id": "route-reassessment-eligible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "eligible"
+      },
+      "connections": {
+        "true": "review-corrected-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "review-corrected-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate independent review of the corrected decision-contract.md against the originating goal, immutable authority, exact cause, and changed knowledge recorded in repair-account.md. The reviewer reads repair-account.md directly and overwrites review-findings.md. Return pass only when the correction is material, evidence-capable and does not erode requirements; reassess for a still-invalid or repeated unchanged root; blocked if independent review is unavailable.",
+      "completionCondition": "The corrected contract is independently accepted or remains truthfully non-actionable",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "reassess",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "contract_review_outcome"
+        ]
+      },
+      "connections": {
+        "success": "route-contract-pass"
+      }
+    },
+    {
+      "id": "route-contract-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-corrected-contract.contract_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-contract-blocked"
+      }
+    },
+    {
+      "id": "route-contract-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-corrected-contract.contract_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "route-publication",
+        "false": "present-result"
+      }
+    },
+    {
+      "id": "present-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Present the independently accepted local purchase package and its complete/limited boundary without treating user preference as correctness evidence. Ask for accept, bounded actionable rework feedback, or abort. Acceptance never expands publication, notification or purchase authority.",
+      "completionCondition": "The interactive user accepts, supplies actionable rework feedback, or aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-result-accept"
+      }
+    },
+    {
+      "id": "route-result-accept",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "route-publication",
+        "false": "route-result-rework"
+      }
+    },
+    {
+      "id": "route-result-rework",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "rework"
+      },
+      "connections": {
+        "true": "rework-result",
+        "false": "finalize-aborted"
+      }
+    },
+    {
+      "id": "rework-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the user's bounded feedback between these markers: ---BEGIN FEEDBACK--- {{present-result.feedback}} ---END FEEDBACK--- and the current package. Classify its earliest reach as contract, evidence or report without mutating here; record the feedback and classification in repair-account.md. Do not treat preference as proof or broaden authority.",
+      "completionCondition": "Interactive feedback is classified to the earliest stale owner",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rework_owner": {
+            "type": "string",
+            "enum": [
+              "contract",
+              "evidence",
+              "report"
+            ]
+          }
+        },
+        "required": [
+          "rework_owner"
+        ]
+      },
+      "connections": {
+        "success": "route-rework-contract"
+      }
+    },
+    {
+      "id": "route-rework-contract",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_owner"
+        },
+        "right": "contract"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-rework-evidence"
+      }
+    },
+    {
+      "id": "route-rework-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "produce-report"
+      }
+    },
+    {
+      "id": "route-publication",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "publication_authorized"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "publish-artifact",
+        "false": "route-notification"
+      }
+    },
+    {
+      "id": "publish-artifact",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Under already resolved publication authority, read the independently accepted purchase-report.html and upload it once through the supported Moira artifacts API. Do not change the package or rerun research. Return succeeded only with the actual observed HTTPS URL; otherwise failed with the factual bounded failure_reason that downstream finalization will consume. The accepted local package remains valid.",
+      "completionCondition": "The authorized optional artifact upload has one observed success or failure outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "failure_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "publication_status"
+        ],
+        "globalInputs": [
+          "publication_status",
+          "public_url"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "publication_status": {
+                "enum": [
+                  "succeeded",
+                  "failed"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "public_url"
+              ],
+              "not": {
+                "required": [
+                  "failure_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "failure_reason"
+              ],
+              "not": {
+                "required": [
+                  "public_url"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-notification"
+      }
+    },
+    {
+      "id": "route-notification",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "notification_authorized"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "send-notification",
+        "false": "finalize-result"
+      }
+    },
+    {
+      "id": "send-notification",
+      "type": "telegram-notification",
+      "message": "Smart Purchase Assistant completed independent review.\n\n{{recommendation_summary}}\n\nPublic report when available: {{public_url}}",
+      "connections": {
+        "default": "route-notification-sent",
+        "error": "finalize-notification-error"
+      }
+    },
+    {
+      "id": "route-notification-sent",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "send-notification.telegramNotificationSent"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "finalize-notified",
+        "false": "finalize-notification-unsent"
+      }
+    },
+    {
+      "id": "finalize-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. Write final-report.md from the independently accepted package, preserving result_class, recommendation_summary and limitations_summary without semantic reinterpretation. Record the actual publication outcome and that notification was not requested. Return the exact final report path and bounded truthful summary. Do not publish, notify or mutate the package.",
+      "completionCondition": "The accepted local result and actual optional transport outcomes are durably projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "not_requested"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-notified",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized Telegram handler returned telegramNotificationSent=true; this proves accepted send handling, not user receipt. Write final-report.md with the independently accepted local result and actual publication/notification outcomes. Preserve the accepted summaries, set notification_status sent, and return the exact final report path. Do not mutate the package.",
+      "completionCondition": "Observed notification handling and the accepted local result are truthfully projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "sent"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-notification-unsent",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized Telegram node continued with telegramNotificationSent={{send-notification.telegramNotificationSent}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status not_sent, explain the bounded unconfigured/disabled/unavailable transport state without secrets, and return the exact final report path. Do not claim send or user receipt and do not rerun research.",
+      "completionCondition": "The not-sent transport observation is distinct and the accepted local result remains available",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "not_sent"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-notification-error",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}}, publication_failure={{publish-artifact.failure_reason}}{{/if}}{{#if send-notification.errorMessage}}, and the bounded Telegram engine error={{send-notification.errorMessage}}{{/if}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status failed, record the non-secret factual transport reason, and return the exact final report path. Do not claim send, rerun research or mutate the package.",
+      "completionCondition": "The thrown notification error remains visible without invalidating the accepted local result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "failed"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read review-findings.md and repair-account.md when present, and consume whichever immediate cause exists: {{#if frame-contract.outcome_reason}}frame={{frame-contract.outcome_reason}}; {{/if}}{{#if research-evidence.outcome_reason}}research={{research-evidence.outcome_reason}}; {{/if}}{{#if produce-report.outcome_reason}}production={{produce-report.outcome_reason}}; {{/if}}{{#if repair-evidence.blocker_reason}}evidence_repair={{repair-evidence.blocker_reason}}; {{/if}}{{#if repair-report.blocker_reason}}report_repair={{repair-report.blocker_reason}}; {{/if}}{{#if reassess-contract.outcome_reason}}reassessment={{reassess-contract.outcome_reason}}.{{/if}} Write final-report.md with the exact factual blocker, safe completed work, preserved artifacts, current evidence/authority boundary and prerequisite to resume. Set result_class blocked and return the exact final report path and bounded summary. Do not claim review acceptance, publication or notification.",
+      "completionCondition": "The workspace-backed blocker and preserved state are durable and truthful",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "globalInputs": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "result_class": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume the only authorized abort evidence, present-result.decision={{present-result.decision}}. Record the explicit interactive abort and preserved local artifacts in final-report.md without claiming acceptance or optional effects. Set result_class aborted and return the exact final report path and bounded summary. No autonomous or reassessment route may reach this node.",
+      "completionCondition": "The explicit abort and preserved state are durably reported",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "globalInputs": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "result_class": {
+                "const": "aborted"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "finalize-no-workspace",
+      "type": "agent-directive",
+      "directive": "No safe materialized workspace exists. Consume the immediate observed cause: intake_outcome={{intake.intake_outcome}}, filesystem_available={{filesystem_available}}{{#if intake.outcome_reason}}, intake_reason={{intake.outcome_reason}}{{/if}}{{#if materialize-workspace.errorMessage}}, materialize_error={{materialize-workspace.errorMessage}}{{/if}}. Report the applicable exact intake, filesystem or server-observed materialize prerequisite without pretending a local report exists. Set result_class blocked and return a bounded summary only. A client-side failure after a materialize command was presented must not call this node; it remains incomplete at that waiting step.",
+      "completionCondition": "The pre-workspace blocker is truthfully bounded without invented artifacts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_class",
+          "summary"
+        ],
+        "globalInputs": [
+          "result_class",
+          "summary"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "result_class": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-no-workspace"
+      }
+    },
+    {
+      "id": "end-success",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "artifact_path",
+        "result_class",
+        "recommendation_summary",
+        "limitations_summary",
+        "publication_status",
+        "notification_status",
+        "public_url",
+        "summary"
+      ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "artifact_path",
+        "result_class",
+        "summary"
+      ]
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "artifact_path",
+        "result_class",
+        "summary"
+      ]
+    },
+    {
+      "id": "end-no-workspace",
+      "type": "end",
+      "finalOutput": [
+        "result_class",
+        "summary"
+      ]
+    },
+    {
+      "id": "teleport-revise-process",
+      "type": "teleport",
+      "hint": "Jump here when the purchase contract, evidence method, scope or authority is itself wrong; not for an ordinary source/report finding or transport failure.",
+      "directive": "Work only in {{workspace_path}} when it exists. State why the current purchase process contract is wrong, preserve the originating goal and authority, and correct decision-contract.md plus repair-account.md when materialized. Do not repair ordinary evidence/report findings or use revision to authorize purchase, publication or notification.",
+      "completionCondition": "A material process defect is recorded for normal authority-preserving reassessment",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "maxProperties": 0
+      },
+      "connections": {
+        "success": "reassess-contract"
+      }
+    }
+  ],
+  "variableRegistry": {
+    "purchase_request": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 4000,
+      "description": "Bounded complete originating purchase request carried from intake to the durable contract owner."
+    },
+    "filesystem_available": {
+      "type": "boolean",
+      "description": "Whether the executing agent can use the required local filesystem."
+    },
+    "operating_mode": {
+      "type": "string",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "description": "Resolved once; autonomous skips only human preference waits."
+    },
+    "publication_authorized": {
+      "type": "boolean",
+      "description": "Separate originating authority for optional static artifact publication."
+    },
+    "notification_authorized": {
+      "type": "boolean",
+      "description": "Separate originating authority for optional Telegram notification."
+    },
+    "workspace_path": {
+      "type": "string",
+      "description": "Execution-correlated canonical purchase workspace.",
+      "const": "./moira-ws/smart-purchase-assistant-{{executionId}}",
+      "default": "./moira-ws/smart-purchase-assistant-{{executionId}}"
+    },
+    "workspace_process_id_file": {
+      "type": "string",
+      "description": "Registry-backed process ID content.",
+      "const": "{{executionId}}",
+      "default": "{{executionId}}"
+    },
+    "evidence_status": {
+      "type": "string",
+      "enum": [
+        "sufficient",
+        "limited"
+      ],
+      "description": "Current source-evidence fitness for complete or limited reporting."
+    },
+    "result_class": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited",
+        "blocked",
+        "aborted"
+      ],
+      "description": "Truthful local result class after independent review or terminal failure."
+    },
+    "recommendation_summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 4000,
+      "description": "Bounded accepted recommendation summary without raw evidence or secrets."
+    },
+    "limitations_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Bounded material evidence and decision limitations."
+    },
+    "publication_status": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "succeeded",
+        "failed"
+      ],
+      "description": "Observed optional artifact publication outcome.",
+      "default": "not_requested"
+    },
+    "notification_status": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "sent",
+        "not_sent",
+        "failed"
+      ],
+      "description": "Observed optional Telegram handler outcome.",
+      "default": "not_requested"
+    },
+    "public_url": {
+      "type": "string",
+      "pattern": "^(|https://[^\\s]+)$",
+      "maxLength": 2000,
+      "description": "Observed HTTPS artifact URL after successful authorized publication.",
+      "default": ""
+    },
+    "artifact_path": {
+      "type": "string",
+      "pattern": "^\\./moira-ws/smart-purchase-assistant-[0-9a-f-]{36}/final-report\\.md$",
+      "description": "Exact final report path in the canonical workspace."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 4000,
+      "description": "Bounded truthful terminal summary."
+    }
+  }
+}

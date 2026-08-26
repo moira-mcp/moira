@@ -180,10 +180,13 @@ notes({
 });
 ```
 
-## Пример из репозитория
+## Исторический пример
 
-Непроизводственный пример `workflows/examples/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
-использует write-note после сбора потребностей пользователя:
+Раньше Smart Purchase Assistant демонстрировал сохранение каждого этапа через write-note. Текущая
+production-версия в `workflows/production/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
+использует один execution-correlated файловый пакет: дублирование подробного содержимого в notes и
+workflow variables создаёт конкурирующие источники истины. Write-note по-прежнему подходит, когда
+сама note является каноническим долговечным значением:
 
 ```json
 {
@@ -191,7 +194,7 @@ notes({
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
   "source": "{{analyze-user-needs}}",
-  "tags": ["purchase-{{executionId}}", "smart-purchase"],
+  "tags": ["analysis-{{executionId}}", "research"],
   "connections": { "default": "research-product-category" }
 }
 ```
@@ -201,7 +204,7 @@ notes({
 ### Стратегия тегов
 
 - Используйте тег выполнения: `purchase-{{executionId}}`
-- Используйте тег категории: `smart-purchase`, `research-flow`
+- Используйте тег категории: `research`, `research-flow`
 - Позволяет эффективную фильтрацию и очистку
 
 ### Обработка ошибок
