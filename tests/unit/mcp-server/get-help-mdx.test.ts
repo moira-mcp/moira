@@ -317,7 +317,7 @@ tags:
 
       // Verify workflow mapping section exists
       expect(result).toContain("## Task → Workflow Mapping");
-      expect(result).toContain("Use this when user requests match these patterns");
+      expect(result).toContain("complete authorized catalog with `list()`");
     });
 
     it("should include key workflow trigger mappings", () => {
@@ -349,10 +349,10 @@ tags:
 
       // Verify trigger phrases are documented
       expect(result).toContain("create workflow");
-      expect(result).toContain("write tests");
+      expect(result).toContain("implement executable tests");
       expect(result).toContain("test plan");
       expect(result).toContain("test suite audit");
-      expect(result).toContain("write article");
+      expect(result).toContain("one reviewed article");
       expect(result).toContain("research");
       expect(result).toContain("repeated independent zero-issue review");
       expect(result).toContain("develop feature");

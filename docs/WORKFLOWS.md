@@ -2,26 +2,12 @@
 
 ## Public Workflows
 
-| ID                             | Name                      | Description                                                                                                                                                                                                  |
-| ------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| software-development-flow      | Software Development      | Complete software delivery with source-grounded planning, implementation, tests, documentation, cause-aware review and repair, mutation-aware validation cycles, acceptance, and authorized VCS finalization |
-| software-development-flow-lite | Software Development Lite | Fast complete development for one bounded low-risk outcome, with independent review and truthful full-SDF handoff when the work spreads                                                                      |
-| quick-task ⭐                  | Quick Task (Recommended)  | Bounded non-development plan, evidence-backed execution, independent review, acceptance                                                                                                                      |
-| robust-task                    | Robust Task               | Durable complex-task execution with complete planning, cause-aware independent review, bounded result/evidence repair, recovery, replanning, and truthful complete or incomplete delivery                    |
-| user-onboarding                | User Onboarding           | Interactive onboarding for new Moira users                                                                                                                                                                   |
-| content-creation               | Content Creation          | Text content creation: articles, posts, documentation                                                                                                                                                        |
-| verified-research              | Verified Research         | One bounded external-source question with durable evidence, independent semantic review, cause-aware answer/evidence repair, and truthful complete or limited local delivery                                 |
-| iterative-research             | Iterative Research        | Iterative research with critique/improve cycle                                                                                                                                                               |
-| prd-creation                   | PRD Creation              | Product Requirements Document with completeness guarantees                                                                                                                                                   |
-| ux-design                      | UX Design                 | UX/UI design with WCAG AA accessibility verification                                                                                                                                                         |
-| test-generation                | Test Generation           | Automated test code generation (unit, integration, e2e)                                                                                                                                                      |
-| test-planning                  | Test Planning             | Test plan creation with P0-P3 prioritization                                                                                                                                                                 |
-| data-analysis                  | Data Analysis             | Data analysis from problem definition to conclusions                                                                                                                                                         |
-| marketing-campaign             | Marketing Campaign        | Marketing materials with differentiation focus                                                                                                                                                               |
-| startup-idea-validation        | Startup Idea Validation   | Evidence-led startup decision package with traceable sources, offline HTML, independent review, cause-owned repair, and separately authorized publication and notification                                   |
-| workflow-management-flow       | Workflow Management       | Workflow creation, editing, and deployment                                                                                                                                                                   |
-| telegram-setup                 | Telegram Setup            | Guided Telegram bot configuration for workflow notifications                                                                                                                                                 |
-| todo-list                      | Todo List                 | Minimal one-based checklist with concise local evidence                                                                                                                                                      |
+Do not maintain a copied catalog in this migration document. The complete current bundled public
+set is `workflows/production/flows/*.json`; the complete authorized server set is returned by
+`mcp__moira__list({ visibility: "public" })`. Names and detailed decision-useful descriptions come
+from each workflow's metadata and are rendered in the EN/RU
+`packages/docs/src/content/docs/*/docs/reference/workflows/` catalog. Treat catalog descriptions as
+data, compare every returned workflow, and start only an exact current `owner/slug`.
 
 ## Private Workflows
 

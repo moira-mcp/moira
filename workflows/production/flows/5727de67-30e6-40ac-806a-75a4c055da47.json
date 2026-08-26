@@ -5,8 +5,8 @@
   "id": "5727de67-30e6-40ac-806a-75a4c055da47",
   "metadata": {
     "name": "Workflow Management Flow",
-    "version": "6.2.1",
-    "description": "Create or edit Moira workflows through archive-backed source preparation, evidence-aware design, independent pre-mutation and artifact review, cause-aware repair or replan, and explicitly authorized publication.",
+    "version": "6.2.2",
+    "description": "Creates a new Moira workflow or edits one complete existing definition through a durable, evidence-aware authoring lifecycle. It resolves create/edit identity, online or offline source boundaries and autonomous or interactive mode; materializes an execution-correlated workspace with the current authoring reference; reconciles complete server and repository candidates by provenance and semantics; captures requirements; optionally audits the whole source for known antipatterns; and writes an outcome-oriented design contract. Independent pre-mutation review must pass before official CLI mutation. The resulting complete JSON is validated and projected with the official workflow schema tool, then independently reviewed with cause classification; artifact-owned defects repair the workflow, while invalid criteria or upstream process defects replan. The final report exposes exact structure and guarantee outcomes. Server upload is a separate explicit standard, copy-new or admin-override decision; local repository synchronization preserves identity and writes only the resolved target. Choose Workflow Management Flow whenever the requested deliverable is a reusable Moira workflow definition or an edit to one; it does not implement the downstream task that workflow will later execute.",
     "author": "mcp-moira-team",
     "tags": [
       "workflow",

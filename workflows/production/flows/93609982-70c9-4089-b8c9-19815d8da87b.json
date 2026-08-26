@@ -5,8 +5,8 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.4.5",
-    "description": "Autonomous sequential checklist with optional supplied tasks, an engine-owned one-based cursor, one concise local evidence acknowledgement per completed task, and a mid-run jump that replaces the checklist while keeping completed tasks and resuming at a stated position."
+    "version": "3.4.6",
+    "description": "Executes a finite checklist sequentially with minimal orchestration. It accepts an already supplied typed task list or gathers one bounded list, derives the total and one-based cursor in the engine, projects exactly the current task, requires one concise evidence acknowledgement after real completion, and advances without asking for approval between items. A guarded mid-run revision can replace the checklist while keeping completed positions unchanged and resuming from an explicit task number; engine-derived totals and cursors prevent contradictory state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation."
   },
   "nodes": [
     {

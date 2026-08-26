@@ -5,20 +5,20 @@ description: Готовые workflows для типичных задач AI аг
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-Готовые к использованию workflows, которые можно запустить сразу. Каждый workflow проводит AI агента через структурированный процесс с валидацией на каждом шаге.
+Готовые к использованию workflows, которые можно запустить сразу. Каждый workflow задаёт явные условия завершения и собственный пропорциональный контракт планирования, evidence, review, validation, полномочий и неуспешных исходов.
 
 ## Разработка ПО
 
 <CardGrid>
   <LinkCard
     title="Software Development Flow"
-    description="Полный цикл разработки фичи с планированием, итеративной реализацией и валидацией"
-    href="/ru/docs/reference/workflow-templates/#разработка-по"
+    description="Полная реализация репозитория: код, тесты, документация, интеграционные последствия, deterministic validation, semantic review, repair и VCS в пределах полномочий"
+    href="./software-development-flow/"
   />
   <LinkCard
     title="Software Development Flow Lite"
     description="Быстрая полная поставка одного ограниченного низкорискового изменения с независимым ревью и handoff в полный SDF при расширении"
-    href="./software-development-lite/"
+    href="./software-development-flow-lite/"
   />
 </CardGrid>
 
@@ -62,7 +62,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
   />
   <LinkCard
     title="Test Planning"
-    description="Создание комплексных тест-планов с приоритизацией P0-P3"
+    description="Независимо проверенная risk-prioritized тест-стратегия с трассируемыми P0-P3 cases, обоснованным выбором категорий, каноническими JSON/Markdown и без выполнения тестов или изменения продукта"
     href="./test-planning/"
   />
   <LinkCard
@@ -102,7 +102,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
   />
   <LinkCard
     title="PRD Creation"
-    description="Требования к продукту с крайними случаями и валидацией"
+    description="Evidence-grounded требования с трассируемыми приоритетами и acceptance criteria, сценариями, метриками, рисками, равенством canonical JSON/Markdown и independent review без реализации"
     href="./prd-creation/"
   />
 </CardGrid>
@@ -116,8 +116,13 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
     href="./startup-idea-validation/"
   />
   <LinkCard
+    title="Smart Purchase Assistant"
+    description="Evidence-linked выбор продукта с current source provenance, independently reviewed профильными рекомендациями, buyer guidance, self-contained HTML и отдельно разрешённой artifact/Telegram delivery"
+    href="./smart-purchase-assistant/"
+  />
+  <LinkCard
     title="Data Analysis"
-    description="Валидация данных, анализ и конвейер визуализации"
+    description="Анализ явно разрешённых supplied data с readiness review, пропорциональными методами, опциональной privacy-safe визуализацией, reproducibility, evidence-backed выводами и честными limited outcomes"
     href="./data-analysis/"
   />
   <LinkCard
@@ -130,6 +135,41 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
     description="Привязанная к запуску UX-спецификация с трассируемыми состояниями и решениями, переиспользованием дизайн-системы, планом будущей валидации, exact-zero независимым ревью, repair и без полномочий на реализацию"
     href="./ux-design/"
   />
+  <LinkCard
+    title="Architecture Design Flow"
+    description="Decision-ready архитектура новой или существующей системы с source evidence, пропорциональными методами, поддерживаемой документацией, cause-owned repair и независимым review всего пакета"
+    href="./architecture-design-flow/"
+  />
+</CardGrid>
+
+## Moira и операции с workflow
+
+<CardGrid>
+  <LinkCard
+    title="Moira User Onboarding"
+    description="Первая ориентация: читает полный текущий public catalog, объясняет каждый observed выбор и запускает только явно выбранный child workflow"
+    href="./user-onboarding/"
+  />
+  <LinkCard
+    title="Workflow Management Flow"
+    description="Создание или редактирование полного workflow через source reconciliation, requirements, reviewed design, official tooling, structural projection, independent artifact review и отдельно разрешённый upload"
+    href="./workflow-management-flow/"
+  />
+  <LinkCard
+    title="Workflow Presentation Generator"
+    description="Source-faithful self-contained локальная HTML-презентация с official topology, progressive disclosure, redaction, deterministic checks и independent semantic/visual review"
+    href="./workflow-presentation-generator/"
+  />
+  <LinkCard
+    title="Execution Retrospective"
+    description="Evidence-backed анализ одного Moira execution с independent review и proposal-only улучшениями результата, workflow или system prompt"
+    href="./execution-retrospective/"
+  />
+  <LinkCard
+    title="Telegram Setup"
+    description="Secret-safe Telegram configuration текущего пользователя с masked settings readback, observed send/receipt и changed-evidence recovery"
+    href="./telegram-setup/"
+  />
 </CardGrid>
 
 ## Использование
@@ -137,7 +177,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 Запуск любого workflow:
 
 ```bash
-mcp__moira__start({ workflowId: "workflow-id", parentExecutionId: "none" })
+mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
 ```
 
 Список доступных workflows:

@@ -372,7 +372,9 @@ describe("workflow-management-flow v6", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("6.2.1");
+    expect(workflow.metadata.version).toBe("6.2.2");
+    expect(workflow.metadata.description).toContain("complete existing definition");
+    expect(workflow.metadata.description).toContain("official workflow schema tool");
     // One node fewer than upstream 6.1.0: the analysis responsibility moved into the planning node.
     expect(workflow.nodes).toHaveLength(57);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);

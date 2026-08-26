@@ -5,20 +5,20 @@ description: Pre-built workflows for common AI agent tasks
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-Production-ready workflows you can use immediately. Each workflow guides your AI agent through a structured process with validation at every step.
+Production-ready workflows you can use immediately. Each workflow provides explicit completion conditions and its own proportionate planning, evidence, review, validation, authority, and failure contract.
 
 ## Software Development
 
 <CardGrid>
   <LinkCard
     title="Software Development Flow"
-    description="Complete feature development cycle with planning, iterative implementation, and validation"
-    href="/docs/reference/workflow-templates/#software-development-flow"
+    description="Complete repository implementation across code, tests, documentation, integration consequences, deterministic validation, semantic review, repair, and authority-bound VCS closure"
+    href="./software-development-flow/"
   />
   <LinkCard
     title="Software Development Flow Lite"
     description="Fast complete delivery for one bounded low-risk change, with independent review and full-SDF handoff when work spreads"
-    href="./software-development-lite/"
+    href="./software-development-flow-lite/"
   />
 </CardGrid>
 
@@ -62,7 +62,7 @@ Production-ready workflows you can use immediately. Each workflow guides your AI
   />
   <LinkCard
     title="Test Planning"
-    description="Create comprehensive test plans with P0-P3 prioritization"
+    description="Reviewed risk-prioritized test strategy with traceable P0-P3 cases, justified category choices, canonical JSON and Markdown outputs, and no test execution or product mutation"
     href="./test-planning/"
   />
   <LinkCard
@@ -102,7 +102,7 @@ Production-ready workflows you can use immediately. Each workflow guides your AI
   />
   <LinkCard
     title="PRD Creation"
-    description="Product requirements with edge cases and validation"
+    description="Evidence-grounded product requirements with traceable priorities and acceptance criteria, scenarios, metrics, risks, canonical JSON/Markdown equality, and independent review without implementation"
     href="./prd-creation/"
   />
 </CardGrid>
@@ -116,8 +116,13 @@ Production-ready workflows you can use immediately. Each workflow guides your AI
     href="./startup-idea-validation/"
   />
   <LinkCard
+    title="Smart Purchase Assistant"
+    description="Evidence-linked product selection with current source provenance, reviewed profile-specific recommendations, buyer guidance, self-contained HTML, and separately authorized artifact or Telegram delivery"
+    href="./smart-purchase-assistant/"
+  />
+  <LinkCard
     title="Data Analysis"
-    description="Data validation, analysis, and visualization pipeline"
+    description="Authorized supplied-data analysis with readiness review, proportionate methods, privacy-safe optional visualization, reproducibility, evidence-backed conclusions, and truthful limited outcomes"
     href="./data-analysis/"
   />
   <LinkCard
@@ -130,6 +135,41 @@ Production-ready workflows you can use immediately. Each workflow guides your AI
     description="Execution-bound UX specification with traceable states and decisions, design-system reuse, future validation planning, exact-zero independent review, changed repair, and no implementation authority"
     href="./ux-design/"
   />
+  <LinkCard
+    title="Architecture Design Flow"
+    description="Decision-ready architecture for new or existing systems with source evidence, proportionate methods, maintained documentation, cause-owned repair, and independent whole-package review"
+    href="./architecture-design-flow/"
+  />
+</CardGrid>
+
+## Moira & Workflow Operations
+
+<CardGrid>
+  <LinkCard
+    title="Moira User Onboarding"
+    description="First-time orientation that reads the complete current public catalog, explains every observed choice, and starts only an explicitly selected child workflow"
+    href="./user-onboarding/"
+  />
+  <LinkCard
+    title="Workflow Management Flow"
+    description="Create or edit a complete workflow through source reconciliation, requirements, reviewed design, official tooling, structural projection, independent artifact review, and separately authorized upload"
+    href="./workflow-management-flow/"
+  />
+  <LinkCard
+    title="Workflow Presentation Generator"
+    description="Source-faithful self-contained local HTML presentation with official topology, progressive disclosure, redaction, deterministic checks, and independent semantic/visual review"
+    href="./workflow-presentation-generator/"
+  />
+  <LinkCard
+    title="Execution Retrospective"
+    description="Evidence-backed analysis of one Moira execution with independent review and proposal-only improvements for the result, workflow, or system prompt"
+    href="./execution-retrospective/"
+  />
+  <LinkCard
+    title="Telegram Setup"
+    description="Secret-safe current-user Telegram configuration with masked settings readback, observed send and receipt, and changed-evidence recovery"
+    href="./telegram-setup/"
+  />
 </CardGrid>
 
 ## Usage
@@ -137,7 +177,7 @@ Production-ready workflows you can use immediately. Each workflow guides your AI
 Start any workflow:
 
 ```bash
-mcp__moira__start({ workflowId: "workflow-id", parentExecutionId: "none" })
+mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
 ```
 
 List available workflows:
