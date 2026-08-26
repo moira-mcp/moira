@@ -806,7 +806,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **workflow**
 
-- `tests/workflow/scenarios/architecture-design-flow.test.ts`
+- `tests/workflow/scenarios/architecture-design-flow.test.ts` — v2 public identity and universal new/existing architecture contract; exact source and delivery authority; execution-bound package; proportional methods without fixed quotas; completion-before deterministic and independent semantic gates; five cause-owned repair cones; corrected-contract review, process revision, interactive completion rework, complete/limited/blocked/abort/materialization outcomes, and exact authorized project delivery
 - `tests/workflow/scenarios/artifacts-demo-dashboard-builder.test.ts`
 - `tests/workflow/scenarios/artifacts-demo-report-publisher.test.ts`
 - `tests/workflow/scenarios/conditional-branching.test.ts`
