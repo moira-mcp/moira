@@ -1,0 +1,30 @@
+---
+title: Telegram Setup
+description: Secret-safe настройка Telegram текущего пользователя с проверкой сохранённого состояния и фактического получения теста.
+---
+
+Telegram Setup настраивает или тестирует Telegram-уведомления текущего пользователя Moira. Он проверяет masked существующие настройки, поддерживает явную замену, подтверждает сохранённые значения, отправляет bounded secret-free тест и разделяет handler send, API error, skipped send, фактическое получение, retry, reconfiguration, incomplete, blocked и skipped outcomes.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/telegram-setup",
+  parentExecutionId: "none",
+  skipTelegramCheck: true
+})
+```
+
+`skipTelegramCheck: true` обязателен для ненастроенного аккаунта: workflow содержит собственную тестовую ноду `telegram-notification` и иначе попадёт под обычный Telegram preflight.
+
+## Процесс
+
+Workflow читает только masked notification settings текущего пользователя. Если они полные, пользователь может протестировать их или явно выбрать замену. Configuration проводит через создание или переиспользование бота и безопасное получение chat ID, записывает только `telegram.bot_token`, `telegram.chat_id` и `telegram.enabled`, затем проверяет masked наличие токена, нужный chat ID и enabled state.
+
+Bot token используется только в живом разрешённом settings call. Он не становится workflow field, global, artifact, notification, summary или terminal output. Не помещайте токен в URL браузера.
+
+После проверки настроек handler должен вернуть `telegramNotificationSent=true`, прежде чем workflow спросит о получении. Thrown error, skipped send и заявленное пользователем non-receipt имеют разные recovery paths. Retry и reconfiguration требуют changed evidence; иначе запуск заканчивается incomplete.
+
+## Полномочия и исходы
+
+Продолжение разрешает только три Telegram-настройки текущего пользователя и bounded test или явно выбранные retries. Оно не разрешает другого пользователя или chat, произвольные дальнейшие сообщения, product changes, VCS, release или deployment.
+
+Outcomes различают configured-and-received, configured-but-unconfirmed для каждой текущей причины, blocked и skipped. Final output никогда не содержит bot token или полный chat ID.

@@ -25,11 +25,7 @@ Moira workflows can send Telegram notifications at specific steps using `telegra
 2. Send any message
 3. The bot replies with your user ID — that is your chat ID
 
-**Method B — Bot API:**
-
-1. Send any message to your new bot
-2. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser
-3. Find `"chat":{"id":XXXXXXX}` — that number is your chat ID
+Do not put the bot token into a browser URL. URLs can be retained in browser history, screenshots, proxies, and logs. Use `@userinfobot` or the guided workflow instead.
 
 ### 3. Save Settings
 
@@ -53,10 +49,14 @@ You must send at least one message to your bot in Telegram before testing. The T
 If you're using Moira through an MCP client (Claude Code, Claude Desktop), you can start the guided setup workflow:
 
 ```
-start({ workflowId: "moira/telegram-setup", parentExecutionId: "none" })
+start({
+  workflowId: "moira/telegram-setup",
+  parentExecutionId: "none",
+  skipTelegramCheck: true
+})
 ```
 
-The workflow walks through bot creation, chat ID retrieval, settings configuration, and sends a test notification.
+`skipTelegramCheck: true` is required for this bootstrap workflow when Telegram is not configured; otherwise the normal notification preflight prevents an execution from starting. The workflow inspects masked existing settings, lets you test or explicitly replace them, keeps credentials out of workflow output, verifies persisted settings, sends a secret-free test, and confirms actual receipt.
 
 ## Troubleshooting
 
