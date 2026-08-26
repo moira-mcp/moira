@@ -104,18 +104,13 @@ describe("public workflow selection surfaces", () => {
     expect(rootPrompt).toBe(configPrompt);
     expect(packagedPrompt).toBe(configPrompt);
     expect(configPrompt).toContain("complete current `list()` result");
-    expect(configPrompt).toContain(
-      "Push, pull request, publication, release, and deployment remain separate",
-    );
     expect(configPrompt).not.toContain(
-      "do not split code, tests, documentation, review, release, or deployment",
+      "Use one software-development workflow for one complete repository implementation lifecycle",
     );
     expect(russianPrompt).toContain("полный текущий результат `list()`");
     expect(russianPrompt).not.toContain("Доступные публичные Workflow");
     expect(russianPrompt).not.toContain("Кодовое слово для отладки");
-    expect(russianPrompt).toContain(
-      "Push, pull request, publication, release и deployment остаются отдельной работой",
-    );
+    expect(russianPrompt).not.toContain("полного жизненного цикла реализации в репозитории");
   });
 
   it("does not advertise removed identities on live selection surfaces", () => {

@@ -45,7 +45,6 @@ Treat the complete current `list()` result as the workflow-selection source of t
 
 Use `quick-task` for bounded work requiring plan → approval → execution → review.
 Use `robust-task` when retry, recovery, or durable progress tracking is important.
-Use one software-development workflow for one complete repository implementation lifecycle; do not split code, tests, documentation, review, and the workflow's explicitly supported local or VCS closure across several general task runs. Push, pull request, publication, release, and deployment remain separate caller or parent-process work unless the selected workflow's current definition explicitly owns that effect and the originating request authorizes it. Do not add unsupported delivery effects to a development plan.
 
 Execute directly only a single answer, read-only lookup, or localized change that can be completed and verified as one step.
 
