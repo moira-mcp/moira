@@ -1,379 +1,398 @@
-/**
- * workflow-presentation-generator Scenario Tests
- *
- * Generates HTML presentations from workflow definitions.
- * Coverage target: 100% nodes (20), 100% branches
- *
- * NOTE: This workflow had a bug where 7 template variables were undefined
- * because the start node had no initialData. Fixed by adding initialData
- * with business_section_structure, business_writing_rules,
- * technical_section_structure, technical_writing_rules,
- * quality_checklist, html_requirements, and max_fix_iterations.
- */
-
+/** Behavioral contracts for moira/workflow-presentation-generator v2.0.0. */
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import {
   runScenario,
-  type TestScenario,
+  type MockInput,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("workflow-presentation-generator", "public")!
-    .graph as WorkflowGraph;
+const entry = findSystemCatalogEntry("workflow-presentation-generator", "public")!;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const sentinel = "No active revision request.";
+const completion = {
+  completion_outcome: "ready",
+  result_status: "complete",
+  presentation_summary: "The local self-contained presentation faithfully explains the workflow.",
+  limitation_summary: "No material limitations remain beyond those stated in the presentation.",
+  revision_request: sentinel,
+};
+
+function terminal(status: "complete" | "limited" | "blocked" | "aborted"): MockInput {
+  return ({ executionId }) => ({
+    artifact_path: `./moira-ws/workflow-presentation-generator-${executionId}/final-report.md`,
+    terminal_status: status,
+  });
 }
 
-describe("workflow-presentation-generator Scenarios", () => {
-  let workflow: WorkflowGraph;
+function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockInput> {
+  return {
+    intake: {
+      intake_outcome: "ready",
+      operating_mode: "autonomous",
+      source_type: "id",
+      workflow_source: "moira/verified-research",
+      target_audience: "Product stakeholders and workflow maintainers",
+      presentation_use: "Explain value, behavior, and technical topology.",
+      output_language: "English",
+      presentation_scope: ["Local-only", "Do not expose private literals"],
+    },
+    "initialize-contract": { contract_outcome: "ready" },
+    "prepare-source": { source_outcome: "ready", revision_request: sentinel },
+    "develop-content": { content_outcome: "ready", revision_request: sentinel },
+    "generate-html": { html_outcome: "ready", revision_request: sentinel },
+    "complete-presentation": completion,
+    "validate-presentation": { validation_outcome: "pass", revision_request: sentinel },
+    "presentation-review": { review_outcome: "pass" },
+    "reassess-contract": {
+      reassessment_outcome: "corrected",
+      changed_knowledge: "The cumulative correction preserves source and local-only authority.",
+      reentry_owner: "completion",
+    },
+    "corrected-contract-review": { contract_review_outcome: "pass" },
+    "interactive-acceptance": { user_decision: "accept" },
+    "finalize-complete": terminal("complete"),
+    "finalize-limited": terminal("limited"),
+    "finalize-blocked": terminal("blocked"),
+    "finalize-aborted": terminal("aborted"),
+    "finalize-workspace-blocked": {
+      terminal_reason: "Workspace materialization failed.",
+      terminal_status: "blocked",
+    },
+    "finalize-intake-blocked": { terminal_status: "blocked" },
+    "revise-process": { revision_request: "The presentation evidence criterion is invalid." },
+    ...overrides,
+  };
+}
 
-  beforeAll(() => {
-    workflow = loadProductionWorkflow();
+function configureMaterialize(engine: GraphExecutionEngine, error = false): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
+  if (error) {
+    handlers.set("materialize", {
+      getNodeType: () => "materialize",
+      execute: async (current: { id: string }) => ({
+        nodeId: current.id,
+        action: "continue",
+        outputPath: "error",
+        data: {},
+      }),
+    });
+    return;
+  }
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
+async function run(scenario: TestScenario, materializeError = false): Promise<ScenarioResult> {
+  return runScenario(workflow(), scenario, {
+    engineSetup: (engine) => configureMaterialize(engine, materializeError),
+  });
+}
+
+describe("workflow-presentation-generator", () => {
+  test("publishes a valid local self-contained v2 presentation contract", async () => {
+    const graph = workflow();
+    expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+    expect(entry.owner).toBe("system-moira");
+    expect(entry.visibility).toBe("public");
+    expect(graph.metadata.version).toBe("2.0.0");
+    expect(graph.nodes).toHaveLength(66);
+    expect(graph.metadata.description).toContain("official full structural projection");
+    expect(graph.metadata.description).toContain("never mutates the source, publishes, uploads");
+    const intake = graph.nodes.find((node) => node.id === "intake") as any;
+    expect(intake.directive).toContain("moira/verified-research");
+    expect(intake.directive).toContain("never removed moira/research");
+    expect(graph.nodes.some((node) => node.type === "telegram-notification")).toBe(false);
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: workflow.id || "presentation-generator", ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
-    });
-
-    it("should have expected cycles (fix-verify loop)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles.length).toBeGreaterThan(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(20);
-    });
-
-    it("should declare all required template variables in the registry", () => {
-      const registry = (workflow as any).variableRegistry;
-      expect(registry).toBeDefined();
-      expect(registry).toHaveProperty("business_section_structure");
-      expect(registry).toHaveProperty("business_writing_rules");
-      expect(registry).toHaveProperty("technical_section_structure");
-      expect(registry).toHaveProperty("technical_writing_rules");
-      expect(registry).toHaveProperty("quality_checklist");
-      expect(registry).toHaveProperty("html_requirements");
-      expect(registry).toHaveProperty("max_fix_iterations");
-    });
+  test("materializes canonical artifacts and separates structural, deterministic, and semantic evidence", () => {
+    const byId = (id: string): any => workflow().nodes.find((node) => node.id === id);
+    const files = byId("materialize-workspace").files.map((file: { path: string }) => file.path);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "workflow.json",
+        "workflow-schema.txt",
+        "presentation-content.md",
+        "presentation.html",
+        "presentation-validation.md",
+        "presentation-review.md",
+        "repair-account.md",
+      ]),
+    );
+    expect(byId("prepare-source").directive).toContain(
+      "complete authorized definition through a download token",
+    );
+    expect(byId("prepare-source").directive).toContain("official moira-workflow");
+    expect(byId("develop-content").directive).toContain("searchable/collapsible topology");
+    expect(byId("generate-html").directive).toContain("Do not use external scripts");
+    expect(byId("validate-presentation").directive).toContain("deterministic observations only");
+    expect(byId("presentation-review").directive).toContain("genuinely independent");
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        {
-          name: "Happy path - fetch by ID, no issues",
-          description: "Source by ID, fetch succeeds, HTML valid on first try",
-          mockInputs: {
-            "collect-input": {
-              source_type: "id",
-              workflow_source: "moira/quick-task",
-              target_audience: "developers",
-              special_focus: "condition logic",
-            },
-            "fetch-workflow-by-id": {
-              workflow_json: { nodes: [] },
-              fetch_status: "success",
-            },
-            "setup-workspace": {
-              workspace_path: "/tmp/presentations/quick-task",
-            },
-            "analyze-workflow": {
-              workflow_name: "Quick Task",
-              workflow_description: "Universal lightweight task workflow",
-              business_purpose: "Fast task execution with quality gates",
-              node_count: 22,
-              patterns_summary: "Plan-Execute-Review pattern with loops",
-            },
-            "generate-business-content": {
-              business_content_ready: "yes",
-            },
-            "generate-technical-content": {
-              technical_content_ready: "yes",
-              diagram_included: "yes",
-              all_nodes_described: "yes",
-            },
-            "generate-html": {
-              html_created: "yes",
-              html_file_path: "/tmp/presentations/quick-task/presentation.html",
-              fix_iteration: 0,
-            },
-            "verify-presentation": {
-              issues_count: 0,
-              verification_notes: "All checks passed",
-            },
-            "save-output": {
-              output_delivered: "yes",
-              final_html_path: "/tmp/presentations/quick-task/presentation.html",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "collect-input",
-              "route-source",
-              "fetch-workflow-by-id",
-              "route-fetch-status",
-              "setup-workspace",
-              "analyze-workflow",
-              "generate-business-content",
-              "generate-technical-content",
-              "generate-html",
-              "verify-presentation",
-              "route-validation",
-              "save-output",
-              "end",
-            ],
-            avoids: [
-              "load-workflow-from-file",
-              "handle-error",
-              "fix-presentation",
-              "save-output-with-issues",
-            ],
-          },
-        },
-        {
-          name: "Load from file, issues fixed within limit",
-          description: "Source from file, load succeeds, issues found but fixed",
-          mockInputs: {
-            "collect-input": {
-              source_type: "file",
-              workflow_source: "./workflow.json",
-              target_audience: "stakeholders",
-              special_focus: "business value",
-            },
-            "load-workflow-from-file": {
-              workflow_json: { nodes: [] },
-              load_status: "success",
-            },
-            "setup-workspace": {
-              workspace_path: "/tmp/presentations/custom",
-            },
-            "analyze-workflow": {
-              workflow_name: "Custom Workflow",
-              workflow_description: "Custom automation",
-              business_purpose: "Process automation",
-              node_count: 15,
-              patterns_summary: "Linear with conditions",
-            },
-            "generate-business-content": {
-              business_content_ready: "yes",
-            },
-            "generate-technical-content": {
-              technical_content_ready: "yes",
-              diagram_included: "yes",
-              all_nodes_described: "yes",
-            },
-            "generate-html": {
-              html_created: "yes",
-              html_file_path: "/tmp/presentations/custom/presentation.html",
-              fix_iteration: 0,
-            },
-            "verify-presentation": [
-              {
-                issues_count: 2,
-                issues_description: "Broken diagram, missing styles",
-                verification_notes: "Needs fixes",
-              },
-              {
-                issues_count: 0,
-                verification_notes: "All fixed",
-              },
-            ],
-            "fix-presentation": {
-              fixes_applied: "yes",
-              fix_iteration: 1,
-            },
-            "save-output": {
-              output_delivered: "yes",
-              final_html_path: "/tmp/presentations/custom/presentation.html",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "route-source",
-              "load-workflow-from-file",
-              "route-load-status",
-              "route-validation",
-              "check-max-iterations",
-              "fix-presentation",
-              "save-output",
-            ],
-            avoids: ["fetch-workflow-by-id", "handle-error", "save-output-with-issues"],
-          },
-        },
-        {
-          name: "Fetch by ID fails - error handling",
-          description: "Fetch fails, error is reported",
-          mockInputs: {
-            "collect-input": {
-              source_type: "id",
-              workflow_source: "invalid/workflow-id",
-              target_audience: "developers",
-            },
-            "fetch-workflow-by-id": {
-              fetch_status: "error",
-              error_message: "Workflow not found: invalid/workflow-id",
-            },
-            "handle-error": {
-              error_reported: "yes",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "route-source",
-              "fetch-workflow-by-id",
-              "route-fetch-status",
-              "handle-error",
-              "end",
-            ],
-            avoids: ["setup-workspace", "load-workflow-from-file"],
-          },
-        },
-        {
-          name: "Load from file fails - error handling",
-          description: "File load fails, error is reported",
-          mockInputs: {
-            "collect-input": {
-              source_type: "file",
-              workflow_source: "./nonexistent.json",
-              target_audience: "stakeholders",
-            },
-            "load-workflow-from-file": {
-              load_status: "error",
-              error_message: "File not found: ./nonexistent.json",
-            },
-            "handle-error": {
-              error_reported: "yes",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "route-source",
-              "load-workflow-from-file",
-              "route-load-status",
-              "handle-error",
-              "end",
-            ],
-            avoids: ["fetch-workflow-by-id", "setup-workspace"],
-          },
-        },
-        {
-          name: "Max fix iterations exceeded - save with issues",
-          description: "Issues persist after 3 fix attempts, saves with known issues",
-          mockInputs: {
-            "collect-input": {
-              source_type: "id",
-              workflow_source: "moira/complex-workflow",
-              target_audience: "developers",
-              special_focus: "architecture",
-            },
-            "fetch-workflow-by-id": {
-              workflow_json: { nodes: [] },
-              fetch_status: "success",
-            },
-            "setup-workspace": {
-              workspace_path: "/tmp/presentations/complex",
-            },
-            "analyze-workflow": {
-              workflow_name: "Complex Workflow",
-              workflow_description: "Multi-stage process",
-              business_purpose: "Enterprise automation",
-              node_count: 50,
-              patterns_summary: "Nested loops with teleports",
-            },
-            "generate-business-content": {
-              business_content_ready: "yes",
-            },
-            "generate-technical-content": {
-              technical_content_ready: "yes",
-              diagram_included: "no",
-              all_nodes_described: "yes",
-            },
-            "generate-html": {
-              html_created: "yes",
-              html_file_path: "/tmp/presentations/complex/presentation.html",
-              fix_iteration: 0,
-            },
-            "verify-presentation": [
-              {
-                issues_count: 1,
-                issues_description: "Diagram rendering fails for complex graphs",
-                verification_notes: "Mermaid cannot handle 50 nodes",
-              },
-              {
-                issues_count: 1,
-                issues_description: "Diagram still broken",
-                verification_notes: "Simplification needed",
-              },
-              {
-                issues_count: 1,
-                issues_description: "Diagram partially rendered",
-                verification_notes: "Best effort reached",
-              },
-              {
-                issues_count: 1,
-                issues_description: "Cannot fully fix",
-                verification_notes: "Limitation of renderer",
-              },
-            ],
-            "fix-presentation": [
-              { fixes_applied: "yes", fix_iteration: 1 },
-              { fixes_applied: "yes", fix_iteration: 2 },
-              { fixes_applied: "yes", fix_iteration: 3 },
-            ],
-            "save-output-with-issues": {
-              output_delivered: "yes",
-              final_html_path: "/tmp/presentations/complex/presentation.html",
-            },
-          },
-          expect: {
-            status: "completed",
-            reaches: [
-              "verify-presentation",
-              "route-validation",
-              "check-max-iterations",
-              "fix-presentation",
-              "save-output-with-issues",
-              "end",
-            ],
-            avoids: ["save-output"],
-          },
-        },
-      ];
+  test.each([
+    [
+      "ready intake without complete source contract",
+      "intake",
+      { intake_outcome: "ready", operating_mode: "autonomous", source_type: "id" },
+    ],
+    ["source ready without clearing revision", "prepare-source", { source_outcome: "ready" }],
+    ["validation repair without owner", "validate-presentation", { validation_outcome: "repair" }],
+    [
+      "completion without summaries",
+      "complete-presentation",
+      { completion_outcome: "ready", result_status: "complete", revision_request: sentinel },
+    ],
+  ])("rejects contradictory input: %s", async (_name, target, invalid) => {
+    const result = await run({
+      name: String(_name),
+      mockInputs: inputs({ [String(target)]: invalid as MockInput }),
+      expect: { status: "failed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain(`Input validation failed for node '${String(target)}'`);
+  });
 
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
+  test("rejects interactive rework and process revision without an active cause", async () => {
+    const rework = await run({
+      name: "rework without request",
+      mockInputs: inputs({
+        intake: {
+          intake_outcome: "ready",
+          operating_mode: "interactive",
+          source_type: "id",
+          workflow_source: "moira/verified-research",
+          target_audience: "Maintainers",
+          presentation_use: "Review behavior",
+          output_language: "English",
+          presentation_scope: ["Local-only"],
+        },
+        "interactive-acceptance": { user_decision: "rework", rework_owner: "html" },
+      }),
+      expect: { status: "failed" },
+    });
+    expect(rework.error).toContain("Input validation failed for node 'interactive-acceptance'");
 
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
+    const teleport = await run({
+      name: "neutral teleport cause",
+      mockInputs: inputs({ "revise-process": { revision_request: sentinel } }),
+      teleportAfter: { afterNode: "prepare-source", teleportTo: "revise-process" },
+      expect: { status: "failed" },
+    });
+    expect(teleport.error).toContain("Input validation failed for node 'revise-process'");
+  });
+
+  test("executes source, outcome, mode, and contract-revision routes", async () => {
+    const cases: Array<{ scenario: TestScenario; materializeError?: boolean }> = [
+      {
+        scenario: {
+          name: "ID source complete",
+          mockInputs: inputs(),
+          expect: { status: "completed", reaches: ["prepare-source", "end-complete"] },
+        },
+      },
+      {
+        scenario: {
+          name: "file source complete",
+          mockInputs: inputs({
+            intake: {
+              intake_outcome: "ready",
+              operating_mode: "autonomous",
+              source_type: "file",
+              workflow_source: "/workspace/workflow.json",
+              target_audience: "Maintainers",
+              presentation_use: "Technical onboarding",
+              output_language: "English",
+              presentation_scope: ["Large graph", "Local-only"],
+            },
+          }),
+          expect: { status: "completed", reaches: ["prepare-source", "end-complete"] },
+        },
+      },
+      {
+        scenario: {
+          name: "reviewed limited",
+          mockInputs: inputs({
+            "complete-presentation": { ...completion, result_status: "limited" },
+          }),
+          expect: { status: "completed", reaches: ["end-limited"] },
+        },
+      },
+      {
+        scenario: {
+          name: "intake blocked",
+          mockInputs: inputs({
+            intake: {
+              intake_outcome: "blocked",
+              operating_mode: "autonomous",
+              terminal_reason: "Source authority is missing.",
+            },
+          }),
+          expect: {
+            status: "completed",
+            reaches: ["end-intake-blocked"],
+            avoids: ["materialize-workspace"],
+          },
+        },
+      },
+      {
+        materializeError: true,
+        scenario: {
+          name: "workspace blocked",
+          mockInputs: inputs(),
+          expect: { status: "completed", reaches: ["end-workspace-blocked"] },
+        },
+      },
+      {
+        scenario: {
+          name: "source blocked",
+          mockInputs: inputs({
+            "prepare-source": {
+              source_outcome: "blocked",
+              terminal_reason: "The complete source cannot be acquired.",
+            },
+          }),
+          expect: { status: "completed", reaches: ["end-blocked"] },
+        },
+      },
+      {
+        scenario: {
+          name: "interactive content rework",
+          mockInputs: inputs({
+            intake: {
+              intake_outcome: "ready",
+              operating_mode: "interactive",
+              source_type: "id",
+              workflow_source: "moira/verified-research",
+              target_audience: "Maintainers",
+              presentation_use: "Review behavior",
+              output_language: "English",
+              presentation_scope: ["Local-only"],
+            },
+            "develop-content": [
+              { content_outcome: "ready", revision_request: sentinel },
+              { content_outcome: "ready", revision_request: sentinel },
+            ],
+            "generate-html": [
+              { html_outcome: "ready", revision_request: sentinel },
+              { html_outcome: "ready", revision_request: sentinel },
+            ],
+            "complete-presentation": [completion, completion],
+            "validate-presentation": [
+              { validation_outcome: "pass", revision_request: sentinel },
+              { validation_outcome: "pass", revision_request: sentinel },
+            ],
+            "presentation-review": [{ review_outcome: "pass" }, { review_outcome: "pass" }],
+            "interactive-acceptance": [
+              {
+                user_decision: "rework",
+                rework_owner: "content",
+                revision_request: "Clarify the business inference labels.",
+              },
+              { user_decision: "accept" },
+            ],
+          }),
+          expect: {
+            status: "completed",
+            reaches: ["route-rework-content", "develop-content", "end-complete"],
+          },
+        },
+      },
+      {
+        scenario: {
+          name: "interactive abort",
+          mockInputs: inputs({
+            intake: {
+              intake_outcome: "ready",
+              operating_mode: "interactive",
+              source_type: "id",
+              workflow_source: "moira/verified-research",
+              target_audience: "Maintainers",
+              presentation_use: "Review behavior",
+              output_language: "English",
+              presentation_scope: ["Local-only"],
+            },
+            "interactive-acceptance": { user_decision: "abort" },
+          }),
+          expect: { status: "completed", reaches: ["end-aborted"] },
+        },
+      },
+      {
+        scenario: {
+          name: "guarded process revision",
+          mockInputs: inputs({
+            "reassess-contract": {
+              reassessment_outcome: "corrected",
+              changed_knowledge: "The large-graph criterion changed.",
+              reentry_owner: "source",
+            },
+          }),
+          teleportAfter: { afterNode: "prepare-source", teleportTo: "revise-process" },
+          expect: {
+            status: "completed",
+            reaches: ["revise-process", "corrected-contract-review", "end-complete"],
+          },
+        },
+      },
+    ];
+
+    for (const current of cases) {
+      const result = await run(current.scenario, current.materializeError);
+      if (!result.passed) throw new Error(`${current.scenario.name}: ${JSON.stringify(result)}`);
+    }
+  });
+
+  test("executes every deterministic and semantic repair owner", async () => {
+    const owners = ["source", "content", "html", "validation", "completion"] as const;
+    const targetByOwner = {
+      source: "prepare-source",
+      content: "develop-content",
+      html: "generate-html",
+      validation: "validate-presentation",
+      completion: "complete-presentation",
+    } as const;
+
+    for (const owner of owners) {
+      for (const source of ["validation", "review"] as const) {
+        const overrides: Record<string, MockInput> = {};
+        if (source === "validation") {
+          overrides["validate-presentation"] = [
+            { validation_outcome: "repair", repair_owner: owner },
+            { validation_outcome: "pass", revision_request: sentinel },
+          ];
+        } else {
+          overrides["validate-presentation"] = [
+            { validation_outcome: "pass", revision_request: sentinel },
+            { validation_outcome: "pass", revision_request: sentinel },
+          ];
+          overrides["presentation-review"] = [
+            { review_outcome: "repair", repair_owner: owner },
+            { review_outcome: "pass" },
+          ];
         }
+        const result = await run({
+          name: `${source} repair owned by ${owner}`,
+          mockInputs: inputs(overrides),
+          expect: {
+            status: "completed",
+            reaches: [targetByOwner[owner], "validate-presentation", "end-complete"],
+          },
+        });
+        if (!result.passed) throw new Error(`${source}/${owner}: ${JSON.stringify(result)}`);
       }
-      expect(failedScenarios).toHaveLength(0);
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
-    });
+    }
   });
 });

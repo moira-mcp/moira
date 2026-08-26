@@ -1,555 +1,2322 @@
 {
   "slug": "workflow-presentation-generator",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "a4d6cc4c-2319-4426-a788-34d410441357",
   "metadata": {
     "name": "Workflow Presentation Generator",
-    "version": "1.1.2",
-    "description": "Генерация презентационных HTML-страниц для любого Moira workflow. Анализирует структуру workflow и создаёт страницу с двумя уровнями: для бизнеса (что это, какую проблему решает) и для разработчиков (техническая схема, nodes, паттерны)."
+    "version": "2.0.0",
+    "description": "Creates a source-faithful, self-contained local HTML presentation for any authorized Moira workflow, with distinct business and technical views. It accepts an accessible Moira identity or authorized JSON path, materializes an execution-correlated workspace, obtains the complete source, validates it and generates the official full structural projection, labels source facts versus inference, scales large graphs through progressive disclosure, excludes secrets and unrelated private content, and produces network-independent HTML suitable for the Moira static sandbox. Deterministic file/HTML checks and genuinely independent semantic/visual review precede complete or reviewed-limited local delivery. Cause-owned source, content, HTML, completion and validation repair reruns stale gates; invalid criteria use independently reviewed contract correction. Autonomous mode skips only final acceptance. The workflow never mutates the source, publishes, uploads, notifies, commits, releases or deploys."
+  },
+  "variableRegistry": {
+    "operating_mode": {
+      "type": "string",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "default": "autonomous",
+      "description": "Whether final user acceptance is enabled."
+    },
+    "workspace_path": {
+      "type": "string",
+      "minLength": 1,
+      "default": "./moira-ws/workflow-presentation-generator-{{executionId}}",
+      "description": "Execution-correlated presentation workspace."
+    },
+    "workspace_process_id_file": {
+      "type": "string",
+      "minLength": 1,
+      "default": "{{executionId}}",
+      "description": "Execution identifier materialized into process-id.txt."
+    },
+    "presentation_principles": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Outcome-oriented presentation criteria materialized for all roles.",
+      "default": "# Presentation principles\n\nUse only facts present in the authorized workflow, its official structural projection or supplied context; label supported inference and unknown business context. Explain user value without inventing users, metrics or guarantees. Preserve all important starts, teleports, branches, cycles, terminals, failure routes and data flow. Keep the main narrative understandable and move complete large-graph topology into progressive disclosure or an appendix. Exclude credentials, tokens and unrelated private literals. Produce one accessible, responsive, print-friendly HTML file with embedded resources and no network dependency. Mechanical checks prove only storage and syntax properties; business accuracy, technical faithfulness, hierarchy and visual usefulness require direct independent judgment."
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "id",
+        "file"
+      ],
+      "description": "Source acquisition mode."
+    },
+    "workflow_source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Exact Moira identity or authorized JSON path."
+    },
+    "target_audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "description": "Primary presentation audience."
+    },
+    "presentation_use": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "description": "Decision or communication use."
+    },
+    "output_language": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Presentation language."
+    },
+    "presentation_scope": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 30,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      },
+      "description": "Focus, constraints, sensitivity and output requirements."
+    },
+    "result_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited"
+      ],
+      "description": "Producer-completion class reviewed with the exact presentation."
+    },
+    "presentation_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Bounded accepted result summary."
+    },
+    "limitation_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Bounded current limitations."
+    },
+    "revision_request": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000,
+      "default": "No active revision request.",
+      "description": "Active contract correction or user rework request."
+    },
+    "reentry_owner": {
+      "type": "string",
+      "enum": [
+        "source",
+        "content",
+        "html",
+        "validation",
+        "completion"
+      ],
+      "description": "Earliest stale normal owner after contract correction."
+    },
+    "terminal_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Current irreducible blocker."
+    },
+    "terminal_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited",
+        "blocked",
+        "aborted"
+      ],
+      "default": "blocked",
+      "description": "Truthful terminal class for the presentation execution."
+    },
+    "artifact_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Stable local final report path."
+    },
+    "presentation_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "default": "./moira-ws/workflow-presentation-generator-{{executionId}}/presentation.html",
+      "description": "Stable local HTML path."
+    }
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "collect-input"
+        "default": "intake"
       }
     },
     {
-      "id": "collect-input",
+      "id": "intake",
       "type": "agent-directive",
-      "directive": "Собери информацию о workflow для которого нужно создать презентацию.\n\n**СПРОСИ У ПОЛЬЗОВАТЕЛЯ:**\n1. Источник workflow:\n   - `id` — если workflow уже загружен в Moira (укажи ID, например `moira/verified-research`)\n   - `file` — если это локальный JSON файл (укажи путь)\n\n2. Дополнительный контекст (опционально):\n   - Для какой аудитории в первую очередь (заказчики, коллеги, документация)?\n   - Есть ли особые акценты которые нужно сделать?\n   - Нужны ли примеры использования?",
-      "completionCondition": "Получен источник workflow (ID или путь к файлу) и опциональный контекст",
+      "directive": "Resolve the exact authorized workflow source, primary audience and use, output language, focus/sensitivity constraints and operating mode from the request and discoverable context. Use retained examples such as moira/verified-research, never removed moira/research. Ask only for a material unknown. Return ready or blocked; do not fetch, read or mutate the source yet.",
+      "completionCondition": "The source, presentation contract and local-only authority are actionable or blocked",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "source_type": {
+          "intake_outcome": {
             "type": "string",
             "enum": [
-              "id",
-              "file"
-            ],
-            "description": "Тип источника: id (из Moira) или file (локальный JSON)"
-          },
-          "workflow_source": {
-            "type": "string",
-            "description": "ID workflow в Moira (например moira/verified-research) или путь к JSON файлу"
-          },
-          "target_audience": {
-            "type": "string",
-            "default": "общая аудитория",
-            "description": "Основная целевая аудитория презентации"
-          },
-          "special_focus": {
-            "type": "string",
-            "default": "",
-            "description": "Особые акценты или требования к презентации"
+              "ready",
+              "blocked"
+            ]
           }
         },
         "required": [
+          "intake_outcome",
+          "operating_mode"
+        ],
+        "globalInputs": [
+          "operating_mode",
           "source_type",
-          "workflow_source"
+          "workflow_source",
+          "target_audience",
+          "presentation_use",
+          "output_language",
+          "presentation_scope",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "intake_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "intake_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "source_type",
+                "workflow_source",
+                "target_audience",
+                "presentation_use",
+                "output_language",
+                "presentation_scope"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-source"
+        "success": "route-intake-ready"
       }
     },
     {
-      "id": "route-source",
+      "id": "route-intake-ready",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "collect-input.source_type"
+          "contextPath": "intake.intake_outcome"
         },
-        "right": "id"
+        "right": "ready"
       },
       "connections": {
-        "true": "fetch-workflow-by-id",
-        "false": "load-workflow-from-file"
+        "true": "materialize-workspace",
+        "false": "finalize-intake-blocked"
       }
     },
     {
-      "id": "fetch-workflow-by-id",
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "presentation-principles.md",
+          "from": "presentation_principles"
+        },
+        {
+          "path": "presentation-contract.md",
+          "content": ""
+        },
+        {
+          "path": "source-provenance.md",
+          "content": ""
+        },
+        {
+          "path": "workflow.json",
+          "content": ""
+        },
+        {
+          "path": "workflow-schema.txt",
+          "content": ""
+        },
+        {
+          "path": "presentation-content.md",
+          "content": ""
+        },
+        {
+          "path": "presentation.html",
+          "content": ""
+        },
+        {
+          "path": "limitations.md",
+          "content": ""
+        },
+        {
+          "path": "completion.md",
+          "content": ""
+        },
+        {
+          "path": "presentation-validation.md",
+          "content": ""
+        },
+        {
+          "path": "presentation-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "corrected-contract.md",
+          "content": ""
+        },
+        {
+          "path": "corrected-contract-findings.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "initialize-contract",
+        "error": "finalize-workspace-blocked"
+      }
+    },
+    {
+      "id": "initialize-contract",
       "type": "agent-directive",
-      "directive": "Получи workflow из Moira по ID.\n\n**WORKFLOW ID:** {{collect-input.workflow_source}}\n\n**ДЕЙСТВИЕ:**\n1. Используй MCP tool `mcp__moira__manage` с action: \"get\" и workflowId: \"{{collect-input.workflow_source}}\"\n2. Сохрани полученный JSON workflow\n\n**ЕСЛИ ОШИБКА:**\n- Workflow не найден — установи fetch_status = \"error\"\n- Нет доступа — установи fetch_status = \"error\"",
-      "completionCondition": "Workflow получен из Moira API или зафиксирована ошибка",
+      "directive": "Work only in {{workspace_path}}. Write immutable presentation-contract.md from source {{workflow_source}}, type {{source_type}}, audience {{target_audience}}, use {{presentation_use}}, language {{output_language}}, scope {{presentation_scope}} and local-only authority. Initialize repair-account.md with a factual header. Return ready or blocked.",
+      "completionCondition": "The immutable contract exists or its blocker is explicit",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "fetch_status": {
+          "contract_outcome": {
             "type": "string",
             "enum": [
-              "success",
-              "error"
-            ],
-            "description": "Статус получения workflow"
+              "ready",
+              "blocked"
+            ]
           }
         },
         "required": [
-          "fetch_status"
+          "contract_outcome"
         ],
         "globalInputs": [
-          "workflow_json",
-          "error_message"
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "contract_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ]
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-fetch-status"
+        "success": "route-contract-ready"
       }
     },
     {
-      "id": "route-fetch-status",
+      "id": "route-contract-ready",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "fetch-workflow-by-id.fetch_status"
+          "contextPath": "initialize-contract.contract_outcome"
         },
-        "right": "success"
+        "right": "ready"
       },
       "connections": {
-        "true": "setup-workspace",
-        "false": "handle-error"
+        "true": "prepare-source",
+        "false": "finalize-blocked"
       }
     },
     {
-      "id": "load-workflow-from-file",
+      "id": "prepare-source",
       "type": "agent-directive",
-      "directive": "Загрузи workflow из локального JSON файла.\n\n**ПУТЬ К ФАЙЛУ:** {{collect-input.workflow_source}}\n\n**ДЕЙСТВИЕ:**\n1. Прочитай файл по указанному пути\n2. Распарси JSON\n3. Проверь что это валидный Moira workflow (есть metadata, nodes)\n\n**ЕСЛИ ОШИБКА:**\n- Файл не найден — установи load_status = \"error\"\n- Невалидный JSON — установи load_status = \"error\"\n- Не workflow — установи load_status = \"error\"",
-      "completionCondition": "Workflow загружен из файла или зафиксирована ошибка",
+      "directive": "Work only in {{workspace_path}}. Read the effective contract and revision_request {{revision_request}}. For source_type=id, obtain one complete authorized definition through a download token; do not use a bounded node page. For source_type=file, read the exact authorized path. Preserve complete candidates, record identity/provenance and select one without mechanical merge. Write workflow.json and source-provenance.md, validate the exact source with official moira-workflow, generate and inspect the exact complete workflow-schema.txt, and confirm semantic meaning in JSON. Never mutate the source or copy it into context. When a current presentation-validation.md or presentation-review.md assigns a finding to this owner, reproduce the complete owner-local class, append one factual repair-account entry, then update the owned artifact. Return replan for an invalid/non-local criterion and blocked for an irreducible failure.",
+      "completionCondition": "The exact complete source and official projection are current or the upstream/blocked cause is explicit",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "load_status": {
+          "source_outcome": {
             "type": "string",
             "enum": [
-              "success",
-              "error"
-            ],
-            "description": "Статус загрузки workflow"
+              "ready",
+              "replan",
+              "blocked"
+            ]
           }
         },
         "required": [
-          "load_status"
+          "source_outcome"
         ],
         "globalInputs": [
-          "workflow_json",
-          "error_message"
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "source_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "source_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "source_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "source_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-load-status"
+        "success": "route-source-ready"
       }
     },
     {
-      "id": "route-load-status",
+      "id": "route-source-ready",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "load-workflow-from-file.load_status"
+          "contextPath": "prepare-source.source_outcome"
         },
-        "right": "success"
+        "right": "ready"
       },
       "connections": {
-        "true": "setup-workspace",
-        "false": "handle-error"
+        "true": "develop-content",
+        "false": "route-source-replan"
       }
     },
     {
-      "id": "handle-error",
-      "type": "agent-directive",
-      "directive": "Произошла ошибка при загрузке workflow.\n\n**СООБЩЕНИЕ ОБ ОШИБКЕ:** {{error_message}}\n\n**ДЕЙСТВИЕ:**\nСообщи пользователю об ошибке и предложи:\n1. Проверить правильность ID или пути к файлу\n2. Убедиться что workflow существует и доступен\n3. Попробовать другой источник",
-      "completionCondition": "Пользователь информирован об ошибке",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "error_reported"
-        ],
-        "globalInputs": [
-          "error_reported"
-        ]
+      "id": "route-source-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "prepare-source.source_outcome"
+        },
+        "right": "replan"
       },
       "connections": {
-        "success": "end"
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
       }
     },
     {
-      "id": "setup-workspace",
+      "id": "develop-content",
       "type": "agent-directive",
-      "directive": "Создай рабочую директорию для генерации презентации.\n\n**ДЕЙСТВИЕ:**\n1. Создай директорию: `./moira-ws/presentation-{workflow-id}-YYYYMMDD-HHMM/`\n   (замени {workflow-id} на ID workflow, YYYYMMDD-HHMM на текущую дату и время)\n2. Сохрани workflow.json в эту директорию для референса\n\n**СТРУКТУРА:**\n```\n./moira-ws/presentation-{workflow-id}-{timestamp}/\n├── workflow.json      # Исходный workflow\n├── analysis.md        # Результаты анализа (будет создан)\n├── presentation.html  # Финальная презентация (будет создана)\n```",
-      "completionCondition": "Рабочая директория создана, workflow.json сохранён",
+      "directive": "Work only in {{workspace_path}}. Read the effective contract, presentation-principles.md, complete workflow.json, source-provenance.md, workflow-schema.txt and revision_request {{revision_request}}. Write presentation-content.md and limitations.md. Ground business purpose and examples in source facts or label supported inference/unknowns. Explain all important starts, teleports, branches, cycles, terminals, failures and data flow. For large graphs keep an understandable main narrative plus complete searchable/collapsible topology or appendix. Exclude credentials, tokens and unrelated private literals. When a current presentation-validation.md or presentation-review.md assigns a finding to this owner, reproduce the complete owner-local class, append one factual repair-account entry, then update the owned artifact. Return replan for an invalid/non-local criterion and blocked for an irreducible failure.",
+      "completionCondition": "Source-grounded business and complete scale-appropriate technical content are current or blocked/replanned",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "workspace_path": {
+          "content_outcome": {
             "type": "string",
-            "description": "Полный путь к созданной рабочей директории"
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
           }
         },
         "required": [
-          "workspace_path"
-        ]
-      },
-      "connections": {
-        "success": "analyze-workflow"
-      }
-    },
-    {
-      "id": "analyze-workflow",
-      "type": "agent-directive",
-      "directive": "Проанализируй структуру workflow и извлеки информацию для презентации.\n\n**WORKFLOW:** {{setup-workspace.workspace_path}}/workflow.json\n\n**ИЗВЛЕКИ:**\n\n1. **Metadata:**\n   - name, version, description\n   - visibility (public/private)\n\n2. **Бизнес-цель:**\n   - Какую проблему решает этот workflow?\n   - Кто целевая аудитория?\n   - Какой результат получает пользователь?\n\n3. **Техническая структура:**\n   - Список всех nodes с их типами\n   - Connections между nodes (построй граф)\n   - Используемые паттерны (validation loop, branching, etc.)\n   - Ключевые переменные из initialData\n\n4. **Flow:**\n   - Опиши последовательность шагов\n   - Где есть условия (branching)\n   - Где есть циклы (validation loops)\n\n**СОХРАНИ** результаты анализа в `{{setup-workspace.workspace_path}}/analysis.md`\n\n**ВЕРНИ:** patterns_summary — строку с перечислением найденных паттернов через запятую",
-      "completionCondition": "Анализ завершён, файл analysis.md создан с полной информацией о workflow",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "workflow_name": {
-            "type": "string",
-            "description": "Название workflow из metadata"
-          },
-          "workflow_description": {
-            "type": "string",
-            "description": "Описание из metadata"
-          },
-          "node_count": {
-            "type": "number",
-            "description": "Количество nodes в workflow"
-          },
-          "patterns_summary": {
-            "type": "string",
-            "description": "Выявленные паттерны через запятую (например: validation-loop, branching, workspace)"
+          "content_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "content_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "content_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "content_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "content_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           }
+        ]
+      },
+      "connections": {
+        "success": "route-content-ready"
+      }
+    },
+    {
+      "id": "route-content-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "develop-content.content_outcome"
         },
-        "required": [
-          "workflow_name",
-          "business_purpose",
-          "node_count",
-          "patterns_summary"
-        ],
-        "globalInputs": [
-          "business_purpose"
-        ]
+        "right": "ready"
       },
       "connections": {
-        "success": "generate-business-content"
+        "true": "generate-html",
+        "false": "route-content-replan"
       }
     },
     {
-      "id": "generate-business-content",
-      "type": "agent-directive",
-      "directive": "Создай контент для бизнес-секции презентации (для нетехнарей).\n\n**ИСХОДНЫЕ ДАННЫЕ:** {{setup-workspace.workspace_path}}/analysis.md\n**ЦЕЛЕВАЯ АУДИТОРИЯ:** {{collect-input.target_audience}}\n**ОСОБЫЕ АКЦЕНТЫ:** {{collect-input.special_focus}}\n\n**СТРУКТУРА СЕКЦИИ:**\n{{business_section_structure}}\n\n**ПРАВИЛА НАПИСАНИЯ:**\n{{business_writing_rules}}\n\n**ВАЖНО:**\n- Объясни что такое Moira если это не очевидно из контекста\n- Используй аналогии из реальной жизни\n- Фокусируйся на пользе и результате\n- Избегай технических терминов или объясняй их\n\n**СОХРАНИ** контент в `{{setup-workspace.workspace_path}}/business-content.md`",
-      "completionCondition": "Бизнес-контент создан, понятен без технического бэкграунда",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "business_content_ready"
-        ],
-        "globalInputs": [
-          "business_content_ready"
-        ]
+      "id": "route-content-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "develop-content.content_outcome"
+        },
+        "right": "replan"
       },
       "connections": {
-        "success": "generate-technical-content"
-      }
-    },
-    {
-      "id": "generate-technical-content",
-      "type": "agent-directive",
-      "directive": "Создай контент для технической секции презентации (для разработчиков).\n\n**ИСХОДНЫЕ ДАННЫЕ:** {{setup-workspace.workspace_path}}/analysis.md\n\n**СТРУКТУРА СЕКЦИИ:**\n{{technical_section_structure}}\n\n**ПРАВИЛА НАПИСАНИЯ:**\n{{technical_writing_rules}}\n\n**ОБЯЗАТЕЛЬНО ВКЛЮЧИ:**\n1. Текстовую диаграмму workflow (ASCII art или box-drawing characters)\n2. Таблицу nodes с описанием каждого\n3. Список используемых паттернов с объяснением\n4. Примеры ключевых переменных из initialData\n\n**СОХРАНИ** контент в `{{setup-workspace.workspace_path}}/technical-content.md`",
-      "completionCondition": "Технический контент создан, включает диаграмму и описание всех nodes",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "technical_content_ready",
-          "diagram_included",
-          "all_nodes_described"
-        ],
-        "globalInputs": [
-          "technical_content_ready",
-          "diagram_included",
-          "all_nodes_described"
-        ]
-      },
-      "connections": {
-        "success": "generate-html"
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
       }
     },
     {
       "id": "generate-html",
       "type": "agent-directive",
-      "directive": "Сгенерируй финальную HTML страницу презентации.\n\n**ИСХОДНЫЕ ФАЙЛЫ:**\n- {{setup-workspace.workspace_path}}/business-content.md\n- {{setup-workspace.workspace_path}}/technical-content.md\n\n**ТРЕБОВАНИЯ К HTML:**\n{{html_requirements}}\n\n**СТРУКТУРА СТРАНИЦЫ:**\n1. Header с названием workflow: {{analyze-workflow.workflow_name}}\n2. Навигация между секциями\n3. Секция \"Простыми словами\" — для бизнеса\n4. Секция \"Для разработчиков\" — техническая\n5. Footer с информацией о Moira\n\n**СОХРАНИ** HTML в `{{setup-workspace.workspace_path}}/presentation.html`\n\n**ИНИЦИАЛИЗАЦИЯ счётчика:** fix_iteration = 0",
-      "completionCondition": "HTML страница создана, включает обе секции, стили встроены",
+      "directive": "Work only in {{workspace_path}}. Read the effective contract, presentation-principles.md, presentation-content.md, workflow-schema.txt, limitations.md and revision_request {{revision_request}}. Build presentation.html as one parseable self-contained file with embedded CSS/optional JS, semantic headings, keyboard-usable navigation, responsive and print styles, and progressive disclosure. Use native embedded HTML/CSS/SVG for diagrams. Do not use external scripts, fonts, styles, fetch/XHR/WebSocket, forms, CDNs or another runtime dependency. When a current presentation-validation.md or presentation-review.md assigns a finding to this owner, reproduce the complete owner-local class, append one factual repair-account entry, then update the owned artifact. Return replan for an invalid/non-local criterion and blocked for an irreducible failure.",
+      "completionCondition": "The exact self-contained HTML is current or blocked/replanned",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "html_file_path": {
+          "html_outcome": {
             "type": "string",
-            "description": "Путь к созданному HTML файлу"
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
           }
         },
         "required": [
-          "html_created",
-          "html_file_path"
+          "html_outcome"
         ],
         "globalInputs": [
-          "html_created",
-          "fix_iteration"
-        ]
-      },
-      "connections": {
-        "success": "verify-presentation"
-      }
-    },
-    {
-      "id": "verify-presentation",
-      "type": "agent-directive",
-      "directive": "Re-validation pass {{fix_iteration}} of up to 3 — a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nПроверь качество созданной презентации.\n\n**ФАЙЛ:** {{generate-html.html_file_path}}\n\n**ЧЕКЛИСТ ПРОВЕРКИ:**\n{{quality_checklist}}\n\n**ДОПОЛНИТЕЛЬНЫЕ ПРОВЕРКИ:**\n- HTML синтаксис валиден\n- Все секции на месте\n- Навигация работает (якоря корректны)\n- Текст читаем (нет обрезанных слов, правильные переносы)\n- Диаграмма workflow отображается корректно\n\n**РЕЗУЛЬТАТ:**\n- Если всё ок: issues_count = 0\n- Если есть проблемы: перечисли их в issues_description и укажи issues_count",
-      "completionCondition": "Проверка завершена, issues_count определён",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "issues_count": {
-            "type": "number",
-            "minimum": 0,
-            "description": "Количество найденных проблем"
-          },
-          "issues_description": {
-            "type": "string",
-            "description": "Описание найденных проблем (если есть)"
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "html_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "html_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "html_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "html_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
           }
-        },
-        "required": [
-          "issues_count"
-        ],
-        "globalInputs": [
-          "verification_notes"
         ]
       },
       "connections": {
-        "success": "route-validation"
+        "success": "route-html-ready"
       }
     },
     {
-      "id": "route-validation",
+      "id": "route-html-ready",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "verify-presentation.issues_count"
+          "contextPath": "generate-html.html_outcome"
         },
-        "right": 0
+        "right": "ready"
       },
       "connections": {
-        "true": "save-output",
-        "false": "check-max-iterations"
+        "true": "complete-presentation",
+        "false": "route-html-replan"
       }
     },
     {
-      "id": "check-max-iterations",
+      "id": "route-html-replan",
       "type": "condition",
       "condition": {
-        "operator": "lt",
+        "operator": "eq",
         "left": {
-          "contextPath": "fix_iteration"
+          "contextPath": "generate-html.html_outcome"
         },
-        "right": 3
+        "right": "replan"
       },
       "connections": {
-        "true": "fix-presentation",
-        "false": "save-output-with-issues"
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
       }
     },
     {
-      "id": "fix-presentation",
+      "id": "complete-presentation",
       "type": "agent-directive",
-      "directive": "Исправь найденные проблемы в презентации.\n\n**ПРОБЛЕМЫ:**\n{{verify-presentation.issues_description}}\n\n**ФАЙЛ:** {{generate-html.html_file_path}}\n\n**ДЕЙСТВИЕ:**\n1. Прочитай HTML файл\n2. Исправь каждую проблему из описания\n3. Сохрани исправленный файл\n\n**ВАЖНО:** Исправляй только указанные проблемы, не меняй остальное.\n\n**УВЕЛИЧЬ счётчик:** fix_iteration = {{fix_iteration}} + 1",
-      "completionCondition": "Все проблемы из списка исправлены",
+      "directive": "Work only in {{workspace_path}}. Reread the effective contract, source/projection, content, exact HTML and limitations. When current validation/review assigns a completion finding, reproduce it and append repair-account.md. Close foreseeable omissions, atomically write completion.md and return matching result_status, presentation_summary and limitation_summary. Complete requires full contracted support; limited is allowed only for a useful result with explicit non-critical source-context or rendering limitations. Invalid or self-inconsistent HTML is blocked. When a current presentation-validation.md or presentation-review.md assigns a finding to this owner, reproduce the complete owner-local class, append one factual repair-account entry, then update the owned artifact. Return replan for an invalid/non-local criterion and blocked for an irreducible failure.",
+      "completionCondition": "The exact result is producer-complete and truthfully classified or blocked/replanned",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "completion_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
         "required": [
-          "fixes_applied",
-          "fix_iteration"
+          "completion_outcome"
         ],
         "globalInputs": [
-          "fixes_applied",
-          "fix_iteration"
+          "result_status",
+          "presentation_summary",
+          "limitation_summary",
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completion_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "completion_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "result_status",
+                "presentation_summary",
+                "limitation_summary",
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "completion_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "completion_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "result_status"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "presentation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitation_summary"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "result_status"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "presentation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitation_summary"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "verify-presentation"
+        "success": "route-completion-ready"
       }
     },
     {
-      "id": "save-output-with-issues",
+      "id": "route-completion-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "complete-presentation.completion_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "validate-presentation",
+        "false": "route-completion-replan"
+      }
+    },
+    {
+      "id": "route-completion-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "complete-presentation.completion_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "validate-presentation",
       "type": "agent-directive",
-      "directive": "Достигнут лимит итераций исправлений ({{max_fix_iterations}}).\n\n**ОСТАВШИЕСЯ ПРОБЛЕМЫ:**\n{{verify-presentation.issues_description}}\n\n**ДЕЙСТВИЕ:**\nСообщи пользователю что:\n1. Презентация создана но содержит некоторые проблемы\n2. Укажи какие проблемы остались\n3. Укажи путь к файлу: {{generate-html.html_file_path}}\n4. Предложи вручную исправить оставшиеся проблемы",
-      "completionCondition": "Пользователь информирован о проблемах",
+      "directive": "Work only in {{workspace_path}}. Read the exact contract, source/projection identity, presentation.html, limitations.md and completion.md. Overwrite presentation-validation.md with deterministic observations only: required files, source/projection identity, parseable HTML, internal anchors, embedded resources and absence of network/runtime dependencies. When the previous report assigns validation as owner, repair only the observation method/report. Do not infer business accuracy, technical faithfulness, visual hierarchy or audience fit. Return pass, one earliest repair owner, replan or blocked.",
+      "completionCondition": "One exact modality-correct deterministic report is current",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "validation_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "source",
+              "content",
+              "html",
+              "validation",
+              "completion"
+            ]
+          }
+        },
         "required": [
-          "output_delivered",
-          "final_html_path"
+          "validation_outcome"
         ],
         "globalInputs": [
-          "output_delivered",
-          "final_html_path"
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "validation_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "validation_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "repair_owner"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "if": {
+                  "properties": {
+                    "validation_outcome": {
+                      "const": "blocked"
+                    }
+                  },
+                  "required": [
+                    "validation_outcome"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "terminal_reason"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [
+                    "revision_request"
+                  ],
+                  "properties": {
+                    "revision_request": {
+                      "const": "No active revision request."
+                    }
+                  },
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "terminal_reason"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "end"
+        "success": "route-validation-pass"
       }
     },
     {
-      "id": "save-output",
+      "id": "route-validation-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.validation_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "presentation-review",
+        "false": "route-validation-repair"
+      }
+    },
+    {
+      "id": "route-validation-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.validation_outcome"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "route-validation-owner-source",
+        "false": "route-validation-replan"
+      }
+    },
+    {
+      "id": "route-validation-owner-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.repair_owner"
+        },
+        "right": "source"
+      },
+      "connections": {
+        "true": "prepare-source",
+        "false": "route-validation-owner-content"
+      }
+    },
+    {
+      "id": "route-validation-owner-content",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.repair_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "develop-content",
+        "false": "route-validation-owner-html"
+      }
+    },
+    {
+      "id": "route-validation-owner-html",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.repair_owner"
+        },
+        "right": "html"
+      },
+      "connections": {
+        "true": "generate-html",
+        "false": "route-validation-owner-validation"
+      }
+    },
+    {
+      "id": "route-validation-owner-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.repair_owner"
+        },
+        "right": "validation"
+      },
+      "connections": {
+        "true": "validate-presentation",
+        "false": "complete-presentation"
+      }
+    },
+    {
+      "id": "route-validation-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-presentation.validation_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "presentation-review",
       "type": "agent-directive",
-      "directive": "Финализируй и сохрани презентацию.\n\n**WORKSPACE:** {{setup-workspace.workspace_path}}\n**HTML FILE:** {{generate-html.html_file_path}}\n\n**ДЕЙСТВИЯ:**\n1. Сообщи пользователю что презентация готова\n2. Укажи путь к файлу: {{generate-html.html_file_path}}\n3. Предложи:\n   - Открыть в браузере для просмотра\n   - Загрузить на статик-хостер (upload-static команда)\n   - Скопировать в другое место\n\n**РЕЗЮМЕ:**\n- Workflow: {{analyze-workflow.workflow_name}}\n- Описание: {{analyze-workflow.workflow_description}}\n- Nodes: {{analyze-workflow.node_count}}\n- Паттерны: {{analyze-workflow.patterns_summary}}",
-      "completionCondition": "Пользователь информирован о готовности презентации",
+      "directive": "Work only in {{workspace_path}}. Delegate one genuinely independent whole-result reviewer; if no independent mechanism exists, return blocked. The reviewer reads the exact contract, source JSON, provenance, complete projection, content, HTML, limitations, completion and validation. It judges business accuracy, supported inference, technical faithfulness, progressive disclosure, sensitive-data safety, hierarchy, accessibility and usefulness; render/screenshots in a network-disabled environment when supported and record an honest limitation otherwise. Overwrite presentation-review.md with all current blockers or zero findings. Diagnose, never repair. Return pass, one earliest repair owner, replan or blocked.",
+      "completionCondition": "One independent exact-result review owns every current blocker by earliest cause",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "source",
+              "content",
+              "html",
+              "validation",
+              "completion"
+            ]
+          }
+        },
         "required": [
-          "output_delivered",
-          "final_html_path"
+          "review_outcome"
         ],
         "globalInputs": [
-          "output_delivered",
-          "final_html_path"
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "review_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "review_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "repair_owner"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "if": {
+                  "properties": {
+                    "review_outcome": {
+                      "const": "blocked"
+                    }
+                  },
+                  "required": [
+                    "review_outcome"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "terminal_reason"
+                  ],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [],
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "repair_owner"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "revision_request"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "terminal_reason"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "end"
+        "success": "route-review-pass"
       }
     },
     {
-      "id": "end",
-      "type": "end"
+      "id": "route-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-mode",
+        "false": "route-review-repair"
+      }
+    },
+    {
+      "id": "route-review-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.review_outcome"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "route-review-owner-source",
+        "false": "route-review-replan"
+      }
+    },
+    {
+      "id": "route-review-owner-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.repair_owner"
+        },
+        "right": "source"
+      },
+      "connections": {
+        "true": "prepare-source",
+        "false": "route-review-owner-content"
+      }
+    },
+    {
+      "id": "route-review-owner-content",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.repair_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "develop-content",
+        "false": "route-review-owner-html"
+      }
+    },
+    {
+      "id": "route-review-owner-html",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.repair_owner"
+        },
+        "right": "html"
+      },
+      "connections": {
+        "true": "generate-html",
+        "false": "route-review-owner-validation"
+      }
+    },
+    {
+      "id": "route-review-owner-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.repair_owner"
+        },
+        "right": "validation"
+      },
+      "connections": {
+        "true": "validate-presentation",
+        "false": "complete-presentation"
+      }
+    },
+    {
+      "id": "route-review-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "presentation-review.review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Reassess active revision_request {{revision_request}} against immutable presentation-contract.md, repair-account.md and accepted corrected-contract.md. Never change originating source/sensitivity/local-only authority. Overwrite corrected-contract.md with one cumulative bounded correction and name earliest reentry_owner source|content|html|validation|completion. Return corrected or blocked.",
+      "completionCondition": "A bounded authority-preserving correction and earliest re-entry exist or are blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "corrected",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "globalInputs": [
+          "reentry_owner",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "corrected"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge",
+                "reentry_owner"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "changed_knowledge"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "reentry_owner"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-corrected"
+      }
+    },
+    {
+      "id": "route-reassessment-corrected",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "corrected"
+      },
+      "connections": {
+        "true": "corrected-contract-review",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "corrected-contract-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate independent review of corrected-contract.md against immutable presentation-contract.md, repair-account.md and earlier accepted corrections. Overwrite corrected-contract-findings.md. Pass only when goal, source, sensitivity and local-only authority are preserved and reentry_owner is earliest; replan repeats reassessment with changed knowledge; blocked ends truthfully.",
+      "completionCondition": "The cumulative correction independently passes or its replan/blocked cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "contract_review_outcome"
+        ],
+        "globalInputs": [
+          "revision_request",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_review_outcome": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "contract_review_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "contract_review_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "contract_review_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "revision_request"
+                ],
+                "properties": {
+                  "revision_request": {
+                    "not": {
+                      "const": "No active revision request."
+                    }
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "revision_request"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-contract-review-pass"
+      }
+    },
+    {
+      "id": "route-contract-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.contract_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-reentry-source",
+        "false": "route-contract-review-blocked"
+      }
+    },
+    {
+      "id": "route-contract-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.contract_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-reentry-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "source"
+      },
+      "connections": {
+        "true": "prepare-source",
+        "false": "route-reentry-content"
+      }
+    },
+    {
+      "id": "route-reentry-content",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "develop-content",
+        "false": "route-reentry-html"
+      }
+    },
+    {
+      "id": "route-reentry-html",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "html"
+      },
+      "connections": {
+        "true": "generate-html",
+        "false": "route-reentry-validation"
+      }
+    },
+    {
+      "id": "route-reentry-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "validation"
+      },
+      "connections": {
+        "true": "validate-presentation",
+        "false": "complete-presentation"
+      }
+    },
+    {
+      "id": "route-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "interactive-acceptance",
+        "false": "route-final-status"
+      }
+    },
+    {
+      "id": "interactive-acceptance",
+      "type": "agent-directive",
+      "directive": "Present the independently accepted local HTML at {{presentation_path}}, summary {{presentation_summary}} and limitations {{limitation_summary}}. Ask to accept, abort or request one concrete source|content|html|validation|completion|contract rework with nonblank revision_request. Do not infer publication or copy authority.",
+      "completionCondition": "The user accepted, aborted or supplied one owner-scoped rework request",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "rework_owner": {
+            "type": "string",
+            "enum": [
+              "source",
+              "content",
+              "html",
+              "validation",
+              "completion",
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "user_decision"
+        ],
+        "globalInputs": [
+          "revision_request"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "user_decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "user_decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "rework_owner",
+                "revision_request"
+              ],
+              "properties": {
+                "revision_request": {
+                  "not": {
+                    "const": "No active revision request."
+                  }
+                }
+              }
+            },
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "rework_owner"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "revision_request"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-user-accept"
+      }
+    },
+    {
+      "id": "route-user-accept",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.user_decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "route-final-status",
+        "false": "route-user-abort"
+      }
+    },
+    {
+      "id": "route-user-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.user_decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "finalize-aborted",
+        "false": "route-rework-source"
+      }
+    },
+    {
+      "id": "route-rework-source",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "source"
+      },
+      "connections": {
+        "true": "prepare-source",
+        "false": "route-rework-content"
+      }
+    },
+    {
+      "id": "route-rework-content",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "content"
+      },
+      "connections": {
+        "true": "develop-content",
+        "false": "route-rework-html"
+      }
+    },
+    {
+      "id": "route-rework-html",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "html"
+      },
+      "connections": {
+        "true": "generate-html",
+        "false": "route-rework-validation"
+      }
+    },
+    {
+      "id": "route-rework-validation",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "validation"
+      },
+      "connections": {
+        "true": "validate-presentation",
+        "false": "route-rework-completion"
+      }
+    },
+    {
+      "id": "route-rework-completion",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "completion"
+      },
+      "connections": {
+        "true": "complete-presentation",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-final-status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "result_status"
+        },
+        "right": "complete"
+      },
+      "connections": {
+        "true": "finalize-complete",
+        "false": "finalize-limited"
+      }
+    },
+    {
+      "id": "finalize-complete",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read completion.md and write final-report.md for the exact accepted complete local presentation. Preserve presentation_path {{presentation_path}}, summary {{presentation_summary}} and limitations {{limitation_summary}}. Do not upload, publish, copy or notify.",
+      "completionCondition": "The truthful local terminal report is current without reclassifying the accepted result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "complete"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-complete"
+      }
+    },
+    {
+      "id": "finalize-limited",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read completion.md and write final-report.md for the exact accepted reviewed-limited local presentation, prominently preserving presentation_path {{presentation_path}} and limitations {{limitation_summary}}. Do not upload, publish, copy or notify.",
+      "completionCondition": "The truthful local terminal report is current without reclassifying the accepted result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "limited"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-limited"
+      }
+    },
+    {
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md with useful completed work, blocker {{terminal_reason}} and recovery action. Do not claim acceptance or external delivery.",
+      "completionCondition": "The truthful local terminal report is current without reclassifying the accepted result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md with the user's abort and useful completed local work; do not claim acceptance.",
+      "completionCondition": "The truthful local terminal report is current without reclassifying the accepted result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "aborted"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "finalize-workspace-blocked",
+      "type": "agent-directive",
+      "directive": "Report the observed workspace materialization failure as terminal_reason with a concrete recovery action; do not claim artifact paths.",
+      "completionCondition": "The truthful local terminal report is current without reclassifying the accepted result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "terminal_status",
+          "terminal_reason"
+        ],
+        "globalInputs": [
+          "terminal_status",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-workspace-blocked"
+      }
+    },
+    {
+      "id": "finalize-intake-blocked",
+      "type": "agent-directive",
+      "directive": "Report the pre-workspace intake blocker {{terminal_reason}} and recovery action without claiming artifact paths.",
+      "completionCondition": "The truthful local terminal report is current without reclassifying the accepted result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-intake-blocked"
+      }
+    },
+    {
+      "id": "end-complete",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "presentation_path",
+        "presentation_summary",
+        "limitation_summary"
+      ]
+    },
+    {
+      "id": "end-limited",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "presentation_path",
+        "presentation_summary",
+        "limitation_summary"
+      ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "terminal_reason"
+      ]
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "presentation_path"
+      ]
+    },
+    {
+      "id": "end-workspace-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "terminal_reason"
+      ]
+    },
+    {
+      "id": "end-intake-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "terminal_reason"
+      ]
+    },
+    {
+      "id": "revise-process",
+      "type": "teleport",
+      "hint": "Use only when the presentation process, interpretation or criterion itself is invalid, not for an ordinary source, validation or review finding.",
+      "directive": "Return one nonblank revision_request that corrects the remaining presentation process while preserving originating source, sensitivity and local-only authority and naming still-valid work. Do not bypass an ordinary failed gate.",
+      "completionCondition": "The bounded process correction can enter independent corrected-contract review",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "revision_request"
+        ],
+        "globalInputs": [
+          "revision_request"
+        ],
+        "allOf": [
+          {
+            "not": {
+              "properties": {
+                "revision_request": {
+                  "const": "No active revision request."
+                }
+              },
+              "required": [
+                "revision_request"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "reassess-contract"
+      }
     }
   ],
-  "variableRegistry": {
-    "business_section_structure": {
-      "type": "string",
-      "description": "Structure template for business content section",
-      "default": "1. Executive Summary\n2. Problem & Solution\n3. User Journey\n4. Business Value\n5. Success Metrics"
-    },
-    "business_writing_rules": {
-      "type": "string",
-      "description": "Writing guidelines for business content",
-      "default": "Write for non-technical stakeholders. Use clear language, avoid jargon. Include concrete examples and metrics. Focus on business outcomes and user value."
-    },
-    "technical_section_structure": {
-      "type": "string",
-      "description": "Structure template for technical content section",
-      "default": "1. Architecture Overview\n2. Node Flow Diagram\n3. Node Descriptions\n4. Condition Logic\n5. Integration Points\n6. Error Handling"
-    },
-    "technical_writing_rules": {
-      "type": "string",
-      "description": "Writing guidelines for technical content",
-      "default": "Be precise and specific. Include node IDs and connection details. Document all condition logic. Use diagrams where helpful. Cover edge cases and error paths."
-    },
-    "quality_checklist": {
-      "type": "string",
-      "description": "Checklist for presentation quality verification",
-      "default": "1. All nodes described\n2. All connections documented\n3. Condition logic explained\n4. Business value articulated\n5. Diagrams included\n6. No broken HTML\n7. Responsive layout\n8. Consistent styling"
-    },
-    "html_requirements": {
-      "type": "string",
-      "description": "Requirements for HTML presentation generation",
-      "default": "Single-file HTML with embedded CSS/JS. Responsive design. Clean typography. Syntax highlighting for code. Mermaid diagrams for flow visualization. Print-friendly layout."
-    },
-    "max_fix_iterations": {
-      "type": "number",
-      "description": "Maximum number of fix iterations before accepting with issues",
-      "default": 3
-    },
-    "all_nodes_described": {
-      "type": "string",
-      "description": "Workflow-global all_nodes_described",
-      "enum": [
-        "yes",
-        "no"
-      ]
-    },
-    "business_content_ready": {
-      "type": "string",
-      "description": "Workflow-global business_content_ready",
-      "enum": [
-        "yes"
-      ]
-    },
-    "business_purpose": {
-      "type": "string",
-      "description": "Workflow-global business_purpose"
-    },
-    "diagram_included": {
-      "type": "string",
-      "description": "Workflow-global diagram_included",
-      "enum": [
-        "yes",
-        "no"
-      ]
-    },
-    "error_message": {
-      "type": "string",
-      "description": "Workflow-global error_message"
-    },
-    "error_reported": {
-      "type": "string",
-      "description": "Workflow-global error_reported",
-      "enum": [
-        "yes"
-      ]
-    },
-    "final_html_path": {
-      "type": "string",
-      "description": "Workflow-global final_html_path"
-    },
-    "fix_iteration": {
-      "type": "number",
-      "description": "Workflow-global fix_iteration"
-    },
-    "fixes_applied": {
-      "type": "string",
-      "description": "Workflow-global fixes_applied",
-      "enum": [
-        "yes"
-      ]
-    },
-    "html_created": {
-      "type": "string",
-      "description": "Workflow-global html_created",
-      "enum": [
-        "yes"
-      ]
-    },
-    "output_delivered": {
-      "type": "string",
-      "description": "Workflow-global output_delivered",
-      "enum": [
-        "yes"
-      ]
-    },
-    "technical_content_ready": {
-      "type": "string",
-      "description": "Workflow-global technical_content_ready",
-      "enum": [
-        "yes"
-      ]
-    },
-    "verification_notes": {
-      "type": "string",
-      "description": "Workflow-global verification_notes"
-    },
-    "workflow_json": {
-      "type": "object",
-      "description": "Workflow-global workflow_json"
-    }
-  }
+  "owner": "system-moira",
+  "visibility": "public"
 }
