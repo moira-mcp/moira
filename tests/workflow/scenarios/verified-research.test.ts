@@ -1,387 +1,640 @@
-/**
- * verified-research Scenario Tests
- *
- * Linear verified-research workflow for investigating topics.
- * Path: question → methodology → gather → read → alternative → synthesize → limitations → output → end
- *
- * Coverage target: 100% nodes (10), 100% branches
- */
-
+/** Contract and route scenarios for moira/verified-research v3. */
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  GraphExecutionEngine,
+  GraphValidator,
+  MaterializeHandler,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
+import { calculateCoverage } from "../../helpers/coverage-calculator.js";
+import {
   runScenario,
-  type TestScenario,
+  type MockInput,
   type ScenarioResult,
+  type TestScenario,
 } from "../../helpers/scenario-runner.js";
-import { calculateCoverage, formatCoverageReport } from "../../helpers/coverage-calculator.js";
-import { GraphValidator, detectCycles } from "@mcp-moira/workflow-engine";
-import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
-function loadProductionWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("verified-research", "public")!.graph as WorkflowGraph;
+const entry = findSystemCatalogEntry("verified-research", "public")!;
+const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
+const workspace = (executionId: string) => `./moira-ws/verified-research-${executionId}`;
+
+function node(graph: WorkflowGraph, id: string): any {
+  const found = graph.nodes.find((candidate) => candidate.id === id);
+  expect(found).toBeDefined();
+  return found;
 }
 
-describe("verified-research Scenarios", () => {
-  let workflow: WorkflowGraph;
+function terminal(status: "complete" | "limited" | "blocked" | "aborted"): MockInput {
+  return ({ executionId }) => ({
+    artifact_path: `${workspace(executionId)}/final-report.md`,
+    terminal_status: status,
+  });
+}
 
-  beforeAll(() => {
-    workflow = loadProductionWorkflow();
+const readyCompletion = {
+  completion_outcome: "ready",
+  answer_summary: "The bounded answer is supported by the current evidence register.",
+  limitation_summary: "Material uncertainty and applicability limits remain explicit.",
+};
+
+function inputs(overrides: Record<string, MockInput> = {}): Record<string, MockInput> {
+  return {
+    intake: {
+      intake_outcome: "actionable",
+      research_question: "Which API rate-limiting approach fits a multi-region service?",
+      research_use: "Choose a production architecture with explicit trade-offs.",
+      research_scope: ["HTTP APIs", "multi-region consistency", "current primary sources"],
+      operating_mode: "autonomous",
+    },
+    "clarify-question": {
+      clarification_outcome: "ready",
+      research_question: "Which API rate-limiting approach fits a multi-region service?",
+      research_use: "Choose a production architecture with explicit trade-offs.",
+      research_scope: ["HTTP APIs", "multi-region consistency"],
+    },
+    "materialize-workspace": {},
+    "frame-research": { framing_outcome: "ready" },
+    "research-evidence": { evidence_status: "ready" },
+    "synthesize-answer": { synthesis_outcome: "ready" },
+    "package-completion": readyCompletion,
+    "validate-package": { validation_outcome: "pass" },
+    "semantic-review": { review_outcome: "pass" },
+    "repair-answer": {
+      repair_outcome: "changed",
+      changed_knowledge: "The answer now separates inference from sourced facts.",
+    },
+    "repair-evidence": {
+      repair_outcome: "changed",
+      changed_knowledge: "The source register now links every material claim to a reading.",
+    },
+    "reassess-contract": {
+      reassessment_outcome: "corrected",
+      changed_knowledge: "The criterion now has a discriminating observation.",
+    },
+    "corrected-contract-review": { contract_review_outcome: "pass" },
+    "interactive-acceptance": { user_decision: "accept" },
+    "finalize-result": terminal("complete"),
+    "finalize-limited": terminal("limited"),
+    "finalize-blocked": terminal("blocked"),
+    "finalize-workspace-blocked": {
+      terminal_reason: "The canonical workspace could not be materialized.",
+      terminal_status: "blocked",
+    },
+    "finalize-aborted": terminal("aborted"),
+    "revise-process": { revision_reason: "The evidence criterion cannot distinguish states." },
+    ...overrides,
+  };
+}
+
+function configureMaterialize(engine: GraphExecutionEngine, error = false): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
+  if (error) {
+    handlers.set("materialize", {
+      getNodeType: () => "materialize",
+      execute: async (current: { id: string }) => ({
+        nodeId: current.id,
+        action: "continue",
+        outputPath: "error",
+        data: { error: "workspace unavailable" },
+      }),
+    });
+    return;
+  }
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "scenario-token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
+async function run(scenario: TestScenario, materializeError = false): Promise<ScenarioResult> {
+  return runScenario(workflow(), scenario, {
+    engineSetup: (engine) => configureMaterialize(engine, materializeError),
+  });
+}
+
+describe("verified-research", () => {
+  test("publishes the bounded v3 identity and local artifact contract", async () => {
+    const graph = workflow();
+    expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
+      valid: true,
+      errors: [],
+    });
+    expect(entry.owner).toBe("system-moira");
+    expect(entry.visibility).toBe("public");
+    expect(graph.id).toBe("1617b350-5e58-46a9-a783-fb9a69aec9bd");
+    expect(graph.metadata.version).toBe("3.0.0");
+    expect(graph.metadata.description).toContain("proportionate set");
+    expect(graph.metadata.description).toContain("Completion is local");
+    expect(graph.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(false);
+    expect(graph.variableRegistry).not.toHaveProperty("answer_status");
   });
 
-  describe("Structural Validation", () => {
-    it("should have valid structure", async () => {
-      const validator = new GraphValidator();
-      const withId = { id: `moira/${workflow.slug || "verified-research"}`, ...workflow };
-      const validation = await validator.validateWorkflow(withId);
-      expect(validation.valid).toBe(true);
-      expect(validation.errors).toHaveLength(0);
+  test("keeps detailed bodies in one execution-correlated workspace", () => {
+    const graph = workflow();
+    expect(graph.variableRegistry?.workspace_path).toMatchObject({
+      default: "./moira-ws/verified-research-{{executionId}}",
     });
-
-    it("should have no cycles (linear workflow)", () => {
-      const cycles = detectCycles(workflow);
-      expect(cycles).toHaveLength(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(10);
+    expect(
+      node(graph, "materialize-workspace").files.map((file: { path: string }) => file.path),
+    ).toEqual([
+      "process-id.txt",
+      "framing.md",
+      "source-register.md",
+      "readings.md",
+      "alternative-views.md",
+      "answer.md",
+      "limitations.md",
+      "package-validation.md",
+      "semantic-review.md",
+      "contract-review.md",
+      "contract-review-findings.md",
+      "repair-account.md",
+      "final-report.md",
+    ]);
+    expect(node(graph, "finalize-result").inputSchema.xContextPathSuffixes).toEqual({
+      baseContextProperty: "workspace_path",
+      properties: { artifact_path: "/final-report.md" },
     });
   });
 
-  describe("Scenario Coverage", () => {
-    it("should achieve 100% node and branch coverage", async () => {
-      const scenarios: TestScenario[] = [
-        // Scenario 1: Complete verified-research flow
-        {
-          name: "Complete verified-research workflow",
-          description: "Full verified-research from question to final output",
-          expect: { status: "completed" },
-          mockInputs: {
-            question: {
-              research_question: "What are best practices for API rate limiting?",
-              success_criteria: ["Comprehensive list of patterns with pros/cons"],
-              scope_in: ["Production HTTP APIs"],
-              scope_out: ["Internal APIs"],
-            },
-            methodology: {
-              source_types: ["academic", "industry", "documentation"],
-              keywords: ["rate limiting", "throttling", "API gateway"],
-              quality_criteria: ["Peer-reviewed or official docs"],
-              time_period: "last 3 years",
-            },
-            gather: {
-              sources: [
-                {
-                  title: "RFC 6585",
-                  url: "https://example.com/rfc",
-                  type: "academic",
-                  relevance_note: "HTTP status codes",
-                },
-                {
-                  title: "Stripe Rate Limiting",
-                  url: "https://stripe.com/docs",
-                  type: "industry",
-                  relevance_note: "Production patterns",
-                },
-                {
-                  title: "Kong Gateway",
-                  url: "https://kong.io/docs",
-                  type: "documentation",
-                  relevance_note: "API gateway approach",
-                },
-                {
-                  title: "AWS API Gateway",
-                  url: "https://aws.amazon.com/docs",
-                  type: "documentation",
-                  relevance_note: "Cloud patterns",
-                },
-                {
-                  title: "Google Cloud Endpoints",
-                  url: "https://cloud.google.com/docs",
-                  type: "documentation",
-                  relevance_note: "Rate limiting config",
-                },
-              ],
-            },
-            read: {
-              readings: [
-                {
-                  source_id: 1,
-                  main_finding: "429 status code standard",
-                  key_quotes: ["Retry-After header usage"],
-                },
-                {
-                  source_id: 2,
-                  main_finding: "Token bucket algorithm",
-                  key_quotes: ["Rate limits per API key"],
-                },
-                {
-                  source_id: 3,
-                  main_finding: "Plugin-based limiting",
-                  key_quotes: ["Request counting strategies"],
-                },
-              ],
-            },
-            alternative: {
-              alternative_views: [
-                {
-                  viewpoint: "Server-side vs client-side limiting",
-                  source: "Industry article",
-                  reasoning: "Client-side reduces server load",
-                },
-                {
-                  viewpoint: "Distributed rate limiting challenges",
-                  source: "Tech blog",
-                  reasoning: "Consistency vs availability tradeoff",
-                },
-              ],
-            },
-            synthesize: {
-              answer: "Token bucket with redis for distributed systems",
-              conclusions: [
-                { statement: "Use 429 status", supporting_sources: [1] },
-                { statement: "Include Retry-After", supporting_sources: [1, 2] },
-                { statement: "Consider distributed cache", supporting_sources: [3] },
-              ],
-            },
-            limitations: {
-              gaps: ["Limited to HTTP APIs", "Not covering gRPC patterns"],
-              source_biases: ["Vendor documentation may be biased toward their solutions"],
-              methodology_biases: ["Focus on English-language sources only"],
-            },
-            output: {
-              report_delivered: "yes",
-              sources_cited: 15,
-              sections_count: 5,
-            },
-          },
-        },
-
-        // Scenario 2: Minimal verified-research
-        {
-          name: "Minimal verified-research inputs",
-          description: "Research with minimal required data at each step",
-          expect: { status: "completed" },
-          mockInputs: {
-            question: {
-              research_question: "Basic API security",
-              success_criteria: ["List of security practices"],
-              scope_in: ["REST APIs"],
-              scope_out: ["GraphQL"],
-            },
-            methodology: {
-              source_types: ["documentation"],
-              keywords: ["API security", "best practices"],
-              quality_criteria: ["Any official docs"],
-              time_period: "last 2 years",
-            },
-            gather: {
-              sources: [
-                {
-                  title: "OWASP",
-                  url: "https://owasp.org",
-                  type: "documentation",
-                  relevance_note: "Security standards",
-                },
-                {
-                  title: "NIST",
-                  url: "https://nist.gov",
-                  type: "academic",
-                  relevance_note: "Security frameworks",
-                },
-                {
-                  title: "Auth0",
-                  url: "https://auth0.com/docs",
-                  type: "industry",
-                  relevance_note: "Auth patterns",
-                },
-                {
-                  title: "OAuth RFC",
-                  url: "https://tools.ietf.org",
-                  type: "academic",
-                  relevance_note: "Standards",
-                },
-                {
-                  title: "MDN",
-                  url: "https://developer.mozilla.org",
-                  type: "documentation",
-                  relevance_note: "Web security",
-                },
-              ],
-            },
-            read: {
-              readings: [
-                { source_id: 1, main_finding: "Use HTTPS for all APIs" },
-                { source_id: 2, main_finding: "Follow security frameworks" },
-                { source_id: 3, main_finding: "Implement proper authentication" },
-              ],
-            },
-            alternative: {
-              alternative_views: [
-                {
-                  viewpoint: "Zero-trust approach",
-                  source: "Google BeyondCorp",
-                  reasoning: "Network perimeter is outdated",
-                },
-                {
-                  viewpoint: "API keys vs OAuth",
-                  source: "Industry discussion",
-                  reasoning: "Simplicity vs security tradeoff",
-                },
-              ],
-            },
-            synthesize: {
-              answer: "Standard security practices apply",
-              conclusions: [
-                { statement: "Use HTTPS", supporting_sources: [1] },
-                { statement: "Validate input", supporting_sources: [1, 2] },
-              ],
-            },
-            limitations: {
-              gaps: ["Basic overview only"],
-              source_biases: ["Limited to mainstream sources"],
-              methodology_biases: ["Quick verified-research approach"],
-            },
-            output: {
-              report_delivered: "yes",
-              sources_cited: 5,
-            },
-          },
-        },
-
-        // Scenario 3: Complex multi-topic verified-research
-        {
-          name: "Complex multi-topic verified-research",
-          description: "Research covering multiple interconnected topics",
-          expect: { status: "completed" },
-          mockInputs: {
-            question: {
-              research_question: "Microservices authentication patterns",
-              success_criteria: ["Comparison of OAuth2, JWT, and mTLS for microservices"],
-              scope_in: ["Cloud-native microservices"],
-              scope_out: ["Monolithic applications"],
-              audience: "Backend developers",
-            },
-            methodology: {
-              source_types: ["academic", "industry", "case-study"],
-              keywords: ["OAuth2 microservices", "JWT authentication", "mTLS service mesh"],
-              quality_criteria: ["Production-proven patterns only"],
-              time_period: "Last 3 years",
-            },
-            gather: {
-              sources: [
-                {
-                  title: "OWASP API Security",
-                  url: "https://owasp.org/api",
-                  type: "documentation",
-                  relevance_note: "Security standards",
-                },
-                {
-                  title: "OAuth 2.0 RFC",
-                  url: "https://tools.ietf.org/rfc6749",
-                  type: "academic",
-                  relevance_note: "OAuth specs",
-                },
-                {
-                  title: "Netflix mTLS",
-                  url: "https://netflix.com/blog",
-                  type: "case-study",
-                  relevance_note: "Production patterns",
-                },
-                {
-                  title: "Istio docs",
-                  url: "https://istio.io/docs",
-                  type: "documentation",
-                  relevance_note: "Service mesh auth",
-                },
-                {
-                  title: "Google Zero Trust",
-                  url: "https://cloud.google.com/beyondcorp",
-                  type: "industry",
-                  relevance_note: "Zero trust model",
-                },
-              ],
-            },
-            read: {
-              readings: [
-                {
-                  source_id: 1,
-                  main_finding: "Token validation best practices",
-                  key_quotes: ["Rate limiting required"],
-                },
-                {
-                  source_id: 2,
-                  main_finding: "Bearer tokens and scopes",
-                  key_quotes: ["Short-lived tokens recommended"],
-                },
-                {
-                  source_id: 3,
-                  main_finding: "Service mesh patterns",
-                  key_quotes: ["Certificate rotation critical"],
-                },
-              ],
-            },
-            alternative: {
-              alternative_views: [
-                {
-                  viewpoint: "Zero-trust vs perimeter security",
-                  source: "Google BeyondCorp",
-                  reasoning: "Network perimeter obsolete",
-                },
-                {
-                  viewpoint: "Performance overhead concerns",
-                  source: "Industry benchmarks",
-                  reasoning: "mTLS adds latency",
-                },
-              ],
-              controversies: ["Complexity vs security tradeoffs"],
-            },
-            synthesize: {
-              answer: "Layered approach: mTLS for internal, OAuth2 at gateway",
-              conclusions: [
-                { statement: "Use mTLS for service-to-service", supporting_sources: [3, 4] },
-                { statement: "OAuth2 for external clients", supporting_sources: [2] },
-                { statement: "Short-lived JWTs for sessions", supporting_sources: [1, 2] },
-              ],
-              agreements: ["mTLS is most secure for internal"],
-              disagreements: ["JWT vs opaque tokens debate"],
-            },
-            limitations: {
-              gaps: ["Not covering serverless patterns"],
-              source_biases: ["Vendor documentation may be biased"],
-              methodology_biases: ["English sources only"],
-            },
-            output: {
-              report_delivered: "yes",
-              sources_cited: 25,
-              sections_count: 8,
-            },
-          },
-        },
-      ];
-
-      const results: ScenarioResult[] = [];
-      for (const scenario of scenarios) {
-        const result = await runScenario(workflow, scenario);
-        results.push(result);
-      }
-
-      const coverage = calculateCoverage(workflow, results, {
-        includeGapAnalysis: true,
-      });
-
-      console.log(formatCoverageReport(coverage));
-
-      const failedScenarios = results.filter((r) => !r.passed);
-      if (failedScenarios.length > 0) {
-        console.error("Failed scenarios:");
-        for (const s of failedScenarios) {
-          console.error(`  - ${s.scenario}: ${s.error || s.failedExpectations?.join(", ")}`);
-        }
-      }
-      expect(failedScenarios).toHaveLength(0);
-
-      expect(coverage.nodeCoverage).toBe(100);
-      expect(coverage.branchCoverage).toBe(100);
+  test("uses one reviewed evidence class for usable routing and terminal truth", () => {
+    const graph = workflow();
+    expect(node(graph, "research-evidence").inputSchema.required).toContain("evidence_status");
+    expect(node(graph, "research-evidence").inputSchema.properties).not.toHaveProperty(
+      "research_outcome",
+    );
+    expect(node(graph, "route-evidence-usable").condition.conditions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ left: { contextPath: "evidence_status" }, right: "ready" }),
+        expect.objectContaining({ left: { contextPath: "evidence_status" }, right: "limited" }),
+      ]),
+    );
+    expect(node(graph, "semantic-review").directive).toContain("exact canonical evidence_status");
+    expect(node(graph, "route-final-answer-status").condition).toMatchObject({
+      left: { contextPath: "evidence_status" },
+      right: "ready",
     });
+  });
+
+  test.each([
+    [
+      "autonomous clarification",
+      "intake",
+      {
+        intake_outcome: "clarify",
+        clarification_request: "Which jurisdiction?",
+        operating_mode: "autonomous",
+      },
+      {},
+    ],
+    ["actionable intake without question", "intake", { intake_outcome: "actionable" }, {}],
+    [
+      "usable evidence with blocker",
+      "research-evidence",
+      { evidence_status: "limited", terminal_reason: "contradictory" },
+      {},
+    ],
+    [
+      "blocked evidence with replan reason",
+      "research-evidence",
+      { evidence_status: "blocked", outcome_reason: "contradictory" },
+      {},
+    ],
+    ["semantic repair without owner", "semantic-review", { review_outcome: "repair" }, {}],
+    [
+      "changed answer without knowledge",
+      "repair-answer",
+      { repair_outcome: "changed" },
+      {
+        "validate-package": { validation_outcome: "package_repair" },
+      },
+    ],
+    [
+      "package replan with stale summary",
+      "package-completion",
+      {
+        completion_outcome: "replan",
+        outcome_reason: "Invalid criterion.",
+        answer_summary: "stale",
+      },
+      {},
+    ],
+    [
+      "wrong complete terminal status",
+      "finalize-result",
+      ({ executionId }: { executionId: string }) => ({
+        artifact_path: `${workspace(executionId)}/final-report.md`,
+        terminal_status: "limited",
+      }),
+      {},
+    ],
+    [
+      "wrong limited terminal status",
+      "finalize-limited",
+      ({ executionId }: { executionId: string }) => ({
+        artifact_path: `${workspace(executionId)}/final-report.md`,
+        terminal_status: "complete",
+      }),
+      { "research-evidence": { evidence_status: "limited" } },
+    ],
+    [
+      "contract blocked without reason",
+      "corrected-contract-review",
+      { contract_review_outcome: "blocked" },
+      { "frame-research": { framing_outcome: "replan", outcome_reason: "Invalid." } },
+    ],
+  ])("rejects a contradictory strict response: %s", async (_name, target, invalid, setup) => {
+    const result = await run({
+      name: String(_name),
+      mockInputs: inputs({ ...(setup as Record<string, MockInput>), [String(target)]: invalid }),
+      expect: { status: "failed" },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain(`Input validation failed for node '${String(target)}'`);
+  });
+
+  test("covers every ordinary node and branch with truthful terminal classes", async () => {
+    const cases: Array<{
+      name: string;
+      overrides?: Record<string, MockInput>;
+      materializeError?: boolean;
+      teleportAfter?: TestScenario["teleportAfter"];
+      reaches?: string[];
+      avoids?: string[];
+      contextContains?: Record<string, unknown>;
+    }> = [
+      { name: "autonomous complete", reaches: ["end"], avoids: ["interactive-acceptance"] },
+      {
+        name: "interactive clarification and acceptance",
+        overrides: {
+          intake: {
+            intake_outcome: "clarify",
+            clarification_request: "Which jurisdiction controls applicability?",
+            operating_mode: "interactive",
+          },
+        },
+        reaches: ["clarify-question", "interactive-acceptance", "end"],
+      },
+      {
+        name: "interactive clarification remains blocked",
+        overrides: {
+          intake: {
+            intake_outcome: "clarify",
+            clarification_request: "Which jurisdiction?",
+            operating_mode: "interactive",
+          },
+          "clarify-question": {
+            clarification_outcome: "blocked",
+            blocker_reason: "The required jurisdiction was not supplied.",
+          },
+        },
+        reaches: ["end-intake-blocked"],
+      },
+      {
+        name: "intake blocked",
+        overrides: {
+          intake: {
+            intake_outcome: "blocked",
+            blocker_reason: "No research question was supplied.",
+            operating_mode: "autonomous",
+          },
+        },
+        reaches: ["end-intake-blocked"],
+      },
+      { name: "materialize blocked", materializeError: true, reaches: ["end-workspace-blocked"] },
+      {
+        name: "framing replan then corrected",
+        overrides: {
+          "frame-research": [
+            { framing_outcome: "replan", outcome_reason: "Criterion is ambiguous." },
+            { framing_outcome: "ready" },
+          ],
+        },
+        reaches: ["reassess-contract", "corrected-contract-review", "end"],
+      },
+      {
+        name: "framing blocked",
+        overrides: {
+          "frame-research": {
+            framing_outcome: "blocked",
+            terminal_reason: "A required prerequisite is unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "limited evidence yields limited terminal",
+        overrides: { "research-evidence": { evidence_status: "limited" } },
+        reaches: ["finalize-limited", "end-limited"],
+        contextContains: { terminal_status: "limited" },
+      },
+      {
+        name: "evidence replan then ready",
+        overrides: {
+          "research-evidence": [
+            { evidence_status: "replan", outcome_reason: "Method cannot distinguish states." },
+            { evidence_status: "ready" },
+          ],
+        },
+        reaches: ["reassess-contract", "corrected-contract-review", "end"],
+      },
+      {
+        name: "evidence blocked",
+        overrides: {
+          "research-evidence": {
+            evidence_status: "blocked",
+            terminal_reason: "Required primary evidence is inaccessible.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "synthesis replan then ready",
+        overrides: {
+          "synthesize-answer": [
+            { synthesis_outcome: "replan", outcome_reason: "Answer criterion is invalid." },
+            { synthesis_outcome: "ready" },
+          ],
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "synthesis blocked",
+        overrides: {
+          "synthesize-answer": {
+            synthesis_outcome: "blocked",
+            terminal_reason: "Evidence cannot support an honest answer.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "completion replan",
+        overrides: {
+          "package-completion": [
+            { completion_outcome: "replan", outcome_reason: "Contract invalid." },
+            readyCompletion,
+          ],
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "completion blocked",
+        overrides: {
+          "package-completion": {
+            completion_outcome: "blocked",
+            terminal_reason: "Canonical package cannot be produced.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "deterministic package repair",
+        overrides: {
+          "package-completion": [readyCompletion, readyCompletion],
+          "validate-package": [
+            { validation_outcome: "package_repair" },
+            { validation_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-answer", "package-completion", "end"],
+      },
+      {
+        name: "deterministic evidence repair",
+        overrides: {
+          "research-evidence": [{ evidence_status: "ready" }, { evidence_status: "ready" }],
+          "synthesize-answer": [{ synthesis_outcome: "ready" }, { synthesis_outcome: "ready" }],
+          "package-completion": [readyCompletion, readyCompletion],
+          "validate-package": [
+            { validation_outcome: "evidence_repair" },
+            { validation_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-evidence", "research-evidence", "end"],
+      },
+      {
+        name: "validation replan",
+        overrides: {
+          "validate-package": [{ validation_outcome: "replan" }, { validation_outcome: "pass" }],
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "validation blocked",
+        overrides: {
+          "validate-package": {
+            validation_outcome: "blocked",
+            terminal_reason: "Required parser is unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "semantic answer repair",
+        overrides: {
+          "package-completion": [readyCompletion, readyCompletion],
+          "validate-package": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [
+            { review_outcome: "repair", repair_owner: "answer" },
+            { review_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-answer", "end"],
+      },
+      {
+        name: "semantic evidence repair",
+        overrides: {
+          "research-evidence": [{ evidence_status: "ready" }, { evidence_status: "ready" }],
+          "synthesize-answer": [{ synthesis_outcome: "ready" }, { synthesis_outcome: "ready" }],
+          "package-completion": [readyCompletion, readyCompletion],
+          "validate-package": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [
+            { review_outcome: "repair", repair_owner: "evidence" },
+            { review_outcome: "pass" },
+          ],
+        },
+        reaches: ["repair-evidence", "research-evidence", "end"],
+      },
+      {
+        name: "semantic replan",
+        overrides: {
+          "semantic-review": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
+        },
+        reaches: ["reassess-contract", "corrected-contract-review", "end"],
+      },
+      {
+        name: "semantic blocked",
+        overrides: {
+          "semantic-review": {
+            review_outcome: "blocked",
+            terminal_reason: "Independent reviewer unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "answer repair reassess",
+        overrides: {
+          "validate-package": [
+            { validation_outcome: "package_repair" },
+            { validation_outcome: "pass" },
+          ],
+          "repair-answer": { repair_outcome: "reassess" },
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "answer repair blocked",
+        overrides: {
+          "validate-package": { validation_outcome: "package_repair" },
+          "repair-answer": { repair_outcome: "blocked", terminal_reason: "Repair unavailable." },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "evidence repair reassess",
+        overrides: {
+          "semantic-review": [
+            { review_outcome: "repair", repair_owner: "evidence" },
+            { review_outcome: "pass" },
+          ],
+          "repair-evidence": { repair_outcome: "reassess" },
+        },
+        reaches: ["reassess-contract", "end"],
+      },
+      {
+        name: "evidence repair blocked",
+        overrides: {
+          "semantic-review": { review_outcome: "repair", repair_owner: "evidence" },
+          "repair-evidence": {
+            repair_outcome: "blocked",
+            terminal_reason: "Evidence prerequisite unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "contract review repair then pass",
+        overrides: {
+          "frame-research": [
+            { framing_outcome: "replan", outcome_reason: "Contract invalid." },
+            { framing_outcome: "ready" },
+          ],
+          "corrected-contract-review": [
+            { contract_review_outcome: "repair" },
+            { contract_review_outcome: "pass" },
+          ],
+        },
+        reaches: ["corrected-contract-review", "reassess-contract", "end"],
+      },
+      {
+        name: "contract review replan then pass",
+        overrides: {
+          "frame-research": [
+            { framing_outcome: "replan", outcome_reason: "Contract invalid." },
+            { framing_outcome: "ready" },
+          ],
+          "corrected-contract-review": [
+            { contract_review_outcome: "replan" },
+            { contract_review_outcome: "pass" },
+          ],
+        },
+        reaches: ["corrected-contract-review", "reassess-contract", "end"],
+      },
+      {
+        name: "contract review blocked",
+        overrides: {
+          "frame-research": { framing_outcome: "replan", outcome_reason: "Contract invalid." },
+          "corrected-contract-review": {
+            contract_review_outcome: "blocked",
+            terminal_reason: "Independent contract review unavailable.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      {
+        name: "reassessment blocked",
+        overrides: {
+          "frame-research": { framing_outcome: "replan", outcome_reason: "Contract invalid." },
+          "reassess-contract": {
+            reassessment_outcome: "blocked",
+            terminal_reason: "No valid evidence criterion exists.",
+          },
+        },
+        reaches: ["end-blocked"],
+      },
+      ...(["framing", "evidence", "answer", "contract"] as const).map((owner) => ({
+        name: `interactive rework to ${owner}`,
+        overrides: {
+          intake: {
+            intake_outcome: "actionable",
+            research_question: "Which rate-limiting design fits?",
+            research_use: "Choose an architecture.",
+            research_scope: ["HTTP APIs"],
+            operating_mode: "interactive",
+          },
+          "frame-research": [{ framing_outcome: "ready" }, { framing_outcome: "ready" }],
+          "research-evidence": [{ evidence_status: "ready" }, { evidence_status: "ready" }],
+          "synthesize-answer": [{ synthesis_outcome: "ready" }, { synthesis_outcome: "ready" }],
+          "package-completion": [readyCompletion, readyCompletion],
+          "validate-package": [{ validation_outcome: "pass" }, { validation_outcome: "pass" }],
+          "semantic-review": [{ review_outcome: "pass" }, { review_outcome: "pass" }],
+          "interactive-acceptance": [
+            { user_decision: "rework", rework_owner: owner },
+            { user_decision: "accept" },
+          ],
+        },
+        reaches: ["interactive-acceptance", "end"],
+      })),
+      {
+        name: "interactive abort",
+        overrides: {
+          intake: {
+            intake_outcome: "actionable",
+            research_question: "Which rate-limiting design fits?",
+            research_use: "Choose an architecture.",
+            research_scope: ["HTTP APIs"],
+            operating_mode: "interactive",
+          },
+          "interactive-acceptance": { user_decision: "abort" },
+        },
+        reaches: ["end-aborted"],
+      },
+      {
+        name: "guarded process revision",
+        overrides: {
+          "frame-research": [{ framing_outcome: "ready" }, { framing_outcome: "ready" }],
+        },
+        teleportAfter: { afterNode: "frame-research", teleportTo: "revise-process" },
+        reaches: ["revise-process", "reassess-contract", "corrected-contract-review", "end"],
+      },
+    ];
+
+    const results: ScenarioResult[] = [];
+    for (const current of cases) {
+      results.push(
+        await run(
+          {
+            name: current.name,
+            mockInputs: inputs(current.overrides),
+            teleportAfter: current.teleportAfter,
+            expect: {
+              status: "completed",
+              reaches: current.reaches,
+              avoids: current.avoids,
+              contextContains: current.contextContains,
+            },
+          },
+          current.materializeError,
+        ),
+      );
+    }
+    expect(results.filter((result) => !result.passed)).toEqual([]);
+    const coverage = calculateCoverage(workflow(), results, { includeGapAnalysis: true });
+    expect(coverage.nodeCoverage).toBe(100);
+    expect(coverage.branchCoverage).toBe(100);
   });
 });

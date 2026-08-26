@@ -5,1011 +5,1751 @@
   "id": "b33e227c-cc2c-4931-ae5d-2de69932e41e",
   "metadata": {
     "name": "Smart Purchase Assistant",
-    "version": "3.1.4",
-    "description": "Intelligent product analysis with persistent notes storage for session recovery, HTML reports via Moira artifacts, and Telegram notifications."
+    "version": "4.0.0",
+    "description": "Produces a durable, evidence-linked purchase decision package for one product need: it captures use, region, currency, budget, constraints, source and privacy limits, operating mode, and separate publication/notification authority; researches current category trade-offs, relevant variants, specifications, prices, availability, seller terms and review evidence without fixed quotas or fabricated certainty; and creates a buyer guide, comparison, profile-specific recommendations, direct observed links, limitations, pre-purchase checks, readable Markdown and self-contained HTML. A filesystem workspace, deterministic HTML observations and genuinely independent semantic review precede cause-owned evidence/report repair or contract reassessment. Outcomes distinguish complete, reviewed-limited, blocked and interactive-aborted local results; optional artifact upload and Telegram transport cannot invalidate an accepted local report. The workflow never buys, reserves, contacts sellers, submits forms, spends money, changes settings, commits, publishes without authority or mutates production. Because the graph contains an optional Telegram node, start it with skipTelegramCheck: true; actual notification configuration is observed only on the authorized delivery route. Choose it for product selection; use a research workflow for evidence synthesis without purchase semantics or Data Analysis for supplied datasets."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "check-agent-capabilities"
+        "default": "intake"
       }
     },
     {
-      "id": "check-agent-capabilities",
+      "id": "intake",
       "type": "agent-directive",
-      "directive": "Determine your technical capabilities for this session:\n\n1. **File Access**: Can you create/write local files? (Check for Write, Edit, or file tools)\n2. **Visual Artifacts**: Can you create visual artifacts? (Like Claude canvas in browser)\n\nCheck your available tools and answer honestly. These capabilities affect how results will be delivered.\n\nNote: Moira artifacts (for publishing HTML reports) is always available since you're using this workflow.",
-      "connections": {
-        "success": "analyze-user-needs"
-      },
+      "directive": "Reuse the originating purchase request and every explicit decision already present. Capture the bounded complete request as purchase_request, then resolve the product need, intended use, region and currency, budget, material constraints, decision deadline, desired depth, source/privacy limits, operating mode, filesystem availability, and separate artifact-publication and Telegram-notification authority. Ask only for a material unknown; in autonomous mode an unresolved prerequisite is blocked and absent external-effect authority is false. Filesystem availability comes from the actual tool set, not a guessed receipt. The workflow is advisory and has no authority to purchase, reserve, contact sellers, submit forms or spend money. Return actionable only when responsible durable research can begin.",
+      "completionCondition": "The bounded purchase request, real filesystem prerequisite, mode, privacy ceiling and separate delivery authority are resolved without invented permission",
       "inputSchema": {
         "type": "object",
-        "required": [
-          "can_create_files",
-          "can_create_artifacts"
-        ],
+        "additionalProperties": false,
         "properties": {
-          "can_create_files": {
-            "type": "boolean",
-            "description": "Agent can write local files"
-          }
-        },
-        "globalInputs": [
-          "can_create_artifacts"
-        ]
-      },
-      "completionCondition": "Agent capabilities determined: file access and artifact creation status known"
-    },
-    {
-      "id": "analyze-user-needs",
-      "type": "agent-directive",
-      "directive": "Analyze user's purchasing needs. Find out: what product is needed, budget, purchase purpose, important requirements and constraints. Ask clarifying questions to understand context.",
-      "connections": {
-        "success": "write-note-01"
-      },
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "product_type",
-          "budget_max",
-          "use_case"
-        ],
-        "properties": {
-          "budget_max": {
-            "type": "number",
-            "description": "Maximum budget"
-          },
-          "budget_min": {
-            "type": "number",
-            "description": "Minimum budget"
-          },
-          "product_type": {
+          "intake_outcome": {
             "type": "string",
-            "description": "Type of product to purchase"
+            "enum": [
+              "actionable",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
           }
         },
-        "globalInputs": [
-          "use_case",
-          "constraints",
-          "requirements"
-        ]
-      },
-      "completionCondition": "Complete information about needs obtained: product type, budget, purpose of use, key requirements"
-    },
-    {
-      "id": "write-note-01",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-01-user-needs",
-      "source": "{{analyze-user-needs}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
-      "connections": {
-        "default": "research-product-category"
-      }
-    },
-    {
-      "id": "research-product-category",
-      "type": "agent-directive",
-      "directive": "Research the product category based on user needs.\n\n**User needs data:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Part 1: Category expertise**\nDetermine: main types and kinds, key comparison parameters, technology trends, alternative solutions, price seasonality.\n\n**Part 2: Product variant map (REQUIRED)**\nCreate a comprehensive \"variant map\" for the category:\n\n1. **Device/product types**: List ALL distinct types/technologies in this category. For each type provide: name, operating principle (1-2 sentences), typical price range, best suited for whom.\n   Example for humidifiers: ultrasonic, evaporative, steam, air washer.\n\n2. **Form factors**: List physical form factors available. For each: name, typical dimensions, placement.\n   Example: portable, tabletop, floor-standing, wall-mounted.\n\n3. **Use cases with recommendations**: Identify common use cases/scenarios. For each: scenario description, which product type is best, what to prioritize.\n   Example: \"small bedroom 10-15m²\" → ultrasonic or evaporative, prioritize noise level <30dB.\n\n4. **Price segments**: Define budget/mid-range/premium boundaries for this category with typical feature differences between segments.\n\n5. **Buyer checklist**: List the TOP 8-12 parameters a buyer should evaluate when choosing in this category, ordered by importance. For each: parameter name, why it matters, what values are good/bad.",
-      "connections": {
-        "success": "write-note-02"
-      },
-      "inputSchema": {
-        "type": "object",
         "required": [
-          "product_types",
-          "key_parameters",
-          "device_types",
-          "use_cases",
-          "price_segments",
-          "buyer_checklist"
+          "intake_outcome",
+          "filesystem_available",
+          "operating_mode",
+          "publication_authorized",
+          "notification_authorized",
+          "purchase_request"
         ],
-        "properties": {},
         "globalInputs": [
-          "product_types",
-          "key_parameters",
-          "technology_trends",
-          "alternatives",
-          "seasonality",
-          "device_types",
-          "form_factors",
-          "use_cases",
-          "price_segments",
-          "buyer_checklist"
+          "filesystem_available",
+          "operating_mode",
+          "publication_authorized",
+          "notification_authorized",
+          "purchase_request"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "intake_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "intake_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
         ]
       },
-      "completionCondition": "Complete expert base AND product variant map created: types with descriptions, form factors, use cases with recommendations, price segments, buyer checklist"
-    },
-    {
-      "id": "write-note-02",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-02-category-research",
-      "source": "{{research-product-category}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
       "connections": {
-        "default": "determine-search-sources"
+        "success": "route-intake-actionable"
       }
     },
     {
-      "id": "determine-search-sources",
-      "type": "agent-directive",
-      "directive": "Determine optimal sources for searching products.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Category research:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\nInclude: marketplaces, specialized stores, manufacturers, regional chains. Consider category specifics and user's region.",
-      "connections": {
-        "success": "write-note-03"
-      },
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "marketplaces",
-          "search_priority"
-        ],
-        "properties": {},
-        "globalInputs": [
-          "marketplaces",
-          "manufacturers",
-          "regional_stores",
-          "search_priority",
-          "specialized_stores"
-        ]
-      },
-      "completionCondition": "Prioritized list of search sources compiled with justification for each selection"
-    },
-    {
-      "id": "write-note-03",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-03-search-sources",
-      "source": "{{determine-search-sources}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
-      "connections": {
-        "default": "search-and-analyze"
-      }
-    },
-    {
-      "id": "search-and-analyze",
-      "type": "agent-directive",
-      "directive": "Search for products on identified sources.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Product variant map (types, use cases, segments):**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Search sources:**\n{{note:purchase-{{executionId}}-03-search-sources}}\n\nFind products within budget, filter by requirements and constraints.\n\n**CRITICAL RULES:**\n\n1. **Search across ALL product types** from the variant map. Do not limit to one type — cover at least the top 2-3 most relevant types for the user's use case.\n\n2. **Search for model line variations**: For EACH promising model found, check if line variations exist (Lite, Mini, Pro, Plus, Max, SE, Gen 2/3, etc.). If a variation fits user requirements — include it as a separate candidate. Different variations often have fundamentally different price/performance ratios.\n\n3. **Cover multiple price segments**: Include candidates from budget, mid-range, and premium segments.\n\n4. **Collect for EACH candidate:**\n   - Direct product URL (clickable link to product page)\n   - Store URLs where product can be purchased\n   - Current prices at each store\n   - Which product type/category it belongs to\n\nCreate initial candidate list with specifications and URLs.",
-      "connections": {
-        "success": "write-note-04"
-      },
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "candidates",
-          "search_summary"
-        ],
-        "properties": {},
-        "globalInputs": [
-          "candidates",
-          "search_summary"
-        ]
-      },
-      "completionCondition": "List of candidate products found (10-20 items) covering multiple product types and price segments, with model line variations included, specifications, prices, and direct purchase URLs"
-    },
-    {
-      "id": "write-note-04",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-04-candidates",
-      "source": "{{search-and-analyze}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
-      "connections": {
-        "default": "deep-analysis"
-      }
-    },
-    {
-      "id": "deep-analysis",
-      "type": "agent-directive",
-      "directive": "Conduct deep analysis of top candidates.\n\n**Candidates list:**\n{{note:purchase-{{executionId}}-04-candidates}}\n\n**FOCUS ON REAL CUSTOMER REVIEWS:**\n- Prioritize reviews from verified purchasers over expert opinions\n- Count total reviews and percentage from verified buyers\n- Note review recency (latest review date)\n- Identify common complaints (repeated issues from multiple buyers)\n- Identify common praises (consistently mentioned positives)\n- Look for signs of fake reviews (generic language, suspicious patterns)\n\nAlso study: brand reputation, technical specifications comparison, expert reviews where helpful.\n\nIdentify pros, cons and real-world pitfalls of each option.",
-      "connections": {
-        "success": "write-note-05"
-      },
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "detailed_analysis"
-        ],
-        "properties": {},
-        "globalInputs": [
-          "detailed_analysis"
-        ]
-      },
-      "completionCondition": "Detailed analysis conducted with focus on real customer reviews, verified purchases, and common feedback patterns"
-    },
-    {
-      "id": "write-note-05",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-05-analysis",
-      "source": "{{deep-analysis}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
-      "connections": {
-        "default": "analyze-purchase-conditions"
-      }
-    },
-    {
-      "id": "analyze-purchase-conditions",
-      "type": "agent-directive",
-      "directive": "Analyze purchase conditions for best options.\n\n**Detailed analysis:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\nCompare: total cost (product + delivery), warranty and return conditions, delivery times, availability, current promotions and discounts.",
-      "connections": {
-        "success": "write-note-06"
-      },
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "purchase_analysis"
-        ],
-        "properties": {},
-        "globalInputs": [
-          "purchase_analysis"
-        ]
-      },
-      "completionCondition": "Complete purchase conditions analysis obtained with final cost calculation and conditions comparison"
-    },
-    {
-      "id": "write-note-06",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-06-purchase-conditions",
-      "source": "{{analyze-purchase-conditions}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
-      "connections": {
-        "default": "generate-recommendations"
-      }
-    },
-    {
-      "id": "generate-recommendations",
-      "type": "agent-directive",
-      "directive": "Create final recommendations based on all collected data.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Analysis:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Purchase conditions:**\n{{note:purchase-{{executionId}}-06-purchase-conditions}}\n\n**INCLUDE CLICKABLE LINKS:**\n- Direct product URL for each recommendation\n- Best store URL with price for immediate purchase\n- Alternative store URLs if available\n\n**RECOMMENDATIONS (5-8 options):**\nPresent recommendations grouped by profile/use case. Each recommendation must have a clear `best_for` label. Example categories:\n- \"Best value for money\" (цена/качество)\n- \"Best budget option\" (бюджетный)\n- \"Best premium\" (премиум)\n- \"Best for [specific use case from user needs]\"\n- \"Most compact / quiet / powerful\" (based on category specifics)\n\nFor EACH top recommendation: verify that all available model variations were checked. If a cheaper variation covers user requirements — recommend it instead of or alongside the more expensive model.\n\n**BUYER'S GUIDE (REQUIRED):**\nCreate a buyer's guide section for users who are not experts in this category:\n\n1. **Product types overview**: For each type from the variant map — 2-3 sentences explaining what it is, main pros/cons, who it's best for.\n2. **Selection checklist**: Ordered list of what to look for when buying, with brief explanations.\n3. **Decision matrix**: Table format — \"If you value X → choose type Y\" for 5-8 common priorities.\n4. **Common mistakes**: 3-5 frequent mistakes buyers make in this category and how to avoid them.",
-      "connections": {
-        "success": "write-note-07"
-      },
-      "inputSchema": {
-        "type": "object",
-        "required": [
-          "top_recommendations",
-          "comparison_table",
-          "purchase_plan",
-          "buyer_guide"
-        ],
-        "properties": {},
-        "globalInputs": [
-          "top_recommendations",
-          "comparison_table",
-          "purchase_plan",
-          "alternative_options",
-          "buyer_guide"
-        ]
-      },
-      "completionCondition": "Final recommendations created with 5-8 options grouped by profile/use case, clickable purchase links, comparison table, buyer guide with product types overview, selection checklist, decision matrix and common mistakes, and action plan"
-    },
-    {
-      "id": "write-note-07",
-      "type": "write-note",
-      "key": "purchase-{{executionId}}-07-recommendations",
-      "source": "{{generate-recommendations}}",
-      "tags": [
-        "purchase-{{executionId}}",
-        "smart-purchase"
-      ],
-      "connections": {
-        "default": "check-can-create-files"
-      }
-    },
-    {
-      "id": "check-can-create-files",
+      "id": "route-intake-actionable",
       "type": "condition",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "check-agent-capabilities.can_create_files"
+          "contextPath": "intake.intake_outcome"
+        },
+        "right": "actionable"
+      },
+      "connections": {
+        "true": "route-filesystem",
+        "false": "finalize-no-workspace"
+      }
+    },
+    {
+      "id": "route-filesystem",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "filesystem_available"
         },
         "right": true
       },
       "connections": {
-        "true": "generate-html-report",
-        "false": "generate-and-upload-report"
+        "true": "materialize-workspace",
+        "false": "finalize-no-workspace"
       }
     },
     {
-      "id": "generate-html-report",
-      "type": "agent-directive",
-      "directive": "Generate a beautiful, responsive HTML report for the purchase assistant results.\n\n**Recommendations (with buyer's guide):**\n{{note:purchase-{{executionId}}-07-recommendations}}\n\n**Analysis details:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\n**Include sections:**\n1. Executive Summary - top recommendation with 'Buy Now' button\n2. Buyer's Guide - for users unfamiliar with the category:\n   - Product Types Overview (what types exist, pros/cons of each, who they're for)\n   - Selection Checklist (what to look for)\n   - Decision Matrix (if you value X → choose Y table)\n   - Common Mistakes (what to avoid)\n3. Product Comparison Table - all candidates with specs, prices, ratings\n4. TOP 5-8 Recommendations - detailed cards grouped by profile with key specs, price comparison, 'Buy Now' buttons\n5. Review Analysis Summary\n6. Purchase Plan steps\n\n**Design:**\n- Use modern CSS (Tailwind CDN or clean custom styles)\n- Responsive design (mobile-friendly)\n- Make all product and store links clickable\n- Use clear visual hierarchy\n- Buyer's Guide section should be visually distinct and easy to scan\n\nSave as: purchase-report.html",
-      "completionCondition": "HTML report file created with product comparison, clickable purchase links, and professional design",
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "decision-contract.md",
+          "content": ""
+        },
+        {
+          "path": "source-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "purchase-report.md",
+          "content": ""
+        },
+        {
+          "path": "purchase-report.html",
+          "content": ""
+        },
+        {
+          "path": "validation-observations.md",
+          "content": ""
+        },
+        {
+          "path": "review-findings.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
+      ],
       "connections": {
-        "success": "upload-via-token"
-      },
+        "success": "frame-contract",
+        "error": "finalize-no-workspace"
+      }
+    },
+    {
+      "id": "frame-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write decision-contract.md once from the bounded originating request between these markers: ---BEGIN REQUEST--- {{purchase_request}} ---END REQUEST--- and the resolved authority. Define product/use, region/currency, budget, constraints, deadline, proportionate depth, relevant category/variant boundary, source and privacy ceiling, evidence distinctions, advisory boundary, operating mode, publication authority, notification authority, observable success, useful-limited boundary and blockers. Do not prescribe fixed counts, sources, stores, model variants, steps or report length. Return ready, reassess for an invalid interpretation/evidence method, or blocked for a factual prerequisite.",
+      "completionCondition": "One complete authority-preserving purchase decision contract is durable and actionable or truthfully non-actionable",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
         "required": [
-          "report_file_path",
-          "report_generated"
+          "contract_outcome"
         ],
-        "properties": {},
-        "globalInputs": [
-          "report_file_path",
-          "report_generated"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "contract_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ]
+            }
+          }
         ]
+      },
+      "connections": {
+        "success": "route-frame-ready"
       }
     },
     {
-      "id": "upload-via-token",
-      "type": "agent-directive",
-      "directive": "Upload the generated HTML report to Moira artifacts.\n\n**Steps:**\n\n1. Get upload token:\n   artifacts({ action: \"token\", ttlMinutes: 30 })\n   Returns: { token, uploadUrl, expiresAt }\n\n2. Read the HTML report file that was saved in the previous step (purchase-report.html in current working directory).\n\n3. Upload via HTTP POST to uploadUrl:\n   POST {uploadUrl}\n   Content-Type: application/json\n   Body: {\"name\": \"purchase-report.html\", \"content\": \"<html content>\"}\n\n   Use curl, fetch, or HTTP tool available to you.\n\n4. Response: { uuid, url, name, size, expiresAt }\n   Save the url field as report_url.\n\nIf upload fails with 5xx or network error, the system will retry automatically. If 4xx error, report the error.",
-      "completionCondition": "Report uploaded via artifacts token, public URL obtained",
-      "connections": {
-        "success": "telegram-notification"
+      "id": "route-frame-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-contract.contract_outcome"
+        },
+        "right": "ready"
       },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-frame-reassess"
+      }
+    },
+    {
+      "id": "route-frame-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-contract.contract_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "research-evidence",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read decision-contract.md and any current feedback or changed-knowledge account in repair-account.md, then research the purchase decision proportionately from public or explicitly authorized sources. Overwrite source-evidence.md with category types/trade-offs, relevant variants, decision criteria, current candidates, specifications, price/availability, seller terms, warranty/returns/delivery, independent and customer evidence, comparisons and calculations. For each material claim record URL or source identity, publisher/seller, observed date, access outcome, geography, claim support, conflicts, sponsorship/aggregation limits, inference and unknowns. Prefer primary evidence for specifications/terms and disclose unverifiable review status. Never fabricate fields or claim exhaustive market coverage. Return ready with evidence_status sufficient or limited, or return blocked or reassess without an evidence status.",
+      "completionCondition": "Current purchase evidence is traceable and proportionate, with uncertainty and limits explicit rather than padded",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "research_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked",
+              "reassess"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
         "required": [
-          "report_url",
-          "uploaded"
+          "research_outcome"
         ],
-        "properties": {},
         "globalInputs": [
-          "report_url",
-          "uploaded"
+          "evidence_status"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "research_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "research_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "evidence_status"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "required": [
+                  "evidence_status"
+                ]
+              }
+            }
+          }
         ]
+      },
+      "connections": {
+        "success": "route-research-blocked"
       }
     },
     {
-      "id": "generate-and-upload-report",
-      "type": "agent-directive",
-      "directive": "Generate and upload the purchase report in a single step.\n\n**Recommendations (with buyer's guide):**\n{{note:purchase-{{executionId}}-07-recommendations}}\n\n**Analysis details:**\n{{note:purchase-{{executionId}}-05-analysis}}\n\n**Product variant map:**\n{{note:purchase-{{executionId}}-02-category-research}}\n\nGenerate HTML report with:\n- Executive Summary with top recommendation\n- Buyer's Guide section:\n  - Product Types Overview (what types exist, pros/cons, who they're for)\n  - Selection Checklist (what to look for)\n  - Decision Matrix (if you value X → choose Y)\n  - Common Mistakes (what to avoid)\n- Product Comparison Table\n- TOP 5-8 Recommendations grouped by profile with 'Buy Now' links\n- Review Analysis Summary\n- Purchase Plan steps\n\nUse modern CSS (inline styles or Tailwind CDN). Make all product/store links clickable.\nBuyer's Guide should be visually distinct and easy to scan for non-experts.\n\nUpload directly:\nartifacts({\n  action: \"upload\",\n  name: \"purchase-report.html\",\n  content: \"<your generated HTML>\"\n})\n\nResponse: { uuid, url, name, size, expiresAt }\nSave `url` as report_url.",
-      "completionCondition": "HTML report generated and uploaded to artifacts, public URL obtained",
-      "connections": {
-        "success": "telegram-notification"
+      "id": "route-research-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research-evidence.research_outcome"
+        },
+        "right": "blocked"
       },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-research-reassess"
+      }
+    },
+    {
+      "id": "route-research-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "research-evidence.research_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "produce-report"
+      }
+    },
+    {
+      "id": "produce-report",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the current decision-contract.md, source-evidence.md and any current feedback or changed-knowledge account in repair-account.md. Own the complete decision package and ordinary completion before review. Overwrite purchase-report.md with a decision summary, category and buyer guide, evidence-linked comparison, profile-specific recommendations, direct observed product/seller links, purchase-condition caveats, reasoning, uncertainty, limitations and pre-purchase checks. Overwrite purchase-report.html as the same current content in self-contained readable HTML with inline assets only: no CDN, fetch/XHR/WebSocket, forms, external scripts/styles/fonts, credentials, unrelated personal data or tracking. Run cheap applicable checks and overwrite validation-observations.md with each check, applicability and direct observation for readable files, parseable/self-contained HTML, forbidden network/form constructs and internal references. These observations do not prove semantic quality. Set result_class to limited whenever evidence_status={{evidence_status}} is limited; otherwise complete only when supported. Return ready, blocked or reassess; write result and bounded summaries only for a ready package.",
+      "completionCondition": "A complete or explicitly limited current report and self-contained HTML exist with current bounded mechanical observations",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "production_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked",
+              "reassess"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
         "required": [
-          "report_url",
-          "uploaded"
+          "production_outcome"
         ],
-        "properties": {},
         "globalInputs": [
-          "report_url",
-          "uploaded"
+          "result_class",
+          "recommendation_summary",
+          "limitations_summary"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "production_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "production_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "result_class": {
+                  "enum": [
+                    "complete",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "result_class",
+                "recommendation_summary",
+                "limitations_summary"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "result_class"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "recommendation_summary"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "limitations_summary"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
         ]
+      },
+      "connections": {
+        "success": "route-production-ready"
       }
     },
     {
-      "id": "telegram-notification",
+      "id": "route-production-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "produce-report.production_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-production-blocked"
+      }
+    },
+    {
+      "id": "route-production-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "produce-report.production_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "semantic-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate one genuinely independent whole-result review and retain the same reviewer context for rereview where supported. The reviewer reads decision-contract.md, source-evidence.md, purchase-report.md, purchase-report.html, validation-observations.md and repair-account.md plus primary sources needed to test material claims. It verifies any changed-knowledge claim in repair-account.md and the bounded terminal projections against the current package: result_class={{result_class}}, recommendation_summary={{recommendation_summary}}, limitations_summary={{limitations_summary}}. It overwrites review-findings.md with the complete current reproducible blocker set, diagnoses without repair, and checks evidence provenance, comparison fairness, recommendation reasoning, buyer guidance, limits, privacy, HTML meaning and authority. Mechanical checks prove only their direct observations. Return pass only at zero blockers; repair only for one evidence or report owner under a sound contract; reassess for mixed/upstream/criterion/validation-method defects or a repeated root without stronger knowledge; blocked when independence or a prerequisite is unavailable.",
+      "completionCondition": "One independent primary-source review records all current blockers and a cause-correct aggregate outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "evidence",
+              "report"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "repair_owner"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-review-pass"
+      }
+    },
+    {
+      "id": "route-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-mode",
+        "false": "route-review-blocked"
+      }
+    },
+    {
+      "id": "route-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-review-reassess"
+      }
+    },
+    {
+      "id": "route-review-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-repair-owner"
+      }
+    },
+    {
+      "id": "route-repair-owner",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "repair-evidence",
+        "false": "repair-report"
+      }
+    },
+    {
+      "id": "repair-evidence",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read review-findings.md, decision-contract.md, source-evidence.md and relevant primary sources. Reproduce every evidence-owned blocker, repair every real manifestation of its confirmed class, overwrite source-evidence.md, and record root class plus changed relevant source knowledge in repair-account.md. Return changed only after mutation; reassess for invalid/mixed/unreproduced/repeated-without-stronger-knowledge causes; blocked for an irreducible evidence prerequisite. Report and HTML are now stale and must be recomputed after changed evidence.",
+      "completionCondition": "Evidence defects change coherently before all dependent conclusions rerun, or non-local causes do not loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-changed"
+      }
+    },
+    {
+      "id": "route-evidence-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-evidence-reassess"
+      }
+    },
+    {
+      "id": "route-evidence-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-report",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read review-findings.md and the current canonical package. Reproduce every report/HTML-owned blocker and repair all real manifestations without changing sound evidence or authority. Overwrite purchase-report.md, purchase-report.html and validation-observations.md so observations match the changed bytes; update result_class, recommendation_summary and limitations_summary to the same current package; and record root class plus changed relevant knowledge in repair-account.md. Return changed only after mutation and current bounded projections; reassess for invalid validation/evidence methods, mixed/unreproduced/repeated roots; blocked for an irreducible local repair.",
+      "completionCondition": "Report defects and current mechanical observations change together, or non-report causes do not loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "result_class",
+          "recommendation_summary",
+          "limitations_summary"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "result_class": {
+                  "enum": [
+                    "complete",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "changed_knowledge",
+                "result_class",
+                "recommendation_summary",
+                "limitations_summary"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "result_class"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "recommendation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitations_summary"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "result_class"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "recommendation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitations_summary"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-report-changed"
+      }
+    },
+    {
+      "id": "route-report-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-report.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-report-reassess"
+      }
+    },
+    {
+      "id": "route-report-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-report.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the originating request/authority, current decision-contract.md, review-findings.md, repair-account.md and relevant primary evidence. Consume whichever immediate cause exists: {{#if frame-contract.outcome_reason}}frame={{frame-contract.outcome_reason}}; {{/if}}{{#if research-evidence.outcome_reason}}research={{research-evidence.outcome_reason}}; {{/if}}{{#if produce-report.outcome_reason}}production={{produce-report.outcome_reason}}; {{/if}}{{#if repair-evidence.blocker_reason}}evidence_repair={{repair-evidence.blocker_reason}}; {{/if}}{{#if repair-report.blocker_reason}}report_repair={{repair-report.blocker_reason}}.{{/if}} Correct only the earliest invalid derived interpretation, criterion, scope, evidence method or authority while preserving the user's goal and authority ceiling. Overwrite decision-contract.md and record changed relevant knowledge in repair-account.md. Return eligible only after material correction or blocked for an irreducible prerequisite. Reassessment cannot claim user abort; only present-result.decision=abort owns that outcome.",
+      "completionCondition": "The earliest invalid derived contract is corrected for independent review or ends truthfully",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "eligible"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "required": [
+                  "changed_knowledge"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-eligible"
+      }
+    },
+    {
+      "id": "route-reassessment-eligible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "eligible"
+      },
+      "connections": {
+        "true": "review-corrected-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "review-corrected-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate independent review of the corrected decision-contract.md against the originating goal, immutable authority, exact cause, and changed knowledge recorded in repair-account.md. The reviewer reads repair-account.md directly and overwrites review-findings.md. Return pass only when the correction is material, evidence-capable and does not erode requirements; reassess for a still-invalid or repeated unchanged root; blocked if independent review is unavailable.",
+      "completionCondition": "The corrected contract is independently accepted or remains truthfully non-actionable",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "reassess",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "contract_review_outcome"
+        ]
+      },
+      "connections": {
+        "success": "route-contract-pass"
+      }
+    },
+    {
+      "id": "route-contract-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-corrected-contract.contract_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-contract-blocked"
+      }
+    },
+    {
+      "id": "route-contract-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-corrected-contract.contract_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "route-publication",
+        "false": "present-result"
+      }
+    },
+    {
+      "id": "present-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Present the independently accepted local purchase package and its complete/limited boundary without treating user preference as correctness evidence. Ask for accept, bounded actionable rework feedback, or abort. Acceptance never expands publication, notification or purchase authority.",
+      "completionCondition": "The interactive user accepts, supplies actionable rework feedback, or aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-result-accept"
+      }
+    },
+    {
+      "id": "route-result-accept",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "route-publication",
+        "false": "route-result-rework"
+      }
+    },
+    {
+      "id": "route-result-rework",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "rework"
+      },
+      "connections": {
+        "true": "rework-result",
+        "false": "finalize-aborted"
+      }
+    },
+    {
+      "id": "rework-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read the user's bounded feedback between these markers: ---BEGIN FEEDBACK--- {{present-result.feedback}} ---END FEEDBACK--- and the current package. Classify its earliest reach as contract, evidence or report without mutating here; record the feedback and classification in repair-account.md. Do not treat preference as proof or broaden authority.",
+      "completionCondition": "Interactive feedback is classified to the earliest stale owner",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rework_owner": {
+            "type": "string",
+            "enum": [
+              "contract",
+              "evidence",
+              "report"
+            ]
+          }
+        },
+        "required": [
+          "rework_owner"
+        ]
+      },
+      "connections": {
+        "success": "route-rework-contract"
+      }
+    },
+    {
+      "id": "route-rework-contract",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_owner"
+        },
+        "right": "contract"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-rework-evidence"
+      }
+    },
+    {
+      "id": "route-rework-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "produce-report"
+      }
+    },
+    {
+      "id": "route-publication",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "publication_authorized"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "publish-artifact",
+        "false": "route-notification"
+      }
+    },
+    {
+      "id": "publish-artifact",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Under already resolved publication authority, read the independently accepted purchase-report.html and upload it once through the supported Moira artifacts API. Do not change the package or rerun research. Return succeeded only with the actual observed HTTPS URL; otherwise failed with the factual bounded failure_reason that downstream finalization will consume. The accepted local package remains valid.",
+      "completionCondition": "The authorized optional artifact upload has one observed success or failure outcome",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "failure_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "publication_status"
+        ],
+        "globalInputs": [
+          "publication_status",
+          "public_url"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "publication_status": {
+                "enum": [
+                  "succeeded",
+                  "failed"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "publication_status": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "publication_status"
+              ]
+            },
+            "then": {
+              "required": [
+                "public_url"
+              ],
+              "not": {
+                "required": [
+                  "failure_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "failure_reason"
+              ],
+              "not": {
+                "required": [
+                  "public_url"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-notification"
+      }
+    },
+    {
+      "id": "route-notification",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "notification_authorized"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "send-notification",
+        "false": "finalize-result"
+      }
+    },
+    {
+      "id": "send-notification",
       "type": "telegram-notification",
-      "message": "🛒 Purchase Report Ready!\n\nProduct: {{analyze-user-needs.product_type}}\nBudget: {{analyze-user-needs.budget_min}}-{{analyze-user-needs.budget_max}}\n\n📊 Full report: {{report_url}}",
+      "message": "Smart Purchase Assistant completed independent review.\n\n{{recommendation_summary}}\n\nPublic report when available: {{public_url}}",
       "connections": {
-        "default": "end"
+        "default": "route-notification-sent",
+        "error": "finalize-notification-error"
       }
     },
     {
-      "id": "end",
+      "id": "route-notification-sent",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "send-notification.telegramNotificationSent"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "finalize-notified",
+        "false": "finalize-notification-unsent"
+      }
+    },
+    {
+      "id": "finalize-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. Write final-report.md from the independently accepted package, preserving result_class, recommendation_summary and limitations_summary without semantic reinterpretation. Record the actual publication outcome and that notification was not requested. Return the exact final report path and bounded truthful summary. Do not publish, notify or mutate the package.",
+      "completionCondition": "The accepted local result and actual optional transport outcomes are durably projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "not_requested"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-notified",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized Telegram handler returned telegramNotificationSent=true; this proves accepted send handling, not user receipt. Write final-report.md with the independently accepted local result and actual publication/notification outcomes. Preserve the accepted summaries, set notification_status sent, and return the exact final report path. Do not mutate the package.",
+      "completionCondition": "Observed notification handling and the accepted local result are truthfully projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "sent"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-notification-unsent",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized Telegram node continued with telegramNotificationSent={{send-notification.telegramNotificationSent}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status not_sent, explain the bounded unconfigured/disabled/unavailable transport state without secrets, and return the exact final report path. Do not claim send or user receipt and do not rerun research.",
+      "completionCondition": "The not-sent transport observation is distinct and the accepted local result remains available",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "not_sent"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-notification-error",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}}, publication_failure={{publish-artifact.failure_reason}}{{/if}}{{#if send-notification.errorMessage}}, and the bounded Telegram engine error={{send-notification.errorMessage}}{{/if}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status failed, record the non-secret factual transport reason, and return the exact final report path. Do not claim send, rerun research or mutate the package.",
+      "completionCondition": "The thrown notification error remains visible without invalidating the accepted local result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "summary",
+          "notification_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "notification_status": {
+                "const": "failed"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-success"
+      }
+    },
+    {
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read review-findings.md and repair-account.md when present, and consume whichever immediate cause exists: {{#if frame-contract.outcome_reason}}frame={{frame-contract.outcome_reason}}; {{/if}}{{#if research-evidence.outcome_reason}}research={{research-evidence.outcome_reason}}; {{/if}}{{#if produce-report.outcome_reason}}production={{produce-report.outcome_reason}}; {{/if}}{{#if repair-evidence.blocker_reason}}evidence_repair={{repair-evidence.blocker_reason}}; {{/if}}{{#if repair-report.blocker_reason}}report_repair={{repair-report.blocker_reason}}; {{/if}}{{#if reassess-contract.outcome_reason}}reassessment={{reassess-contract.outcome_reason}}.{{/if}} Write final-report.md with the exact factual blocker, safe completed work, preserved artifacts, current evidence/authority boundary and prerequisite to resume. Set result_class blocked and return the exact final report path and bounded summary. Do not claim review acceptance, publication or notification.",
+      "completionCondition": "The workspace-backed blocker and preserved state are durable and truthful",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "globalInputs": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "result_class": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Consume the only authorized abort evidence, present-result.decision={{present-result.decision}}. Record the explicit interactive abort and preserved local artifacts in final-report.md without claiming acceptance or optional effects. Set result_class aborted and return the exact final report path and bounded summary. No autonomous or reassessment route may reach this node.",
+      "completionCondition": "The explicit abort and preserved state are durably reported",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "globalInputs": [
+          "result_class",
+          "artifact_path",
+          "summary"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "result_class": {
+                "const": "aborted"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "finalize-no-workspace",
+      "type": "agent-directive",
+      "directive": "No safe materialized workspace exists. Consume the immediate observed cause: intake_outcome={{intake.intake_outcome}}, filesystem_available={{filesystem_available}}{{#if intake.outcome_reason}}, intake_reason={{intake.outcome_reason}}{{/if}}{{#if materialize-workspace.errorMessage}}, materialize_error={{materialize-workspace.errorMessage}}{{/if}}. Report the applicable exact intake, filesystem or server-observed materialize prerequisite without pretending a local report exists. Set result_class blocked and return a bounded summary only. A client-side failure after a materialize command was presented must not call this node; it remains incomplete at that waiting step.",
+      "completionCondition": "The pre-workspace blocker is truthfully bounded without invented artifacts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "result_class",
+          "summary"
+        ],
+        "globalInputs": [
+          "result_class",
+          "summary"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "result_class": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-no-workspace"
+      }
+    },
+    {
+      "id": "end-success",
       "type": "end",
       "finalOutput": [
-        "product_type",
-        "budget_min",
-        "budget_max",
-        "use_case",
-        "top_recommendations",
-        "comparison_table",
-        "purchase_plan",
-        "alternative_options",
-        "report_url"
+        "workspace_path",
+        "artifact_path",
+        "result_class",
+        "recommendation_summary",
+        "limitations_summary",
+        "publication_status",
+        "notification_status",
+        "public_url",
+        "summary"
       ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "artifact_path",
+        "result_class",
+        "summary"
+      ]
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "workspace_path",
+        "artifact_path",
+        "result_class",
+        "summary"
+      ]
+    },
+    {
+      "id": "end-no-workspace",
+      "type": "end",
+      "finalOutput": [
+        "result_class",
+        "summary"
+      ]
+    },
+    {
+      "id": "teleport-revise-process",
+      "type": "teleport",
+      "hint": "Jump here when the purchase contract, evidence method, scope or authority is itself wrong; not for an ordinary source/report finding or transport failure.",
+      "directive": "Work only in {{workspace_path}} when it exists. State why the current purchase process contract is wrong, preserve the originating goal and authority, and correct decision-contract.md plus repair-account.md when materialized. Do not repair ordinary evidence/report findings or use revision to authorize purchase, publication or notification.",
+      "completionCondition": "A material process defect is recorded for normal authority-preserving reassessment",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "maxProperties": 0
+      },
+      "connections": {
+        "success": "reassess-contract"
+      }
     }
   ],
   "variableRegistry": {
-    "stage": {
+    "purchase_request": {
       "type": "string",
-      "description": "Stores stage",
-      "default": "initialization"
+      "minLength": 10,
+      "maxLength": 4000,
+      "description": "Bounded complete originating purchase request carried from intake to the durable contract owner."
     },
-    "alternative_options": {
-      "type": "array",
-      "description": "Workflow-global alternative_options",
-      "items": {
-        "type": "string"
-      }
-    },
-    "alternatives": {
-      "type": "array",
-      "description": "Workflow-global alternatives",
-      "items": {
-        "type": "string"
-      }
-    },
-    "buyer_checklist": {
-      "type": "array",
-      "description": "Workflow-global buyer_checklist",
-      "items": {
-        "type": "object",
-        "required": [
-          "parameter",
-          "why_matters"
-        ],
-        "properties": {
-          "parameter": {
-            "type": "string",
-            "description": "Parameter name to evaluate"
-          },
-          "why_matters": {
-            "type": "string",
-            "description": "Why this parameter is important"
-          },
-          "good_values": {
-            "type": "string",
-            "description": "What values are considered good"
-          },
-          "bad_values": {
-            "type": "string",
-            "description": "What values are concerning"
-          }
-        }
-      }
-    },
-    "buyer_guide": {
-      "type": "object",
-      "description": "Workflow-global buyer_guide",
-      "properties": {
-        "product_types_overview": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "type_name",
-              "description",
-              "pros",
-              "cons",
-              "best_for"
-            ],
-            "properties": {
-              "type_name": {
-                "type": "string",
-                "description": "Product type name"
-              },
-              "description": {
-                "type": "string",
-                "description": "What it is in 2-3 sentences"
-              },
-              "pros": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Main advantages"
-              },
-              "cons": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Main disadvantages"
-              },
-              "best_for": {
-                "type": "string",
-                "description": "Who this type is best for"
-              }
-            }
-          },
-          "description": "Overview of each product type for non-experts"
-        },
-        "selection_checklist": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Ordered list of what to look for when buying"
-        },
-        "decision_matrix": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "if_you_value",
-              "choose"
-            ],
-            "properties": {
-              "if_you_value": {
-                "type": "string",
-                "description": "What the buyer values (e.g. Quiet operation)"
-              },
-              "choose": {
-                "type": "string",
-                "description": "Recommended type/approach (e.g. Evaporative humidifier)"
-              }
-            }
-          },
-          "description": "Decision matrix: If you value X -> choose Y"
-        },
-        "common_mistakes": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": [
-              "mistake",
-              "how_to_avoid"
-            ],
-            "properties": {
-              "mistake": {
-                "type": "string",
-                "description": "Common buyer mistake"
-              },
-              "how_to_avoid": {
-                "type": "string",
-                "description": "How to avoid this mistake"
-              }
-            }
-          },
-          "description": "3-5 frequent mistakes buyers make in this category"
-        }
-      },
-      "required": [
-        "product_types_overview",
-        "selection_checklist",
-        "decision_matrix",
-        "common_mistakes"
-      ]
-    },
-    "can_create_artifacts": {
+    "filesystem_available": {
       "type": "boolean",
-      "description": "Workflow-global can_create_artifacts"
+      "description": "Whether the executing agent can use the required local filesystem."
     },
-    "candidates": {
-      "type": "array",
-      "description": "Workflow-global candidates",
-      "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "price",
-          "source",
-          "product_url"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "brand": {
-            "type": "string"
-          },
-          "price": {
-            "type": "number"
-          },
-          "source": {
-            "type": "string"
-          },
-          "product_url": {
-            "type": "string",
-            "description": "Direct URL to product page"
-          },
-          "store_urls": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "store_name": {
-                  "type": "string"
-                },
-                "url": {
-                  "type": "string"
-                },
-                "price": {
-                  "type": "number"
-                }
-              }
-            },
-            "description": "URLs in different stores with prices"
-          },
-          "key_specs": {
-            "type": "object"
-          },
-          "product_type_category": {
-            "type": "string",
-            "description": "Which product type from variant map this candidate belongs to (e.g. ultrasonic, evaporative)"
-          }
-        }
-      }
-    },
-    "comparison_table": {
+    "operating_mode": {
       "type": "string",
-      "description": "Workflow-global comparison_table"
+      "enum": [
+        "autonomous",
+        "interactive"
+      ],
+      "description": "Resolved once; autonomous skips only human preference waits."
     },
-    "constraints": {
-      "type": "array",
-      "description": "Workflow-global constraints",
-      "items": {
-        "type": "string"
-      }
-    },
-    "detailed_analysis": {
-      "type": "array",
-      "description": "Workflow-global detailed_analysis",
-      "items": {
-        "type": "object",
-        "required": [
-          "product_name",
-          "pros",
-          "cons",
-          "rating_score",
-          "review_count"
-        ],
-        "properties": {
-          "product_name": {
-            "type": "string"
-          },
-          "pros": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "cons": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "rating_score": {
-            "type": "number",
-            "minimum": 1,
-            "maximum": 10
-          },
-          "review_count": {
-            "type": "number",
-            "description": "Total number of reviews"
-          },
-          "verified_purchase_percent": {
-            "type": "number",
-            "description": "Percentage of reviews from verified buyers"
-          },
-          "latest_review_date": {
-            "type": "string",
-            "description": "Date of most recent review"
-          },
-          "common_complaints": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Frequently mentioned issues"
-          },
-          "common_praises": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Frequently mentioned positives"
-          },
-          "review_summary": {
-            "type": "string"
-          },
-          "expert_opinion": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "device_types": {
-      "type": "array",
-      "description": "Workflow-global device_types",
-      "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "principle",
-          "price_range",
-          "best_for"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Device type name (e.g. ultrasonic, evaporative)"
-          },
-          "principle": {
-            "type": "string",
-            "description": "How it works in 1-2 sentences"
-          },
-          "price_range": {
-            "type": "string",
-            "description": "Typical price range (e.g. 3000-8000 RUB)"
-          },
-          "best_for": {
-            "type": "string",
-            "description": "Who this type is best suited for"
-          }
-        }
-      }
-    },
-    "form_factors": {
-      "type": "array",
-      "description": "Workflow-global form_factors",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Form factor name"
-          },
-          "dimensions": {
-            "type": "string",
-            "description": "Typical dimensions/size"
-          },
-          "placement": {
-            "type": "string",
-            "description": "Where it is typically placed"
-          }
-        }
-      }
-    },
-    "key_parameters": {
-      "type": "array",
-      "description": "Workflow-global key_parameters",
-      "items": {
-        "type": "string"
-      }
-    },
-    "manufacturers": {
-      "type": "array",
-      "description": "Workflow-global manufacturers",
-      "items": {
-        "type": "string"
-      }
-    },
-    "marketplaces": {
-      "type": "array",
-      "description": "Workflow-global marketplaces",
-      "items": {
-        "type": "string"
-      }
-    },
-    "price_segments": {
-      "type": "object",
-      "description": "Workflow-global price_segments",
-      "properties": {
-        "budget": {
-          "type": "string",
-          "description": "Budget segment range and typical features"
-        },
-        "mid_range": {
-          "type": "string",
-          "description": "Mid-range segment range and typical features"
-        },
-        "premium": {
-          "type": "string",
-          "description": "Premium segment range and typical features"
-        }
-      }
-    },
-    "product_types": {
-      "type": "array",
-      "description": "Workflow-global product_types",
-      "items": {
-        "type": "string"
-      }
-    },
-    "purchase_analysis": {
-      "type": "array",
-      "description": "Workflow-global purchase_analysis",
-      "items": {
-        "type": "object",
-        "required": [
-          "product_name",
-          "total_cost"
-        ],
-        "properties": {
-          "product_name": {
-            "type": "string"
-          },
-          "total_cost": {
-            "type": "number"
-          },
-          "delivery_cost": {
-            "type": "number"
-          },
-          "delivery_time": {
-            "type": "string"
-          },
-          "warranty": {
-            "type": "string"
-          },
-          "return_policy": {
-            "type": "string"
-          },
-          "availability": {
-            "type": "string"
-          },
-          "current_offers": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    "purchase_plan": {
-      "type": "array",
-      "description": "Workflow-global purchase_plan",
-      "items": {
-        "type": "string"
-      }
-    },
-    "regional_stores": {
-      "type": "array",
-      "description": "Workflow-global regional_stores",
-      "items": {
-        "type": "string"
-      }
-    },
-    "report_file_path": {
-      "type": "string",
-      "description": "Workflow-global report_file_path"
-    },
-    "report_generated": {
+    "publication_authorized": {
       "type": "boolean",
-      "description": "Workflow-global report_generated"
+      "description": "Separate originating authority for optional static artifact publication."
     },
-    "report_url": {
-      "type": "string",
-      "description": "Workflow-global report_url"
-    },
-    "requirements": {
-      "type": "array",
-      "description": "Workflow-global requirements",
-      "items": {
-        "type": "string"
-      }
-    },
-    "search_priority": {
-      "type": "array",
-      "description": "Workflow-global search_priority",
-      "items": {
-        "type": "string"
-      }
-    },
-    "search_summary": {
-      "type": "string",
-      "description": "Workflow-global search_summary"
-    },
-    "seasonality": {
-      "type": "string",
-      "description": "Workflow-global seasonality"
-    },
-    "specialized_stores": {
-      "type": "array",
-      "description": "Workflow-global specialized_stores",
-      "items": {
-        "type": "string"
-      }
-    },
-    "technology_trends": {
-      "type": "array",
-      "description": "Workflow-global technology_trends",
-      "items": {
-        "type": "string"
-      }
-    },
-    "top_recommendations": {
-      "type": "array",
-      "description": "Workflow-global top_recommendations",
-      "items": {
-        "type": "object",
-        "required": [
-          "rank",
-          "product_name",
-          "why_recommended",
-          "total_cost",
-          "product_url",
-          "best_for"
-        ],
-        "properties": {
-          "rank": {
-            "type": "number"
-          },
-          "product_name": {
-            "type": "string"
-          },
-          "why_recommended": {
-            "type": "string"
-          },
-          "total_cost": {
-            "type": "number"
-          },
-          "product_url": {
-            "type": "string",
-            "description": "Direct link to product"
-          },
-          "best_store_url": {
-            "type": "string",
-            "description": "Best place to buy (price/reliability)"
-          },
-          "store_urls": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "store_name": {
-                  "type": "string"
-                },
-                "url": {
-                  "type": "string"
-                },
-                "price": {
-                  "type": "number"
-                }
-              }
-            },
-            "description": "All store options with prices"
-          },
-          "key_advantages": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "best_for": {
-            "type": "string",
-            "description": "Profile/use case this recommendation is best for (e.g. Best budget option, Best for quiet bedroom)"
-          },
-          "product_type": {
-            "type": "string",
-            "description": "Product type category (e.g. evaporative, ultrasonic)"
-          }
-        }
-      },
-      "minItems": 5,
-      "maxItems": 8
-    },
-    "uploaded": {
+    "notification_authorized": {
       "type": "boolean",
-      "description": "Workflow-global uploaded"
+      "description": "Separate originating authority for optional Telegram notification."
     },
-    "use_case": {
+    "workspace_path": {
       "type": "string",
-      "description": "Workflow-global use_case"
+      "description": "Execution-correlated canonical purchase workspace.",
+      "const": "./moira-ws/smart-purchase-assistant-{{executionId}}",
+      "default": "./moira-ws/smart-purchase-assistant-{{executionId}}"
     },
-    "use_cases": {
-      "type": "array",
-      "description": "Workflow-global use_cases",
-      "items": {
-        "type": "object",
-        "required": [
-          "scenario",
-          "recommended_type",
-          "priority_params"
-        ],
-        "properties": {
-          "scenario": {
-            "type": "string",
-            "description": "Usage scenario description"
-          },
-          "recommended_type": {
-            "type": "string",
-            "description": "Which product type is best for this scenario"
-          },
-          "priority_params": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Parameters to prioritize for this use case"
-          }
-        }
-      }
+    "workspace_process_id_file": {
+      "type": "string",
+      "description": "Registry-backed process ID content.",
+      "const": "{{executionId}}",
+      "default": "{{executionId}}"
+    },
+    "evidence_status": {
+      "type": "string",
+      "enum": [
+        "sufficient",
+        "limited"
+      ],
+      "description": "Current source-evidence fitness for complete or limited reporting."
+    },
+    "result_class": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited",
+        "blocked",
+        "aborted"
+      ],
+      "description": "Truthful local result class after independent review or terminal failure."
+    },
+    "recommendation_summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 4000,
+      "description": "Bounded accepted recommendation summary without raw evidence or secrets."
+    },
+    "limitations_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "description": "Bounded material evidence and decision limitations."
+    },
+    "publication_status": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "succeeded",
+        "failed"
+      ],
+      "description": "Observed optional artifact publication outcome.",
+      "default": "not_requested"
+    },
+    "notification_status": {
+      "type": "string",
+      "enum": [
+        "not_requested",
+        "sent",
+        "not_sent",
+        "failed"
+      ],
+      "description": "Observed optional Telegram handler outcome.",
+      "default": "not_requested"
+    },
+    "public_url": {
+      "type": "string",
+      "pattern": "^(|https://[^\\s]+)$",
+      "maxLength": 2000,
+      "description": "Observed HTTPS artifact URL after successful authorized publication.",
+      "default": ""
+    },
+    "artifact_path": {
+      "type": "string",
+      "pattern": "^\\./moira-ws/smart-purchase-assistant-[0-9a-f-]{36}/final-report\\.md$",
+      "description": "Exact final report path in the canonical workspace."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 4000,
+      "description": "Bounded truthful terminal summary."
     }
   }
 }

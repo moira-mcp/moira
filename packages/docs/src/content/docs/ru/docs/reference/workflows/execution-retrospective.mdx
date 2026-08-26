@@ -1,0 +1,23 @@
+---
+title: Execution Retrospective
+description: Evidence-backed анализ одного запуска Moira с проверенными предложениями улучшений и без автоматических изменений.
+---
+
+Execution Retrospective анализирует один завершённый, прерванный или неуспешный запуск Moira по разрешённому execution context, agent-session evidence, артефактам, review, retry, пользовательским исправлениям и terminal behavior. Результат — приоритизированные предложения по улучшению результата, workflow definition или system prompt без изменения анализируемого запуска.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/execution-retrospective",
+  parentExecutionId: "<subject-execution-id>"
+})
+```
+
+## Evidence и процесс
+
+Workflow материализует execution-correlated workspace и сохраняет различие между sufficient, partial и unavailable evidence. Independent analysis отделяет наблюдаемые факты от inference, описывает успешные части, находит причины переделок или задержек и пишет source-linked retrospective. Independent final review должен закрыть все blockers; подтверждённые замечания к отчёту используют contained или spreading repair routes.
+
+Partial или unavailable execution evidence не превращается в уверенный диагноз. Terminal result честно сообщает evidence boundary и путь к reviewed proposal.
+
+## Полномочия
+
+Workflow только предлагает изменения. Он не редактирует execution, workflow или prompt, не публикует, не уведомляет, не коммитит, не выпускает release, не deploy и не меняет production. Для реализации принятых изменений workflow отдельно используйте [Workflow Management Flow](./workflow-management-flow/).

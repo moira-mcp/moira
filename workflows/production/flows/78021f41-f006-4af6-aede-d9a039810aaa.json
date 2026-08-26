@@ -1,1308 +1,2124 @@
 {
-  "slug": "test-generation",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "78021f41-f006-4af6-aede-d9a039810aaa",
   "metadata": {
     "name": "Test Generation",
-    "version": "1.8.1",
-    "description": "Workflow for QA/Tester role - helps create tests for code. Analyzes project and code, determines what to test (functions, classes, API endpoints), generates test cases with edge case coverage, writes automated tests using selected framework following project patterns."
+    "version": "2.0.3",
+    "description": "Adds or updates executable test code for one authorized target in an existing project. Captures repository, target behavior, test levels and VCS authority; materializes a durable workspace; analyzes production behavior and existing project test patterns; designs behavior/risk/boundary cases; writes the complete authorized test, fixture, configuration and coverage-record change to real project paths; performs a fresh producer completion pass before targeted and broader deterministic commands; and requires independent semantic review. Test, target/design and evidence defects have cause-owned repair; production-code requirements end in a durable Software Development Flow handoff. Autonomous mode skips human waits only, and VCS effects require separate originating authority. The workflow never modifies production code, publishes, notifies, releases or deploys. Choose Test Planning for strategy without code, Test Suite Audit for an existing-suite audit, or Software Development Flow for production implementation with tests and documentation."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "get-code"
-      }
-    },
-    {
-      "id": "get-code",
-      "type": "agent-directive",
-      "directive": "Get code for testing from user.\n\nAsk:\n1. Which file/module/function needs to be tested?\n2. Path to file or code directly\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask question and STOP\n- DO NOT fill fields until user explicitly responds\n- Record in user_response_text exactly what user wrote",
-      "completionCondition": "User provided code or file path",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "code_source",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "code_source",
-          "file_path",
-          "code_content",
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "analyze-project"
-      }
-    },
-    {
-      "id": "analyze-project",
-      "type": "agent-directive",
-      "directive": "Re-validation pass {{fix_project_iteration}} of up to {{max_self_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nAnalyze the project structure and testing requirements.\n\nRead the code provided in context and identify:\n1. Main modules and components\n2. Public APIs and functions\n3. Dependencies and integrations\n4. Existing test coverage (if any)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave analysis issues to `{{workspace_path}}/project-analysis-issues.md` with format:\n```\n# Project Analysis Issues\n\n1. [Issue description]\n2. [Issue description]\n...\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `analysis_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if analysis complete).",
-      "completionCondition": "Project analyzed, test information collected",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "tests_exist": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ],
-            "description": "Do tests exist in project"
-          },
-          "test_framework": {
-            "type": "string",
-            "description": "Found framework (Jest, Playwright, pytest, etc.)"
-          },
-          "naming_pattern": {
-            "type": "string",
-            "description": "Naming pattern (*.test.ts, *.spec.js, test_*.py)"
-          },
-          "project_analysis_summary": {
-            "type": "string",
-            "description": "Brief description of findings"
-          },
-          "project_analysis_valid": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ],
-            "description": "Whether project analysis is complete and valid"
-          }
-        },
-        "required": [
-          "tests_exist",
-          "test_framework",
-          "naming_pattern",
-          "project_analysis_valid"
-        ],
-        "globalInputs": [
-          "test_directory",
-          "existing_helpers"
-        ]
-      },
-      "connections": {
-        "success": "check-project-analysis"
-      }
-    },
-    {
-      "id": "check-project-analysis",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "analyze-project.project_analysis_valid"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "determine-approach",
-        "false": "expr-inc-proj-fix"
-      }
-    },
-    {
-      "id": "fix-project-analysis",
-      "type": "agent-directive",
-      "directive": "Fix project analysis issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/project-analysis-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `analysis_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Investigate the cause\n3. Apply fix or gather missing information\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
-      "completionCondition": "Analysis completed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "project_analysis_fix_hints"
-        ],
-        "globalInputs": [
-          "project_analysis_fix_hints"
-        ]
-      },
-      "connections": {
-        "success": "analyze-project"
-      }
-    },
-    {
-      "id": "determine-approach",
-      "type": "agent-directive",
-      "directive": "Determine test creation approach based on project analysis.\n\n{{#if analyze-project.project_analysis_summary}}Project analysis: {{analyze-project.project_analysis_summary}}{{else}}Project analysis: Not available (analysis fix limit reached){{/if}}\nTests exist: {{analyze-project.tests_exist}}\nFramework: {{analyze-project.test_framework}}\n\nIf tests exist:\n- Suggest using existing patterns\n- Specify which helpers to reuse\n\nIf no tests:\n- Suggest test structure\n- Recommend framework based on project stack\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show suggestion and ask 'Do you confirm? (yes/no)'\n- DO NOT fill approach_approved until user explicitly responds\n- Record in user_response_text exactly what user answered\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User confirmed or rejected approach",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "approach_approved": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ],
-            "description": "User confirmed approach"
-          }
-        },
-        "required": [
-          "approach",
-          "approach_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "approach",
-          "recommended_framework",
-          "recommended_structure",
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-approach-approval"
-      }
-    },
-    {
-      "id": "route-approach-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "determine-approach.approach_approved"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "analyze-structure",
-        "false": "revise-approach"
-      }
-    },
-    {
-      "id": "revise-approach",
-      "type": "agent-directive",
-      "directive": "User did not confirm approach.\n\nUser response: {{user_response_text}}\n\nClarify what needs to change and suggest alternative.",
-      "completionCondition": "Alternative approach suggested",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "revised_approach"
-        ],
-        "globalInputs": [
-          "revised_approach"
-        ]
-      },
-      "connections": {
-        "success": "determine-approach"
-      }
-    },
-    {
-      "id": "analyze-structure",
-      "type": "agent-directive",
-      "directive": "Re-validation pass {{fix_structure_iteration}} of up to {{max_self_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nAnalyze the code structure for test generation.\n\nBased on project analysis, examine:\n1. Code organization and patterns\n2. Function signatures and types\n3. Dependencies between modules\n4. Testability considerations\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave structure issues to `{{workspace_path}}/structure-analysis-issues.md` with format:\n```\n# Structure Analysis Issues\n\n1. [Issue description]\n2. [Issue description]\n...\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `structure_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if analysis complete).",
-      "completionCondition": "Code structure analyzed, testable units determined",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "structure_analysis_valid": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          }
-        },
-        "required": [
-          "testable_units",
-          "structure_analysis_valid"
-        ],
-        "globalInputs": [
-          "testable_units"
-        ]
-      },
-      "connections": {
-        "success": "check-structure-analysis"
-      }
-    },
-    {
-      "id": "check-structure-analysis",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "analyze-structure.structure_analysis_valid"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "determine-test-type",
-        "false": "expr-inc-struct-fix"
-      }
-    },
-    {
-      "id": "fix-structure-analysis",
-      "type": "agent-directive",
-      "directive": "Fix structure analysis issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/structure-analysis-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `structure_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Investigate the cause\n3. Apply fix or gather missing information\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
-      "completionCondition": "Structure analysis fixed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "testable_units"
-        ],
-        "globalInputs": [
-          "testable_units"
-        ]
-      },
-      "connections": {
-        "success": "analyze-structure"
-      }
-    },
-    {
-      "id": "determine-test-type",
-      "type": "agent-directive",
-      "directive": "Determine test type for each testable unit.\n\nTestable units: {{testable_units}}\nProject framework: {{analyze-project.test_framework}}\n\nFor each unit determine:\n- unit test (isolated function)\n- integration test (module interaction)\n- e2e test (full user path)\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show suggestion and ask 'Do you confirm? (yes/no)'\n- DO NOT fill test_type_approved until user explicitly responds\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User confirmed test types",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "test_types": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "unit_name": {
-                  "type": "string"
-                },
-                "test_type": {
-                  "type": "string",
-                  "enum": [
-                    "unit",
-                    "integration",
-                    "e2e"
-                  ]
-                }
-              }
-            }
-          },
-          "selected_framework": {
-            "type": "string",
-            "description": "Selected framework"
-          },
-          "test_type_approved": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          }
-        },
-        "required": [
-          "test_types",
-          "selected_framework",
-          "test_type_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-test-type-approval"
-      }
-    },
-    {
-      "id": "route-test-type-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "determine-test-type.test_type_approved"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "identify-cases",
-        "false": "revise-test-type"
-      }
-    },
-    {
-      "id": "revise-test-type",
-      "type": "agent-directive",
-      "directive": "User did not confirm test types.\n\nResponse: {{user_response_text}}\n\nRevise and suggest alternative.",
-      "completionCondition": "Test types revised",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "revised_test_types"
-        ],
-        "globalInputs": [
-          "revised_test_types"
-        ]
-      },
-      "connections": {
-        "success": "determine-test-type"
-      }
-    },
-    {
-      "id": "identify-cases",
-      "type": "agent-directive",
-      "directive": "Re-validation pass {{fix_cases_iteration}} of up to {{max_self_fix_iterations}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nIdentify test cases based on analysis.\n\nUse planning standards: {{planning_standards}}\n\nFor each function/module:\n1. Happy path cases\n2. Edge cases (null, empty, boundary)\n3. Error cases (exceptions, validation)\n4. Integration cases (if applicable)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave coverage issues to `{{workspace_path}}/cases-coverage-issues.md` with format:\n```\n# Test Cases Coverage Issues\n\n## REQUIREMENTS COVERAGE\n1. [Requirement not covered]\n\n## STANDARDS COMPLIANCE\n1. [Standard not followed]\n\n## Missing Cases\n1. [Case description]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `coverage_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - every requirement has test cases\n2. STANDARDS COMPLIANCE - cases follow {{planning_standards}}\n3. Edge cases covered\n4. Error paths covered\n\nReturn `issues_count` = number of issues found (0 if complete).",
-      "completionCondition": "Test cases determined for all units",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "test_cases": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "unit_name": {
-                  "type": "string"
-                },
-                "cases": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string"
-                      },
-                      "type": {
-                        "type": "string",
-                        "enum": [
-                          "happy_path",
-                          "edge_case",
-                          "error_case",
-                          "boundary"
-                        ]
-                      },
-                      "input": {
-                        "type": "string"
-                      },
-                      "expected": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "coverage_complete": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          }
-        },
-        "required": [
-          "test_cases",
-          "coverage_complete"
-        ]
-      },
-      "connections": {
-        "success": "check-cases-coverage"
-      }
-    },
-    {
-      "id": "check-cases-coverage",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "identify-cases.coverage_complete"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "create-plan",
-        "false": "expr-inc-cases-fix"
-      }
-    },
-    {
-      "id": "fix-cases",
-      "type": "agent-directive",
-      "directive": "Fix test cases coverage issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/cases-coverage-issues.md` for issues to fix.\n{{else}}\n**CONTEXT MODE:**\nUse `coverage_issues` from previous step.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Add missing test cases\n3. Ensure standards compliance\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
-      "completionCondition": "Test cases completed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "additional_cases"
-        ],
-        "globalInputs": [
-          "additional_cases"
-        ]
-      },
-      "connections": {
-        "success": "identify-cases"
-      }
-    },
-    {
-      "id": "create-plan",
-      "type": "agent-directive",
-      "directive": "Create final test plan.\n\nTestable units: {{testable_units}}\nTest types: {{determine-test-type.test_types}}\nTest cases: {{identify-cases.test_cases}}\nFramework: {{determine-test-type.selected_framework}}\n{{#if analyze-project.project_analysis_summary}}Project structure: {{analyze-project.project_analysis_summary}}{{else}}Project structure: Not available{{/if}}\n\nPlan should include:\n1. Test files to be created\n2. Which helpers/fixtures needed\n3. What needs to be mocked\n4. Test order\n\n{{#if has_file_access}}\n**FILE MODE:** Save test plan to `test-plan.md`\n{{else}}\n**CONTEXT MODE:** Store test plan in response\n{{/if}}",
-      "completionCondition": "Test plan created",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "test_plan": {
-            "type": "object",
-            "properties": {
-              "files_to_create": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "helpers_needed": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "mocks_needed": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "test_order": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "plan_summary": {
-            "type": "string",
-            "description": "Brief plan description"
-          }
-        },
-        "required": [
-          "test_plan",
-          "plan_summary"
-        ]
-      },
-      "connections": {
-        "success": "notify-plan-ready"
-      }
-    },
-    {
-      "id": "notify-plan-ready",
-      "type": "telegram-notification",
-      "message": "*Test plan ready*\n\nFramework: {{determine-test-type.selected_framework}}\nTests: {{identify-cases.test_cases}}\n\nAwaiting confirmation.",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "approve-plan",
-        "error": "approve-plan"
-      }
-    },
-    {
-      "id": "approve-plan",
-      "type": "agent-directive",
-      "directive": "Show user the test plan and get confirmation.\n\nPlan: {{create-plan.plan_summary}}\nFiles: {{create-plan.test_plan}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Ask 'Do you confirm the plan? (yes/no)'\n- DO NOT fill plan_approved until user explicitly responds\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User confirmed or rejected plan",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "plan_approved": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          },
-          "plan_feedback": {
-            "type": "string",
-            "description": "Plan comments"
-          }
-        },
-        "required": [
-          "plan_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-plan-approval"
-      }
-    },
-    {
-      "id": "route-plan-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "approve-plan.plan_approved"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "generate-tests",
-        "false": "revise-plan"
-      }
-    },
-    {
-      "id": "revise-plan",
-      "type": "agent-directive",
-      "directive": "User did not confirm plan.\n\nComments: {{approve-plan.plan_feedback}}\n\nRevise plan considering feedback.",
-      "completionCondition": "Plan revised",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "revised_plan"
-        ],
-        "globalInputs": [
-          "revised_plan"
-        ]
-      },
-      "connections": {
-        "success": "create-plan"
-      }
-    },
-    {
-      "id": "generate-tests",
-      "type": "agent-directive",
-      "directive": "Generate test code according to plan.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRE-READ the test plan from `{{workspace_path}}/test-plan.md` to ensure you have the latest version (plan may have been revised by user).\n\nPlan details from file:\n- Test files to be created\n- Helpers/fixtures needed\n- Mocks needed\n- Test order\n{{else}}\n**CONTEXT MODE:**\nPlan: {{create-plan.test_plan}}\n{{/if}}\n\nTest cases: {{identify-cases.test_cases}}\nFramework: {{determine-test-type.selected_framework}}\nProject patterns: {{analyze-project.naming_pattern}}\n\nQuality standards:\n{{quality_standards}}\n\nAvoid mistakes:\n{{common_mistakes}}\n\nCreate complete test code ready to run.",
-      "completionCondition": "Test code generated",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "generated_tests": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "file_path": {
-                  "type": "string"
-                },
-                "content": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "tests_count": {
-            "type": "number",
-            "minimum": 1
-          }
-        },
-        "required": [
-          "generated_tests",
-          "tests_count"
-        ]
-      },
-      "connections": {
-        "success": "check-tests-valid"
-      }
-    },
-    {
-      "id": "check-tests-valid",
-      "type": "agent-directive",
-      "directive": "Re-validation pass {{retry_count}} of up to {{max_retries}} — this is a normal quality loop, expected to converge. Seeing this step again is NOT a bug and NOT a stuck/looping flow; do NOT report a loop to the user.\n\nDelegate test validation to subagent via Task tool.\n\nUse Task tool to spawn validation subagent with prompt:\n```\nYOU ARE test validation reviewer.\n\nValidate the following generated tests against criteria:\n1. Correct syntax - code compiles without errors\n2. Proper assertions - meaningful, not just truthy checks\n3. Test isolation - no shared state between tests\n4. Naming conventions - follows project patterns\n5. Planning standards compliance: {{planning_standards}}\n\nGenerated tests to validate:\n{{generate-tests.generated_tests}}\n\nTest framework: {{determine-test-type.selected_framework}}\nProject naming pattern: {{analyze-project.naming_pattern}}\n\nFor EACH test file:\n1. Check syntax validity\n2. Verify assertions are specific\n3. Confirm test isolation\n4. Check naming follows conventions\n\nReturn:\n- tests_valid: yes/no\n- validation_errors: array of specific issues found\n- issues_count: number of issues (0 if all valid)\n\nRead test files yourself - DO NOT ask main agent.\n```\n\nSubagent model: sonnet\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave validation issues to `{{workspace_path}}/test-validation-issues.md` with format:\n```\n# Test Validation Issues\n\n1. [Issue: test X has problem Y]\n2. [Issue: assertion in test Z is weak]\n...\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `validation_issues` field as array.\n{{/if}}\n\nReturn `issues_count` = number of issues found (0 if all tests valid).",
-      "completionCondition": "Tests verified",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "tests_valid": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          },
-          "validation_errors": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "tests_valid"
-        ]
-      },
-      "connections": {
-        "success": "route-tests-validation"
-      }
-    },
-    {
-      "id": "route-tests-validation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "check-tests-valid.tests_valid"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "notify-tests-ready",
-        "false": "fix-tests"
-      }
-    },
-    {
-      "id": "fix-tests",
-      "type": "agent-directive",
-      "directive": "Fix test validation issues.\n\n{{#if has_file_access}}\n**FILE MODE:**\nRead `{{workspace_path}}/test-validation-issues.md` for issues to fix.\nUpdate test files directly.\n{{else}}\n**CONTEXT MODE:**\nUse `validation_issues` from previous step.\nReturn fixed tests in response.\n{{/if}}\n\nAddress EACH issue one by one:\n1. Read the issue\n2. Fix the test code\n3. Verify fix resolves issue\n4. Mark as resolved\n\nDO NOT skip any issue. All issues must be addressed.",
-      "completionCondition": "Errors fixed",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "fixed_tests"
-        ],
-        "globalInputs": [
-          "fixed_tests"
-        ]
-      },
-      "connections": {
-        "success": "expr-inc-retry"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-retry",
-      "expressions": [
-        "retry_count = retry_count + 1"
-      ],
-      "connections": {
-        "default": "check-retry-limit"
-      }
-    },
-    {
-      "id": "check-retry-limit",
-      "type": "condition",
-      "condition": {
-        "operator": "gte",
-        "left": {
-          "contextPath": "retry_count"
-        },
-        "right": {
-          "contextPath": "max_retries"
-        }
-      },
-      "connections": {
-        "true": "escalate-to-user",
-        "false": "generate-tests"
-      }
-    },
-    {
-      "id": "escalate-to-user",
-      "type": "agent-directive",
-      "directive": "Cannot generate valid tests after {{max_retries}} attempts.\n\nErrors: {{check-tests-valid.validation_errors}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show problem and ask what to do\n- Options: continue with errors / cancel / help manually\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently\n- Or reset retry counter and try again",
-      "completionCondition": "User made decision",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_decision": {
-            "type": "string",
-            "enum": [
-              "continue",
-              "cancel",
-              "manual_help",
-              "reset"
-            ]
-          }
-        },
-        "required": [
-          "user_decision",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "check-reset-retry"
-      }
-    },
-    {
-      "id": "route-escalation",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "escalate-to-user.user_decision"
-        },
-        "right": "continue"
-      },
-      "connections": {
-        "true": "notify-tests-ready",
-        "false": "end-cancelled"
-      }
-    },
-    {
-      "id": "end-cancelled",
-      "type": "end",
-      "finalOutput": [
-        "user_decision",
-        "validation_errors"
-      ]
-    },
-    {
-      "id": "notify-tests-ready",
-      "type": "telegram-notification",
-      "message": "*Tests ready for review*\n\nTests generated: {{generate-tests.tests_count}}\nFramework: {{determine-test-type.selected_framework}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "review-tests",
-        "error": "review-tests"
-      }
-    },
-    {
-      "id": "review-tests",
-      "type": "agent-directive",
-      "directive": "Show user generated tests for review.\n\nTests: {{generate-tests.generated_tests}}\n\n⚠️ MANDATORY: WAIT FOR USER RESPONSE\n- Show test code\n- Ask 'Do you confirm? (yes/no)'\n- DO NOT fill tests_approved until user explicitly responds\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User confirmed or rejected tests",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "tests_approved": {
-            "type": "string",
-            "enum": [
-              "yes",
-              "no"
-            ]
-          },
-          "review_feedback": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "tests_approved",
-          "user_response_text"
-        ],
-        "globalInputs": [
-          "user_response_text"
-        ]
-      },
-      "connections": {
-        "success": "route-tests-approval"
-      }
-    },
-    {
-      "id": "route-tests-approval",
-      "type": "condition",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "review-tests.tests_approved"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "finalize",
-        "false": "revise-tests"
-      }
-    },
-    {
-      "id": "revise-tests",
-      "type": "agent-directive",
-      "directive": "User did not confirm tests.\n\nComments: {{review-tests.review_feedback}}\n\nRevise tests considering feedback and reset retry_count.\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave feedback to `{{workspace_path}}/test-feedback.md` for reference.\nUpdate test files directly based on feedback.\n{{else}}\n**CONTEXT MODE:**\nApply feedback from `review_feedback` field.\nReturn revised tests in response.\n{{/if}}",
-      "completionCondition": "Tests revised",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "retry_count"
-        ],
-        "globalInputs": [
-          "retry_count"
-        ]
-      },
-      "connections": {
-        "success": "generate-tests"
-      }
-    },
-    {
-      "id": "finalize",
-      "type": "agent-directive",
-      "directive": "Save tests and create final report.\n\nTests: {{generate-tests.generated_tests}}\n\nSave files and prepare summary:\n- Which tests were created\n- How to run\n- What is tested",
-      "completionCondition": "Tests saved, report ready",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "files_saved": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "run_command": {
-            "type": "string",
-            "description": "Command to run tests"
-          }
-        },
-        "required": [
-          "files_saved",
-          "run_command",
-          "final_summary"
-        ],
-        "globalInputs": [
-          "final_summary"
-        ]
-      },
-      "connections": {
-        "success": "notify-completion"
-      }
-    },
-    {
-      "id": "notify-completion",
-      "type": "telegram-notification",
-      "message": "*Tests created*\n\nFiles: {{finalize.files_saved}}\nRun: `{{finalize.run_command}}`",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "end",
-        "error": "end"
+        "default": "intake"
       }
     },
     {
       "id": "end",
       "type": "end",
       "finalOutput": [
-        "files_saved",
-        "run_command",
-        "final_summary",
-        "tests_count"
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "commit_status",
+        "push_status"
       ]
     },
     {
-      "type": "expression",
-      "id": "expr-inc-proj-fix",
-      "expressions": [
-        "fix_project_iteration = fix_project_iteration + 1"
-      ],
-      "connections": {
-        "default": "check-proj-fix-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-proj-fix-limit",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "fix_project_iteration"
-        },
-        "right": {
-          "contextPath": "max_self_fix_iterations"
-        }
-      },
-      "connections": {
-        "true": "fix-project-analysis",
-        "false": "ask-user-proj-fix-limit-reached"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-struct-fix",
-      "expressions": [
-        "fix_structure_iteration = fix_structure_iteration + 1"
-      ],
-      "connections": {
-        "default": "check-struct-fix-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-struct-fix-limit",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "fix_structure_iteration"
-        },
-        "right": {
-          "contextPath": "max_self_fix_iterations"
-        }
-      },
-      "connections": {
-        "true": "fix-structure-analysis",
-        "false": "ask-user-struct-fix-limit-reached"
-      }
-    },
-    {
-      "type": "expression",
-      "id": "expr-inc-cases-fix",
-      "expressions": [
-        "fix_cases_iteration = fix_cases_iteration + 1"
-      ],
-      "connections": {
-        "default": "check-cases-fix-limit"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-cases-fix-limit",
-      "condition": {
-        "operator": "lt",
-        "left": {
-          "contextPath": "fix_cases_iteration"
-        },
-        "right": {
-          "contextPath": "max_self_fix_iterations"
-        }
-      },
-      "connections": {
-        "true": "fix-cases",
-        "false": "ask-user-cases-fix-limit-reached"
-      }
-    },
-    {
+      "id": "intake",
       "type": "agent-directive",
-      "id": "ask-user-proj-fix-limit-reached",
-      "directive": "The project analysis fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
-      "completionCondition": "User has made a decision on how to proceed",
+      "directive": "Reuse the originating test-generation request and explicit repository, target behavior, scope, operating mode, acceptance, test/config/fixture authority and separate commit/push decisions. Read only non-mutating context needed to classify preliminary_outcome eligible, handoff or blocked. Eligible means one bounded executable test-code outcome; production-code change, unknown repository, cross-repository work or unresolved testability architecture requires handoff. Autonomous mode skips human waits only and never grants VCS authority.",
+      "completionCondition": "The existing task, mode and authority are preserved and preliminary Lite eligibility is truthfully classified without mutation or numeric heuristics",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "preliminary_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
         "required": [
-          "decision"
+          "operating_mode",
+          "commit_authorized",
+          "task_summary",
+          "preliminary_outcome"
         ],
         "globalInputs": [
-          "decision"
+          "operating_mode",
+          "commit_authorized",
+          "task_summary",
+          "push_authorized"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "preliminary_outcome": {
+                  "enum": [
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "preliminary_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-proj-fix-limit-decision"
+        "success": "materialize-workspace"
       }
     },
     {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "test-contract.md",
+          "content": ""
+        },
+        {
+          "path": "plan.md",
+          "content": ""
+        },
+        {
+          "path": "plan-review.md",
+          "content": ""
+        },
+        {
+          "path": "implementation-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "validation-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "semantic-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "handoff.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        },
+        {
+          "path": "corrected-contract.md",
+          "content": ""
+        },
+        {
+          "path": "corrected-contract-findings.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "route-intake-eligible",
+        "error": "finalize-workspace-blocked"
+      }
+    },
+    {
+      "id": "route-intake-eligible",
       "type": "condition",
-      "id": "route-proj-fix-limit-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "decision"
+          "contextPath": "intake.preliminary_outcome"
         },
-        "right": "reset"
+        "right": "eligible"
       },
       "connections": {
-        "true": "expr-reset-proj-fix-counter",
-        "false": "determine-approach"
+        "true": "plan-change",
+        "false": "route-intake-handoff"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-proj-fix-counter",
-      "expressions": [
-        "fix_project_iteration = 0"
-      ],
+      "id": "route-intake-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "intake.preliminary_outcome"
+        },
+        "right": "handoff"
+      },
       "connections": {
-        "default": "fix-project-analysis"
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
       }
     },
     {
+      "id": "plan-change",
       "type": "agent-directive",
-      "id": "ask-user-struct-fix-limit-reached",
-      "directive": "The structure analysis fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
-      "completionCondition": "User has made a decision on how to proceed",
+      "directive": "Verify workspace correlation. Inspect repository instructions, actual target behavior and public surface, existing tests, fixtures, helpers, framework/configuration, commands, coverage conventions, dependencies and VCS state. Write immutable test-contract.md and concise plan.md with behavioral/risk/boundary cases, intended test levels, authorized files and observable acceptance. Return eligible, handoff when production code or full SDF is required, or blocked. Do not mutate the repository.",
+      "completionCondition": "Canonical task and proportionate plan are durable and actual project evidence either confirms Lite eligibility or truthfully produces handoff or blocked",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "planning_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
         "required": [
-          "decision"
+          "planning_outcome"
         ],
-        "globalInputs": [
-          "decision"
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "planning_outcome": {
+                  "enum": [
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "planning_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "route-struct-fix-limit-decision"
+        "success": "route-plan-eligible"
       }
     },
     {
+      "id": "route-plan-eligible",
       "type": "condition",
-      "id": "route-struct-fix-limit-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "decision"
+          "contextPath": "plan-change.planning_outcome"
         },
-        "right": "reset"
+        "right": "eligible"
       },
       "connections": {
-        "true": "expr-reset-struct-fix-counter",
-        "false": "determine-test-type"
+        "true": "review-plan",
+        "false": "route-plan-handoff"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-struct-fix-counter",
-      "expressions": [
-        "fix_structure_iteration = 0"
-      ],
+      "id": "route-plan-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan-change.planning_outcome"
+        },
+        "right": "handoff"
+      },
       "connections": {
-        "default": "fix-structure-analysis"
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
       }
     },
     {
+      "id": "review-plan",
       "type": "agent-directive",
-      "id": "ask-user-cases-fix-limit-reached",
-      "directive": "The test cases fix loop has reached its maximum iteration limit ({{max_self_fix_iterations}} attempts).\n\nSome issues may remain unresolved.\n\nAsk the user how to proceed:\n- **continue** — accept current result as-is and proceed to next phase\n- **reset** — reset the iteration counter and try fixing again",
-      "completionCondition": "User has made a decision on how to proceed",
+      "directive": "Delegate a genuinely independent review and keep the same reviewer context for rereview where supported. The reviewer reads the originating task and authority, test-contract.md, plan.md and relevant repository primary sources directly, then overwrites plan-review.md with every current reproducible blocker. It judges task coverage, Lite eligibility, acceptance/evidence modality, dependencies, risks, authority and whether the plan leaves implementation work to an intelligent producer. It does not repair, run linters as semantic judgment, require a finding or design process machinery. Return design_review_outcome=pass only at zero blockers; repair only when every blocker is plan-owned under a valid upstream contract; replan for task interpretation, eligibility, criterion, evidence, authority, process or mixed cause. Return blocked when a genuinely independent review cannot be obtained because of an irreducible capability or authority constraint; do not substitute self-review and call it independent. If the same root returns after one repair without changed relevant source knowledge, return replan. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "For pass, repair or replan, the complete independent plan review is durable and matches the earliest cause; for blocked, a factual durable inability record exists and no independent-review claim is made",
       "inputSchema": {
         "type": "object",
-        "properties": {},
+        "additionalProperties": false,
+        "properties": {
+          "design_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
         "required": [
-          "decision"
-        ],
-        "globalInputs": [
-          "decision"
+          "design_review_outcome"
         ]
       },
       "connections": {
-        "success": "route-cases-fix-limit-decision"
+        "success": "route-plan-review-pass"
       }
     },
     {
+      "id": "route-plan-review-pass",
       "type": "condition",
-      "id": "route-cases-fix-limit-decision",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "decision"
+          "contextPath": "review-plan.design_review_outcome"
         },
-        "right": "reset"
+        "right": "pass"
       },
       "connections": {
-        "true": "expr-reset-cases-fix-counter",
-        "false": "create-plan"
+        "true": "implement-change",
+        "false": "route-plan-review-blocked"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-cases-fix-counter",
-      "expressions": [
-        "fix_cases_iteration = 0"
-      ],
-      "connections": {
-        "default": "fix-cases"
-      }
-    },
-    {
+      "id": "route-plan-review-replan",
       "type": "condition",
-      "id": "check-reset-retry",
       "condition": {
         "operator": "eq",
         "left": {
-          "contextPath": "escalate-to-user.user_decision"
+          "contextPath": "review-plan.design_review_outcome"
         },
-        "right": "reset"
+        "right": "replan"
       },
       "connections": {
-        "true": "expr-reset-retry-counter",
-        "false": "route-escalation"
+        "true": "reassess-contract",
+        "false": "repair-plan"
       }
     },
     {
-      "type": "expression",
-      "id": "expr-reset-retry-counter",
-      "expressions": [
-        "retry_count = 0"
-      ],
+      "id": "repair-plan",
+      "type": "agent-directive",
+      "directive": "Read plan-review.md, immutable test-contract.md, accepted corrected-contract.md when present, plan.md and relevant repository sources. Reproduce every current plan/design-owned blocker under the complete effective contract. If all are reproducible and upstream authority remains valid, change only derived plan.md coherently without embedding implementation or weakening acceptance, and record root class plus changed relevant knowledge in repair-account.md. Return changed. Return reassess without plan mutation for unreproduced, upstream, evidence-model, mixed, proof-only or same-root-without-stronger-knowledge causes. Do not rewrite test-contract.md or mutate repository files.",
+      "completionCondition": "Plan-owned defects are materially repaired for the same independent review or the exact cause is sent to contract reassessment",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "changed_knowledge"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "connections": {
-        "default": "generate-tests"
+        "success": "route-plan-repair-changed"
+      }
+    },
+    {
+      "id": "route-plan-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-plan.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "review-plan",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Reassess the active process or review cause against immutable test-contract.md, original repository scope, production-code prohibition and commit/push authority. Read corrected-contract-findings.md when the cause came from correction review. Rewrite corrected-contract.md as the complete cumulative supplement, preserving every still-valid correction and recording explicit supersession. Never alter originating authority. Return corrected with earliest reentry_owner target|design|tests|evidence|completion, handoff when production code/full SDF is required, or blocked.",
+      "completionCondition": "The earliest invalid contract is materially corrected for plan rereview, or Lite truthfully ends in handoff or blocked without an unchanged loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "corrected",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "globalInputs": [
+          "reentry_owner"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "corrected"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge",
+                "reentry_owner"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "changed_knowledge"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "reentry_owner"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-corrected"
+      }
+    },
+    {
+      "id": "implement-change",
+      "type": "agent-directive",
+      "directive": "Implement the complete accepted test plan in real authorized project paths. Change only test files and necessary test fixtures/configuration/coverage records; reuse project helpers and public surfaces. Never edit production code or build proof-only mutation machinery. Record exact diff and direct evidence in implementation-evidence.md. Return ready, handoff if production/testability code must change, or blocked. Do not run VCS or external effects. Every repository mutation remains test-side only; if feedback or evidence requires production/testability implementation, stop before mutation and return handoff. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "The complete bounded product result and direct evidence are durable, or spreading/blocked work is truthfully classified without false completion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "implementation_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "implementation_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "implementation_outcome": {
+                  "enum": [
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "implementation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-implementation-ready"
+      }
+    },
+    {
+      "id": "route-implementation-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "implement-change.implementation_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "producer-completion",
+        "false": "route-implementation-handoff"
+      }
+    },
+    {
+      "id": "route-implementation-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "implement-change.implementation_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "producer-completion",
+      "type": "agent-directive",
+      "directive": "Before gates, perform a fresh producer completion pass over immutable test-contract.md, accepted corrected-contract.md when present, accepted plan, actual repository diff, target behavior, tests, fixtures/configuration and evidence. Close ordinary test-side omissions and refresh implementation-evidence.md. It may change only authorized tests, test fixtures/configuration and coverage records. Return ready when complete, handoff only when production/testability implementation is required, replan for an invalid contract/evidence model including any proof-only or non-discriminating evidence request, or blocked for an irreducible prerequisite.",
+      "completionCondition": "A fresh whole-diff pass closes ordinary omissions and produces producer-ready bytes, or truthfully routes handoff, contract reassessment or blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completion_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "handoff",
+              "replan",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "completion_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completion_outcome": {
+                  "enum": [
+                    "handoff",
+                    "replan",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "completion_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-completion-ready"
+      }
+    },
+    {
+      "id": "route-completion-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "producer-completion.completion_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "validate-change",
+        "false": "route-completion-handoff"
+      }
+    },
+    {
+      "id": "route-completion-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "producer-completion.completion_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "route-completion-replan"
+      }
+    },
+    {
+      "id": "route-completion-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "producer-completion.completion_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "validate-change",
+      "type": "agent-directive",
+      "directive": "Run applicable targeted tests and broader project gates on producer-complete bytes in cost order. Record exact commands, outcomes, applicability and infrastructure limits in validation-evidence.md. Return pass; test_repair for a reproduced test/fixture/config defect; verification_repair for command/evidence-only defects; handoff when production code must change; replan for invalid criterion/plan/process or mixed cause; blocked for an irreducible prerequisite. Do not modify production code or create proof-only harnesses. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "Applicable checks and direct evidence are current and every non-pass result is classified to its earliest owner without surrogate proof",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "validation_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "test_repair",
+              "verification_repair",
+              "handoff",
+              "replan",
+              "blocked"
+            ]
+          },
+          "cause_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "validation_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "cause_summary"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "cause_summary"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-validation-pass"
+      }
+    },
+    {
+      "id": "route-validation-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-validation-tests"
+      }
+    },
+    {
+      "id": "route-validation-tests",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "test_repair"
+      },
+      "connections": {
+        "true": "repair-tests",
+        "false": "route-validation-verification"
+      }
+    },
+    {
+      "id": "route-validation-verification",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "verification_repair"
+      },
+      "connections": {
+        "true": "repair-verification",
+        "false": "route-validation-handoff"
+      }
+    },
+    {
+      "id": "route-validation-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-tests",
+      "type": "agent-directive",
+      "directive": "Read the exact current validation or semantic report, test-contract.md, accepted corrected-contract.md, actual tests and target public behavior. Reproduce every test-owned blocker and repair only authorized tests, fixtures/configuration or coverage records. Never modify production code or create a proof-only proxy, guard, adapter, metatest or mutation harness. Return changed for producer completion, reassess for invalid/mixed/unreproduced causes, or blocked; production/testability changes require reassess for SDF handoff. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "Confirmed test-side defects change for producer completion, while production or non-local causes do not mutate here",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-tests-repair-changed"
+      }
+    },
+    {
+      "id": "route-tests-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-tests.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "producer-completion",
+        "false": "route-tests-repair-reassess"
+      }
+    },
+    {
+      "id": "route-tests-repair-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-tests.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-verification",
+      "type": "agent-directive",
+      "directive": "Read the exact current validation or semantic report and reproduce evidence/command-owned defects. Change only command evidence or contained validation artifacts without changing tests, fixtures, configuration, target analysis or case design; return changed to the deterministic gate. If stronger evidence exposes a test-code defect, return test_required with changed knowledge; if it exposes a production defect, return reassess for handoff classification. Do not build proof-only machinery. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "Contained evidence defects are changed, newly exposed product defects return to product ownership, and invalid or irreducible causes do not loop unchanged",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "test_required",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "enum": [
+                    "changed",
+                    "test_required"
+                  ]
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-verification-repair-changed"
+      }
+    },
+    {
+      "id": "route-verification-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-verification.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "validate-change",
+        "false": "route-verification-tests"
+      }
+    },
+    {
+      "id": "route-verification-tests",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-verification.repair_outcome"
+        },
+        "right": "test_required"
+      },
+      "connections": {
+        "true": "repair-tests",
+        "false": "route-verification-reassess"
+      }
+    },
+    {
+      "id": "route-verification-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-verification.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "semantic-review",
+      "type": "agent-directive",
+      "directive": "Delegate one genuinely independent whole-result review. Read original authority, test-contract.md, accepted plan, actual diff, target behavior, tests, fixtures/configuration, implementation and validation evidence. Judge realistic failure sensitivity from a reproduced regression or existing authorized mutation facility when available, otherwise from target behavior, assertion path and concrete plausible wrong state. Absence of mutation tooling is not a defect. Overwrite semantic-review.md. Return pass only at zero blockers; repair with owner tests or verification; replan for production/upstream/mixed/criterion causes; blocked when independence is unavailable. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "For pass, repair or replan, the complete independent whole-result review is durable and matches the earliest cause and repair ownership; for blocked, a factual durable inability record exists and no semantic-review claim is made",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "tests",
+              "verification"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "repair_owner"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-semantic-pass"
+      }
+    },
+    {
+      "id": "route-semantic-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-result-mode",
+        "false": "route-semantic-blocked"
+      }
+    },
+    {
+      "id": "route-semantic-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-semantic-repair-owner"
+      }
+    },
+    {
+      "id": "route-semantic-repair-owner",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "tests"
+      },
+      "connections": {
+        "true": "repair-tests",
+        "false": "repair-verification"
+      }
+    },
+    {
+      "id": "route-result-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "close-result",
+        "false": "present-result"
+      }
+    },
+    {
+      "id": "present-result",
+      "type": "agent-directive",
+      "directive": "Present the independently accepted current result and validation evidence without treating preference as semantic proof. Ask the user to accept, request rework with nonblank feedback, or abort. Acceptance does not expand VCS or external authority. Rework that changes task, eligibility, criterion or evidence model belongs to contract reassessment; bounded product rework returns through producer completion and every stale gate.",
+      "completionCondition": "The user accepts the reviewed result, provides actionable rework feedback, or explicitly aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-result-accepted"
+      }
+    },
+    {
+      "id": "route-result-accepted",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "close-result",
+        "false": "route-result-rework"
+      }
+    },
+    {
+      "id": "route-result-rework",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "rework"
+      },
+      "connections": {
+        "true": "rework-result",
+        "false": "finalize-aborted"
+      }
+    },
+    {
+      "id": "rework-result",
+      "type": "agent-directive",
+      "directive": "Read {{present-result.feedback}}, immutable test-contract.md, accepted corrected-contract.md, plan.md, semantic-review.md and the actual accepted tests. Reproduce the requested reach. Return tests_changed only after bounded authorized test-side feedback and update implementation-evidence.md. Return reassess for task/criterion/evidence changes, including any proof-only or non-discriminating evidence request. Return handoff only when feedback requires production/testability implementation; never mutate production code. Return blocked for an irreducible test-side prerequisite.",
+      "completionCondition": "Feedback is implemented at its real owner or truthfully routes contract reassessment, handoff or blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rework_outcome": {
+            "type": "string",
+            "enum": [
+              "tests_changed",
+              "reassess",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "rework_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "rework_outcome": {
+                  "enum": [
+                    "reassess",
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "rework_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-rework-tests"
+      }
+    },
+    {
+      "id": "route-rework-tests",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_outcome"
+        },
+        "right": "tests_changed"
+      },
+      "connections": {
+        "true": "producer-completion",
+        "false": "route-rework-reassess"
+      }
+    },
+    {
+      "id": "route-rework-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-rework-handoff"
+      }
+    },
+    {
+      "id": "route-rework-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "close-result",
+      "type": "agent-directive",
+      "directive": "Close only independently accepted test bytes. commit_authorized={{commit_authorized}} and push_authorized={{push_authorized}} come only from the originating request. Run repository-required pre-commit checks. Commit only when authorized under project authorship/sign-off policy; push only when separately authorized and a valid accepted commit exists. Otherwise skip each effect without asking in autonomous mode. Record independent commit_status and push_status plus factual failures in final-report.md. VCS failure must not be reported as successful generation or product handoff. Never open PR, publish, notify, release or deploy. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "completionCondition": "Accepted bytes are truthfully closed under originating VCS authority and final-report.md records the complete local result without broader side effects",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "closure_outcome": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "closure_outcome",
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "commit_status",
+          "push_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "commit_status",
+          "push_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "closure_outcome": {
+                  "const": "complete"
+                }
+              },
+              "required": [
+                "closure_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "delivery_status": {
+                  "const": "complete"
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "commit_status": {
+                        "const": "failed"
+                      }
+                    },
+                    "required": [
+                      "commit_status"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "push_status": {
+                        "const": "failed"
+                      }
+                    },
+                    "required": [
+                      "push_status"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "properties": {
+                "delivery_status": {
+                  "const": "blocked"
+                }
+              },
+              "anyOf": [
+                {
+                  "properties": {
+                    "commit_status": {
+                      "const": "failed"
+                    }
+                  },
+                  "required": [
+                    "commit_status"
+                  ]
+                },
+                {
+                  "properties": {
+                    "push_status": {
+                      "const": "failed"
+                    }
+                  },
+                  "required": [
+                    "push_status"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-closure-complete"
+      }
+    },
+    {
+      "id": "route-closure-complete",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "close-result.closure_outcome"
+        },
+        "right": "complete"
+      },
+      "connections": {
+        "true": "end",
+        "false": "end-vcs-blocked"
+      }
+    },
+    {
+      "id": "finalize-handoff",
+      "type": "agent-directive",
+      "directive": "Write or complete {{workspace_path}}/handoff.md as the truthful full-SDF handoff. Preserve the original task and authority, inspected repository evidence, completed safe work, current dirty/commit state, unresolved obligations and risks, and the exact eligibility reason. Do not start full SDF, mutate production code, commit, push, publish, deploy or describe Lite as complete. Return delivery_status=handoff, artifact_path exactly {{workspace_path}}/handoff.md, bounded summary and vcs_status=not_applicable.",
+      "completionCondition": "A complete durable full-SDF handoff is projected without false Lite completion or external mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/handoff.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "handoff"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-handoff"
+      }
+    },
+    {
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Write {{workspace_path}}/final-report.md with the factual irreducible blocker, completed safe work, repository/VCS state, preserved artifacts and what change in authority, evidence or prerequisites could resume the task. Do not claim semantic acceptance or Lite completion and do not perform external side effects. Return delivery_status=blocked, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary and truthful vcs_status.",
+      "completionCondition": "The post-materialization blocker and preserved local state are durable and truthfully projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "blocked"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-workspace-blocked",
+      "type": "agent-directive",
+      "directive": "Report the observed materialization failure and recovery action without claiming a workspace artifact or VCS effect. Return delivery_status=materialization_failed and vcs_status=not_applicable.",
+      "completionCondition": "The pre-workspace blocker is truthfully projected without a fake artifact path",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "summary",
+          "vcs_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "materialization_failed"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-workspace-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Honor the explicit user abort without additional product or VCS mutation. Write {{workspace_path}}/final-report.md with where the run stopped, current safe repository state and existing local artifacts. Return delivery_status=aborted, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary and vcs_status=not_applicable. Do not describe the result as complete or reviewed.",
+      "completionCondition": "The explicit abort and current local state are durably and truthfully projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "aborted"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "end-handoff",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "teleport-revise-process",
+      "type": "teleport",
+      "hint": "Use only when the derived target/test process contract is invalid or incomplete. Never use it for an ordinary test defect, failed command, semantic finding, inconvenience, or authority change; preserve originating repository and VCS authority.",
+      "directive": "Use only when the derived target/test process contract itself is invalid or incomplete, never merely because a test command, implementation or review failed. Record the bounded cause and preserved immutable goal, repository scope, production-code prohibition, VCS authority and completed valid work in repair-account.md. Do not bypass ordinary owners or mutate code; reassess-contract performs cumulative correction and typed re-entry.",
+      "completionCondition": "A legitimate changed process cause and its invalidation reach are durable for normal contract reassessment",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-plan-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-plan.design_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-plan-review-replan"
+      }
+    },
+    {
+      "id": "route-semantic-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-semantic-replan"
+      }
+    },
+    {
+      "id": "route-validation-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "route-validation-replan"
+      }
+    },
+    {
+      "id": "route-reassessment-corrected",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "corrected"
+      },
+      "connections": {
+        "true": "corrected-contract-review",
+        "false": "route-reassessment-handoff"
+      }
+    },
+    {
+      "id": "route-reassessment-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "corrected-contract-review",
+      "type": "agent-directive",
+      "directive": "Delegate independent review of corrected-contract.md against immutable test-contract.md, repository scope, production-code prohibition, VCS authority, prior accepted corrections and actual proposed reentry_owner {{reentry_owner}}. Overwrite corrected-contract-findings.md with all current blockers or zero findings. Return pass only when both cumulative correction and route-driving owner are coherent; return replan or blocked otherwise; do not repair.",
+      "completionCondition": "The cumulative correction and earliest re-entry are independently accepted",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ]
+      },
+      "connections": {
+        "success": "route-corrected-review-pass"
+      }
+    },
+    {
+      "id": "route-corrected-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-reentry-target",
+        "false": "route-corrected-review-replan"
+      }
+    },
+    {
+      "id": "route-corrected-review-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "route-reentry-target",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "target"
+      },
+      "connections": {
+        "true": "reanalyze-target",
+        "false": "route-reentry-design"
+      }
+    },
+    {
+      "id": "route-reentry-design",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "design"
+      },
+      "connections": {
+        "true": "review-plan",
+        "false": "route-reentry-tests"
+      }
+    },
+    {
+      "id": "route-reentry-tests",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "tests"
+      },
+      "connections": {
+        "true": "implement-change",
+        "false": "route-reentry-evidence"
+      }
+    },
+    {
+      "id": "route-reentry-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reentry_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "validate-change",
+        "false": "producer-completion"
+      }
+    },
+    {
+      "id": "end-workspace-blocked",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "end-vcs-blocked",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "commit_status",
+        "push_status"
+      ]
+    },
+    {
+      "id": "reanalyze-target",
+      "type": "agent-directive",
+      "directive": "Read immutable test-contract.md plus accepted corrected-contract.md and current repository primary sources. Reanalyze only derived target behavior, public surface, existing test patterns and case/design consequences made stale by the accepted correction. Update plan.md and implementation-evidence.md as analysis evidence without rewriting test-contract.md or mutating repository files. Return ready or blocked.",
+      "completionCondition": "Derived target/design material reflects the accepted correction while the originating contract remains immutable",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "analysis_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked"
+            ]
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "analysis_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "analysis_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "analysis_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "blocker_reason"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reanalyze-ready"
+      }
+    },
+    {
+      "id": "route-reanalyze-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reanalyze-target.analysis_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "review-plan",
+        "false": "finalize-blocked"
       }
     }
   ],
   "variableRegistry": {
-    "retry_count": {
-      "type": "number",
-      "description": "Stores retry count",
-      "default": 0
-    },
-    "max_retries": {
-      "type": "number",
-      "description": "Stores max retries",
-      "default": 3
-    },
-    "process_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "TEST GENERATION PROCESS:\n\n1. PROJECT ANALYSIS:\n- Study existing tests in project\n- Identify frameworks used (jest.config, pytest.ini, playwright.config)\n- Find patterns: file structure, naming conventions, helpers\n- If no tests exist - suggest structure\n\n2. CODE ANALYSIS:\n- Identify testable units (functions, classes, methods)\n- Determine dependencies and what needs to be mocked\n- Distinguish public API vs internal implementation\n\n3. TEST CASE GENERATION:\n- Happy path - main scenario\n- Edge cases - boundary conditions\n- Error cases - error handling\n- Boundary conditions - value limits\n\n4. TEST WRITING:\n- Follow project patterns\n- Use existing helpers\n- One test = one assertion"
-    },
-    "quality_standards": {
-      "type": "string",
-      "description": "Stores quality standards",
-      "default": "TEST QUALITY STANDARDS:\n\n1. ISOLATION:\n- Each test is independent from others\n- No shared state between tests\n- Use beforeEach/afterEach for setup/cleanup\n\n2. READABILITY:\n- Clear test names (should_return_X_when_Y)\n- Arrange-Act-Assert structure\n- One assert per test (when possible)\n\n3. RELIABILITY:\n- Tests are not flaky (don't depend on timing)\n- Deterministic result\n- Don't depend on external services (mock them)\n\n4. MAINTAINABILITY:\n- Test behavior, not implementation\n- Avoid tests tied to internal structure\n- When refactoring code, tests shouldn't break"
-    },
-    "validation_criteria": {
-      "type": "string",
-      "description": "Criteria for validation",
-      "default": "TEST VALIDATION CRITERIA:\n\n1. SYNTAX:\n- Code compiles without errors\n- Imports are correct\n- No undefined variables\n\n2. EXECUTION:\n- Tests run without errors\n- All assertions pass\n- No timeout issues\n\n3. COVERAGE:\n- Happy path covered\n- At least 2 edge cases\n- Error handling verified\n\n4. PROJECT COMPLIANCE:\n- Follows project naming conventions\n- Uses existing helpers\n- Files in correct directory"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Stores common mistakes",
-      "default": "COMMON TEST GENERATION MISTAKES:\n\n❌ Tests tied to implementation details → ✅ Test behavior and outputs\n❌ One test verifies many things → ✅ One test = one assertion\n❌ Copy-paste without adaptation → ✅ Adapt to specific code\n❌ Ignoring existing patterns → ✅ Study and follow project patterns\n❌ Hardcoded values → ✅ Use constants and fixtures\n❌ No cleanup after test → ✅ Always cleanup in afterEach\n❌ Testing private methods → ✅ Test through public API\n❌ Too many mocks → ✅ Only mock external dependencies"
-    },
-    "planning_standards": {
-      "type": "string",
-      "description": "Test generation planning standards",
-      "default": "TEST GENERATION PLANNING STANDARDS:\n\n1. TEST COVERAGE:\n- Every public function/method must have tests\n- Edge cases: null, empty, boundary values\n- Error paths: exceptions, validation failures\n- Happy paths: normal successful execution\n\n2. TEST ISOLATION:\n- Each test independent, no shared state\n- Use mocks for external dependencies\n- Setup/teardown for each test\n- No order dependency between tests\n\n3. NAMING CONVENTIONS:\n- Descriptive test names: should_[expected]_when_[condition]\n- Group related tests in describe blocks\n- Clear assertion messages\n\n4. ASSERTION QUALITY:\n- One logical assertion per test\n- Specific assertions (not just \"truthy\")\n- Test behavior, not implementation\n- Verify both positive and negative cases\n\n5. TEST STRUCTURE:\n- Arrange-Act-Assert pattern\n- Given-When-Then for BDD\n- Keep tests short and focused\n- DRY for setup, explicit for assertions\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan item's directive in isolation — other items and any general rules stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
-    },
-    "fix_project_iteration": {
-      "type": "number",
-      "description": "Counter for project analysis fix loop",
-      "default": 0
-    },
-    "fix_structure_iteration": {
-      "type": "number",
-      "description": "Counter for structure analysis fix loop",
-      "default": 0
-    },
-    "fix_cases_iteration": {
-      "type": "number",
-      "description": "Counter for test cases fix loop",
-      "default": 0
-    },
-    "max_self_fix_iterations": {
-      "type": "number",
-      "description": "Max iterations for self-fix loops before proceeding",
-      "default": 3
-    },
-    "additional_cases": {
-      "type": "array",
-      "description": "Workflow-global additional_cases",
-      "items": {
-        "type": "object"
-      }
-    },
-    "approach": {
-      "type": "string",
-      "description": "Workflow-global approach",
-      "enum": [
-        "use_existing",
-        "create_new"
-      ]
-    },
-    "code_content": {
-      "type": "string",
-      "description": "Workflow-global code_content"
-    },
-    "code_source": {
-      "type": "string",
-      "description": "Workflow-global code_source",
-      "enum": [
-        "file_path",
-        "inline_code"
-      ]
-    },
-    "decision": {
-      "type": "string",
-      "description": "Workflow-global decision",
-      "enum": [
-        "continue",
-        "reset"
-      ]
-    },
-    "existing_helpers": {
-      "type": "array",
-      "description": "Workflow-global existing_helpers",
-      "items": {
-        "type": "string"
-      }
-    },
-    "file_path": {
-      "type": "string",
-      "description": "Workflow-global file_path"
-    },
-    "final_summary": {
-      "type": "string",
-      "description": "Workflow-global final_summary"
-    },
-    "fixed_tests": {
-      "type": "array",
-      "description": "Workflow-global fixed_tests",
-      "items": {
-        "type": "object",
-        "properties": {
-          "file_path": {
-            "type": "string"
-          },
-          "content": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "project_analysis_fix_hints": {
-      "type": "string",
-      "description": "Workflow-global project_analysis_fix_hints",
-      "minLength": 20
-    },
-    "recommended_framework": {
-      "type": "string",
-      "description": "Workflow-global recommended_framework"
-    },
-    "recommended_structure": {
-      "type": "string",
-      "description": "Workflow-global recommended_structure"
-    },
-    "revised_approach": {
-      "type": "string",
-      "description": "Workflow-global revised_approach"
-    },
-    "revised_plan": {
-      "type": "string",
-      "description": "Workflow-global revised_plan"
-    },
-    "revised_test_types": {
-      "type": "string",
-      "description": "Workflow-global revised_test_types"
-    },
-    "test_directory": {
-      "type": "string",
-      "description": "Workflow-global test_directory"
-    },
-    "testable_units": {
-      "type": "array",
-      "description": "Workflow-global testable_units",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "params": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "returns": {
-            "type": "string"
-          },
-          "dependencies": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "minItems": 1
-    },
-    "user_response_text": {
-      "type": "string",
-      "description": "Workflow-global user_response_text",
-      "minLength": 2
-    },
     "workspace_path": {
       "type": "string",
-      "description": "Workflow-global workspace_path"
+      "description": "Execution-correlated materialized workspace for canonical Lite artifacts.",
+      "const": "./moira-ws/test-generation-{{executionId}}",
+      "default": "./moira-ws/test-generation-{{executionId}}"
     },
-    "has_file_access": {
+    "workspace_process_id_file": {
+      "type": "string",
+      "description": "Registry-backed process-id.txt content for workspace correlation.",
+      "default": "{{executionId}}"
+    },
+    "operating_mode": {
+      "type": "string",
+      "description": "How Lite handles human waits; quality and authority gates are unchanged.",
+      "enum": [
+        "autonomous",
+        "interactive"
+      ]
+    },
+    "commit_authorized": {
       "type": "boolean",
-      "description": "Agent can read/write local files"
+      "description": "Whether the originating task already authorizes a local Git commit.",
+      "default": false
+    },
+    "task_summary": {
+      "type": "string",
+      "description": "Bounded routing summary of the originating test-generation task.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "delivery_status": {
+      "type": "string",
+      "description": "Truthful terminal class for the Lite execution.",
+      "enum": [
+        "complete",
+        "handoff",
+        "blocked",
+        "aborted",
+        "materialization_failed"
+      ]
+    },
+    "artifact_path": {
+      "type": "string",
+      "description": "Validated final-report or handoff artifact beneath the current materialized workspace.",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "summary": {
+      "type": "string",
+      "description": "Bounded truthful terminal summary.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "vcs_status": {
+      "type": "string",
+      "enum": [
+        "committed",
+        "not_authorized",
+        "failed",
+        "not_applicable"
+      ],
+      "description": "Legacy aggregate VCS status for non-complete terminal compatibility."
+    },
+    "push_authorized": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether the originating user explicitly authorizes pushing the accepted test commit."
+    },
+    "commit_status": {
+      "type": "string",
+      "enum": [
+        "committed",
+        "not_authorized",
+        "failed",
+        "not_applicable"
+      ],
+      "description": "Observed local commit outcome."
+    },
+    "push_status": {
+      "type": "string",
+      "enum": [
+        "pushed",
+        "not_authorized",
+        "failed",
+        "not_applicable"
+      ],
+      "description": "Observed push outcome."
+    },
+    "reentry_owner": {
+      "type": "string",
+      "enum": [
+        "target",
+        "design",
+        "tests",
+        "evidence",
+        "completion"
+      ],
+      "description": "Earliest normal responsibility made stale by accepted contract correction."
     }
-  }
+  },
+  "slug": "test-generation",
+  "owner": "system-moira",
+  "visibility": "public"
 }

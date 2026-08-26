@@ -1,0 +1,47 @@
+{
+  "slug": "note-nodes-test",
+  "metadata": {
+    "name": "Note Nodes Test",
+    "version": "1.0.0",
+    "description": "E2E fixture for rendering write-note and upsert-note nodes"
+  },
+  "nodes": [
+    {
+      "type": "start",
+      "id": "start",
+      "connections": {
+        "default": "write-note"
+      }
+    },
+    {
+      "type": "write-note",
+      "id": "write-note",
+      "key": "note-rendering-test",
+      "source": "render write-note",
+      "tags": ["e2e", "note-rendering"],
+      "connections": {
+        "default": "upsert-note",
+        "error": "end"
+      }
+    },
+    {
+      "type": "upsert-note",
+      "id": "upsert-note",
+      "search": {
+        "tag": "note-rendering"
+      },
+      "keyTemplate": "note-rendering-test",
+      "value": "render upsert-note",
+      "tags": ["e2e", "note-rendering"],
+      "outputVariable": "upsertResult",
+      "connections": {
+        "default": "end",
+        "error": "end"
+      }
+    },
+    {
+      "type": "end",
+      "id": "end"
+    }
+  ]
+}

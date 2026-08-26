@@ -1,104 +1,43 @@
 ---
 title: Marketing Campaign
-description: Marketing materials creation with differentiation focus
+description: Evidence-aware campaign strategy and channel materials with independent review and truthful local outcomes.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-Structured marketing materials creation workflow with differentiation and conversion focus. Solves the generic AI copy problem through competitive analysis and mandatory proof points.
-
-## Start
+Marketing Campaign creates one channel-ready campaign package from an authorized product or offer. It combines audience and competitive context, positioning, proof or hypothesis mapping, brand and legal constraints, materials, calls to action, limitations, deterministic reference checks, and genuinely independent semantic review.
 
 ```bash
-mcp__moira__start({ workflowId: "marketing-campaign" })
+mcp__moira__start({ workflowId: "moira/marketing-campaign", parentExecutionId: "none" })
 ```
 
-## Process
+## Use it when
+
+You need a campaign system—positioning, messages, proof mapping and channel materials—not one standalone article or post. Use [Content Creation](/docs/reference/workflows/content-creation/) for one text, a research workflow when evidence discovery is the result, and Software Development Flow for repository implementation.
+
+## Durable process
+
+The workflow materializes an execution-correlated local workspace containing the immutable campaign contract, strategy, evidence register, brand/legal constraints, campaign package, limitations, validation observations, independent findings, repair account, corrected-contract supplement and final report.
+
+The clean route is:
 
 ```mermaid
 flowchart LR
-    A[Product] --> B[Audience]
-    B --> C[Competitive]
-    C --> D[Positioning]
-    D --> E[Proof Points]
-    E --> F[Brand Voice]
-    F --> G[Create]
-    G --> H[Review]
+  A[Intake] --> B[Strategy]
+  B --> C[Evidence and brand]
+  C --> D[Campaign package]
+  D --> E[Producer completion]
+  E --> F[Deterministic checks]
+  F --> G[Independent review]
+  G --> H[Complete or limited local report]
 ```
 
-## Steps
+Material claims are recorded as supported evidence, supplied assertions, hypotheses, or explicit omissions. Source-shaped text and checklist counts do not prove audience fit, differentiation, provenance, brand coherence, legal safety, or conversion usefulness; those properties remain independent judgments.
 
-| Step | Action | Output |
-|------|--------|--------|
-| 1. Product | Understand product, USPs, problem solved | Product brief |
-| 2. Audience | Define target audience, pain points, decision criteria, channels | Audience profile |
-| 3. Competitive | Analyze competitors, their positioning, messages, weaknesses | Competitive analysis |
-| 4. Positioning | Define unique angle, key messages, value proposition, differentiator | Positioning statement |
-| 5. Proof Points | Gather proof for each claim (data/testimonial/case study) | Evidence library |
-| 6. Brand Voice | Define tone, style, banned phrases, good copy examples | Brand guidelines |
-| 7. Create | Create materials using positioning, proofs, brand voice | Marketing materials |
-| 8. Review | Check claims, brand fit, legal compliance | Approved materials |
+## Repair and outcomes
 
-## Features
+Package, evidence/provenance and strategy findings use different source-specific repair owners and re-enter every stale downstream responsibility. Invalid criteria use a cumulative corrected-contract supplement that preserves earlier accepted corrections unless a later reviewed correction explicitly supersedes them.
 
-<Aside type="tip">
-USPs must be specific and concrete, not buzzwords. "50% faster onboarding" beats "streamlined experience".
-</Aside>
+Autonomous mode skips only final user acceptance. Interactive mode supports accept, abort, or one concrete strategy, evidence, package or contract rework request. Outcomes distinguish complete, reviewed-limited, blocked before or after workspace creation, workspace failure, and aborted.
 
-### Solving Generic AI Copy
+## Authority
 
-| Problem | Solution |
-|---------|----------|
-| Vague USPs | Require specific, measurable claims |
-| No differentiation | Mandatory competitive analysis |
-| Unsubstantiated claims | Proof points required for each claim |
-
-### Proof Point Types
-
-| Type | Example | Strength |
-|------|---------|----------|
-| Data point | "Reduces time by 50%" | High - quantifiable |
-| Testimonial | Customer quote | Medium - social proof |
-| Case study | Specific customer result | High - detailed evidence |
-
-<Aside type="caution">
-Each claim requires at least one proof point. Claims without evidence should be removed or rewritten.
-</Aside>
-
-### Brand Voice Consistency
-
-| Element | Purpose |
-|---------|---------|
-| Tone | Overall voice (professional, friendly, technical) |
-| Style | Writing conventions and patterns |
-| Banned phrases | Words and expressions to avoid |
-| Good examples | Reference copy to emulate |
-
-### Legal Compliance Review
-
-| Check | Description |
-|-------|-------------|
-| Misleading claims | Verify accuracy of all statements |
-| Disclaimers | Add required legal disclaimers |
-| Testimonial permissions | Confirm customer consent |
-| Competitive claims | Verify comparisons are fair |
-
-## Example Node Configuration
-
-```json
-{
-  "id": "competitive-analysis",
-  "type": "agent-directive",
-  "directive": "Analyze top 3 competitors. Document their positioning, key messages, and weaknesses. Identify gaps we can exploit.",
-  "completionCondition": "Competitive analysis complete with 3 competitors analyzed and positioning gaps identified",
-  "connections": {
-    "next": "define-positioning"
-  }
-}
-```
-
-## Related
-
-- [Content Creation](/docs/reference/workflows/content-creation/) — For blog posts and articles
-- [Verified Research Workflow](/docs/reference/workflows/verified-research/) — For market research
-- [Workflow Templates Overview](/docs/reference/workflow-templates/) — All available templates
+The result is local. The workflow does not publish, notify, spend advertising budget, contact customers, launch a campaign, modify product code, commit, release or deploy.

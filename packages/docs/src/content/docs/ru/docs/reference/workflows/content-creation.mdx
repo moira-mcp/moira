@@ -1,90 +1,37 @@
 ---
 title: Content Creation
-description: Workflow для создания текстового контента
+description: Один независимо проверенный текстовый результат с долговечными evidence, cause-owned repair и отдельно разрешёнными delivery effects.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-Workflow для создания текстового контента со структурированным исследованием, циклами валидации и точками подтверждения. Поддерживает статьи, посты и техническую документацию.
-
-## Запуск
+Content Creation создаёт один ограниченный текстовый результат — статью, пост, документацию, сценарий, email, landing copy или другой запрошенный формат — из разрешённого brief.
 
 ```bash
-mcp__moira__start({ workflowId: "content-creation" })
+mcp__moira__start({ workflowId: "moira/content-creation", parentExecutionId: "none" })
 ```
 
-## Процесс
+Используйте его, когда результатом является сам текст. Для campaign positioning и multi-channel материалов выбирайте [Marketing Campaign](/ru/docs/reference/workflows/marketing-campaign/), для evidence discovery как результата — research workflow, для изменений репозитория — Software Development Flow.
+
+## Долговечный процесс
+
+Workflow создаёт execution-correlated workspace с неизменяемым content contract, накопительными независимо проверенными corrections, content brief, evidence register, structure, draft, final content, limitations, validation observations, independent findings, repair account и final report.
 
 ```mermaid
 flowchart LR
-    A[Бриф] --> B[Исследование]
-    B --> C[Структура]
-    C --> D[Черновик]
-    D --> E[Редактирование]
-    E --> F[Финализация]
+  A[Intake] --> B[Brief]
+  B --> C[Evidence]
+  C --> D[Structure, draft, final content]
+  D --> E[Producer completion]
+  E --> F[Deterministic checks]
+  F --> G[Independent review]
+  G --> H[Complete или limited local result]
 ```
 
-## Шаги
+Evidence разделяет sourced facts и quotations, переданные утверждения, inference, assumptions, creative invention и недоступные материалы. Фиксированные source, section, word, score, issue или retry quotas не определяют semantic quality.
 
-| Шаг | Действие | Результат |
-|-----|----------|-----------|
-| 1. Бриф | Сбор требований: тема, формат, аудитория, тональность, ограничения | Структурированный бриф |
-| 2. Исследование | Исследование темы из авторитетных источников | Мин. 3 источника, 3 факта |
-| 3. Структура | Создание структуры контента | Согласованная структура |
-| 4. Черновик | Написание по структуре и тональности | Черновик по брифу |
-| 5. Редактирование | Редактирование для ясности и engagement | Отредактированный контент |
-| 6. Финализация | Финальное согласование и подготовка к публикации | Готовый контент |
+Content, evidence и brief findings имеют source-specific repair owners и повторяют все устаревшие downstream responsibilities. Ошибочные criteria проходят cumulative corrected-contract review. Autonomous mode пропускает только финальную пользовательскую приёмку; interactive mode поддерживает accept, abort или один конкретный brief/evidence/content/contract rework request.
 
-## Особенности
+## Опциональные эффекты
 
-<Aside type="tip">
-Валидация исследования требует минимум 3 авторитетных источника и 3 ключевых факта перед переходом к структуре.
-</Aside>
+Локального результата достаточно. Publication требует originating authority для конкретного destination и использует точную принятую редакцию. Telegram требует отдельного originating authority. Исходы остаются `not_requested`, `declined`, `succeeded`/`sent` или `failed` и не меняют complete либо reviewed-limited качество текста.
 
-### Форматы контента
-
-| Формат | Описание |
-|--------|----------|
-| `article` | Длинная статья |
-| `post` | Пост в блог или соцсети |
-| `documentation` | Техническая документация |
-| `other` | Другой формат |
-
-### Тональности
-
-| Тональность | Описание |
-|-------------|----------|
-| `formal` | Профессиональная, формальная |
-| `casual` | Разговорная, дружелюбная |
-| `technical` | Техническая, точная |
-| `mixed` | Комбинация по контексту |
-
-### Циклы валидации
-
-- **Валидация исследования**: Проверка полноты (мин. 3 источника, 3 факта)
-- **Валидация черновика**: Проверка соответствия структуре и тональности
-
-### Точки согласования
-
-- **Согласование структуры**: Подтверждение перед написанием
-- **Согласование контента**: Финальное одобрение
-
-## Пример конфигурации ноды
-
-```json
-{
-  "id": "research-topic",
-  "type": "agent-directive",
-  "directive": "Исследуй тему из авторитетных источников. Найди минимум 3 источника и выдели 3 ключевых факта.",
-  "completionCondition": "Исследование завершено с 3+ верифицированными источниками и 3+ ключевыми фактами",
-  "connections": {
-    "next": "validate-research"
-  }
-}
-```
-
-## Связанное
-
-- [Verified Research](/ru/docs/reference/workflows/verified-research/) — Для глубокого исследования с верификацией источников
-- [Robust Task](/ru/docs/reference/workflows/robust-task/) — Для многошаговых задач
-- [Обзор шаблонов](/ru/docs/reference/workflow-templates/) — Все доступные шаблоны
+Workflow не коммитит, не выпускает релиз, не деплоит, не изменяет product code, не связывается с клиентами и не угадывает source/effect authority.

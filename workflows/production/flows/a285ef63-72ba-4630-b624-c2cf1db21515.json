@@ -2,8 +2,8 @@
   "id": "workflow-1787080951494-copy-1787083884390",
   "metadata": {
     "name": "Execution Retrospective",
-    "version": "1.0.0",
-    "description": "Analyze one Moira execution from real evidence and produce a reviewed proposal with honest partial/no-data outcomes and no automatic mutation."
+    "version": "1.0.1",
+    "description": "Analyzes one completed, interrupted, or failed Moira execution from authorized execution context, agent-session evidence, produced artifacts, review findings, retries, user corrections, and terminal behavior. It materializes an execution-correlated workspace, preserves an explicit evidence-state distinction for sufficient, partial, or unavailable data, reconstructs what worked and what caused rework or delay, and produces a source-linked retrospective plus prioritized proposals for the result, workflow definition, or system prompt. Independent analysis and final review must clear current blockers; confirmed report defects use contained or spreading repair routes without mutating the subject execution. Outcomes remain truthful when evidence is partial or unavailable. The workflow is proposal-only: it does not edit workflows, change prompts, publish, notify, commit, deploy, or mutate production. Choose it after a workflow run when the deliverable is evidence-backed process learning; use Workflow Management Flow separately to implement accepted workflow changes."
   },
   "nodes": [
     {

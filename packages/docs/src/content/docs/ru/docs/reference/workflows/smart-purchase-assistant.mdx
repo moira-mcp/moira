@@ -1,0 +1,34 @@
+---
+title: Smart Purchase Assistant
+description: Evidence-linked выбор продукта с долговечным исследованием, проверенными рекомендациями, self-contained buyer report и отдельно разрешённой доставкой.
+---
+
+Smart Purchase Assistant превращает одну потребность в продукте в долговечный evidence-linked пакет решения о покупке. До исследования рынка он фиксирует назначение, регион и валюту, бюджет, ограничения, срок решения, глубину исследования, privacy limits, operating mode и раздельные полномочия на публикацию и Telegram.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/smart-purchase-assistant",
+  parentExecutionId: "none",
+  skipTelegramCheck: true
+})
+```
+
+`skipTelegramCheck: true` пропускает только graph-level preflight Moira для опциональной Telegram-ноды. Он не разрешает уведомление. Реальная Telegram configuration проверяется только после independent review локального результата и только при явно выданном notification authority.
+
+## Результат и evidence
+
+Workflow создаёт один execution-correlated файловый пакет: decision contract, датированное source evidence, Markdown-отчёт, self-contained HTML, deterministic observations, independent findings, repair account и final report. Исследование пропорционально решению охватывает важные trade-offs категории, варианты моделей, характеристики, текущие цены и наличие, условия продавцов, гарантию, возврат, доставку, независимые обзоры и customer evidence — без фиксированных квот источников, кандидатов, магазинов или рекомендаций.
+
+Для материальных утверждений сохраняются изученный источник, publisher или seller, дата наблюдения, access result, география, поддерживаемые claims, конфликты, sponsorship/aggregation limits, inference и unknowns. Отсутствующие live price, stock, review verification или model data остаются limitations, а не выдумываются для заполнения схемы.
+
+Buyer package содержит профильные рекомендации, прямые изученные ссылки при наличии, сравнение, category/buyer guidance, оговорки условий покупки, нерешённую uncertainty и проверки перед checkout. HTML не использует CDN, внешние scripts/fonts, формы, fetch или tracking.
+
+## Review, recovery и outcomes
+
+Genuinely independent reviewer читает полный текущий contract, evidence, report, HTML, mechanical observations, bounded terminal summaries и changed-knowledge account. Evidence defects возвращаются через research и все зависимые стадии; report-only defects обновляют Markdown, HTML, validation observations и summaries перед тем же review. Mixed causes, invalid criteria и non-discriminating evidence methods входят в independently reviewed contract reassessment.
+
+Outcomes различают reviewed complete и reviewed-limited локальные результаты, фактические blockers и явный interactive abort. Artifact upload и Telegram являются независимыми optional effects. Upload failure, not-sent или transport error остаются видимыми, но не отменяют принятый локальный отчёт.
+
+Workflow остаётся advisory: он не покупает и не резервирует товар, не связывается с продавцами, не отправляет формы, не тратит деньги, не меняет настройки, не делает commit/deploy и не меняет production.
+
+Используйте Smart Purchase Assistant, когда нужен пакет выбора продукта. Для синтеза evidence без purchase semantics выбирайте [Verified Research](./verified-research/) или другой research workflow, для supplied datasets — [Data Analysis](./data-analysis/), а для уже определённой операционной работы — [Robust Task](./robust-task/).

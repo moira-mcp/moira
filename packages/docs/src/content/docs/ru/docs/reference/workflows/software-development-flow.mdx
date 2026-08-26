@@ -1,0 +1,27 @@
+---
+title: Software Development Flow
+description: "Полная реализация изменения репозитория: код, тесты, документация, интеграционные последствия, валидация, review и VCS в пределах полномочий."
+---
+
+Software Development Flow реализует одно полное программное изменение как независимо принимаемые вертикальные units. Он владеет всем результатом репозитория — production code, тестами, coverage, документацией, schemas/types, generated/config outputs, compatibility и integration consequences — вместо разделения одного lifecycle между несколькими task workflows.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/software-development-flow",
+  parentExecutionId: "none"
+})
+```
+
+## Lifecycle
+
+Flow фиксирует source-grounded требования и полномочия, создаёт и независимо проверяет architecture-aware план, готовит каждый unit по реальному репозиторию до мутации, реализует полное вертикальное поведение и запускает fresh producer completion до deterministic validation и independent semantic review. Документация и тесты являются частью production, а не поздней уборкой.
+
+Findings классифицируются как product, test/validation, evidence, documentation/projection, invalid criterion или upstream plan/process defects. Product repair возвращается через producer completion. Verification-only и gate-local repair повторяют только устаревшие evidence. Mixed или invalid causes приводят к quality-preserving replan, а не к расширению реализации по сломанному контракту.
+
+Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Финальная reconciliation покрывает feature-wide validation, документацию, requirements, checkpoints и отдельно разрешённые VCS effects.
+
+## Выбор full или Lite
+
+Используйте full SDF для security/privacy boundaries, persistent data или migrations, breaking public contracts, нескольких vertical units, неразрешённой архитектуры, сложного rollout/recovery или spreading work. Для одного ограниченного низкорискового результата используйте [Software Development Flow Lite](./software-development-flow-lite/); при потере eligibility он создаёт handoff сюда. Quick Task и Robust Task не заменяют software lifecycle.
+
+Запуск SDF сам по себе не разрешает commit, push, PR, release, deployment, notification, production mutation или administrative override. Эти эффекты требуют originating authority.

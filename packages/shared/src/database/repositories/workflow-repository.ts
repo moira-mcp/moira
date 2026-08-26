@@ -15,7 +15,7 @@ import { workflow, user, workflowAccess } from "../schema.js";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import {
   generateSlugFromName,
   generateDefaultSlug,
@@ -408,7 +408,7 @@ export class WorkflowRepository {
     }
 
     // Fallback: use UUID-based slug
-    return `workflow-${uuidv4().substring(0, 8)}`;
+    return `workflow-${randomUUID().substring(0, 8)}`;
   }
 
   // ===== List Operations =====
@@ -886,7 +886,7 @@ export class WorkflowRepository {
       return { id: existingId, slug: ownership.slug! };
     } else {
       // Insert new workflow - generate UUID and slug
-      const workflowId = uuidv4();
+      const workflowId = randomUUID();
 
       // Generate or validate slug
       let finalSlug: string;

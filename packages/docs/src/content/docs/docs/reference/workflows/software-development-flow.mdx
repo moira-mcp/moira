@@ -1,0 +1,27 @@
+---
+title: Software Development Flow
+description: Complete repository implementation across code, tests, documentation, integration consequences, validation, review, and authority-bound VCS closure.
+---
+
+Software Development Flow implements one complete software change as independently accepted vertical units. It owns the full repository result—production code, tests, coverage, documentation, schemas and types, generated or configuration outputs, compatibility, and integration consequences—rather than splitting one lifecycle across several task workflows.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/software-development-flow",
+  parentExecutionId: "none"
+})
+```
+
+## Lifecycle
+
+The flow captures source-grounded requirements and authority, creates and independently reviews an architecture-aware plan, prepares each unit from the real repository before mutation, implements complete vertical behavior, and runs a fresh producer-completion pass before deterministic validation and independent semantic review. Documentation and tests are part of production, not late cleanup.
+
+Findings are classified as product, test/validation, evidence, documentation/projection, invalid criterion, or upstream plan/process defects. Product repair returns through producer completion. Verification-only or gate-local repair reruns only stale evidence. Mixed or invalid causes trigger quality-preserving replan rather than expanding implementation against a broken contract.
+
+Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Final reconciliation covers feature-wide validation, documentation, requirements, checkpoints, and separately authorized VCS effects.
+
+## Choose full or Lite
+
+Use full SDF for security or privacy boundaries, persistent data or migrations, breaking public contracts, multiple vertical units, unresolved architecture, complex rollout or recovery, or spreading work. Use [Software Development Flow Lite](./software-development-flow-lite/) for one bounded low-risk coherent outcome; it hands off here when eligibility is lost. Quick Task and Robust Task do not replace a software lifecycle.
+
+Starting SDF does not itself authorize commit, push, PR, release, deployment, notification, production mutation, or administrative override. Those effects require originating authority.

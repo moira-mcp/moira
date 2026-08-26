@@ -55,10 +55,12 @@ moira-workflow ./workflow.json set-description --file ./description.txt
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
-For a complete planned rewrite, `sync` preserves the destination workflow identity and validates
-the fully synchronized graph before writing. A validation error leaves the destination unchanged.
-The standalone `validate` command exits unsuccessfully when errors exist, so an agent or CI script
-can use it as a real gate.
+For a complete planned rewrite, `sync` preserves the destination identity and its catalog migration
+aliases in `previousSlugs`. The catalog reader validates those aliases separately; only the
+executable graph is passed to the engine validator. Aliases always come from the real destination,
+not from a workspace copy. A metadata or graph validation failure leaves the destination unchanged.
+The standalone `validate` command exits unsuccessfully for either class of error, so an agent or CI
+script can use it as a real gate without weakening runtime/upload graph validation.
 
 ```bash
 moira-workflow ./workspace/workflow.json sync ./workflows/production/flows/<flow>.json

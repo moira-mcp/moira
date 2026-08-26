@@ -1,12 +1,9 @@
 {
-  "slug": "software-development-flow-lite",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "50c23256-c9d3-4d7e-94c6-763b295fc168",
   "metadata": {
     "name": "Software Development Flow Lite",
-    "version": "1.2.2",
-    "description": "Simplified development flow for small tasks (1-5 steps). Core loop: plan → implement → test → review → commit.",
+    "version": "2.0.0",
+    "description": "Fast complete delivery of one bounded coherent software change through risk-based Lite eligibility, repository-grounded reviewed planning, full code/test/documentation production, a fresh completion pass, proportionate deterministic evidence, independent cause-aware semantic review, precise repair or contract reassessment, and authority-bound VCS closure. Superficially small security, data, breaking-contract, multi-unit, rollout-heavy, or architecturally uncertain work cannot claim Lite completion and instead yields a durable full-SDF handoff. Autonomous mode skips human waits only; interactive mode retains plan and result decisions. Outcomes distinguish complete local delivery, full-SDF handoff, blocked prerequisites, and explicit abort. No automatic notification, push, PR, release, or deployment is performed.",
     "author": "mcp-moira-team",
     "tags": [
       "development",
@@ -15,1061 +12,1912 @@
   },
   "nodes": [
     {
-      "type": "start",
       "id": "start",
-      "initialData": {
-        "variables": {
-          "workflow_version": {
-            "description": "Stores workflow version",
-            "value": "1.0.0"
-          },
-          "current_iteration": {
-            "description": "Stores current iteration",
-            "value": 1
-          },
-          "current_step_index": {
-            "description": "Index of the current step in the plan",
-            "value": 1
-          },
-          "test_quality_standards": {
-            "description": "Stores test quality standards",
-            "value": "QUALITY TESTING STANDARDS: Test reality: DO NOT write tests for the sake of tests, verify real use cases and user scenarios, avoid synthetic tests without practical value. Project structure: place tests in folders according to project architecture, follow naming patterns adopted in the project, use existing test utilities and helpers, follow test environment configuration. Reality coverage: cover ALL new functionality without gaps, test edge cases and error handling, cover integration points with other components. Isolation and independence: tests are independent of each other, do not affect execution order, use proper setup/teardown, clean up state after themselves. Readability and maintenance: clear test names describing what is being tested, clear test structure with arrange/act/assert, meaningful assertion messages, easy to update when code changes. Efficiency: tests run quickly without performance regression, optimized for CI/CD pipeline, use functional snapshots if framework supports for easier maintenance and updates. Project integration: use test run commands adopted in the project, follow project conventions, do not duplicate existing tests."
-          },
-          "fix_requirements": {
-            "description": "Product requirements",
-            "value": "FIX REQUIREMENTS: ROOT CAUSE ANALYSIS - find the root cause of the problem, do not fix symptoms, understand why the problem occurred. COMPLETE FIX - fix ALL problems completely without exceptions, superficial fixes DO NOT work and will be detected by the next check, do not leave unfinished work for later. MANDATORY SELF-CHECK BEFORE COMPLETION - VERIFY that the fix works through actual execution, RUN tests to validate the fix, ENSURE nothing is broken in existing functionality, TEST all affected areas, DO NOT proceed to execute_step without verifying the fix works. NO SHORTCUTS - do not look for workarounds and quick solutions, if major changes or global refactoring are needed - do them without hesitation, rewriting significant portions of code may be required - this is normal and correct. CYCLE ESCAPE STRATEGY - workflow checks will be executed anyway and will detect problems, the only way to escape the fix cycle is to do it right the first time, self-validation BEFORE submitting to workflow saves time and iterations, validate through running tests BEFORE claiming fixed."
-          },
-          "planning_requirements": {
-            "description": "Product requirements",
-            "value": "# PLANNING REQUIREMENTS\n\n## CRITICAL RULES (READ FIRST)\n\n### FORBIDDEN STEP TYPES - REJECT PLAN IF CONTAINS:\n- \"Testing\" / \"Write tests\" / \"Add tests\" as separate step\n- \"Final validation\" / \"Final check\" / \"Verification\"\n- \"E2E testing\" / \"Integration testing\" as separate step\n- \"Production deployment\" / \"Deploy and verify\"\n- \"Documentation\" as separate step (unless task IS documentation)\n- \"Cleanup\" / \"Code cleanup\" as separate step (unless task IS cleanup/refactoring)\n- ANY step that ONLY tests/validates without implementing NEW functionality or refactoring\n\n### WHY TESTS MUST BE BUILT-IN (NOT SEPARATE):\n- Separate test step = admission that previous step is incomplete\n- Gate validation requires working tests to verify step completion\n- \"Write tests\" as step means agent shipped untested code\n- Test proves step is complete - without tests, step is unverified\n\n### EACH STEP MUST:\n- Implement new functionality OR refactor existing code\n- Include tests for that functionality (built-in, not separate)\n- Include self-verification (built-in, not separate)\n- Leave code clean (no separate cleanup step needed)\n\n### BAD EXAMPLE (FORBIDDEN):\n```\nStep 1: Implement feature X\nStep 2: Write tests for feature X    ← FORBIDDEN: testing-only\nStep 3: Final validation             ← FORBIDDEN: validation-only\n```\n\n### BAD PLAN (REAL EXAMPLE - DO NOT COPY):\n```\nStep 1: Database layer for user isolation\nStep 2: API endpoints for workflows\nStep 3: E2E и Production             ← FORBIDDEN: testing-only step\nStep 4: Documentation и cleanup      ← FORBIDDEN: doc-only step\n```\n\n### GOOD EXAMPLE (CORRECT):\n```\nStep 1: Implement feature X with unit tests\n        Verify: feature works, tests pass\n\nStep 2: Implement feature Y with integration tests\n        Verify: X+Y work together, all tests pass\n```\n\n### CORRECT VERSION OF BAD PLAN:\n```\nStep 1: Database layer with unit tests\n        Verify: queries isolated per user, tests pass\n\nStep 2: API endpoints with integration tests\n        Verify: auth works, E2E passing, all tests pass\n```\n\n---\n\n## STEP SIZE - FUNCTIONAL BLOCKS\n\nStep = completed functional block with verifiable result.\n\nNOT too small: \"create a file\", \"add import\"\nNOT too large: \"implement entire frontend\"\n\nCORRECT granularity:\n- Database layer with user isolation\n- MCP integration with authentication\n- Web UI for workflow management\n\nWHY: Workflow has gate validation after each step - expensive in time.\n- Too small steps = dozens of checks instead of 3-5\n- Too large steps = agent gets lost\n\n---\n\n## STEP FEASIBILITY CHECK\n\nEach step must be:\n- Absolutely executable by agent\n- Maximally specific in functionality\n- Have clear completion criterion\n\n**HUGE STEP = RED FLAG** of task misunderstanding.\nActions: STOP → study project → ask user → web search → delegate analysis.\n\n**LARGE STEP = PLANNING FAILURE** - split it.\n\n---\n\n## ARCHITECTURE AT PLAN START\n\nMANDATORY Architecture section after Goal:\n- Overall solution architecture\n- Key components and interaction\n- Architectural decisions (technologies, approaches)\n- Diagrams if applicable (ASCII, Mermaid, text)\n\nNot too much - conceptual understanding is enough.\n\nPlan undergoes mandatory validation - user confirms architecture before execution.\n\n---\n\n## FORBIDDEN IN PLAN - SPECIFIC FILES AND CODE\n\nFORBIDDEN:\n- Specific file paths\n- Function/method names\n- Line numbers\n- Code examples (TypeScript, SQL, React)\n- \"Files Created/Modified\" lists\n\nCORRECT:\n- \"Implement authentication layer\"\n- \"Update database schema for user isolation\"\n- \"Create UI components for workflow display\"\n\nWHY: Agent must ITSELF analyze code and find where to implement.\nPlan with files creates false sense of completeness - agent forgets critical details.\n\n---\n\n## WHAT TO WRITE IN STEPS\n\nINCLUDE:\n- Functionality and behavior description\n- Integration points (conceptually)\n- Expected result after step\n- Verification criteria (what should work + tests pass)\n\nEXAMPLE:\n```\n## Step 2: API layer for user workflows\n\nImplement REST endpoints for workflow CRUD operations with integration tests covering auth scenarios.\nEndpoints use authenticated context from Step 1.\nInclude request validation and error handling.\n\nVerify: API returns user's workflows only, rejects unauthorized access. All integration tests pass.\n```\n\n---\n\n## PLAN FOR REVIEWER WITHOUT CONTEXT\n\nPlan must be detailed enough that reviewer WITHOUT conversation history can:\n- Fully understand what each step accomplishes\n- Verify work is complete\n\nBUT: Detail ≠ code and files. Detail = clear FUNCTIONALITY and RESULT description.\n\nReviewer runs WITHOUT CONTEXT - this is architectural system decision.\n\n---\n\n## GRADUAL BUILDUP (LAYER ORDER)\n\n1) Base layer: data models, core logic, services + unit tests\n2) Integration layer: API endpoints, MCP tools + integration tests\n3) UI layer: Web interface, forms + browser tests (Playwright)\n\nFROM CORE TO INTERFACE. Never start with UI.\n\n---\n\n## PLAN FORMAT\n\nStructure:\n```\n# Title\n## Goal (one sentence)\n## Architecture (components, decisions)\n## Step 1: [name] with [test type] tests. Verify: [criteria], tests pass.\n## Step 2: [name] with [test type] tests. Verify: [criteria], tests pass.\n...\n```\n\nFORBIDDEN sections:\n- Overview, Summary\n- Acceptance Criteria (separate)\n- Validation blocks with bash commands\n- Files Created/Modified\n- UPDATED REQUIREMENTS\n- Testing (as separate section)\n- Final validation\n\n---\n\n## PLAN VOLUME\n\n- Tiny task: 1 step is NORMAL and CORRECT\n- Simple task: 50-100 lines, 2-4 steps\n- Medium task: 100-200 lines, 5-7 steps\n- Complex task: 200-300 lines, 8-12 steps\n\n**ONE STEP IS OK**: If task is small - plan with 1 step is correct.\nDO NOT artificially inflate plan to have more steps.\nDO NOT split simple task into multiple steps just to \"look thorough\".\n\nIf >400 lines - you are writing code instead of plan.\n\n---\n\n## NO SUBITEMS\n\nPlan = simple list of steps: 1, 2, 3, 4\n\nFORBIDDEN: 5.1, 5.2, 5.3 subitems\n\nSubitems = sign that step is too large → split into separate steps.\n\n---\n\n## USER APPROVAL STEPS\n\nSome steps require user confirmation:\n- UI changes (visual)\n- Breaking changes\n- Architectural decisions\n- API changes\n\nMark in plan: `[USER APPROVAL]` before continuing.\n\n---\n\n## PLANNING PRINCIPLES\n\n- CODE RESEARCH for existing patterns\n- WEB RESEARCH for best practices\n- LIBRARY DOCUMENTATION for APIs\n- DO NOT ASSUME - only verified facts\n- CURRENT library versions\n\nGood plan = result of deep analysis, not guess.\n\n---\n\n## FORMULA\n\n```\nPlan = Architecture + Functional blocks (1-12 steps) + Verification criteria\nEach step: functionality + tests + verification (ALL BUILT-IN)\nWITHOUT: code, files, validation blocks, subitems, testing-only steps, cleanup steps\n```\n\nGood plan reads in 2 minutes and gives complete understanding."
-          },
-          "code_quality_principles": {
-            "description": "Stores code quality principles",
-            "value": "=== AGENT IDENTITY PROTOCOL === YOU ARE AN AI AGENT, NOT A HUMAN: You have NO fatigue, no time constraints, no desire to avoid difficulties. DO NOT IMITATE human weaknesses and limitations. TAKE THE BEST ENGINEER PATTERNS: full responsibility, deep understanding, completion without compromises. You can work with ANY complexity without limitations. SOLVE AT THE ROOT, do not work around problems due to perceived complexity. === WORKFLOW BLOCKING PROTOCOL === CRITICALLY IMPORTANT: DO NOT proceed to execute_step until ALL tasks are 100% COMPLETE. Workflow is BLOCKED until full completion. Any attempt to proceed with incomplete work - PROTOCOL VIOLATION. === TASK COMPLETION REQUIREMENTS === ANTI-AVOIDANCE RULES: FORBIDDEN to claim main goal achieved without 100% completion, use significant improvement to mask incompleteness, say comprehensive work ongoing instead of completing tasks, move to next task with current incomplete, avoid difficult parts of task. MANDATORY to complete ALL subtasks before claiming completion, provide specific numerical evidence for each claim, honestly report remaining problems with exact numbers, fix ALL identified problems before continuing, fulfill all requirements with tool-based verification. === BIG TASK PROTOCOL === DO NOT FEAR BIG TASKS! If task seems huge - this is NORMAL and EXPECTED: Break into subtasks but COMPLETE ALL without exceptions. DO NOT SKIP difficult parts for speed. DO NOT look for shortcuts and workarounds. Large changes and refactoring are NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. Complexity is NOT an excuse for incompleteness. === EVIDENCE PROTOCOL === COMPLETION EVIDENCE IS MANDATORY: Every completed must have tool-based verification. Every works correctly must have actual test execution. Every significantly improved must have exact before/after numbers. Every transition to execute_step must have completion verification. === QUALITY STANDARDS === TECHNICAL REQUIREMENTS: RESPONSIBILITY: You are experienced engineer - full responsibility for result. EVERYTHING depends on your work. QUALITY: Code must be clean, without issues, with proper typing. QUALITY CODE: No hacks, workarounds, temporary solutions - do it right immediately. PROBLEMS: Solve problems completely, do not work around them. ERRORS: Analyze causes, fix root of problem, not symptoms. SIMPLICITY: First look for simple solutions, then complicate if needed. CHECKS: After every significant change - testing and validation. DEAD CODE: Remove all unused, maintain cleanliness. RESULT: Focus on working solution, not on process for process sake. BIG CHANGES: DO NOT fear big changes and refactoring - this is NORMAL and NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. DO NOT SLACK: DO NOT try to quickly do something instead of proper solution. Flow checks are help, NOT replacement for your responsibility. ADDITIONAL DEVELOPMENT PRINCIPLES: CODE STUDY: DO NOT hesitate to study existing code for understanding patterns and integration points. WEB RESEARCH: Use internet to study best practices and solve problems. CURRENT VERSIONS: Use latest stable library versions, read their documentation. DO NOT ASSUME: If something does not work - read documentation, do not invent solutions. DOCUMENTATION: For library problems - official documentation first, then search. === CODEBASE MAINTENANCE PROTOCOL === RESPONSIBILITY FOR ENTIRE CODEBASE: CANNOT PASS BY PROBLEMS: If you see non-compliance with standards, issues, hacks, lints, warnings in EXISTING code you touch - FIX immediately. BROKEN TESTS: See failing tests, .skip, .only in project - FIX or delete, DO NOT write new tests leaving old ones broken. FIX ON TOUCH: TODO, FIXME, console.log, commented code in files you edit - remove immediately. IMPROVE CODE: DO NOT leave code worse than you found - improve quality on every touch. FULL RESPONSIBILITY: You are responsible for ENTIRE project, not just new code - maintain entire codebase at high level, you will be working with it. === SELF-MONITORING PROTOCOL === CRITICAL QUESTIONS BEFORE EACH execute_step: Can I prove this claim with tool output? Would this pass code review by human without access to my work? Am I avoiding something difficult here? Is this really finished or am I just tired of working on it? Do I have specific evidence for each claim? Are ALL requirements 100% fulfilled or am I masking incompleteness?"
-          },
-          "startup_check_directive": {
-            "description": "Stores startup check directive",
-            "value": "Use project startup instructions:\n---\n{{startup_info}}\n---"
-          },
-          "run_tests_directive": {
-            "description": "Stores run tests directive",
-            "value": "Use testing information:\n---\n{{test_info}}\n---\nRun all tests. Wait for ALL tests to complete. Count how many tests passed and how many failed."
-          },
-          "workspace_path": {
-            "description": "Working directory for plan files (empty = project root)",
-            "value": ""
-          }
-        }
-      },
+      "type": "start",
       "connections": {
-        "default": "get-initial-requirements"
+        "default": "intake"
       }
     },
     {
-      "type": "agent-directive",
-      "id": "get-initial-requirements",
-      "directive": "Study the project and EXTRACT information for development (Information Extraction Pattern).\n\nFor EACH category:\n- If information EXISTS → extract and return THE INFORMATION ITSELF\n- If information DOES NOT EXIST → ASK the user (do not skip silently!)\n\n1) TESTING (test_info):\n   - Look for tests: tests/, __tests__, *.test.ts\n   - Find run command: package.json scripts.test\n   - Find testing guide: tests/TESTING-GUIDE.md, TESTING.md\n   - RESULT: command + rules\n   - IF NONE → ask: \"No tests found. Create starter tests? (yes/no)\"\n     - \"yes\" → return \"user_requested: create starter tests\"\n     - \"no\" → return 'skip'\n\n2) STARTUP (startup_info):\n   - Look for: docs/DEVELOPMENT.md, SYSTEM-RESTART.md, README.md Development section\n   - Find instructions how to run system for development\n   - RESULT: startup command + readiness check\n   - If none → return 'skip'\n\n3) PROJECT CHECKLIST (project_checklist):\n   - Look for: docs/PROJECT_CHECKLIST.md, CHECKLIST.md\n   - If found → READ and return CHECKLIST CONTENT\n   - If none → return 'skip'\n\n4) AGENT ONBOARDING (agent_onboarding_info):\n   - Look for: CLAUDE.md, docs/AGENT-ONBOARDING.md\n   - If found → READ and return KEY RULES for agent\n   - If none → return 'skip'\n\n5) DOCUMENTATION STANDARDS (documentation_standards):\n   - Look for: docs/DOCUMENTATION-STYLE-GUIDE.md\n   - If found → READ and return DOCUMENTATION RULES\n   - IF NONE → ask: \"Documentation not found. Create style guide? (yes/no)\"\n     - \"yes\" → return \"user_requested: create documentation style guide\"\n     - \"no\" → return 'skip'\n\n6) BROWSER UI (browser_ui_info):\n   - Check if React, Vue, HTML pages exist\n   - If exists → describe what UI and where located\n   - IF NONE → ask: \"UI not found. Is Web UI planned for this task? (yes/no)\"\n     - \"yes\" → return \"user_requested: {UI description from user}\"\n     - \"no\" → return 'skip'\n\n7) PROJECT SUMMARY: brief description of project architecture\n\nDO NOT create branches and folders - this will be later.",
-      "completionCondition": "Project studied: all information extracted or marked as skip",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "project_checklist": {
-            "type": "string",
-            "description": "Project checklist CONTENT OR skip if none"
-          },
-          "browser_ui_info": {
-            "type": "string",
-            "description": "Browser UI information (type, location) OR skip if none"
-          },
-          "project_summary": {
-            "type": "string",
-            "description": "Brief description of project architecture"
-          }
-        },
-        "required": [
-          "test_info",
-          "startup_info",
-          "project_checklist",
-          "agent_onboarding_info",
-          "documentation_standards",
-          "browser_ui_info",
-          "project_summary"
-        ],
-        "globalInputs": [
-          "test_info",
-          "startup_info",
-          "agent_onboarding_info",
-          "documentation_standards"
-        ]
-      },
-      "connections": {
-        "success": "study-project-foundation"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "study-project-foundation",
-      "directive": "Study project foundations independently.\n\n1) Use agent rules:\n---\n{{agent_onboarding_info}}\n---\n2) Understand how project starts (commands, environment, dependencies) but DO NOT start\n3) Do not assume - read files",
-      "completionCondition": "Project foundation studied: rules found, architecture understood, build system studied",
-      "connections": {
-        "success": "study-implementation-details"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "study-implementation-details",
-      "directive": "Study implementation details independently. 1) Source code - src/, backend/, frontend/, types/ in detail 2) Tests - study test structure, understand what is tested 3) Architecture - understand patterns, component interaction, data flow 4) Do not assume - read code",
-      "completionCondition": "Implementation details studied: core architecture understood, key components identified, patterns determined",
-      "connections": {
-        "success": "get-task-requirements"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "get-task-requirements",
-      "directive": "Get specific task requirements. Project studied - now need to understand what exactly needs to be done.\n\n1) Ask for clear task description considering architecture\n2) Clarify scope and constraints\n3) Get specific requirements\n4) Evaluate complexity - analyze task complexity in context of studied architecture (scale 1-10)\n5) Remember GitHub issue numbers IF user mentioned them\n\nDO NOT create files - workspace will be created later after feature name confirmation.",
-      "completionCondition": "Task defined, scope clarified, complexity evaluated",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "task_complexity_in_context": {
-            "type": "number",
-            "minimum": 1,
-            "maximum": 10,
-            "description": "Task complexity (1-4: express mode, 5-10: full development)"
-          },
-          "github_issues": {
-            "type": "string",
-            "description": "GitHub issue numbers if mentioned (e.g.: #123, #456)"
-          }
-        },
-        "required": [
-          "user_task_description",
-          "task_complexity_in_context",
-          "feature_name"
-        ],
-        "globalInputs": [
-          "user_task_description",
-          "feature_name"
-        ]
-      },
-      "connections": {
-        "success": "analyze-and-plan"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "analyze-and-plan",
-      "directive": "Create iterative development plan where each step delivers working functionality. Need to create detailed and executable plan based on deep requirements analysis.\n\nMANDATORY PLAN SECTIONS:\n\n## Problem Statement\nWhat task/problem are we solving? What is not working or what is missing?\n\n## Business Value\nWhy is this important? What value will this bring?\n\n## Expected Outcome\nExpected result. What will work after completion?\n\n## Architecture\nKey components and their interaction.\n\n## Steps\n(then plan steps)\n\nPLAN CREATION PROCESS:\n1) Analyze requirements from task-requirements.md in detail (in context)\n2) Study project architecture to understand integration points\n3) Analyze task complexity and determine optimal step breakdown\n4) Determine dependencies between steps and correct sequence\n5) Create plan in {{workspace_path}}/development-plan.md\n6) Follow planning requirements: {{planning_requirements}}\n\nIMPORTANT - GitHub Issues:\nIF task-requirements.md has GitHub issue numbers:\n- For each plan step specify related_issue if step relates to specific issue\n- Format in plan: ## Step N: name [related_issue: #123]\n\nIn response indicate structured array of plan steps with detailed tasks, path to plan file for reference, and brief summary of entire plan for notifications.",
-      "completionCondition": "Technical plan created with implementation details worked out, integration points, testing strategy",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "acceptance_criteria": {
-            "type": "string",
-            "minLength": 100,
-            "description": "ACCEPTANCE CRITERIA: what final result is expected, what should work, which use cases are solved, how to verify (commands, UI actions, tests)"
-          }
-        },
-        "required": [
-          "development_plan",
-          "development_plan_file",
-          "plan_summary",
-          "acceptance_criteria"
-        ],
-        "globalInputs": [
-          "development_plan",
-          "development_plan_file",
-          "plan_summary"
-        ]
-      },
-      "connections": {
-        "success": "agent-review-plan"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "agent-review-plan",
-      "directive": "This is a normal re-validation loop, expected to converge — NOT a bug and NOT a stuck flow; do NOT report a loop to the user.\n\nDelegate plan review to subagent via Task tool (subagent-review pattern).\n\nIMPORTANT: DO NOT do self-review - your assessment of own work is biased.\n\n1) Launch subagent with prompt:\n   YOU ARE plan validator. Your assessment determines if development plan proceeds.\n\n   READ THESE FILES DIRECTLY (do not trust summaries):\n   - Plan: {{workspace_path}}/development-plan.md\n   - Requirements: {{workspace_path}}/task-requirements.md\n   - Planning standards: {{workspace_path}}/planning-standards.md\n\n   VALIDATION CRITERIA:\n   1) Step size: not too small (< 1 hour), not too large (> 1 day)\n   2) Criteria clarity: each step has verifiable result\n   3) Dependencies: steps are in correct order, no circular dependencies\n   4) REQUIREMENTS COVERAGE: every requirement from task-requirements.md must be addressed in the plan\n   5) Testing: each step includes verification\n   6) Architecture: section present and understandable\n   7) STANDARDS COMPLIANCE: plan follows rules from planning-standards.md\n\n   RETURN: review_issues_count (number) and issues_found (array of {issue, affected_step, suggested_fix})\n\n2) Honestly pass subagent result:\n   - review_issues_count = EXACTLY what subagent found\n   - issues_found = EXACT list from subagent\n   - DO NOT filter or re-evaluate results\n\n3) Save issues to file:\n   - Write ALL issues to {{workspace_path}}/plan-review-issues.md\n   - Format:\n     # Plan Review Issues\n\n     Total issues: [count]\n\n     ## Issue 1: [issue description]\n     - Affected step: [step]\n     - Suggested fix: [fix]\n\n     ## Issue 2: ...\n   - This file will be used by fix step to address EACH issue",
-      "completionCondition": "Plan reviewed, all issues found and described (or confirmed no issues)",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "issues_found": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "issue": {
-                  "type": "string",
-                  "description": "Issue description"
-                },
-                "affected_step": {
-                  "type": "string",
-                  "description": "Which step is affected"
-                },
-                "suggested_fix": {
-                  "type": "string",
-                  "description": "Suggested fix"
-                }
-              },
-              "required": [
-                "issue",
-                "affected_step",
-                "suggested_fix"
-              ]
-            },
-            "description": "List of found issues (empty if no issues)"
-          }
-        },
-        "required": [
-          "review_issues_count",
-          "issues_found"
-        ],
-        "globalInputs": [
-          "review_issues_count"
-        ]
-      },
-      "connections": {
-        "success": "check-agent-review-issues"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-agent-review-issues",
-      "condition": {
-        "operator": "gt",
-        "left": {
-          "contextPath": "review_issues_count"
-        },
-        "right": 0
-      },
-      "connections": {
-        "true": "fix-plan-issues",
-        "false": "notify-plan-ready"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-plan-issues",
-      "directive": "FIX found issues in plan.\n\nREAD issues from {{workspace_path}}/plan-review-issues.md\n\nFor EACH issue in the file:\n1. Identify what needs to be fixed\n2. Open plan file: {{development_plan_file}}\n3. Apply the fix according to suggested_fix\n4. Mark issue as addressed\n\nDO NOT skip any issue. ALL issues from the file must be resolved.\n\nAfter fixing ALL issues, save updated plan.\nPlan will be reviewed again to verify fixes.",
-      "completionCondition": "All issues fixed, plan updated",
-      "connections": {
-        "success": "agent-review-plan"
-      }
-    },
-    {
-      "type": "telegram-notification",
-      "id": "notify-plan-ready",
-      "message": "📋 *Plan Created*\n\n🎯 **Task:** {{user_task_description}}\n📊 **Plan Steps:** {{development_plan.length}} stages\n\n**📋 Plan:**\n{{plan_summary}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "present-plan-to-user"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "present-plan-to-user",
-      "directive": "Show plan to user for approval.\n\n1) Explain step breakdown logic\n2) Show validation strategy for each step\n3) Explain why some steps may temporarily break system\n4) Ask: \"Do you approve the plan for execution? (yes/no)\"\n5) Get clear yes or no answer\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → plan_approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → plan_approval = \"no\"\n- DO NOT fix plan yourself!\n- Reply plan_approval = \"no\" and write user_feedback_on_plan with feedback\n- Workflow will direct to plan fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "Plan presented to user, clear yes or no answer received on plan approval question",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_feedback_on_plan": {
-            "type": "string",
-            "description": "User feedback on plan (especially important for no)"
-          }
-        },
-        "required": [
-          "plan_approval"
-        ],
-        "globalInputs": [
-          "plan_approval"
-        ]
-      },
-      "connections": {
-        "success": "check-plan-approval"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-plan-approval",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "plan_approval"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "initialize-plan-tracking",
-        "false": "refine-development-plan"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "refine-development-plan",
-      "directive": "Refine plan - user did not approve it.\n\nCRITICAL: File synchronization is MANDATORY!\n\n1) Analyze what exactly user is not satisfied with in plan\n2) FIRST update the file {{workspace_path}}/development-plan.md with refined plan\n3) THEN update development_plan variable in context with same data\n4) Create summary of changes for re-presentation\n\nFollow planning requirements: {{planning_requirements}}\n\nIn response:\n- Confirm file was updated FIRST (plan_file_updated = \"yes\")\n- Provide updated array of plan steps\n- Brief summary of updated plan\n- Description of changes made",
-      "completionCondition": "Plan refined based on user feedback, development_plan in context updated, ready for re-presentation",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "plan_file_updated": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation that development-plan.md file was updated BEFORE filling this response"
-          },
-          "refinement_summary": {
-            "type": "string",
-            "description": "What changed in plan"
-          }
-        },
-        "required": [
-          "plan_file_updated",
-          "development_plan",
-          "plan_summary",
-          "refinement_summary"
-        ],
-        "globalInputs": [
-          "development_plan",
-          "plan_summary"
-        ]
-      },
-      "connections": {
-        "success": "present-plan-to-user"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "initialize-plan-tracking",
-      "directive": "Prepare progress tracking system for development plan.\n\n1) Count total_steps from development-plan.md (plan is already in context)\n2) Determine current_step_name - name of first plan step\n\nCounters current_step_index=1 and current_iteration=1 are already set automatically.\n\nIn response indicate: first step name for templates, total number of steps in plan.",
-      "completionCondition": "Tracking system initialized, can start plan steps",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "current_step_name",
-          "total_steps"
-        ],
-        "globalInputs": [
-          "current_step_name",
-          "total_steps"
-        ]
-      },
-      "connections": {
-        "success": "implement-step"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "implement-step",
-      "directive": "Implement current plan step completely and with quality. This is key moment - do not proceed further until everything planned is fully completed and system is working. Further checks will help, but main responsibility is on you. Everything depends on quality of your work: 1) Take step from {{workspace_path}}/development-plan.md by index {{current_step_index}} (1-based) 2) Implement all technical tasks from plan without exceptions 3) Do not fear big changes and refactoring - this is normal and necessary 4) If need to rewrite lots of code for proper solution - do it 5) Do not try to quickly work around difficulties - solve them completely 6) Create or modify necessary files 7) Test functionality of new features 8) Ensure system works after your changes. {{code_quality_principles}} In response indicate brief description of implemented functionality.",
-      "completionCondition": "Step implemented, working functionality created and tested, results documented",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "implemented_functionality"
-        ],
-        "globalInputs": [
-          "implemented_functionality"
-        ]
-      },
-      "connections": {
-        "success": "run-all-tests"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "run-all-tests",
-      "directive": "This is a normal re-validation loop, expected to converge — NOT a bug and NOT a stuck flow; do NOT report a loop to the user.\n\nCRITICAL: DON'T FIX failed tests and DON'T FIX code - ONLY RUN tests and COLLECT results.\n\nRun all project tests and get NUMERICAL results:\n\n{{run_tests_directive}}\n\nIndicate number of passed and failed tests.",
-      "completionCondition": "All tests run, numerical results obtained",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "tests_passed_count": {
-            "type": "number",
-            "minimum": 0,
-            "description": "Number of passed tests"
-          }
-        },
-        "required": [
-          "tests_passed_count",
-          "tests_failed_count"
-        ],
-        "globalInputs": [
-          "tests_failed_count"
-        ]
-      },
-      "connections": {
-        "success": "check-test-results"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-test-results",
-      "condition": {
-        "operator": "or",
-        "conditions": [
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "test_info"
-            },
-            "right": "skip"
-          },
-          {
-            "operator": "eq",
-            "left": {
-              "contextPath": "tests_failed_count"
-            },
-            "right": 0
-          }
-        ]
-      },
-      "connections": {
-        "true": "check-code-quality-and-architecture",
-        "false": "analyze-test-failures"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "analyze-test-failures",
-      "directive": "Analyze failed tests and determine fix strategy.\n\n1) Review failed_tests details\n2) Determine failure cause for each test\n3) Choose fix strategy:\n   - fix_implementation: code works incorrectly (real bug, broken functionality)\n   - update_tests: code works correctly, but tests are outdated/need updating\n\n4) Save analysis to {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/test-analysis.md:\n   # Test Failure Analysis\n\n   ## Summary\n   Total failed: [count]\n   Strategy: [fix_implementation or update_tests]\n\n   ## Failed Tests\n\n   ### Test 1: [test name]\n   - Error message: [error]\n   - Root cause: [analysis of why it fails]\n   - Recommended fix: [specific fix to apply]\n\n   ### Test 2: [test name]\n   ...\n\nProvide detailed analysis of causes and chosen strategy.",
-      "completionCondition": "Test failure causes analyzed and fix strategy determined",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "failure_analysis": {
-            "type": "string",
-            "description": "Detailed analysis of test failure causes"
-          },
-          "fix_strategy": {
-            "type": "string",
-            "enum": [
-              "fix_implementation",
-              "update_tests"
-            ],
-            "description": "fix_implementation if code needs fixing, update_tests if tests need updating"
-          }
-        },
-        "required": [
-          "failure_analysis",
-          "fix_strategy"
-        ]
-      },
-      "connections": {
-        "success": "fix-implementation-for-tests-action"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-implementation-for-tests-action",
-      "directive": "CRITICAL: FIX THE CODE - NO REPORTS!\n\nFix implementation so ALL tests pass.\n\n⚠️ IMPORTANT: ALL failed tests MUST be fixed - even if unrelated to current development stage. Reasons:\n- Agent may have accidentally broken existing functionality\n- Infrastructure/environment may have changed\n- Failed tests block deployment and project development\n- Broken tests accumulate quickly and project degrades\n\nREAD analysis from {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/test-analysis.md\n\nFor EACH failed test in the file:\n1. Read the root cause and recommended fix\n2. Apply the fix to the code\n3. Run the specific test to verify it passes\n4. Mark test as fixed\n\nALL failed tests from the analysis file must be fixed.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nConfirm CODE IS FIXED and all tests pass.",
-      "completionCondition": "APPLICATION CODE FIXED for tests to pass",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "code_fixed": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation that code is fixed"
-          }
-        },
-        "required": [
-          "code_fixed"
-        ]
-      },
-      "connections": {
-        "success": "run-all-tests"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "check-code-quality-and-architecture",
-      "directive": "This is a normal re-validation loop, expected to converge — NOT a bug and NOT a stuck flow; do NOT report a loop to the user.\n\nCRITICAL: DON'T FIX code - ONLY VERIFY compliance with standards.\n\nCheck quality and architecture standards.\n\n⚠️ IMPORTANT: If standard is NOT RELEVANT to current changes - consider it MET.\nExamples:\n- No UI changes → UI/UX patterns = met\n- No performance-critical code → Performance = met\n- Config only without code → Testability = met\n- No new comments needed → Documentation = met\n\n1) Check 10 code quality standards:\n   - Typing (TypeScript types without any)\n   - Error handling (try/catch, validation)\n   - No hacks (no workarounds, temporary solutions)\n   - Architectural patterns (compliance with project patterns)\n   - Readability (clear names, structure)\n   - Testability (code covered by tests)\n   - Performance (no performance regression)\n   - Security (no security issues)\n   - Documentation (comments where needed)\n   - No dead code (no unused imports/vars/functions)\n\n2) Check 5 architectural aspects:\n   - Architectural integrity (compliance with project architecture)\n   - Integration points (proper integration with existing components)\n   - Future stages compatibility (doesn't break subsequent plan stages)\n   - Error handling (error handling at all levels)\n   - UI/UX patterns (if applicable - UI consistency)\n\n3) Count met standards out of 15\n4) Count violated standards (actual violations, not counting irrelevant ones)\n5) Create BRIEF file {{workspace_path}}/step-{{current_step_index}} (1-based)/iteration-{{current_iteration}}/code-quality-architecture.md describing ONLY violations:\n   - Which standard violated\n   - Where problem found (file, component)\n   - What needs fixing\n\nReturn numbers of met and violated standards.",
-      "completionCondition": "STANDARDS COUNT COMPLETED",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "total_standards_met_count"
-        ],
-        "globalInputs": [
-          "total_standards_met_count"
-        ]
-      },
-      "connections": {
-        "success": "route-code-quality-result"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-code-quality-result",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "total_standards_met_count"
-        },
-        "right": 15
-      },
-      "connections": {
-        "true": "agent-validate-step",
-        "false": "fix-code-quality-and-architecture-action"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-code-quality-and-architecture-action",
-      "directive": "CRITICAL: FIX THE CODE - NO REPORTS! Fix quality and architecture problems. 1) Read {{workspace_path}}/step-{{current_step_index}} (1-based)/iteration-{{current_iteration}}/code-quality-architecture.md 2) Find root cause 3) FIX the problems. {{fix_requirements}} {{code_quality_principles}} Confirm THE FIX.",
-      "completionCondition": "QUALITY AND ARCHITECTURE PROBLEMS FIXED",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "problems_fixed": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "Confirmation of fix"
-          }
-        },
-        "required": [
-          "problems_fixed"
-        ]
-      },
-      "connections": {
-        "success": "check-code-quality-and-architecture"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "agent-validate-step",
-      "directive": "This is a normal re-validation loop, expected to converge — NOT a bug and NOT a stuck flow; do NOT report a loop to the user.\n\nCRITICAL: DON'T FIX reviewer issues - ONLY DELEGATE review.\n\nDelegate critical review to subagent for plan stage evaluation. 1) Give agent direct access to plan without your interpretation 2) No mentions that 'code was improved/added/fixed' 3) Pass directly: file {{workspace_path}}/development-plan.md, plan stage index {{current_step_index}} (1-based), all changed files for review, folder {{workspace_path}}/step-{{current_step_index}} (1-based)/iteration-{{current_iteration}}/ with check reports 4) Tell agent which project parts (src/, docs/, tests/) to study for review context understanding, but give freedom to study anything 5) AGENT DELEGATION RULES: Role clarity (YOU ARE reviewer not helper), Direct commands (CHECK not could you check), Specify files (list exact paths), Include context (PREVIOUS iteration X), Demand verification (VERIFY by reading files), Clear scope (ONLY this step not entire feature). Agent prompt: YOU ARE plan step gate reviewer. Your assessment determines if we can proceed to next development phase. READ plan file directly. CHECK step {{current_step_index}} (1-based) technical tasks and functional results against PREVIOUS and FUTURE steps context. Evaluate code quality, errors, plan compliance, working functionality. Review iteration reports in {{workspace_path}}/step-{{current_step_index}} (1-based)/iteration-{{current_iteration}}/. If step includes Web UI changes - REQUIRE Playwright browser testing for validation. DO NOT approve UI features without real browser functionality verification. Return BLOCKING issues that prevent progression. Provide detailed fix recommendations. Developer has large context - help them maximize efficiency. CLASSIFY: errors vs remarks vs deviations. NO shortcuts/workarounds tolerance 6) Agent must give detailed advice and recommendations for fixing - executor has large context 7) Agent must evaluate plan stage considering previous and future plan stages to ensure development integrity 8) Save comprehensive response in {{workspace_path}}/step-{{current_step_index}} (1-based)/iteration-{{current_iteration}}/gate-review.md. Honestly pass review result: path to review file, whether blocking issues found (not your opinion, but fact what reviewer said). Important: If reviewer found issues - you must pass yes in agent_issues_found field, even if you think issues are minor. Your opinion doesn't matter - fact of reviewer findings matters.",
-      "completionCondition": "CRITICAL gate review of plan stage completed with assessment of ability to proceed to next stage, blocking issues identified, detailed fix recommendations provided",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "agent_review_file": {
-            "type": "string",
-            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/step-\\d+/iteration-\\d+/gate-review\\.md$",
-            "description": "Path to review file: {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/gate-review.md"
-          }
-        },
-        "required": [
-          "agent_review_file",
-          "agent_issues_found"
-        ],
-        "globalInputs": [
-          "agent_issues_found"
-        ]
-      },
-      "connections": {
-        "success": "check-agent-validation-result"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-agent-validation-result",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "agent_issues_found"
-        },
-        "right": "no"
-      },
-      "connections": {
-        "true": "commit-step",
-        "false": "fix-agent-feedback-issues-action"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-agent-feedback-issues-action",
-      "directive": "CRITICAL: FIX THE ISSUES - NO REPORTS!\n\nFix all gate review issues completely.\n\nREAD {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/gate-review.md\n\nFor EACH issue found by reviewer:\n1. Understand the issue and recommendation\n2. Apply the fix completely - no partial fixes\n3. Verify the issue is resolved\n4. Document what was done\n\n⚠️ DO NOT skip any issue. ALL reviewer findings must be addressed.\n⚠️ If issue seems minor - still address it explicitly.\n⚠️ Reviewer findings are authoritative - your opinion doesn't override them.\n\nIf implementation is wrong - REDO completely.\nIf global changes needed - do without hesitation.\nOnly if multiple attempts fail and reviewer points to fundamental planning errors - can consider plan update.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nIndicate: fixed issues or plan needs update.",
-      "completionCondition": "GATE REVIEWER ISSUES FIXED or plan update need determined",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "action_taken": {
-            "type": "string",
-            "enum": [
-              "fixes_applied",
-              "plan_needs_update"
-            ],
-            "description": "fixes_applied if fixed all issues, plan_needs_update if plan needs update"
-          },
-          "fixes_description": {
-            "type": "string",
-            "description": "DETAILED description of HOW EXACTLY gate reviewer issues were fixed (if action_taken = fixes_applied)"
-          },
-          "plan_issues_description": {
-            "type": "string",
-            "description": "Description of fundamental plan problems (if action_taken = plan_needs_update)"
-          }
-        },
-        "required": [
-          "action_taken"
-        ]
-      },
-      "connections": {
-        "success": "agent-validate-step"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "commit-step",
-      "directive": "CRITICAL: Describe CHANGES from git diff, not 'improvements/additions/fixes'.\n\nCommit plan stage progress.\n\n1) Check development-plan.md for stage {{current_step_index}} (1-based) - is there related_issue\n2) Look at git diff to understand specific changes\n3) Create commit message:\n   - Description of CHANGES (what changed in code)\n   - IF there's related_issue: add 'Closes #N' at end\n4) git add and commit\n\nIMPORTANT: Add feature work files from {{workspace_path}} to commit - they should be in git history to preserve work context.\n\nFORBIDDEN in commit message:\n- 'improved', 'added', 'fixed'\n- Marketing words\n- 'success', 'great work'\n\nREQUIRED:\n- Description of actual changes from git diff\n- Issue linking if there's related_issue\n\nReturn hash of created git commit for plan stage progress tracking.",
-      "completionCondition": "Stage committed to git, meaningful commit message created",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "commit_hash": {
-            "type": "string",
-            "description": "Hash of created git commit for plan stage"
-          }
-        },
-        "required": [
-          "commit_hash"
-        ]
-      },
-      "connections": {
-        "success": "check-user-approval-needed"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "check-user-approval-needed",
-      "directive": "Evaluate if current stage requires user review and approval. Evaluate stage criticality: 1) UI changes, breaking changes, architectural decisions, API changes require user approval 2) Normal bug fixes, internal refactoring, unit tests don't require 3) When in doubt - better to request approval than skip critical changes. Honestly indicate if user review is required for this stage.",
-      "completionCondition": "Determined if user approval is required for current stage",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "approval_reason": {
-            "type": "string",
-            "description": "Why stage requires or doesn't require user approval"
-          }
-        },
-        "required": [
-          "user_approval_needed",
-          "approval_reason"
-        ],
-        "globalInputs": [
-          "user_approval_needed"
-        ]
-      },
-      "connections": {
-        "success": "route-user-approval"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "route-user-approval",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "user_approval_needed"
-        },
-        "right": "yes"
-      },
-      "connections": {
-        "true": "user-review-step",
-        "false": "notify-step-complete"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "user-review-step",
-      "directive": "Present user with BRIEF report on completed stage for review.\n\nREPORT FORMAT (REQUIRED):\n\n## What needed to be done\n[Brief description of plan stage - 2-3 sentences]\n\n## What was done\n[Specific list of completed work - bullet points, no implementation details]\n\n## How to verify\n[Specific commands or actions to verify result - step by step]\n\nCRITICAL:\n- Report must be BRIEF and STRUCTURED\n- No excessive implementation technical details\n- Only facts: what was needed → what was done → how to verify\n- Maximum 15-20 lines for entire report\n\nAfter presenting report get user decision: approved or needs_fixes.\n\nIf user_decision == \"needs_fixes\":\n  Save user feedback to {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/user-feedback.md\n  Format:\n  # User Feedback\n\n  ## Decision\n  needs_fixes\n\n  ## User Comments\n  [user comments verbatim - copy EXACTLY what user said]\n\n  ## Required Changes\n  [parsed list of specific changes user wants - one item per line]\n\n**CRITICALLY IMPORTANT - REACTION TO FEEDBACK:**\n- If user said \"yes\" → approval = \"yes\"\n- If user gave ANY feedback or said \"no\" → approval = \"no\"\n- DO NOT fix yourself!\n- Reply approval = \"no\" and write user_feedback with feedback\n- Workflow will direct to fix branch itself\n- All fixes are done only through workflow, not independently",
-      "completionCondition": "User reviewed stage and gave decision on approval or rework",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_step_feedback": {
-            "type": "string",
-            "description": "User feedback on stage for potential fixes"
-          }
-        },
-        "required": [
-          "user_step_approval",
-          "user_step_feedback"
-        ],
-        "globalInputs": [
-          "user_step_approval"
-        ]
-      },
-      "connections": {
-        "success": "check-user-step-decision"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-user-step-decision",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "user_step_approval"
-        },
-        "right": "approved"
-      },
-      "connections": {
-        "true": "notify-step-complete",
-        "false": "fix-user-feedback-action"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "fix-user-feedback-action",
-      "directive": "CRITICAL: FIX PER USER FEEDBACK - NO REPORTS!\n\nREAD user feedback from {{workspace_path}}/step-{{current_step_index}}/iteration-{{current_iteration}}/user-feedback.md\n\nFor EACH item in \"Required Changes\" section:\n1. Understand what user wants\n2. Make the change completely\n3. Verify the change works\n4. Mark item as addressed\n\nDO NOT skip any feedback item. ALL user requests must be fulfilled.\n\nIf multiple attempts fail and fundamental issues prevent completion - can consider plan update.\n\n{{fix_requirements}}\n{{code_quality_principles}}\n\nIndicate: fixed or plan needs update.",
-      "completionCondition": "USER FEEDBACK ADDRESSED or plan update need determined",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "action_taken": {
-            "type": "string",
-            "enum": [
-              "fixes_applied",
-              "plan_needs_update"
-            ],
-            "description": "fixes_applied if fixed implementation, plan_needs_update if plan needs update"
-          },
-          "fixes_description": {
-            "type": "string",
-            "description": "Description of addressed user feedback (if action_taken = fixes_applied)"
-          },
-          "plan_issues_description": {
-            "type": "string",
-            "description": "Description of plan problems (if action_taken = plan_needs_update)"
-          }
-        },
-        "required": [
-          "action_taken"
-        ]
-      },
-      "connections": {
-        "success": "run-all-tests"
-      }
-    },
-    {
-      "type": "telegram-notification",
-      "id": "notify-step-complete",
-      "message": "✅ *Stage {{current_step_name}} completed*\n\n📊 **Progress:** {{current_step_index}}/{{total_steps}}\n📦 **Implemented:** {{implemented_functionality}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "check-if-plan-complete"
-      }
-    },
-    {
-      "type": "condition",
-      "id": "check-if-plan-complete",
-      "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "current_step_index"
-        },
-        "right": {
-          "contextPath": "total_steps"
-        }
-      },
-      "connections": {
-        "true": "notify-development-complete",
-        "false": "expr-increment-step"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "get-next-step-name",
-      "directive": "Get next plan stage name. Counters already updated (current_step_index incremented, current_iteration reset to 1). Read {{workspace_path}}/development-plan.md and find stage name by index {{current_step_index}} (1-based). Return stage name.",
-      "completionCondition": "Next plan stage name obtained",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "current_step_name"
-        ],
-        "globalInputs": [
-          "current_step_name"
-        ]
-      },
-      "connections": {
-        "success": "notify-step-start"
-      }
-    },
-    {
-      "type": "telegram-notification",
-      "id": "notify-step-start",
-      "message": "Stage \"{{current_step_name}}\" started ({{current_step_index}}/{{total_steps}})",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "implement-step"
-      }
-    },
-    {
-      "type": "telegram-notification",
-      "id": "notify-development-complete",
-      "message": "🏆 *All plan stages completed*\n\n📊 **Stages:** {{total_steps}} completed\n🎯 **Task:** {{user_task_description}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "generate-final-report"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "generate-final-report",
-      "directive": "BIAS PREVENTION: Strip marketing language (NO improved/enhanced/better), Neutral communication (factual only), Evidence-based claims (only verifiable), Avoid false celebrations (NO SUCCESS for partial).\n\nCreate final report on ALL completed work for the feature.\n\nCRITICAL - CONTEXT RESTORATION (do this FIRST):\nBefore generating report, you MUST read ALL work artifacts to restore full context:\n1) List ALL step folders: ls {{workspace_path}}/step-*/\n2) For EACH step-N folder, list iterations: ls {{workspace_path}}/step-N/iteration-*/\n3) Read EVERY step-results.md: {{workspace_path}}/step-*/iteration-*/step-results.md\n4) This restores FULL feature context across all development iterations\n5) DO NOT skip any step or iteration - each contains important work details\n\nIMPORTANT: If file {{workspace_path}}/final-report.md already exists:\n- This means we already went through entire plan\n- Issues were found and new stages added\n- APPEND new stage information to existing report\n- DON'T overwrite entire report\n\nAfter reading ALL step results:\n1) Read ENTIRE plan {{workspace_path}}/development-plan.md completely (including acceptance criteria)\n2) Collect information about ALL work from {{workspace_path}} (all step results, commits, analysis)\n3) If final-report.md exists - read it and supplement with new information\n4) Create or supplement comprehensive final report in {{workspace_path}}/final-report.md:\n\n   - Are acceptance criteria met (for ALL work)\n   - What works (ALL functionality, not just last stage)\n   - Which use cases are solved\n   - How it was verified\n\n   **CRITICAL - HIGHLIGHT IN BOLD:**\n   - What was FORGOTTEN (was in plan, not done)\n   - What was POSTPONED (consciously not done)\n   - What was SCOPED OUT (out of scope)\n\n5) Use acceptance criteria as checklist to verify completeness of ALL work\n6) If not all acceptance criteria met - EXPLICITLY state in report what was forgotten\n\nReturn path to report and CRITICAL warning if something from acceptance criteria not done.",
-      "completionCondition": "Final comprehensive report created with analysis of all step results",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "final_report_file": {
-            "type": "string",
-            "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/final-report\\.md$",
-            "description": "Path to final report: {{workspace_path}}/final-report.md"
-          }
-        },
-        "required": [
-          "final_report_file"
-        ]
-      },
-      "connections": {
-        "success": "present-results"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "present-results",
-      "directive": "Present work results FOR ENTIRE FEATURE to user with focus on acceptance criteria.\n\n⚠️ CRITICAL: Report must cover ENTIRE FEATURE, NOT just last plan stage!\n\n1) Use {{workspace_path}}/final-report.md and acceptance criteria from plan (you just created report using these criteria - all info already in context, no need to re-read files)\n2) Present results FOR ENTIRE FEATURE showing:\n   - Which acceptance criteria are met (across ALL stages)\n   - What exactly works (ALL functionality, not just last stage)\n   - Which use cases are solved (full list)\n   - How to verify functionality\n3) Provide specific commands/steps for verification\n4) Honestly state if any criteria not met\n5) FIRST get EXPLICIT permission from user to continue workflow\n\nReturn user's explicit permission to continue with workflow (only yes accepted).",
-      "completionCondition": "Results presented to user, EXPLICIT user permission to continue workflow received",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "user_permission_to_continue": {
-            "type": "string",
-            "enum": [
-              "yes"
-            ],
-            "description": "User allowed to continue with workflow - MUST get explicit permission"
-          }
-        },
-        "required": [
-          "user_permission_to_continue"
-        ]
-      },
-      "connections": {
-        "success": "update-documentation"
-      }
-    },
-    {
-      "type": "agent-directive",
-      "id": "update-documentation",
-      "directive": "⚠️ CRITICALLY IMPORTANT - FINAL PROJECT DOCUMENTATION UPDATE\n\nDO NOT CONFUSE:\n❌ Working folder {{workspace_path}} - WILL BE COMPLETELY DELETED after completion\n✅ Project documentation - docs/, README.md - PERMANENT project files\n\n⚠️ UPDATE DOCUMENTATION FOR ALL PLAN STAGES, STARTING FROM THE FIRST!\nNOT just the last stage - for the ENTIRE feature!\nIf you forget something or mess up - all work will be lost!\n\nUpdate PROJECT DOCUMENTATION for the entire completed feature.\n\n1) Use documentation standards:\n---\n{{documentation_standards}}\n---\n\n2) Analyze ALL project changes across ALL plan stages\n3) Update PERMANENT project documentation files (README.md, docs/, etc.)\n4) Follow documentation rules:\n   - Technical facts only\n   - No change history\n   - No marketing\n   - DO NOT create new documents without necessity\n\nIn your response indicate:\n- Which PERMANENT project files were updated\n- Brief summary of completed workflow for final notification",
-      "completionCondition": "Documentation updated for all feature changes, workflow summary prepared for notification",
-      "inputSchema": {
-        "type": "object",
-        "properties": {},
-        "required": [
-          "workflow_completion_summary"
-        ],
-        "globalInputs": [
-          "workflow_completion_summary"
-        ]
-      },
-      "connections": {
-        "success": "notify-workflow-complete"
-      }
-    },
-    {
-      "type": "telegram-notification",
-      "id": "notify-workflow-complete",
-      "message": "🏆 *Development Complete*\n\n🎯 **Feature:** {{feature_name}}\n👤 **Satisfaction:** N/A\n\n**📊 Summary:**\n{{workflow_completion_summary}}",
-      "parseMode": "Markdown",
-      "connections": {
-        "default": "end"
-      }
-    },
-    {
-      "type": "end",
       "id": "end",
+      "type": "end",
       "finalOutput": [
-        "feature_name",
-        "user_task_description",
-        "user_satisfaction",
-        "final_report_file",
-        "workspace_directory"
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
       ]
     },
     {
-      "type": "expression",
-      "id": "expr-increment-step",
-      "expressions": [
-        "current_step_index = current_step_index + 1",
-        "current_iteration = 1"
+      "id": "intake",
+      "type": "agent-directive",
+      "directive": "Reuse the originating repository-development task and every explicit scope, acceptance, constraint, operating-mode and authority decision already present. Read only the repository instructions and non-mutating context needed to decide whether this is one bounded coherent implementation outcome. Resolve operating_mode once; autonomous skips human waits only. Record task_summary as a bounded routing summary and commit_authorized only from originating authority. Classify preliminary_outcome as eligible, handoff, or blocked from uncertainty, blast radius, independent outcomes, architecture, security/privacy/data, public compatibility, rollout and recoverability—not file or step count. A small auth/security boundary, migration, breaking public contract, cross-repository change, multi-unit result, complex rollout, or unresolved architecture cannot be eligible merely because its diff may be small. Do not inspect a broad implementation cone, create files, mutate the repository, or claim final eligibility here.",
+      "completionCondition": "The existing task, mode and authority are preserved and preliminary Lite eligibility is truthfully classified without mutation or numeric heuristics",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "preliminary_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "operating_mode",
+          "commit_authorized",
+          "task_summary",
+          "preliminary_outcome"
+        ],
+        "globalInputs": [
+          "operating_mode",
+          "commit_authorized",
+          "task_summary"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "preliminary_outcome": {
+                  "enum": [
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "preliminary_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "materialize-workspace"
+      }
+    },
+    {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "task-contract.md",
+          "content": ""
+        },
+        {
+          "path": "plan.md",
+          "content": ""
+        },
+        {
+          "path": "plan-review.md",
+          "content": ""
+        },
+        {
+          "path": "implementation-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "validation-evidence.md",
+          "content": ""
+        },
+        {
+          "path": "semantic-review.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "handoff.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
       ],
       "connections": {
-        "default": "get-next-step-name"
+        "success": "route-intake-eligible",
+        "error": "finalize-workspace-blocked"
+      }
+    },
+    {
+      "id": "route-intake-eligible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "intake.preliminary_outcome"
+        },
+        "right": "eligible"
+      },
+      "connections": {
+        "true": "plan-change",
+        "false": "route-intake-handoff"
+      }
+    },
+    {
+      "id": "route-intake-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "intake.preliminary_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "plan-change",
+      "type": "agent-directive",
+      "directive": "Verify that {{workspace_path}}/process-id.txt equals {{executionId}}. Use {{task_summary}} only as bounded navigation back to the originating request; verify every material task fact against the request and authorized repository evidence. Inspect the applicable repository instructions, actual task-relevant architecture, patterns, tests, documentation, integration boundaries, dependencies and VCS state while preserving unrelated dirty work. Write task-contract.md as the sole detailed task, acceptance, scope, constraints, authority and evidence contract. Write plan.md as one concise outcome-oriented current plan with observable acceptance, dependencies, material risks and applicable tests/documentation; leave file discovery, tools, edit order and implementation method to the producer. Confirm eligibility from real project evidence. Return planning_outcome=eligible only for one bounded coherent result. Return handoff when risk, uncertainty, multiple independent outcomes, data/security/public contract or rollout requires full SDF; write handoff.md with original task, examined evidence, safe completed work if any, VCS state, unresolved obligations/risks and the full-SDF reason. Return blocked for an irreducible prerequisite and write its factual account to final-report.md. Do not mutate product code.",
+      "completionCondition": "Canonical task and proportionate plan are durable and actual project evidence either confirms Lite eligibility or truthfully produces handoff or blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "planning_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "planning_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "planning_outcome": {
+                  "enum": [
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "planning_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-plan-eligible"
+      }
+    },
+    {
+      "id": "route-plan-eligible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan-change.planning_outcome"
+        },
+        "right": "eligible"
+      },
+      "connections": {
+        "true": "review-plan",
+        "false": "route-plan-handoff"
+      }
+    },
+    {
+      "id": "route-plan-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "plan-change.planning_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "review-plan",
+      "type": "agent-directive",
+      "directive": "Delegate a genuinely independent review and keep the same reviewer context for rereview where supported. The reviewer reads the originating task and authority, task-contract.md, plan.md and relevant repository primary sources directly, then overwrites plan-review.md with every current reproducible blocker. It judges task coverage, Lite eligibility, acceptance/evidence modality, dependencies, risks, authority and whether the plan leaves implementation work to an intelligent producer. It does not repair, run linters as semantic judgment, require a finding or design process machinery. Return design_review_outcome=pass only at zero blockers; repair only when every blocker is plan-owned under a valid upstream contract; replan for task interpretation, eligibility, criterion, evidence, authority, process or mixed cause. Return blocked when a genuinely independent review cannot be obtained because of an irreducible capability or authority constraint; do not substitute self-review and call it independent. If the same root returns after one repair without changed relevant source knowledge, return replan.",
+      "completionCondition": "For pass, repair or replan, the complete independent plan review is durable and matches the earliest cause; for blocked, a factual durable inability record exists and no independent-review claim is made",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "design_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "design_review_outcome"
+        ]
+      },
+      "connections": {
+        "success": "route-plan-review-pass"
+      }
+    },
+    {
+      "id": "route-plan-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-plan.design_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-plan-mode",
+        "false": "route-plan-review-blocked"
+      }
+    },
+    {
+      "id": "route-plan-review-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-plan.design_review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "repair-plan"
+      }
+    },
+    {
+      "id": "repair-plan",
+      "type": "agent-directive",
+      "directive": "Read plan-review.md, task-contract.md, plan.md and the relevant repository sources. Reproduce every current plan-owned blocker. If all are reproducible under the still-valid task contract, change plan.md coherently without embedding implementation or weakening acceptance, and record the root class and changed relevant knowledge in repair-account.md. Return changed. If any finding is unreproduced, upstream, evidence-model-related, mixed, or the same root lacks stronger distinguishing knowledge, return reassess without changing the plan. Do not mutate product code.",
+      "completionCondition": "Plan-owned defects are materially repaired for the same independent review or the exact cause is sent to contract reassessment",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "changed_knowledge"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-plan-repair-changed"
+      }
+    },
+    {
+      "id": "route-plan-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-plan.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "review-plan",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-plan-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "implement-change",
+        "false": "present-plan"
+      }
+    },
+    {
+      "id": "present-plan",
+      "type": "agent-directive",
+      "directive": "Present the independently accepted task-contract.md and plan.md consequences to the user without treating preference as semantic review. Ask whether to approve, revise or abort. Revision requires bounded nonblank feedback and returns through the independent plan review. Approval does not expand authority.",
+      "completionCondition": "The user explicitly approves, supplies actionable revision feedback, or aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "revise",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "revise"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-plan-approved"
+      }
+    },
+    {
+      "id": "route-plan-approved",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-plan.decision"
+        },
+        "right": "approve"
+      },
+      "connections": {
+        "true": "implement-change",
+        "false": "route-plan-revise"
+      }
+    },
+    {
+      "id": "route-plan-revise",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-plan.decision"
+        },
+        "right": "revise"
+      },
+      "connections": {
+        "true": "revise-plan",
+        "false": "finalize-aborted"
+      }
+    },
+    {
+      "id": "revise-plan",
+      "type": "agent-directive",
+      "directive": "Apply {{present-plan.feedback}} to task-contract.md or plan.md only at the feedback's real reach. Preserve the original goal, authority and every unaffected accepted requirement. Record the changed preference or source knowledge in repair-account.md. Do not mutate product code or bypass the independent plan review.",
+      "completionCondition": "Actionable feedback is durably incorporated without authority or acceptance erosion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "review-plan"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Reassess the earliest invalid derived contract using the original task and authority, task-contract.md, plan.md, the exact current plan/validation/semantic report that classified the cause, repair-account.md, any process-revision record and relevant repository primary sources. Correct only a reproduced invalid task interpretation, Lite eligibility, acceptance criterion, evidence method, authority interpretation or plan. Preserve the user's goal, still-valid requirements, completed safe repository work and authority ceiling. For eligible, update canonical task/plan artifacts as needed and record the changed relevant source knowledge or new discriminating hypothesis in repair-account.md; changed wording alone is insufficient. For handoff, write the complete full-SDF handoff.md. For blocked, write the irreducible cause to final-report.md. Do not repair product code, tests or review findings here.",
+      "completionCondition": "The earliest invalid contract is materially corrected for plan rereview, or Lite truthfully ends in handoff or blocked without an unchanged loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "eligible",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "eligible"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "outcome_reason"
+              ],
+              "not": {
+                "required": [
+                  "changed_knowledge"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-eligible"
+      }
+    },
+    {
+      "id": "route-reassessment-eligible",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "eligible"
+      },
+      "connections": {
+        "true": "review-plan",
+        "false": "route-reassessment-handoff"
+      }
+    },
+    {
+      "id": "route-reassessment-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "implement-change",
+      "type": "agent-directive",
+      "directive": "Implement the complete bounded result from task-contract.md and the independently accepted plan.md against the real repository. Own every applicable source change, behavior, test level, coverage consequence, documentation, type/schema, generated/configuration, compatibility, integration and necessary cleanup before handoff. Treat initial files as entry points, not a whitelist; preserve unrelated dirty work and the authority ceiling. Record actual changed responsibilities, direct behavior evidence and project-supported commands/results in implementation-evidence.md. Return ready only when the coherent product result is complete enough for a fresh producer pass. If work becomes spreading or ineligible, update handoff.md and return handoff. Return blocked for an irreducible prerequisite. Do not commit, push, notify, publish or deploy here.",
+      "completionCondition": "The complete bounded product result and direct evidence are durable, or spreading/blocked work is truthfully classified without false completion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "implementation_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "implementation_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "implementation_outcome": {
+                  "enum": [
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "implementation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-implementation-ready"
+      }
+    },
+    {
+      "id": "route-implementation-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "implement-change.implementation_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "producer-completion",
+        "false": "route-implementation-handoff"
+      }
+    },
+    {
+      "id": "route-implementation-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "implement-change.implementation_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "producer-completion",
+      "type": "agent-directive",
+      "directive": "Perform a fresh producer completion pass before gates. Read task-contract.md, accepted plan.md, the actual complete repository diff and affected primary dependencies. Complete any obvious omitted code, tests, documentation, integration, generated/configuration or cleanup work and refresh implementation-evidence.md with direct observations. This is production ownership, not review and not a decorative ready flag. Return ready only when the bounded outcome is complete. Return handoff if actual work now exceeds Lite eligibility; return replan for an invalid task/plan/criterion/evidence contract; return blocked for an irreducible prerequisite. Do not waive requirements or perform VCS/external side effects.",
+      "completionCondition": "A fresh whole-diff pass closes ordinary omissions and produces producer-ready bytes, or truthfully routes handoff, contract reassessment or blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completion_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "handoff",
+              "replan",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "completion_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completion_outcome": {
+                  "enum": [
+                    "handoff",
+                    "replan",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "completion_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-completion-ready"
+      }
+    },
+    {
+      "id": "route-completion-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "producer-completion.completion_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "validate-change",
+        "false": "route-completion-handoff"
+      }
+    },
+    {
+      "id": "route-completion-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "producer-completion.completion_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "route-completion-replan"
+      }
+    },
+    {
+      "id": "route-completion-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "producer-completion.completion_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "validate-change",
+      "type": "agent-directive",
+      "directive": "Read task-contract.md, plan.md, implementation-evidence.md, actual diff and project instructions. Discover and run only applicable deterministic and runtime checks in cost order; preserve conditional browser/service/performance/full-suite work. Record exact commands, observations, applicability, failures and infrastructure limits in validation-evidence.md. Mechanical green proves only measured properties. Before proposing any proof mechanism, name the required and plausible wrong states and the observation that distinguishes them; assign contextual architecture/completeness to semantic review instead of building a proxy, guard, harness, proof token or metatest. Classify validation_outcome before mutation: pass; product_repair for a reproduced product defect; verification_repair for test/fixture/projection evidence defect; replan for invalid criterion/evidence/plan/process or mixed cause; blocked for irreducible prerequisite.",
+      "completionCondition": "Applicable checks and direct evidence are current and every non-pass result is classified to its earliest owner without surrogate proof",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "validation_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "product_repair",
+              "verification_repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "cause_summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "validation_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "pass"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "cause_summary"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "cause_summary"
+              ]
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-validation-pass"
+      }
+    },
+    {
+      "id": "route-validation-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-validation-product"
+      }
+    },
+    {
+      "id": "route-validation-product",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "product_repair"
+      },
+      "connections": {
+        "true": "repair-product",
+        "false": "route-validation-verification"
+      }
+    },
+    {
+      "id": "route-validation-verification",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "verification_repair"
+      },
+      "connections": {
+        "true": "repair-verification",
+        "false": "route-validation-replan"
+      }
+    },
+    {
+      "id": "route-validation-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-change.validation_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-product",
+      "type": "agent-directive",
+      "directive": "Read the current cause record that routed here: repair-account.md when repair-verification returned product_required, otherwise validation-evidence.md or semantic-review.md. Also read task-contract.md, plan.md, actual product and relevant primary sources. Reproduce every product-owned blocker and inspect all real manifestations of the confirmed cause inside the bounded change. If the upstream contract remains valid, change the complete product result and implementation-evidence.md, then overwrite repair-account.md with the current root class and changed relevant knowledge and return changed. Return reassess for unreproduced, mixed, upstream, invalid-criterion or same-root-without-stronger-evidence causes. Return blocked for an irreducible authorized product repair. Do not patch validators to make product findings disappear.",
+      "completionCondition": "Confirmed product defects are coherently changed for a fresh completion pass, or non-product/irreducible causes are truthfully reassessed or blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-product-repair-changed"
+      }
+    },
+    {
+      "id": "route-product-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-product.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "producer-completion",
+        "false": "route-product-repair-reassess"
+      }
+    },
+    {
+      "id": "route-product-repair-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-product.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-verification",
+      "type": "agent-directive",
+      "directive": "Read validation-evidence.md or semantic-review.md, actual tests/fixtures/projections, product behavior and primary project contracts. Reproduce the verification/evidence-owned cause before mutation. Change only the contained test, fixture, documentation projection or evidence defect and record root class plus changed relevant knowledge in repair-account.md. Return changed to rerun deterministic validation. If stronger verification exposes a product defect, reproduce it and overwrite repair-account.md with that newly exposed product cause and changed relevant knowledge before returning product_required; do not leave the superseded verification cause as the product owner's source. Return reassess for unreproduced, mixed, invalid-criterion or same-root-without-stronger-evidence causes; blocked for an irreducible verification prerequisite. Do not build validation machinery whose purpose is proving another check ran.",
+      "completionCondition": "Contained evidence defects are changed, newly exposed product defects return to product ownership, and invalid or irreducible causes do not loop unchanged",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "product_required",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "enum": [
+                    "changed",
+                    "product_required"
+                  ]
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "blocker_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "blocker_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-verification-repair-changed"
+      }
+    },
+    {
+      "id": "route-verification-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-verification.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "validate-change",
+        "false": "route-verification-product"
+      }
+    },
+    {
+      "id": "route-verification-product",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-verification.repair_outcome"
+        },
+        "right": "product_required"
+      },
+      "connections": {
+        "true": "repair-product",
+        "false": "route-verification-reassess"
+      }
+    },
+    {
+      "id": "route-verification-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-verification.repair_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "semantic-review",
+      "type": "agent-directive",
+      "directive": "Delegate one genuinely independent whole-result review and keep the same reviewer context for rereview where supported. The reviewer reads the original task/authority, task-contract.md, accepted plan.md, actual complete repository diff, affected primary architecture and behavior, implementation-evidence.md, validation-evidence.md, tests and documentation. It overwrites semantic-review.md with all current reproducible blockers. Structural/test green is not semantic completeness. The reviewer diagnoses without repair, remains inside the bounded task, accepts zero findings, and classifies product, verification/evidence, documentation/product, invalid criterion, or upstream plan/process causes. Return pass only at zero blockers; repair only when every blocker is locally owned under a valid contract and provide repair_owner; replan for criterion/plan/process, mixed causes, or the same root after one repair without changed relevant knowledge. Return blocked when a genuinely independent review cannot be obtained because of an irreducible capability or authority constraint; do not substitute self-review and call it independent.",
+      "completionCondition": "For pass, repair or replan, the complete independent whole-result review is durable and matches the earliest cause and repair ownership; for blocked, a factual durable inability record exists and no semantic-review claim is made",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "product",
+              "verification"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "repair_owner"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-semantic-pass"
+      }
+    },
+    {
+      "id": "route-semantic-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-result-mode",
+        "false": "route-semantic-blocked"
+      }
+    },
+    {
+      "id": "route-semantic-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-semantic-repair-owner"
+      }
+    },
+    {
+      "id": "route-semantic-repair-owner",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "product"
+      },
+      "connections": {
+        "true": "repair-product",
+        "false": "repair-verification"
+      }
+    },
+    {
+      "id": "route-result-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "autonomous"
+      },
+      "connections": {
+        "true": "close-result",
+        "false": "present-result"
+      }
+    },
+    {
+      "id": "present-result",
+      "type": "agent-directive",
+      "directive": "Present the independently accepted current result and validation evidence without treating preference as semantic proof. Ask the user to accept, request rework with nonblank feedback, or abort. Acceptance does not expand VCS or external authority. Rework that changes task, eligibility, criterion or evidence model belongs to contract reassessment; bounded product rework returns through producer completion and every stale gate.",
+      "completionCondition": "The user accepts the reviewed result, provides actionable rework feedback, or explicitly aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "feedback"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "feedback"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-result-accepted"
+      }
+    },
+    {
+      "id": "route-result-accepted",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "close-result",
+        "false": "route-result-rework"
+      }
+    },
+    {
+      "id": "route-result-rework",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "present-result.decision"
+        },
+        "right": "rework"
+      },
+      "connections": {
+        "true": "rework-result",
+        "false": "finalize-aborted"
+      }
+    },
+    {
+      "id": "rework-result",
+      "type": "agent-directive",
+      "directive": "Read {{present-result.feedback}}, task-contract.md, plan.md, semantic-review.md and the actual accepted result. Reproduce the requested reach. Return product_changed only after implementing bounded authorized feedback and updating implementation-evidence.md. Return reassess when feedback changes task interpretation, eligibility, criterion, evidence or authority. Return handoff when it makes Lite ineligible and write handoff.md. Return blocked for an irreducible prerequisite. Do not directly present, commit or bypass producer completion and rereview.",
+      "completionCondition": "Feedback is implemented at its real owner or truthfully routes contract reassessment, handoff or blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rework_outcome": {
+            "type": "string",
+            "enum": [
+              "product_changed",
+              "reassess",
+              "handoff",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "rework_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "rework_outcome": {
+                  "enum": [
+                    "reassess",
+                    "handoff",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "rework_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "outcome_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-rework-product"
+      }
+    },
+    {
+      "id": "route-rework-product",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_outcome"
+        },
+        "right": "product_changed"
+      },
+      "connections": {
+        "true": "producer-completion",
+        "false": "route-rework-reassess"
+      }
+    },
+    {
+      "id": "route-rework-reassess",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_outcome"
+        },
+        "right": "reassess"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "route-rework-handoff"
+      }
+    },
+    {
+      "id": "route-rework-handoff",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "rework-result.rework_outcome"
+        },
+        "right": "handoff"
+      },
+      "connections": {
+        "true": "finalize-handoff",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "close-result",
+      "type": "agent-directive",
+      "directive": "Close only the independently accepted current bytes. Commit authority from the originating task is {{commit_authorized}} and cannot be broadened here. Read repository policy, task/plan, actual diff, implementation/validation evidence and semantic-review.md. If commit is authorized, run the repository's required pre-commit checks and create only the accepted change under its authorship/sign-off policy; never push, open a PR, publish, release, deploy or notify. If commit is not authorized, preserve the accepted local diff. Write final-report.md with the truthful result, checks, limitations, artifact/VCS state and next authorized action. Return closure_outcome=complete with delivery_status=complete, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary, and vcs_status committed or not_authorized. If an authorized required commit fails, preserve the accepted result, report the factual failure in final-report.md and return blocked with delivery_status=blocked and vcs_status=failed.",
+      "completionCondition": "Accepted bytes are truthfully closed under originating VCS authority and final-report.md records the complete local result without broader side effects",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "closure_outcome": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "closure_outcome",
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "closure_outcome": {
+                  "const": "complete"
+                }
+              },
+              "required": [
+                "closure_outcome"
+              ]
+            },
+            "then": {
+              "properties": {
+                "delivery_status": {
+                  "const": "complete"
+                },
+                "vcs_status": {
+                  "enum": [
+                    "committed",
+                    "not_authorized"
+                  ]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "delivery_status": {
+                  "const": "blocked"
+                },
+                "vcs_status": {
+                  "const": "failed"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-closure-complete"
+      }
+    },
+    {
+      "id": "route-closure-complete",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "close-result.closure_outcome"
+        },
+        "right": "complete"
+      },
+      "connections": {
+        "true": "end",
+        "false": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-handoff",
+      "type": "agent-directive",
+      "directive": "Write or complete {{workspace_path}}/handoff.md as the truthful full-SDF handoff. Preserve the original task and authority, inspected repository evidence, completed safe work, current dirty/commit state, unresolved obligations and risks, and the exact eligibility reason. Do not start full SDF, mutate more product code, commit, push, publish, deploy or describe Lite as complete. Return delivery_status=handoff, artifact_path exactly {{workspace_path}}/handoff.md, bounded summary and vcs_status=not_applicable.",
+      "completionCondition": "A complete durable full-SDF handoff is projected without false Lite completion or external mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/handoff.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "handoff"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-handoff"
+      }
+    },
+    {
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Write {{workspace_path}}/final-report.md with the factual irreducible blocker, completed safe work, repository/VCS state, preserved artifacts and what change in authority, evidence or prerequisites could resume the task. Do not claim semantic acceptance or Lite completion and do not perform external side effects. Return delivery_status=blocked, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary and truthful vcs_status.",
+      "completionCondition": "The post-materialization blocker and preserved local state are durable and truthfully projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "blocked"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-workspace-blocked",
+      "type": "agent-directive",
+      "directive": "Report the materialization failure factually without claiming a workspace artifact exists. Preserve the original task and authority and name the concrete local prerequisite required to retry. Return delivery_status=blocked, bounded summary and vcs_status=not_applicable. Do not invent artifact_path or perform product/VCS/external mutation.",
+      "completionCondition": "The pre-workspace blocker is truthfully projected without a fake artifact path",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "summary",
+          "vcs_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "blocked"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Honor the explicit user abort without additional product or VCS mutation. Write {{workspace_path}}/final-report.md with where the run stopped, current safe repository state and existing local artifacts. Return delivery_status=aborted, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary and vcs_status=not_applicable. Do not describe the result as complete or reviewed.",
+      "completionCondition": "The explicit abort and current local state are durably and truthfully projected",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "globalInputs": [
+          "delivery_status",
+          "artifact_path",
+          "summary",
+          "vcs_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "delivery_status": {
+                "const": "aborted"
+              },
+              "vcs_status": {
+                "const": "not_applicable"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "end-handoff",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "delivery_status",
+        "artifact_path",
+        "summary",
+        "vcs_status"
+      ]
+    },
+    {
+      "id": "teleport-revise-process",
+      "type": "teleport",
+      "hint": "Use only when the accepted Lite task, eligibility, authority, criterion or process itself no longer matches reality. Do not use it for an ordinary product defect, failed check, semantic finding, inconvenient task or to bypass review; those have normal owners.",
+      "directive": "Record in repair-account.md the concrete process-revision cause, primary evidence, earliest invalid task/eligibility/criterion/evidence/authority source, preserved original goal and authority, completed safe work and invalidated downstream evidence. Do not repair product code, tests, plan or findings here and do not claim the cause closed; the normal contract reassessment owner runs next.",
+      "completionCondition": "A legitimate changed process cause and its invalidation reach are durable for normal contract reassessment",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "connections": {
+        "success": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-plan-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "review-plan.design_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-plan-review-replan"
+      }
+    },
+    {
+      "id": "route-semantic-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "route-semantic-replan"
       }
     }
   ],
   "variableRegistry": {
-    "workflow_version": {
-      "type": "string",
-      "description": "Stores workflow version",
-      "default": "1.0.0"
-    },
-    "current_iteration": {
-      "type": "number",
-      "description": "Stores current iteration",
-      "default": 1
-    },
-    "current_step_index": {
-      "type": "number",
-      "description": "Index of the current step in the plan",
-      "default": 1
-    },
-    "test_quality_standards": {
-      "type": "string",
-      "description": "Stores test quality standards",
-      "default": "QUALITY TESTING STANDARDS: Test reality: DO NOT write tests for the sake of tests, verify real use cases and user scenarios, avoid synthetic tests without practical value. Project structure: place tests in folders according to project architecture, follow naming patterns adopted in the project, use existing test utilities and helpers, follow test environment configuration. Reality coverage: cover ALL new functionality without gaps, test edge cases and error handling, cover integration points with other components. Isolation and independence: tests are independent of each other, do not affect execution order, use proper setup/teardown, clean up state after themselves. Readability and maintenance: clear test names describing what is being tested, clear test structure with arrange/act/assert, meaningful assertion messages, easy to update when code changes. Efficiency: tests run quickly without performance regression, optimized for CI/CD pipeline, use functional snapshots if framework supports for easier maintenance and updates. Project integration: use test run commands adopted in the project, follow project conventions, do not duplicate existing tests."
-    },
-    "fix_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "FIX REQUIREMENTS: ROOT CAUSE ANALYSIS - find the root cause of the problem, do not fix symptoms, understand why the problem occurred. COMPLETE FIX - fix ALL problems completely without exceptions, superficial fixes DO NOT work and will be detected by the next check, do not leave unfinished work for later. MANDATORY SELF-CHECK BEFORE COMPLETION - VERIFY that the fix works through actual execution, RUN tests to validate the fix, ENSURE nothing is broken in existing functionality, TEST all affected areas, DO NOT proceed to execute_step without verifying the fix works. NO SHORTCUTS - do not look for workarounds and quick solutions, if major changes or global refactoring are needed - do them without hesitation, rewriting significant portions of code may be required - this is normal and correct. CYCLE ESCAPE STRATEGY - workflow checks will be executed anyway and will detect problems, the only way to escape the fix cycle is to do it right the first time, self-validation BEFORE submitting to workflow saves time and iterations, validate through running tests BEFORE claiming fixed."
-    },
-    "planning_requirements": {
-      "type": "string",
-      "description": "Product requirements",
-      "default": "# PLANNING REQUIREMENTS\n\n## CRITICAL RULES (READ FIRST)\n\n### FORBIDDEN STEP TYPES - REJECT PLAN IF CONTAINS:\n- \"Testing\" / \"Write tests\" / \"Add tests\" as separate step\n- \"Final validation\" / \"Final check\" / \"Verification\"\n- \"E2E testing\" / \"Integration testing\" as separate step\n- \"Production deployment\" / \"Deploy and verify\"\n- \"Documentation\" as separate step (unless task IS documentation)\n- \"Cleanup\" / \"Code cleanup\" as separate step (unless task IS cleanup/refactoring)\n- ANY step that ONLY tests/validates without implementing NEW functionality or refactoring\n\n### WHY TESTS MUST BE BUILT-IN (NOT SEPARATE):\n- Separate test step = admission that previous step is incomplete\n- Gate validation requires working tests to verify step completion\n- \"Write tests\" as step means agent shipped untested code\n- Test proves step is complete - without tests, step is unverified\n\n### EACH STEP MUST:\n- Implement new functionality OR refactor existing code\n- Include tests for that functionality (built-in, not separate)\n- Include self-verification (built-in, not separate)\n- Leave code clean (no separate cleanup step needed)\n\n### BAD EXAMPLE (FORBIDDEN):\n```\nStep 1: Implement feature X\nStep 2: Write tests for feature X    ← FORBIDDEN: testing-only\nStep 3: Final validation             ← FORBIDDEN: validation-only\n```\n\n### BAD PLAN (REAL EXAMPLE - DO NOT COPY):\n```\nStep 1: Database layer for user isolation\nStep 2: API endpoints for workflows\nStep 3: E2E и Production             ← FORBIDDEN: testing-only step\nStep 4: Documentation и cleanup      ← FORBIDDEN: doc-only step\n```\n\n### GOOD EXAMPLE (CORRECT):\n```\nStep 1: Implement feature X with unit tests\n        Verify: feature works, tests pass\n\nStep 2: Implement feature Y with integration tests\n        Verify: X+Y work together, all tests pass\n```\n\n### CORRECT VERSION OF BAD PLAN:\n```\nStep 1: Database layer with unit tests\n        Verify: queries isolated per user, tests pass\n\nStep 2: API endpoints with integration tests\n        Verify: auth works, E2E passing, all tests pass\n```\n\n---\n\n## STEP SIZE - FUNCTIONAL BLOCKS\n\nStep = completed functional block with verifiable result.\n\nNOT too small: \"create a file\", \"add import\"\nNOT too large: \"implement entire frontend\"\n\nCORRECT granularity:\n- Database layer with user isolation\n- MCP integration with authentication\n- Web UI for workflow management\n\nWHY: Workflow has gate validation after each step - expensive in time.\n- Too small steps = dozens of checks instead of 3-5\n- Too large steps = agent gets lost\n\n---\n\n## STEP FEASIBILITY CHECK\n\nEach step must be:\n- Absolutely executable by agent\n- Maximally specific in functionality\n- Have clear completion criterion\n\n**HUGE STEP = RED FLAG** of task misunderstanding.\nActions: STOP → study project → ask user → web search → delegate analysis.\n\n**LARGE STEP = PLANNING FAILURE** - split it.\n\n---\n\n## ARCHITECTURE AT PLAN START\n\nMANDATORY Architecture section after Goal:\n- Overall solution architecture\n- Key components and interaction\n- Architectural decisions (technologies, approaches)\n- Diagrams if applicable (ASCII, Mermaid, text)\n\nNot too much - conceptual understanding is enough.\n\nPlan undergoes mandatory validation - user confirms architecture before execution.\n\n---\n\n## FORBIDDEN IN PLAN - SPECIFIC FILES AND CODE\n\nFORBIDDEN:\n- Specific file paths\n- Function/method names\n- Line numbers\n- Code examples (TypeScript, SQL, React)\n- \"Files Created/Modified\" lists\n\nCORRECT:\n- \"Implement authentication layer\"\n- \"Update database schema for user isolation\"\n- \"Create UI components for workflow display\"\n\nWHY: Agent must ITSELF analyze code and find where to implement.\nPlan with files creates false sense of completeness - agent forgets critical details.\n\n---\n\n## WHAT TO WRITE IN STEPS\n\nINCLUDE:\n- Functionality and behavior description\n- Integration points (conceptually)\n- Expected result after step\n- Verification criteria (what should work + tests pass)\n\nEXAMPLE:\n```\n## Step 2: API layer for user workflows\n\nImplement REST endpoints for workflow CRUD operations with integration tests covering auth scenarios.\nEndpoints use authenticated context from Step 1.\nInclude request validation and error handling.\n\nVerify: API returns user's workflows only, rejects unauthorized access. All integration tests pass.\n```\n\n---\n\n## PLAN FOR REVIEWER WITHOUT CONTEXT\n\nPlan must be detailed enough that reviewer WITHOUT conversation history can:\n- Fully understand what each step accomplishes\n- Verify work is complete\n\nBUT: Detail ≠ code and files. Detail = clear FUNCTIONALITY and RESULT description.\n\nReviewer runs WITHOUT CONTEXT - this is architectural system decision.\n\n---\n\n## GRADUAL BUILDUP (LAYER ORDER)\n\n1) Base layer: data models, core logic, services + unit tests\n2) Integration layer: API endpoints, MCP tools + integration tests\n3) UI layer: Web interface, forms + browser tests (Playwright)\n\nFROM CORE TO INTERFACE. Never start with UI.\n\n---\n\n## PLAN FORMAT\n\nStructure:\n```\n# Title\n## Goal (one sentence)\n## Architecture (components, decisions)\n## Step 1: [name] with [test type] tests. Verify: [criteria], tests pass.\n## Step 2: [name] with [test type] tests. Verify: [criteria], tests pass.\n...\n```\n\nFORBIDDEN sections:\n- Overview, Summary\n- Acceptance Criteria (separate)\n- Validation blocks with bash commands\n- Files Created/Modified\n- UPDATED REQUIREMENTS\n- Testing (as separate section)\n- Final validation\n\n---\n\n## PLAN VOLUME\n\n- Tiny task: 1 step is NORMAL and CORRECT\n- Simple task: 50-100 lines, 2-4 steps\n- Medium task: 100-200 lines, 5-7 steps\n- Complex task: 200-300 lines, 8-12 steps\n\n**ONE STEP IS OK**: If task is small - plan with 1 step is correct.\nDO NOT artificially inflate plan to have more steps.\nDO NOT split simple task into multiple steps just to \"look thorough\".\n\nIf >400 lines - you are writing code instead of plan.\n\n---\n\n## NO SUBITEMS\n\nPlan = simple list of steps: 1, 2, 3, 4\n\nFORBIDDEN: 5.1, 5.2, 5.3 subitems\n\nSubitems = sign that step is too large → split into separate steps.\n\n---\n\n## USER APPROVAL STEPS\n\nSome steps require user confirmation:\n- UI changes (visual)\n- Breaking changes\n- Architectural decisions\n- API changes\n\nMark in plan: `[USER APPROVAL]` before continuing.\n\n---\n\n## PLANNING PRINCIPLES\n\n- CODE RESEARCH for existing patterns\n- WEB RESEARCH for best practices\n- LIBRARY DOCUMENTATION for APIs\n- DO NOT ASSUME - only verified facts\n- CURRENT library versions\n\nGood plan = result of deep analysis, not guess.\n\n---\n\n## FORMULA\n\n```\nPlan = Architecture + Functional blocks (1-12 steps) + Verification criteria\nEach step: functionality + tests + verification (ALL BUILT-IN)\nWITHOUT: code, files, validation blocks, subitems, testing-only steps, cleanup steps\n```\n\nGood plan reads in 2 minutes and gives complete understanding.\n\n9. ATOMICITY & REDUNDANCY (no global scope):\n- An agent often receives ONE plan item's directive in isolation — other items and any general rules stated once at the top are NOT in its context.\n- Each item is fully self-contained: restate every nuance it needs, repeat the relevant original requirements INSIDE the item, and DUPLICATE cross-cutting actions (progress report, run tests, commit) into EVERY item.\n- There is no shared/global scope — redundancy across items is REQUIRED, not a smell."
-    },
-    "code_quality_principles": {
-      "type": "string",
-      "description": "Stores code quality principles",
-      "default": "=== AGENT IDENTITY PROTOCOL === YOU ARE AN AI AGENT, NOT A HUMAN: You have NO fatigue, no time constraints, no desire to avoid difficulties. DO NOT IMITATE human weaknesses and limitations. TAKE THE BEST ENGINEER PATTERNS: full responsibility, deep understanding, completion without compromises. You can work with ANY complexity without limitations. SOLVE AT THE ROOT, do not work around problems due to perceived complexity. === WORKFLOW BLOCKING PROTOCOL === CRITICALLY IMPORTANT: DO NOT proceed to execute_step until ALL tasks are 100% COMPLETE. Workflow is BLOCKED until full completion. Any attempt to proceed with incomplete work - PROTOCOL VIOLATION. === TASK COMPLETION REQUIREMENTS === ANTI-AVOIDANCE RULES: FORBIDDEN to claim main goal achieved without 100% completion, use significant improvement to mask incompleteness, say comprehensive work ongoing instead of completing tasks, move to next task with current incomplete, avoid difficult parts of task. MANDATORY to complete ALL subtasks before claiming completion, provide specific numerical evidence for each claim, honestly report remaining problems with exact numbers, fix ALL identified problems before continuing, fulfill all requirements with tool-based verification. === BIG TASK PROTOCOL === DO NOT FEAR BIG TASKS! If task seems huge - this is NORMAL and EXPECTED: Break into subtasks but COMPLETE ALL without exceptions. DO NOT SKIP difficult parts for speed. DO NOT look for shortcuts and workarounds. Large changes and refactoring are NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. Complexity is NOT an excuse for incompleteness. === EVIDENCE PROTOCOL === COMPLETION EVIDENCE IS MANDATORY: Every completed must have tool-based verification. Every works correctly must have actual test execution. Every significantly improved must have exact before/after numbers. Every transition to execute_step must have completion verification. === QUALITY STANDARDS === TECHNICAL REQUIREMENTS: RESPONSIBILITY: You are experienced engineer - full responsibility for result. EVERYTHING depends on your work. QUALITY: Code must be clean, without issues, with proper typing. QUALITY CODE: No hacks, workarounds, temporary solutions - do it right immediately. PROBLEMS: Solve problems completely, do not work around them. ERRORS: Analyze causes, fix root of problem, not symptoms. SIMPLICITY: First look for simple solutions, then complicate if needed. CHECKS: After every significant change - testing and validation. DEAD CODE: Remove all unused, maintain cleanliness. RESULT: Focus on working solution, not on process for process sake. BIG CHANGES: DO NOT fear big changes and refactoring - this is NORMAL and NECESSARY for quality. Better to rewrite lots of code correctly than make hacks. DO NOT SLACK: DO NOT try to quickly do something instead of proper solution. Flow checks are help, NOT replacement for your responsibility. ADDITIONAL DEVELOPMENT PRINCIPLES: CODE STUDY: DO NOT hesitate to study existing code for understanding patterns and integration points. WEB RESEARCH: Use internet to study best practices and solve problems. CURRENT VERSIONS: Use latest stable library versions, read their documentation. DO NOT ASSUME: If something does not work - read documentation, do not invent solutions. DOCUMENTATION: For library problems - official documentation first, then search. === CODEBASE MAINTENANCE PROTOCOL === RESPONSIBILITY FOR ENTIRE CODEBASE: CANNOT PASS BY PROBLEMS: If you see non-compliance with standards, issues, hacks, lints, warnings in EXISTING code you touch - FIX immediately. BROKEN TESTS: See failing tests, .skip, .only in project - FIX or delete, DO NOT write new tests leaving old ones broken. FIX ON TOUCH: TODO, FIXME, console.log, commented code in files you edit - remove immediately. IMPROVE CODE: DO NOT leave code worse than you found - improve quality on every touch. FULL RESPONSIBILITY: You are responsible for ENTIRE project, not just new code - maintain entire codebase at high level, you will be working with it. === SELF-MONITORING PROTOCOL === CRITICAL QUESTIONS BEFORE EACH execute_step: Can I prove this claim with tool output? Would this pass code review by human without access to my work? Am I avoiding something difficult here? Is this really finished or am I just tired of working on it? Do I have specific evidence for each claim? Are ALL requirements 100% fulfilled or am I masking incompleteness?"
-    },
-    "startup_check_directive": {
-      "type": "string",
-      "description": "Stores startup check directive",
-      "default": "Use project startup instructions:\n---\n{{startup_info}}\n---"
-    },
-    "run_tests_directive": {
-      "type": "string",
-      "description": "Stores run tests directive",
-      "default": "Use testing information:\n---\n{{test_info}}\n---\nRun all tests. Wait for ALL tests to complete. Count how many tests passed and how many failed."
-    },
     "workspace_path": {
       "type": "string",
-      "description": "Working directory for plan files (empty = project root)",
-      "default": ""
+      "description": "Execution-correlated materialized workspace for canonical Lite artifacts.",
+      "const": "./moira-ws/software-development-flow-lite-{{executionId}}",
+      "default": "./moira-ws/software-development-flow-lite-{{executionId}}"
     },
-    "agent_onboarding_info": {
+    "workspace_process_id_file": {
       "type": "string",
-      "description": "Key rules for agent from onboarding document OR skip if none"
+      "description": "Registry-backed process-id.txt content for workspace correlation.",
+      "default": "{{executionId}}"
     },
-    "review_issues_count": {
-      "type": "number",
-      "description": "Number of issues found in plan (0 if no issues)"
-    },
-    "development_plan_file": {
+    "operating_mode": {
       "type": "string",
-      "description": "Path to plan file: {{workspace_path}}/development-plan.md",
-      "pattern": "^\\./moira-ws/[a-z0-9-]+-\\d{8}-\\d{4}/development-plan\\.md$"
-    },
-    "user_task_description": {
-      "type": "string",
-      "description": "Detailed task description from user",
-      "minLength": 20
-    },
-    "development_plan": {
-      "type": "array",
-      "description": "List of development steps",
-      "items": {
-        "type": "string",
-        "minLength": 20,
-        "description": "Plan step: name + tasks + result"
-      },
-      "minItems": 1
-    },
-    "plan_summary": {
-      "type": "string",
-      "description": "Brief description of full development plan for notifications",
-      "minLength": 50
-    },
-    "plan_approval": {
-      "type": "string",
-      "description": "User plan approval: yes to approve, no for refinement",
+      "description": "How Lite handles human waits; quality and authority gates are unchanged.",
       "enum": [
-        "yes",
-        "no"
+        "autonomous",
+        "interactive"
       ]
     },
-    "test_info": {
+    "commit_authorized": {
+      "type": "boolean",
+      "description": "Whether the originating task already authorizes a local Git commit.",
+      "default": false
+    },
+    "task_summary": {
       "type": "string",
-      "description": "Testing information (command + rules) OR skip if no tests"
+      "description": "Bounded routing summary of the originating repository-development task.",
+      "minLength": 1,
+      "maxLength": 4000
     },
-    "tests_failed_count": {
-      "type": "number",
-      "description": "Number of failed tests"
-    },
-    "total_standards_met_count": {
-      "type": "number",
-      "description": "Number of standards met out of 15 (10 quality + 5 architecture)"
-    },
-    "agent_issues_found": {
+    "delivery_status": {
       "type": "string",
-      "description": "Were blocking issues found by gate reviewer?",
+      "description": "Truthful terminal class for the Lite execution.",
       "enum": [
-        "yes",
-        "no"
+        "complete",
+        "handoff",
+        "blocked",
+        "aborted"
       ]
     },
-    "user_approval_needed": {
+    "artifact_path": {
       "type": "string",
-      "description": "Is user review and approval required for this stage?",
+      "description": "Validated final-report or handoff artifact beneath the current materialized workspace.",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "summary": {
+      "type": "string",
+      "description": "Bounded truthful terminal summary.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "vcs_status": {
+      "type": "string",
+      "description": "Observed local VCS closure state.",
       "enum": [
-        "yes",
-        "no"
+        "committed",
+        "not_authorized",
+        "failed",
+        "not_applicable"
       ]
-    },
-    "user_step_approval": {
-      "type": "string",
-      "description": "approved if user approves stage, needs_fixes if rework required",
-      "enum": [
-        "approved",
-        "needs_fixes"
-      ]
-    },
-    "current_step_name": {
-      "type": "string",
-      "description": "First plan step name for use in templates"
-    },
-    "total_steps": {
-      "type": "number",
-      "description": "Total number of steps in development plan"
-    },
-    "implemented_functionality": {
-      "type": "string",
-      "description": "Description of implemented working functionality and its test results"
-    },
-    "documentation_standards": {
-      "type": "string",
-      "description": "Documentation rules from style guide OR skip if none"
-    },
-    "feature_name": {
-      "type": "string",
-      "description": "Short name for this feature/task (used in notifications)"
-    },
-    "workflow_completion_summary": {
-      "type": "string",
-      "description": "Brief final summary of entire completed workflow for final notification",
-      "minLength": 30
-    },
-    "startup_info": {
-      "type": "string",
-      "description": "System startup instructions for development OR skip if none"
     }
-  }
+  },
+  "slug": "software-development-flow-lite",
+  "owner": "system-moira",
+  "visibility": "public"
 }

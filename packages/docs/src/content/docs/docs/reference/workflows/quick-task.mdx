@@ -1,14 +1,14 @@
 ---
 title: Quick Task
-description: Filesystem-backed bounded planning, execution, independent review, and user acceptance
+description: Filesystem-backed bounded non-development planning, execution, independent review, and user acceptance
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-Quick Task runs a bounded multi-step task as Plan → Approve → Execute → Review → Accept. It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the approved plan length, the execution cursor, and short values used for routing.
+Quick Task runs a bounded multi-step non-development task as Plan → Approve → Execute → Review → Accept. It keeps complete task, plan, review, decision, change, and evidence records in an execution-specific filesystem workspace. Workflow context carries only bounded file references, the approved plan length, the execution cursor, and short values used for routing.
 
 <Aside type="tip">
-Use Quick Task when an agent has filesystem access and the work fits a plan of at most ten meaningful units. Use [Robust Task](/docs/reference/workflows/robust-task/) when the task needs a stronger recovery policy for partial execution or operational failures.
+Use Quick Task when an agent has filesystem access and bounded non-development work fits a plan of at most ten meaningful units. For software implementation, bug fixing, refactoring, migrations, or rollout, use [Software Development Flow Lite](./software-development-flow-lite/) for one contained low-risk result or the [full Software Development Flow](./software-development-flow/) when risk, uncertainty, or spread grows. Use [Robust Task](/docs/reference/workflows/robust-task/) when a complex general task needs a stronger recovery policy for partial execution or operational failures.
 </Aside>
 
 ## Start

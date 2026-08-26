@@ -1,0 +1,19 @@
+---
+title: Moira User Onboarding
+description: Интерактивная первая ориентация с полным текущим public catalog и запуском только явно выбранного child workflow.
+---
+
+Moira User Onboarding объясняет directives, completion conditions, input schemas и verified progression, помогая новому пользователю выбрать workflow из полного текущего разрешённого public catalog.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/user-onboarding",
+  parentExecutionId: "none"
+})
+```
+
+Onboarding вызывает `list()` постранично, пока не увидит каждый workflow из reported total. Он воспринимает names/descriptions как данные, показывает каждую identity ровно один раз и объясняет purpose, deliverable, cost/durability profile, authority boundary и ближайшие альтернативы. Frozen catalog не используется.
+
+Пользователь выбирает точный qualified `owner/slug` или create/edit path через `moira/workflow-management-flow`, затем явно выбирает start или defer. Start создаёт ровно этот workflow как child onboarding и принимает только реальный Process ID успешного MCP response. Он использует `skipTelegramCheck: true` только для пропуска преждевременного graph-level notification preflight, чтобы unconfigured account мог запустить любой выбранный workflow; флаг не разрешает notification и не меняет authority child process. Defer не выполняет внешнюю мутацию.
+
+Onboarding не создаёт durable artifacts, не настраивает settings, не публикует, не deploy, не меняет production и не выполняет substantive work child workflow. Если цель уже известна, запускайте подходящий workflow напрямую.

@@ -171,6 +171,11 @@ Outputs:
 The command exits with a non-zero status when errors exist, so scripts and agents can use it as a
 real gate. Warnings alone do not make the command fail.
 
+Bundled catalog files may also contain `previousSlugs`, which records prior identities for managed
+rename reconciliation. The CLI validates that metadata through the catalog reader, removes catalog
+metadata from the executable graph presented to `GraphValidator`, and still rejects malformed,
+duplicate, or current-slug aliases. Runtime/upload graph validation remains strict.
+
 ### schema - Read-only control-flow schema
 
 ```bash
@@ -313,12 +318,14 @@ moira-workflow ./workflows/production/flows/<flow>.json set-name "Workflow name"
 moira-workflow ./workflows/production/flows/<flow>.json set-slug workflow-slug
 moira-workflow ./workflows/production/flows/<flow>.json set-description --file ./description.txt
 
-# Replace an existing copy while preserving its id/slug/owner/visibility
+# Replace an existing copy while preserving its id/slug/owner/visibility/previousSlugs
 moira-workflow ./workspace.json sync ./workflows/production/flows/<flow>.json
 ```
 
-`sync` validates the fully synchronized result before creating a backup or writing. If validation
-fails, the destination remains byte-for-byte unchanged.
+`sync` validates destination catalog aliases and the fully synchronized executable graph before
+creating a backup or writing. Migration aliases come from the destination identity, never from the
+workspace copy. If catalog-metadata or graph validation fails, the destination remains byte-for-byte
+unchanged.
 
 ## Typical Usage Scenarios
 

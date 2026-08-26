@@ -6,6 +6,8 @@ Workflow definitions for MCP Moira workflow engine.
 
 ```
 workflows/
+├── examples/
+│   └── flows/     → Tracked examples, not loaded into the bundled catalog
 ├── production/
 │   └── flows/     → Public catalog, one UUID-named JSON file per workflow
 └── README.md      → This file
@@ -16,9 +18,11 @@ workflows/
 During container startup, Moira reconciles the complete filesystem catalog with the database and
 the previous bundled baseline before it mutates any workflow.
 
-Only `workflows/production/flows/` is an OSS catalog source. Personal exports and local backups
-must stay outside the repository; they are not examples and must never be added to a production
-catalog directory. Private deployments supply their additional catalog through `WORKFLOWS_DIRS`.
+Only `workflows/production/flows/` is an OSS catalog source. `workflows/examples/flows/` contains
+reviewed demonstrations that remain testable without being installed or advertised as production
+workflows. Personal exports and local backups must stay outside the repository; they are not
+examples and must never be added to either tracked directory. Private deployments supply their
+additional catalog through `WORKFLOWS_DIRS`.
 
 An upstream-only change updates the managed workflow. A user-only change is preserved. A two-sided
 change preserves the database workflow and records previous/current/incoming candidates for a

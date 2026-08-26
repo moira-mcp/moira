@@ -1,359 +1,1762 @@
 {
-  "slug": "verified-research",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "1617b350-5e58-46a9-a783-fb9a69aec9bd",
   "metadata": {
     "name": "Verified Research",
-    "version": "2.1.0",
-    "description": "Исследование с гарантированной верификацией источников: QUESTION → METHODOLOGY → GATHER → READ → ALTERNATIVE → SYNTHESIZE → LIMITATIONS → OUTPUT. Решает проблему галлюцинаций AI через обязательную проверку URL, поиск альтернативных точек зрения и привязку выводов к конкретным источникам."
+    "version": "3.0.0",
+    "description": "Bounded external-source research for one specific question and one evidence-linked local answer. Frames the decision or use, gathers and critically reads a proportionate set of primary and authoritative sources, preserves meaningful disagreement, distinguishes sourced facts, quotations, calculations, inference, assumptions, uncertainty and gaps, and produces complete source-register, readings, answer, limitations, validation and independent-review artifacts. Supports autonomous and interactive operation, useful explicitly limited answers when evidence is incomplete, truthful blocked/aborted outcomes, cause-owned answer or evidence repair, and replan when the criterion or method is invalid. Choose Iterative Research for repeated durable improvement, Universal Research for adaptive filesystem-or-memory and authority modes, or Deep Corpus Research for separately authorized corpus-scale exhaustive reading. Completion is local: this workflow does not publish, notify, commit, deploy or mutate production."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "question"
+        "default": "intake"
       }
     },
     {
-      "id": "question",
+      "id": "end",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "answer_summary",
+        "limitation_summary"
+      ]
+    },
+    {
+      "id": "intake",
       "type": "agent-directive",
-      "directive": "Formulate research question.\n\nAsk user or determine from context:\n1. What do we want to know? (specific question, not vague)\n2. What criteria for good answer? (what counts as success)\n3. Scope: what we include, what we exclude\n4. Who will use the results?\n\nIMPORTANT: Question must be SPECIFIC and ANSWERABLE.",
-      "completionCondition": "Research question formulated specifically, success criteria defined, scope established",
+      "directive": "Resolve one specific research question, its intended use, proportionate scope and operating mode from the user's request and existing context. Reuse explicit choices. Ask only for a missing fact that materially changes the research and cannot be discovered. Return actionable when the question can be researched, clarify only in interactive mode when one user answer is essential, or blocked when autonomous ambiguity or a prerequisite prevents honest research. Do not invent scope or evidence.",
+      "completionCondition": "The bounded research contract is actionable, one essential clarification is identified, or the prerequisite blocker is explicit",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "research_question": {
+          "intake_outcome": {
             "type": "string",
-            "description": "Specific research question"
+            "enum": [
+              "actionable",
+              "clarify",
+              "blocked"
+            ]
           },
-          "success_criteria": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "description": "Criteria for good answer"
+          "clarification_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           },
-          "scope_in": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "What we include in research"
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
           }
         },
         "required": [
+          "intake_outcome"
+        ],
+        "globalInputs": [
           "research_question",
-          "success_criteria",
-          "scope_in"
+          "research_use",
+          "research_scope",
+          "operating_mode"
         ],
-        "globalInputs": [
-          "scope_out",
-          "audience"
-        ]
-      },
-      "connections": {
-        "success": "methodology"
-      }
-    },
-    {
-      "id": "methodology",
-      "type": "agent-directive",
-      "directive": "Define research methodology.\n\nResearch question: {{question.research_question}}\nScope: {{question.scope_in}}\n\nUse planning standards: {{planning_standards}}\n\nDefine BEFORE starting search:\n1. What source types to use (academic, news, official, expert blogs)\n2. Time period for sources\n3. Keywords and search queries\n4. Success criteria for research\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave methodology issues to `{{workspace_path}}/methodology-issues.md` with format:\n```\n# Methodology Issues\n\n## REQUIREMENTS COVERAGE\n1. [Research question aspect not addressed]\n\n## METHODOLOGY RIGOR\n1. [Missing methodology element]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `methodology_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. REQUIREMENTS COVERAGE - methodology addresses all aspects of research question\n2. METHODOLOGY RIGOR - follows {{planning_standards}}\n3. Scope clearly defined\n4. Success criteria measurable\n\nReturn `issues_count` = number of issues found (0 if methodology complete).",
-      "completionCondition": "Methodology defined: source types, time period, keywords, quality criteria",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "source_types": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "description": "Source types for search"
-          },
-          "time_period": {
-            "type": "string",
-            "description": "Time period (e.g. 'last 3 years')"
-          },
-          "keywords": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 2,
-            "description": "Keywords for search"
-          }
-        },
-        "required": [
-          "source_types",
-          "keywords",
-          "quality_criteria",
-          "time_period"
-        ],
-        "globalInputs": [
-          "quality_criteria"
-        ]
-      },
-      "connections": {
-        "success": "gather"
-      }
-    },
-    {
-      "id": "gather",
-      "type": "agent-directive",
-      "directive": "Gather sources following methodology.\n\nResearch question: {{question.research_question}}\nKeywords: {{methodology.keywords}}\nSource types: {{methodology.source_types}}\nTime period: {{methodology.time_period}}\n\nUse planning standards: {{planning_standards}}\n\nFor each source found:\n1. Verify author credentials\n2. Check publication date relevance\n3. Note potential biases\n4. Rate source quality (high/medium/low)\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave gathering issues to `{{workspace_path}}/gather-issues.md` with format:\n```\n# Source Gathering Issues\n\n## SOURCE VERIFICATION\n1. [Unverified source]\n\n## COVERAGE GAPS\n1. [Missing source type]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `gather_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. SOURCE VERIFICATION - all sources verified per {{planning_standards}}\n2. Minimum sources per type met\n3. Time period coverage adequate\n4. Quality distribution acceptable\n\nReturn `issues_count` = number of issues found (0 if gathering complete).",
-      "completionCondition": "Minimum 5 sources gathered, all URLs verified and working",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "object",
+        "allOf": [
+          {
+            "if": {
               "properties": {
-                "title": {
-                  "type": "string"
-                },
-                "author": {
-                  "type": "string"
-                },
-                "date": {
-                  "type": "string"
-                },
-                "url": {
-                  "type": "string"
-                },
-                "type": {
-                  "type": "string"
-                },
-                "relevance_note": {
-                  "type": "string"
+                "intake_outcome": {
+                  "const": "actionable"
                 }
               },
               "required": [
-                "title",
-                "url",
-                "type",
-                "relevance_note"
+                "intake_outcome"
               ]
             },
-            "minItems": 5,
-            "description": "Gathered sources with verified URLs"
-          }
-        },
-        "required": [
-          "sources"
-        ]
-      },
-      "connections": {
-        "success": "read"
-      }
-    },
-    {
-      "id": "read",
-      "type": "agent-directive",
-      "directive": "Conduct critical reading of key sources.\n\nSources: {{gather.sources}}\nResearch question: {{question.research_question}}\n\nUse planning standards: {{planning_standards}}\n\nFor each key source extract:\n- source_id: source identifier\n- key_claims: main claims relevant to question\n- evidence_quality: strength of evidence (strong/moderate/weak)\n- potential_bias: identified biases\n- relevance: how it answers research question\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave reading issues to `{{workspace_path}}/read-issues.md` with format:\n```\n# Critical Reading Issues\n\n## STANDARDS COMPLIANCE\n1. [Standard not followed]\n\n## EVIDENCE QUALITY\n1. [Weak evidence accepted]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `read_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. STANDARDS COMPLIANCE - reading follows {{planning_standards}}\n2. EVIDENCE QUALITY - properly assessed per standards\n3. All key sources analyzed\n4. Biases identified\n\nReturn `issues_count` = number of issues found (0 if reading complete).",
-      "completionCondition": "Critical reading completed for key sources, findings and quotes extracted",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "readings": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "source_id": {
-                  "type": "number"
-                },
-                "main_finding": {
-                  "type": "string"
-                },
-                "key_quotes": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
+            "then": {
+              "required": [
+                "research_question",
+                "research_use",
+                "research_scope",
+                "operating_mode"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "clarification_request"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "blocker_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "intake_outcome": {
+                    "const": "clarify"
                   }
                 },
-                "methodology": {
-                  "type": "string"
-                },
-                "limitations": {
-                  "type": "string"
-                }
+                "required": [
+                  "intake_outcome"
+                ]
               },
-              "required": [
-                "source_id",
-                "main_finding"
-              ]
-            },
-            "minItems": 3,
-            "description": "Critical reading results"
-          }
-        },
-        "required": [
-          "readings"
-        ]
-      },
-      "connections": {
-        "success": "alternative"
-      }
-    },
-    {
-      "id": "alternative",
-      "type": "agent-directive",
-      "directive": "Find alternative viewpoints.\n\nResearch question: {{question.research_question}}\nCurrent findings: {{read.readings}}\n\nUse planning standards: {{planning_standards}}\n\nMUST find:\n1. Opposing views — who DISAGREES with main findings and why\n2. Alternative interpretations — different ways to read the data\n3. Edge cases — when findings might not apply\n4. Criticism — what critics say about this topic/methodology\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave bias check issues to `{{workspace_path}}/alternative-issues.md` with format:\n```\n# Bias Check Issues\n\n## OPPOSING VIEWS\n1. [Missing opposing viewpoint]\n\n## BIAS IDENTIFICATION\n1. [Unaddressed bias]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `alternative_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. BIAS CHECK - actively sought opposing views per {{planning_standards}}\n2. At least 2 alternative viewpoints found\n3. Criticism addressed\n4. Own biases acknowledged\n\nReturn `issues_count` = number of issues found (0 if alternatives complete).",
-      "completionCondition": "Minimum 2 alternative viewpoints found with sources",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "alternative_views": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "viewpoint": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                },
-                "reasoning": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "viewpoint",
-                "source",
-                "reasoning"
-              ]
-            },
-            "minItems": 2,
-            "description": "Alternative viewpoints"
-          }
-        },
-        "required": [
-          "alternative_views"
-        ],
-        "globalInputs": [
-          "controversies"
-        ]
-      },
-      "connections": {
-        "success": "synthesize"
-      }
-    },
-    {
-      "id": "synthesize",
-      "type": "agent-directive",
-      "directive": "Synthesize findings into answer to research question.\n\nResearch question: {{question.research_question}}\nSuccess criteria: {{question.success_criteria}}\nFindings: {{read.readings}}\nAlternative views: {{alternative.alternative_views}}\n\nUse planning standards: {{planning_standards}}\n\nCreate synthesis that:\n1. Directly answers the research question\n2. Weighs evidence quality\n3. Acknowledges contradictions\n4. Notes confidence level\n5. Addresses alternative views\n\n{{#if has_file_access}}\n**FILE MODE:**\nSave synthesis issues to `{{workspace_path}}/synthesis-issues.md` with format:\n```\n# Synthesis Issues\n\n## ANSWER COMPLETENESS\n1. [Research question aspect not answered]\n\n## EVIDENCE INTEGRATION\n1. [Finding not integrated]\n\nTotal issues: N\n```\n{{else}}\n**CONTEXT MODE:**\nReturn issues in `synthesis_issues` field as array.\n{{/if}}\n\n**VALIDATION CHECKS:**\n1. Research question fully answered\n2. All key findings integrated\n3. Contradictions addressed\n4. Confidence level stated\n\nReturn `issues_count` = number of issues found (0 if synthesis complete).",
-      "completionCondition": "Answer formulated, each conclusion has source, agreement/disagreement areas defined",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "answer": {
-            "type": "string",
-            "description": "Answer to research question"
-          },
-          "conclusions": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "statement": {
-                  "type": "string"
-                },
-                "supporting_sources": {
-                  "type": "array",
-                  "items": {
-                    "type": "number"
+              "then": {
+                "properties": {
+                  "operating_mode": {
+                    "const": "interactive"
                   }
+                },
+                "required": [
+                  "clarification_request",
+                  "operating_mode"
+                ],
+                "not": {
+                  "required": [
+                    "blocker_reason"
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "blocker_reason",
+                  "operating_mode"
+                ],
+                "not": {
+                  "required": [
+                    "clarification_request"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-intake-actionable"
+      }
+    },
+    {
+      "id": "route-intake-actionable",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "intake.intake_outcome"
+        },
+        "right": "actionable"
+      },
+      "connections": {
+        "true": "materialize-workspace",
+        "false": "route-intake-clarify"
+      }
+    },
+    {
+      "id": "route-intake-clarify",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "intake.intake_outcome"
+        },
+        "right": "clarify"
+      },
+      "connections": {
+        "true": "clarify-question",
+        "false": "end-intake-blocked"
+      }
+    },
+    {
+      "id": "clarify-question",
+      "type": "agent-directive",
+      "directive": "Ask the one essential clarification already identified by intake. Integrate the user's answer without expanding the requested outcome. Return ready with the complete canonical question, use and scope, or blocked when the prerequisite remains unresolved.",
+      "completionCondition": "The bounded question is now actionable or the unresolved prerequisite is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clarification_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "blocked"
+            ]
+          },
+          "blocker_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "clarification_outcome"
+        ],
+        "globalInputs": [
+          "research_question",
+          "research_use",
+          "research_scope"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "clarification_outcome": {
+                  "const": "ready"
                 }
               },
               "required": [
-                "statement",
-                "supporting_sources"
+                "clarification_outcome"
               ]
             },
-            "minItems": 1,
-            "description": "Conclusions with sources"
+            "then": {
+              "required": [
+                "research_question",
+                "research_use",
+                "research_scope"
+              ],
+              "not": {
+                "required": [
+                  "blocker_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "blocker_reason"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "research_question"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "research_use"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "research_scope"
+                    ]
+                  }
+                ]
+              }
+            }
           }
-        },
-        "required": [
-          "answer",
-          "conclusions"
-        ],
-        "globalInputs": [
-          "agreements",
-          "disagreements"
         ]
       },
       "connections": {
-        "success": "limitations"
+        "success": "route-clarification-ready"
       }
     },
     {
-      "id": "limitations",
+      "id": "route-clarification-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "clarify-question.clarification_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "materialize-workspace",
+        "false": "end-intake-blocked"
+      }
+    },
+    {
+      "id": "materialize-workspace",
+      "type": "materialize",
+      "basePath": "{{workspace_path}}",
+      "files": [
+        {
+          "path": "process-id.txt",
+          "from": "workspace_process_id_file"
+        },
+        {
+          "path": "framing.md",
+          "content": ""
+        },
+        {
+          "path": "source-register.md",
+          "content": ""
+        },
+        {
+          "path": "readings.md",
+          "content": ""
+        },
+        {
+          "path": "alternative-views.md",
+          "content": ""
+        },
+        {
+          "path": "answer.md",
+          "content": ""
+        },
+        {
+          "path": "limitations.md",
+          "content": ""
+        },
+        {
+          "path": "package-validation.md",
+          "content": ""
+        },
+        {
+          "path": "semantic-review.md",
+          "content": ""
+        },
+        {
+          "path": "contract-review.md",
+          "content": ""
+        },
+        {
+          "path": "contract-review-findings.md",
+          "content": ""
+        },
+        {
+          "path": "repair-account.md",
+          "content": ""
+        },
+        {
+          "path": "final-report.md",
+          "content": ""
+        }
+      ],
+      "connections": {
+        "success": "frame-research",
+        "error": "finalize-workspace-blocked"
+      }
+    },
+    {
+      "id": "frame-research",
       "type": "agent-directive",
-      "directive": "Describe limitations and biases of research.\n\nMethodology: {{methodology.source_types}}, {{methodology.time_period}}, {{methodology.keywords}}\nSources: {{gather.sources}}\n\nHonestly state:\n1. Gaps — what is NOT covered by research?\n2. Source biases — what biases do sources have?\n3. Methodology biases — what biases in our approach?\n4. Future research — what needs additional investigation?\n\n{{common_mistakes}}\n\nIMPORTANT: Honest statement of limitations increases trust in research.",
-      "completionCondition": "Limitations described: gaps, source biases, methodology biases, future research",
+      "directive": "Work only in {{workspace_path}}. Frame the canonical question {{research_question}} for the observable use {{research_use}} within {{research_scope}}. Write framing.md with subquestions, bounded assumptions, applicability, evidence method and what would make the answer useful, limited or impossible. Do not prescribe fixed source counts, providers or search tactics. Return ready, replan for an invalid criterion/method, or blocked for an irreducible prerequisite.",
+      "completionCondition": "The durable framing supports proportionate evidence work or the earliest non-product cause is classified",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "gaps": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "minItems": 1,
-            "description": "What's not covered"
+          "framing_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
           },
-          "source_biases": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Biases in sources"
-          },
-          "methodology_biases": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Biases in our approach"
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
           }
         },
         "required": [
-          "gaps",
-          "source_biases",
-          "methodology_biases"
+          "framing_outcome"
         ],
         "globalInputs": [
-          "future_research"
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "framing_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "framing_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "terminal_reason"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "framing_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "framing_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "outcome_reason"
+                ],
+                "not": {
+                  "required": [
+                    "terminal_reason"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "outcome_reason"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
         ]
       },
       "connections": {
-        "success": "output"
+        "success": "route-framing-ready"
       }
     },
     {
-      "id": "output",
+      "id": "route-framing-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-research.framing_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-framing-replan"
+      }
+    },
+    {
+      "id": "route-framing-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "frame-research.framing_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "research-evidence",
       "type": "agent-directive",
-      "directive": "Generate final research report.\n\nUse all gathered data:\n- Question: {{question.research_question}}\n- Methodology: {{methodology.source_types}}, {{methodology.keywords}}, {{methodology.time_period}}\n- Sources: {{gather.sources}}\n- Findings: {{read.readings}}\n- Alternative views: {{alternative.alternative_views}}\n- Answer: {{synthesize.answer}}\n- Conclusions: {{synthesize.conclusions}}\n- Limitations: {{limitations.gaps}}, {{limitations.source_biases}}, {{limitations.methodology_biases}}\n\nReport structure:\n1. Executive Summary (1-2 paragraphs)\n2. Research Question & Methodology\n3. Findings with Citations\n4. Alternative Perspectives\n5. Synthesis & Conclusions\n6. Limitations\n7. References (full list with URLs)\n\nShow report to user.",
-      "completionCondition": "Research report ready and shown to user",
+      "directive": "Work only in {{workspace_path}} from framing.md. Gather and critically read a proportionate source set for {{research_question}}. Prefer primary and authoritative evidence where available, preserve meaningful disagreement, and evaluate authority, recency, independence and applicability. Write source-register.md with resolvable links plus retrieval/publication dates, readings.md with claim-level support and limitations, and alternative-views.md. Distinguish missing evidence from negative evidence. Return the sole canonical evidence_status: ready, limited only when residual evidence supports a useful explicitly limited answer, replan for a broken method or criterion, or blocked rather than fabricate support.",
+      "completionCondition": "Canonical evidence artifacts support a complete or useful limited answer, or the sole evidence outcome identifies the earliest invalid prerequisite",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "evidence_status"
+        ],
+        "globalInputs": [
+          "evidence_status",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "evidence_status": {
+                  "enum": [
+                    "ready",
+                    "limited"
+                  ]
+                }
+              },
+              "required": [
+                "evidence_status"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "outcome_reason"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "evidence_status": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "evidence_status"
+                ]
+              },
+              "then": {
+                "required": [
+                  "outcome_reason"
+                ],
+                "not": {
+                  "required": [
+                    "terminal_reason"
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "required": [
+                    "outcome_reason"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-usable"
+      }
+    },
+    {
+      "id": "route-evidence-usable",
+      "type": "condition",
+      "condition": {
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "evidence_status"
+            },
+            "right": "ready"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "evidence_status"
+            },
+            "right": "limited"
+          }
+        ]
+      },
+      "connections": {
+        "true": "synthesize-answer",
+        "false": "route-evidence-replan"
+      }
+    },
+    {
+      "id": "route-evidence-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_status"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "synthesize-answer",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Use framing.md, the complete source register, readings, alternative views and primary evidence to write one bounded answer.md and limitations.md for {{research_question}}. Separate sourced facts and quotations, calculations, synthesis/inference, conflicting evidence, assumptions, uncertainty and known gaps. Every material external claim must resolve to supporting evidence. Preserve the current evidence class {{evidence_status}}. Return ready, replan for an invalid answer criterion/method, or blocked when the evidence cannot honestly support an answer.",
+      "completionCondition": "The current evidence is synthesized into a traceable bounded answer and limitations, or the earliest cause is classified",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "synthesis_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "synthesis_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "synthesis_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "synthesis_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "terminal_reason"
+              ],
+              "not": {
+                "required": [
+                  "outcome_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "synthesis_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "synthesis_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "outcome_reason"
+                ],
+                "not": {
+                  "required": [
+                    "terminal_reason"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "outcome_reason"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-synthesis-ready"
+      }
+    },
+    {
+      "id": "route-synthesis-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "synthesize-answer.synthesis_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "package-completion",
+        "false": "route-synthesis-replan"
+      }
+    },
+    {
+      "id": "route-synthesis-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "synthesize-answer.synthesis_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "package-completion",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Perform a fresh producer-completion pass over the question, framing, source register, readings, alternatives, answer and limitations. Close obvious omitted claims, broken source links, stale conclusions and contradictions before gates. For ready, derive answer_summary and limitation_summary from the exact current package bytes while preserving the sole canonical evidence_status {{evidence_status}}; do not create a second answer-class alias. This node is the sole pre-gate writer of these bounded summaries and refreshes them after every package or evidence mutation. Return replan for an invalid contract/evidence method or blocked for an irreducible prerequisite.",
+      "completionCondition": "The complete package and its bounded current summaries are producer-ready under the canonical evidence class, or the earliest non-product cause is classified",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "completion_outcome": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "replan",
+              "blocked"
+            ]
+          },
+          "outcome_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "completion_outcome"
+        ],
+        "globalInputs": [
+          "answer_summary",
+          "limitation_summary",
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "completion_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "completion_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "answer_summary",
+                "limitation_summary"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "outcome_reason"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "terminal_reason"
+                    ]
+                  }
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "completion_outcome": {
+                    "const": "replan"
+                  }
+                },
+                "required": [
+                  "completion_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "outcome_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "answer_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "answer_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "limitation_summary"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "outcome_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-completion-ready"
+      }
+    },
+    {
+      "id": "route-completion-ready",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "package-completion.completion_outcome"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "validate-package",
+        "false": "route-completion-replan"
+      }
+    },
+    {
+      "id": "route-completion-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "package-completion.completion_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "validate-package",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Overwrite package-validation.md with checks whose observations actually distinguish the applicable states: required artifact existence and parsability, bounded schemas, resolvable link syntax and internal source-to-reading references. Do not claim source credibility, semantic completeness or conclusion validity mechanically. Before adding any new validator, name the required and plausible wrong states and the observation that separates them; otherwise replan rather than build proof machinery. Return pass, package_repair for answer/package shape, evidence_repair for concrete source-register/link/reading evidence defects, replan for an invalid criterion/method, or blocked for an irreducible prerequisite.",
+      "completionCondition": "Deterministic observations are durable and routed to the earliest owner without semantic overclaim",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "validation_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "package_repair",
+              "evidence_repair",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "validation_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "validation_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "validation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "terminal_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-validation-pass"
+      }
+    },
+    {
+      "id": "route-validation-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "semantic-review",
+        "false": "route-validation-package"
+      }
+    },
+    {
+      "id": "route-validation-package",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "package_repair"
+      },
+      "connections": {
+        "true": "repair-answer",
+        "false": "route-validation-evidence"
+      }
+    },
+    {
+      "id": "route-validation-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "evidence_repair"
+      },
+      "connections": {
+        "true": "repair-evidence",
+        "false": "route-validation-replan"
+      }
+    },
+    {
+      "id": "route-validation-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "validate-package.validation_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "semantic-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate one genuinely independent whole-answer review and keep the same reviewer context for rereview where supported. The reviewer reads the original question/use/scope, framing, complete source register and readings, alternative views, answer, limitations, deterministic observations, primary evidence and the exact canonical evidence_status {{evidence_status}} that will drive the terminal. It verifies that this class matches the package rather than inferring it from route execution, then overwrites semantic-review.md with all current reproducible blockers. It diagnoses without repair, accepts zero findings, and classifies answer/package, evidence/source, invalid criterion/method or upstream causes. Return pass only at zero blockers; repair only for one local owner; replan for mixed/upstream/criterion or repeated unchanged roots; blocked when genuine independence or another prerequisite is unavailable without claiming review.",
+      "completionCondition": "A complete independent semantic review or factual inability record is durable and cause-correct",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          },
+          "repair_owner": {
+            "type": "string",
+            "enum": [
+              "answer",
+              "evidence"
+            ]
+          }
+        },
+        "required": [
+          "review_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "review_outcome": {
+                  "const": "repair"
+                }
+              },
+              "required": [
+                "review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "repair_owner"
+              ],
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "review_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "review_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "required": [
+                    "repair_owner"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "repair_owner"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-review-pass"
+      }
+    },
+    {
+      "id": "route-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "route-mode-acceptance",
+        "false": "route-review-repair"
+      }
+    },
+    {
+      "id": "route-review-repair",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "repair"
+      },
+      "connections": {
+        "true": "route-review-answer",
+        "false": "route-review-replan"
+      }
+    },
+    {
+      "id": "route-review-answer",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.repair_owner"
+        },
+        "right": "answer"
+      },
+      "connections": {
+        "true": "repair-answer",
+        "false": "repair-evidence"
+      }
+    },
+    {
+      "id": "route-review-replan",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "semantic-review.review_outcome"
+        },
+        "right": "replan"
+      },
+      "connections": {
+        "true": "reassess-contract",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "repair-answer",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read package-validation.md and semantic-review.md as applicable. Reproduce every answer/package-owned blocker, repair the complete confirmed class in answer.md, limitations.md or package structure, and record changed relevant knowledge in repair-account.md. Do not patch source defects in prose. Return changed to refresh package completion and all stale gates, reassess for invalid/mixed/unreproduced/repeated roots, or blocked for an irreducible prerequisite.",
+      "completionCondition": "Confirmed answer/package defects change before every stale gate, or non-local causes do not loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-answer-repair-changed"
+      }
+    },
+    {
+      "id": "route-answer-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-answer.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "package-completion",
+        "false": "route-answer-repair-blocked"
+      }
+    },
+    {
+      "id": "route-answer-repair-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-answer.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "repair-evidence",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Read package-validation.md and semantic-review.md as applicable, the source register, readings and primary evidence. Reproduce every evidence/source-owned blocker, change the complete confirmed evidence class, and record changed relevant knowledge in repair-account.md. Return changed to repeat research, synthesis, package completion and all stale gates; reassess for invalid/mixed/unreproduced/repeated roots; or blocked for an irreducible evidence prerequisite.",
+      "completionCondition": "Evidence defects change before every evidence-dependent artifact is recomputed, or non-local causes do not loop",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repair_outcome": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "reassess",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "repair_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "repair_outcome": {
+                  "const": "changed"
+                }
+              },
+              "required": [
+                "repair_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            },
+            "else": {
+              "if": {
+                "properties": {
+                  "repair_outcome": {
+                    "const": "blocked"
+                  }
+                },
+                "required": [
+                  "repair_outcome"
+                ]
+              },
+              "then": {
+                "required": [
+                  "terminal_reason"
+                ],
+                "not": {
+                  "required": [
+                    "changed_knowledge"
+                  ]
+                }
+              },
+              "else": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "changed_knowledge"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "terminal_reason"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-evidence-repair-changed"
+      }
+    },
+    {
+      "id": "route-evidence-repair-changed",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence.repair_outcome"
+        },
+        "right": "changed"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-evidence-repair-blocked"
+      }
+    },
+    {
+      "id": "route-evidence-repair-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "repair-evidence.repair_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "reassess-contract",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Reassess the earliest invalid interpretation, evidence method or acceptance criterion against the original user question, use, scope and authority. When corrected-contract review has run, read and reproduce every current blocker from contract-review-findings.md before changing the reviewed contract. Preserve the user's goal and still-valid requirements. Write only the corrected bounded contract and changed knowledge to contract-review.md; do not lower acceptance or invent delivery authority. Return corrected when an independently reviewable changed contract exists, or blocked when no honest contract can proceed.",
+      "completionCondition": "The earliest invalid derived contract is corrected without requirement erosion, or the run is truthfully blocked",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reassessment_outcome": {
+            "type": "string",
+            "enum": [
+              "corrected",
+              "blocked"
+            ]
+          },
+          "changed_knowledge": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "reassessment_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reassessment_outcome": {
+                  "const": "corrected"
+                }
+              },
+              "required": [
+                "reassessment_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "changed_knowledge"
+              ],
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            },
+            "else": {
+              "required": [
+                "terminal_reason"
+              ],
+              "not": {
+                "required": [
+                  "changed_knowledge"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-reassessment-corrected"
+      }
+    },
+    {
+      "id": "route-reassessment-corrected",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "reassess-contract.reassessment_outcome"
+        },
+        "right": "corrected"
+      },
+      "connections": {
+        "true": "corrected-contract-review",
+        "false": "finalize-blocked"
+      }
+    },
+    {
+      "id": "corrected-contract-review",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Delegate a genuinely independent review of the corrected contract in contract-review.md against the original question, use, scope and authority. The reviewer diagnoses without implementing research and overwrites the separate contract-review-findings.md with every current reproducible blocker, or an explicit zero-finding result. Return pass only when the corrected contract is coherent and evidence can distinguish its acceptance; repair or replan returns those durable findings to reassessment; blocked records unavailable independence or an irreducible prerequisite without claiming review.",
+      "completionCondition": "The corrected contract has independent acceptance or a truthful blocking result",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "contract_review_outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "repair",
+              "replan",
+              "blocked"
+            ]
+          }
+        },
+        "required": [
+          "contract_review_outcome"
+        ],
+        "globalInputs": [
+          "terminal_reason"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "contract_review_outcome": {
+                  "const": "blocked"
+                }
+              },
+              "required": [
+                "contract_review_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "terminal_reason"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "terminal_reason"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-contract-review-pass"
+      }
+    },
+    {
+      "id": "route-contract-review-pass",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.contract_review_outcome"
+        },
+        "right": "pass"
+      },
+      "connections": {
+        "true": "frame-research",
+        "false": "route-contract-review-blocked"
+      }
+    },
+    {
+      "id": "route-contract-review-blocked",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "corrected-contract-review.contract_review_outcome"
+        },
+        "right": "blocked"
+      },
+      "connections": {
+        "true": "finalize-blocked",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "route-mode-acceptance",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "interactive-acceptance",
+        "false": "route-final-answer-status"
+      }
+    },
+    {
+      "id": "interactive-acceptance",
+      "type": "agent-directive",
+      "directive": "Present the independently accepted bounded answer and limitations from {{workspace_path}} together with the canonical evidence_status {{evidence_status}}, answer_summary and limitation_summary. Ask the user to accept, request one bounded rework owner, or abort. Preference cannot override deterministic or independent review. Rework must identify the earliest stale owner: framing, evidence, answer or contract.",
+      "completionCondition": "The user accepts the reviewed package, chooses bounded rework, or aborts",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_decision": {
+            "type": "string",
+            "enum": [
+              "accept",
+              "rework",
+              "abort"
+            ]
+          },
+          "rework_owner": {
+            "type": "string",
+            "enum": [
+              "framing",
+              "evidence",
+              "answer",
+              "contract"
+            ]
+          }
+        },
+        "required": [
+          "user_decision"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "user_decision": {
+                  "const": "rework"
+                }
+              },
+              "required": [
+                "user_decision"
+              ]
+            },
+            "then": {
+              "required": [
+                "rework_owner"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "rework_owner"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "route-user-accept"
+      }
+    },
+    {
+      "id": "route-user-accept",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.user_decision"
+        },
+        "right": "accept"
+      },
+      "connections": {
+        "true": "route-final-answer-status",
+        "false": "route-user-abort"
+      }
+    },
+    {
+      "id": "route-user-abort",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.user_decision"
+        },
+        "right": "abort"
+      },
+      "connections": {
+        "true": "finalize-aborted",
+        "false": "route-rework-framing"
+      }
+    },
+    {
+      "id": "route-rework-framing",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "framing"
+      },
+      "connections": {
+        "true": "frame-research",
+        "false": "route-rework-evidence"
+      }
+    },
+    {
+      "id": "route-rework-evidence",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "evidence"
+      },
+      "connections": {
+        "true": "research-evidence",
+        "false": "route-rework-answer"
+      }
+    },
+    {
+      "id": "route-rework-answer",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "interactive-acceptance.rework_owner"
+        },
+        "right": "answer"
+      },
+      "connections": {
+        "true": "synthesize-answer",
+        "false": "reassess-contract"
+      }
+    },
+    {
+      "id": "finalize-result",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md from the exact independently accepted complete local package whose canonical evidence_status is ready. Preserve answer_summary, limitation_summary and evidence_status without semantic reinterpretation. Report that no publication, notification, VCS, deployment or production mutation was performed. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status complete. Do not mutate the accepted package here.",
+      "completionCondition": "The accepted complete local answer and limitations are truthfully projected without a new semantic mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
-          "report_delivered",
-          "sources_cited"
+          "artifact_path",
+          "terminal_status"
         ],
         "globalInputs": [
-          "report_delivered",
-          "sections_count",
-          "sources_cited"
+          "artifact_path",
+          "terminal_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "complete"
+              }
+            }
+          }
         ]
       },
       "connections": {
@@ -361,100 +1764,325 @@
       }
     },
     {
-      "id": "end",
-      "type": "end"
+      "id": "finalize-blocked",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md with the original question, completed useful work, terminal_reason, unavailable prerequisite and what could unblock research. Do not claim independent acceptance or fabricate an answer. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status blocked.",
+      "completionCondition": "The blocked run has a truthful durable local report without a success claim",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-blocked"
+      }
+    },
+    {
+      "id": "finalize-aborted",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md with the user's abort decision, completed useful work and current limitations. Do not claim acceptance or external delivery. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status aborted.",
+      "completionCondition": "The interactive abort is truthfully recorded without a success claim",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "aborted"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-aborted"
+      }
+    },
+    {
+      "id": "revise-process",
+      "type": "teleport",
+      "hint": "Use only when the current research interpretation, evidence method or acceptance criterion is itself wrong or unprovable. A source gap, validation failure or review finding with a sound contract belongs to its ordinary repair owner.",
+      "directive": "Explain the process-level defect and the original goal, scope and authority that must remain preserved. Do not use this jump to bypass a failed check or lower acceptance.",
+      "completionCondition": "The legitimate process-revision cause is explicit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision_reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 3000
+          }
+        },
+        "required": [
+          "revision_reason"
+        ]
+      },
+      "connections": {
+        "success": "reassess-contract"
+      }
+    },
+    {
+      "id": "end-limited",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "answer_summary",
+        "limitation_summary"
+      ]
+    },
+    {
+      "id": "end-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path",
+        "terminal_reason"
+      ]
+    },
+    {
+      "id": "end-aborted",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "artifact_path"
+      ]
+    },
+    {
+      "id": "end-intake-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "intake.intake_outcome",
+        "intake.blocker_reason",
+        "intake.clarification_request",
+        "clarify-question.blocker_reason"
+      ]
+    },
+    {
+      "id": "end-workspace-blocked",
+      "type": "end",
+      "finalOutput": [
+        "terminal_status",
+        "terminal_reason",
+        "research_question",
+        "research_use",
+        "workspace_path"
+      ]
+    },
+    {
+      "id": "finalize-workspace-blocked",
+      "type": "agent-directive",
+      "directive": "Report the observed materialization failure truthfully. Explain that no canonical workspace or accepted research package was produced, preserve the bounded question/use when available, and state the concrete action that could unblock workspace creation. Do not claim research completion or create substitute artifacts outside the canonical workspace.",
+      "completionCondition": "The workspace prerequisite failure and recovery action are explicit without a success claim",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "terminal_reason",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "terminal_reason",
+          "terminal_status"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "blocked"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-workspace-blocked"
+      }
+    },
+    {
+      "id": "route-final-answer-status",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "evidence_status"
+        },
+        "right": "ready"
+      },
+      "connections": {
+        "true": "finalize-result",
+        "false": "finalize-limited"
+      }
+    },
+    {
+      "id": "finalize-limited",
+      "type": "agent-directive",
+      "directive": "Work only in {{workspace_path}}. Write final-report.md from the exact independently accepted limited local package whose canonical evidence_status is limited. Preserve answer_summary, limitation_summary and evidence_status without semantic reinterpretation. Make the evidence limits and decision effect prominent. Report that no publication, notification, VCS, deployment or production mutation was performed. Return artifact_path exactly {{workspace_path}}/final-report.md and terminal_status limited. Do not mutate the accepted package here.",
+      "completionCondition": "The accepted limited local answer and limitations are truthfully projected without a new semantic mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "globalInputs": [
+          "artifact_path",
+          "terminal_status"
+        ],
+        "xContextPathSuffixes": {
+          "baseContextProperty": "workspace_path",
+          "properties": {
+            "artifact_path": "/final-report.md"
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "terminal_status": {
+                "const": "limited"
+              }
+            }
+          }
+        ]
+      },
+      "connections": {
+        "success": "end-limited"
+      }
     }
   ],
   "variableRegistry": {
-    "planning_standards": {
+    "operating_mode": {
       "type": "string",
-      "description": "Research planning standards",
-      "default": "RESEARCH PLANNING STANDARDS:\n\n1. METHODOLOGY RIGOR:\n- Clear research question with measurable success criteria\n- Defined scope boundaries (in/out)\n- Systematic search strategy with keywords\n- Specified source types and time periods\n- Reproducible methodology\n\n2. SOURCE VERIFICATION:\n- Primary sources preferred over secondary\n- Author credentials verified\n- Publication date relevance checked\n- Cross-reference claims across sources\n- Note source limitations and biases\n\n3. BIAS CHECK:\n- Actively seek opposing viewpoints\n- Identify author affiliations and potential conflicts\n- Note funding sources where relevant\n- Check for cherry-picked data\n- Consider cultural/regional biases\n\n4. EVIDENCE QUALITY:\n- Distinguish fact from opinion\n- Note confidence levels for claims\n- Identify gaps in evidence\n- Flag contradictory findings\n- Prefer peer-reviewed sources"
-    },
-    "source_quality_criteria": {
-      "type": "string",
-      "description": "Criteria for evaluating source quality and reliability",
-      "default": "SOURCE QUALITY CRITERIA:\n\n1. VERIFIABLE LINK required:\n   - URL must work (not 404)\n   - Content at link matches description\n   - Author/publication stated and verifiable\n\n2. Source types by reliability:\n   - Academic: peer-reviewed papers, journals (highest reliability)\n   - Industry: official documentation, whitepapers, company reports\n   - News: authoritative publications with editorial policy\n   - Community: expert blogs, Stack Overflow (requires verification)\n\n3. Currency:\n   - State publication date for each source\n   - For technical topics: prefer sources < 2-3 years old\n   - For fundamental concepts: classic works acceptable\n\n4. Relevance:\n   - Source directly answers research question\n   - Don't include loosely related materials"
-    },
-    "citation_requirements": {
-      "type": "string",
-      "description": "Requirements for citing sources and formatting references",
-      "default": "CITATION REQUIREMENTS:\n\n1. EVERY conclusion must have source:\n   - 'Research shows that X'\n   + 'According to Smith et al. (2023) [1], X because Y'\n\n2. Source format:\n   - Title\n   - Author(s)\n   - Date (publication year)\n   - URL (verified, working)\n   - Type (academic/industry/news/community)\n\n3. Quotes:\n   - Direct quotes in quotation marks with page number if available\n   - Paraphrase with source reference\n   - DON'T invent quotes\n\n4. Bibliography:\n   - Full source list at end\n   - Numbering [1], [2], [3]...\n   - Inline references in text"
-    },
-    "common_mistakes": {
-      "type": "string",
-      "description": "Common research mistakes to avoid",
-      "default": "COMMON RESEARCH MISTAKES:\n\n1. Fake sources — AI invents links:\n   → Solution: ALWAYS verify URL works\n   → Don't trust your memory about sources\n\n2. Confirmation bias — only seeking confirmation:\n   → Solution: MANDATORY step for alternative viewpoint search\n   → Minimum 2 opposing views\n\n3. Shallow research — superficial review:\n   → Solution: Critical reading with key quote extraction\n   → Analyze source methodology\n\n4. Unmarked assumptions — hidden assumptions:\n   → Solution: Explicit LIMITATIONS step\n   → State biases in sources AND in your approach\n\n5. Missing methodology:\n   → Solution: Define HOW you search BEFORE starting\n   → Keywords, source types, time period"
-    },
-    "agreements": {
-      "type": "array",
-      "description": "Workflow-global agreements",
-      "items": {
-        "type": "string"
-      }
-    },
-    "audience": {
-      "type": "string",
-      "description": "Workflow-global audience"
-    },
-    "controversies": {
-      "type": "array",
-      "description": "Workflow-global controversies",
-      "items": {
-        "type": "string"
-      }
-    },
-    "disagreements": {
-      "type": "array",
-      "description": "Workflow-global disagreements",
-      "items": {
-        "type": "string"
-      }
-    },
-    "future_research": {
-      "type": "array",
-      "description": "Workflow-global future_research",
-      "items": {
-        "type": "string"
-      }
-    },
-    "quality_criteria": {
-      "type": "array",
-      "description": "Workflow-global quality_criteria",
-      "items": {
-        "type": "string"
-      },
-      "minItems": 1
-    },
-    "report_delivered": {
-      "type": "string",
-      "description": "Workflow-global report_delivered",
       "enum": [
-        "yes"
-      ]
+        "autonomous",
+        "interactive"
+      ],
+      "description": "Whether essential user clarification and final acceptance waits are enabled."
     },
-    "scope_out": {
+    "research_question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000,
+      "description": "The canonical bounded research question."
+    },
+    "research_use": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "The observable decision or use the answer must support."
+    },
+    "research_scope": {
       "type": "array",
-      "description": "Workflow-global scope_out",
       "items": {
-        "type": "string"
-      }
-    },
-    "sections_count": {
-      "type": "number",
-      "description": "Workflow-global sections_count"
-    },
-    "sources_cited": {
-      "type": "number",
-      "description": "Workflow-global sources_cited"
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "maxItems": 50,
+      "description": "Explicit inclusions, exclusions, constraints and authority for this bounded research run."
     },
     "workspace_path": {
       "type": "string",
-      "description": "Workflow-global workspace_path"
+      "minLength": 1,
+      "description": "Execution-correlated workspace containing the canonical research package.",
+      "default": "./moira-ws/verified-research-{{executionId}}"
     },
-    "has_file_access": {
-      "type": "boolean",
-      "description": "Agent can read/write local files"
+    "workspace_process_id_file": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Registry-backed execution identifier content for process-id.txt.",
+      "default": "{{executionId}}"
+    },
+    "evidence_status": {
+      "type": "string",
+      "enum": [
+        "ready",
+        "limited",
+        "replan",
+        "blocked"
+      ],
+      "description": "The sole canonical research evidence outcome: usable complete evidence, useful limited evidence, invalid method requiring replan, or an irreducible blocker."
+    },
+    "answer_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Bounded summary derived from the exact producer-complete answer package before review."
+    },
+    "limitation_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "Bounded limitations summary derived from the exact producer-complete package before review."
+    },
+    "terminal_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000,
+      "description": "The current irreducible blocker recorded by the responsibility that observed it."
+    },
+    "artifact_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Safe path to the final local research report."
+    },
+    "terminal_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "limited",
+        "blocked",
+        "aborted"
+      ],
+      "description": "Truthful terminal class for the bounded research run.",
+      "default": "blocked"
     }
-  }
+  },
+  "slug": "verified-research",
+  "owner": "system-moira",
+  "visibility": "public"
 }

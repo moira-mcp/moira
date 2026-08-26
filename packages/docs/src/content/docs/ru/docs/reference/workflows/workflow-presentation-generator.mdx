@@ -1,0 +1,33 @@
+---
+title: Workflow Presentation Generator
+description: Source-faithful локальные HTML-презентации Moira workflows с официальной topology и независимым visual review.
+---
+
+Workflow Presentation Generator превращает один разрешённый Moira workflow в self-contained локальную HTML-презентацию для бизнес- и технической аудитории. Он объединяет source-grounded purpose, полную topology, progressive disclosure для больших графов, sensitive-data boundaries, deterministic HTML checks и independent semantic/visual review.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/workflow-presentation-generator",
+  parentExecutionId: "none"
+})
+```
+
+## Источники и долговечные артефакты
+
+Источником может быть доступный Moira `owner/slug` или разрешённый локальный JSON path. Получение по ID использует complete workflow download, а не bounded node page. Execution-correlated workspace хранит выбранный `workflow.json`, provenance, официальный `workflow-schema.txt`, presentation content, self-contained HTML, limitations, validation/review findings, repair account, corrected contract и final report.
+
+Официальная projection даёт полное описание nodes/edges, starts, teleports, terminals, reachability, cycles, dangling targets и declared data flow. Business meaning и semantics директив проверяются по полному JSON; validator success не считается product proof.
+
+## Качество презентации
+
+Business claims выводятся из metadata, directives, outcomes или переданного контекста и обозначают supported inference либо unavailable context. Technical content сохраняет важные routes и contracts. Большие workflows используют понятный overview плюс searchable/collapsible полную topology или appendix вместо плоского списка или пропущенных nodes.
+
+`presentation.html` содержит embedded CSS и опциональный embedded JavaScript, semantic headings, keyboard-usable navigation, responsive/print styles и не зависит от CDN, внешних fonts/scripts/styles, fetch, forms или runtime network. Файл пригоден для network-isolated Moira static-artifact sandbox, если позже будет отдельно разрешена публикация.
+
+Deterministic checks отвечают за файлы, HTML parseability, anchors, self-containment и identity source/projection. Independent reviewer отвечает за business accuracy, technical faithfulness, progressive disclosure, redaction, hierarchy, accessibility и visual usefulness. Findings source, content, HTML, completion и validation возвращаются самому раннему владельцу; ошибочные criteria проходят independently reviewed contract correction.
+
+## Режимы, исходы и полномочия
+
+Autonomous mode пропускает только финальную пользовательскую приёмку. Interactive mode поддерживает accept, abort или один owner-scoped rework request. Outcomes различают complete, reviewed-limited, blocked до или после создания workspace, workspace failure и aborted.
+
+Результат остаётся локальным. Workflow не изменяет source, не upload/publish/copy за пределы workspace, не уведомляет, не коммитит, не выпускает release и не deploy. Доступ к private source не разрешает public hosting.

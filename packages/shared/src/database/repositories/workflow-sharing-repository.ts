@@ -15,7 +15,6 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflowInvite, workflowAccess, user } from "../schema.js";
 import { createLogger } from "../../logging/logger.js";
 import type * as schema from "../schema.js";
-import { v4 as uuidv4 } from "uuid";
 
 // ===== Constants =====
 
@@ -147,7 +146,7 @@ export class WorkflowSharingRepository {
   async createInvite(options: CreateInviteOptions): Promise<InviteInfo> {
     const { workflowId, createdBy, ttlMs = DEFAULT_INVITE_TTL_MS } = options;
     const now = Date.now();
-    const id = uuidv4();
+    const id = crypto.randomUUID();
     const token = this.generateToken();
     const expiresAt = now + ttlMs;
 
@@ -366,7 +365,7 @@ export class WorkflowSharingRepository {
     inviteId?: string,
   ): Promise<string> {
     const now = Date.now();
-    const id = uuidv4();
+    const id = crypto.randomUUID();
 
     this.logger.debug("grantAccess() called", { workflowId, userId, grantedBy, inviteId });
 

@@ -5,8 +5,8 @@
   "id": "e21e3890-daf3-44b9-8143-9fa8be1b9231",
   "metadata": {
     "name": "Quick Task",
-    "version": "4.4.0",
-    "description": "Ограниченное выполнение многошаговой задачи с файловым workspace: сохраняет неизменяемые версии плана, решений и ревью, последовательно выполняет утверждённый план с долговечными доказательствами, допускает пересмотр плана прямо во время выполнения и завершает независимой проверкой и приёмкой пользователя."
+    "version": "4.4.2",
+    "description": "Executes one bounded non-development task of 1–10 work units in an execution-correlated filesystem workspace. It resolves the goal, observable result, scope, constraints, authority and autonomous or interactive mode; writes immutable versioned plan, decision and review records; requires independent plan review before execution; and runs approved work sequentially with durable per-step evidence. A guarded mid-run revision creates a new complete plan version while preserving the evidenced completed prefix, and final independent review checks the actual result before truthful reporting and interactive acceptance or rework. The originating request remains the authority ceiling; plan approval does not authorize unrelated external, destructive, publication, production or VCS effects. Choose Quick Task for bounded work outside a software-development lifecycle; use Todo List when the checklist is already known and minimal orchestration is enough, Robust Task for stronger retry/recovery and durable critical work, or Software Development Flow for repository implementation with tests and documentation."
   },
   "nodes": [
     {

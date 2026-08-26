@@ -62,7 +62,7 @@ npm run docker:restart  # Build → Start → Wait for ready
 # 9. Verify MCP functionality via moira-local MCP server
 # MCP servers: moira = production (${MOIRA_HOST}), moira-stage = staging, moira-local = Docker (localhost:${DOCKER_PORT})
 /mcp list                                               # Test MCP tools
-/mcp start bug-hunting-workflow                         # Test workflow execution
+/mcp start software-development-flow-lite               # Test workflow execution
 /mcp manage {"action":"get","workflowId":"software-development-flow"}  # Test workflow inspection
 /mcp step <process-id> {"input": "test"}                # Test step execution
 

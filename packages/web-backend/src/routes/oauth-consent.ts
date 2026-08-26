@@ -7,7 +7,7 @@ import { Router, Request, Response } from "express";
 import { oauthConsent, getDatabase, AuditAction, logAuditEvent } from "@mcp-moira/shared";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import { eq, and } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { AuthenticatedRequest } from "../types/express-types.js";
 
@@ -109,7 +109,7 @@ router.post(
       });
     } else {
       // Create new consent
-      consentId = uuidv4();
+      consentId = randomUUID();
       await db.insert(oauthConsent).values({
         id: consentId,
         userId,

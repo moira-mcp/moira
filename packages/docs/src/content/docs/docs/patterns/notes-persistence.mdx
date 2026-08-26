@@ -179,26 +179,22 @@ notes({
 });
 ```
 
-## Real Example
+## Historical example
 
-From `smart-purchase-assistant.json`:
+Smart Purchase Assistant previously demonstrated per-stage write-note persistence. Its current
+production definition at `workflows/production/flows/b33e227c-cc2c-4931-ae5d-2de69932e41e.json`
+uses one execution-correlated filesystem package instead, because duplicating the same detailed
+content in notes and workflow variables creates competing sources of truth. A write-note remains
+appropriate when the note itself is the canonical durable value:
 
 ```json
 {
-  "id": "write-note-step-1",
+  "id": "write-note-01",
   "type": "write-note",
   "key": "purchase-{{executionId}}-01-user-needs",
-  "source": "{{step-1-identify}}",
-  "tags": ["purchase-{{executionId}}", "smart-purchase"],
-  "connections": { "default": "step-2-research" }
-}
-```
-
-Later in the workflow:
-
-```json
-{
-  "directive": "Create final purchase report.\n\n**User needs:**\n{{note:purchase-{{executionId}}-01-user-needs}}\n\n**Research results:**\n{{note:purchase-{{executionId}}-02-research}}"
+  "source": "{{analyze-user-needs}}",
+  "tags": ["analysis-{{executionId}}", "research"],
+  "connections": { "default": "research-product-category" }
 }
 ```
 
@@ -207,7 +203,7 @@ Later in the workflow:
 ### Tag Strategy
 
 - Use execution-specific tag: `purchase-{{executionId}}`
-- Use category tag: `smart-purchase`, `research-flow`
+- Use category tag: `research`, `research-flow`
 - Enables efficient filtering and cleanup
 
 ### Error Handling

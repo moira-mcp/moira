@@ -434,28 +434,37 @@ function getTopicList(): string {
 
   // Workflow mapping for non-Claude agents
   result += `## Task → Workflow Mapping\n\n`;
-  result += `Use this when user requests match these patterns:\n\n`;
+  result += `Use these examples only after discovering the complete authorized catalog with \`list()\`; compare every returned workflow's deliverable, evidence, cost, durability, authority, failure outcomes, and neighboring alternatives before starting one.\n\n`;
   result += `| User Request Contains | Start Workflow |\n`;
   result += `| --------------------- | -------------- |\n`;
   result += `| "develop feature", "implement", "build feature", "fix bug" | \`moira/software-development-flow\` |\n`;
-  result += `| "small feature", "quick fix", "simple task with tests" | \`moira/software-development-flow-lite\` |\n`;
+  result += `| one bounded low-risk software outcome with contained recovery; hand off when security, data, public contracts, rollout, uncertainty, or multiple units spread | \`moira/software-development-flow-lite\` |\n`;
   result += `| general plan-first task where only the current plan/evidence must remain durable | \`moira/simple-plan-execution\` |\n`;
   result += `| one bounded task needing decomposition, independent item review, changed retries, suffix revision, and filesystem or memory operation | \`moira/task-breakdown-flow\` |\n`;
   result += `| human-guided stream of tasks that are not known in advance | \`moira/infinite-task-loop\` |\n`;
-  result += `| filesystem-backed multi-step task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
+  result += `| a known checklist needing a durable cursor, minimal orchestration, optional mid-run revision, and no independent final review or aggregate result model | \`moira/todo-list\` |\n`;
+  result += `| bounded non-development filesystem task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
   result += `| complex critical task needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful incomplete delivery | \`moira/robust-task\` |\n`;
   result += `| "create workflow", "make workflow", "new workflow" | \`moira/workflow-management-flow\` |\n`;
-  result += `| "write tests", "create tests", "add tests" | \`moira/test-generation\` |\n`;
+  result += `| first-time orientation that discovers and compares every currently authorized public workflow before an explicit child start | \`moira/user-onboarding\` |\n`;
+  result += `| design or revise a software architecture with explicit constraints, alternatives, decisions, risks, and independent review | \`moira/architecture-design-flow\` |\n`;
+  result += `| implement executable tests for one authorized existing-project target without changing production code | \`moira/test-generation\` |\n`;
   result += `| "test plan", "QA strategy" | \`moira/test-planning\` |\n`;
   result += `| "audit tests", "test suite audit", "find test gaps or redundancy" | \`moira/test-suite-audit\` |\n`;
-  result += `| "write article", "create post", "write docs" | \`moira/content-creation\` |\n`;
-  result += `| "research", "investigate", "look up" | \`moira/verified-research\` |\n`;
+  result += `| one reviewed article, post, documentation, email or other bounded text with durable evidence and optional target-bound delivery | \`moira/content-creation\` |\n`;
+  result += `| one bounded external-source question needing durable evidence, independent semantic review, and truthful complete or limited local delivery | \`moira/verified-research\` |\n`;
+  result += `| separately authorized expensive research that must read and synthesize a defined corpus as a whole | \`moira/deep-corpus-research\` |\n`;
   result += `| external research needing durable source evidence, repeated independent zero-issue review, and changed repair | \`moira/iterative-research\` |\n`;
   result += `| portable adaptive research needing filesystem-or-memory operation, pre-access authority review, evidence readiness, exact-zero final review, and separately authorized delivery | \`moira/universal-research-workflow\` |\n`;
   result += `| "create PRD", "requirements document" | \`moira/prd-creation\` |\n`;
+  result += `| "validate startup idea", "assess startup hypothesis", "should we build this startup" | \`moira/startup-idea-validation\` |\n`;
+  result += `| evidence-linked product selection with current prices/terms, profile-specific recommendations, buyer guidance, reviewed self-contained HTML, and optional delivery; start with \`skipTelegramCheck: true\` | \`moira/smart-purchase-assistant\` |\n`;
   result += `| "design UI", "wireframe", "mockup" | \`moira/ux-design\` |\n`;
   result += `| "analyze data", "data analysis" | \`moira/data-analysis\` |\n`;
-  result += `| "marketing campaign", "promotional content" | \`moira/marketing-campaign\` |\n\n`;
+  result += `| evidence-aware campaign strategy plus channel materials, proof mapping, independent review, and truthful local delivery | \`moira/marketing-campaign\` |\n`;
+  result += `| analyze one completed execution using authorized session, workflow, artifact, review, retry, and correction evidence; propose improvements without applying them | \`moira/execution-retrospective\` |\n`;
+  result += `| configure and verify the current user's Moira Telegram notifications without exposing the bot token or full chat ID | \`moira/telegram-setup\` |\n`;
+  result += `| create a reviewed visual presentation of a workflow's purpose, graph, routes, variables, and operating contract | \`moira/workflow-presentation-generator\` |\n\n`;
   result += `Start: \`mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })\``;
 
   return result;

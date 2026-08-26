@@ -54,6 +54,7 @@ import {
   searchWorkflow,
   type SearchResult,
 } from "@mcp-moira/shared/services/workflow-query-service";
+import { readCatalogEntry } from "@mcp-moira/shared/services/workflow-catalog";
 import {
   validateVersionChange,
   isValidSemver,
@@ -158,6 +159,19 @@ function loadWorkflow(filePath: string): WorkflowGraph {
     console.error(c("red", `ERROR: Failed to parse workflow file: ${(error as Error).message}`));
     process.exit(1);
   }
+}
+
+/**
+ * Catalog files may carry migration metadata that is intentionally excluded from the executable
+ * graph. Reuse the catalog reader as the single validation/stripping contract when that metadata is
+ * present; ordinary workflow files continue through the engine validator unchanged.
+ */
+function getExecutableWorkflow(filePath: string, workflow: WorkflowGraph): WorkflowGraph {
+  const record = workflow as WorkflowGraph & Record<string, unknown>;
+  if (record.previousSlugs === undefined) {
+    return workflow;
+  }
+  return readCatalogEntry(path.resolve(filePath)).graph as unknown as WorkflowGraph;
 }
 
 // === WORKFLOW SAVING ===
@@ -869,9 +883,23 @@ function setDescription(workflow: WorkflowGraph, description: string): WorkflowG
 }
 
 // === VALIDATE COMMAND (uses full GraphValidator with JSON Schema) ===
-async function cmdValidateWorkflow(workflow: WorkflowGraph): Promise<void> {
+async function cmdValidateWorkflow(workflow: WorkflowGraph, filePath: string): Promise<void> {
+  let executableWorkflow: WorkflowGraph;
+  try {
+    executableWorkflow = getExecutableWorkflow(filePath, workflow);
+  } catch (error) {
+    console.log("");
+    console.log(c("bright", "Workflow Validation"));
+    console.log(c("dim", "─".repeat(80)));
+    console.log("");
+    console.log(c("red", "✗ 1 catalog metadata error found:"));
+    console.log(`  ${c("red", "•")} ${(error as Error).message}`);
+    console.log("");
+    process.exitCode = 1;
+    return;
+  }
   const validator = new GraphValidator();
-  const result = await validator.validateUnified(workflow);
+  const result = await validator.validateUnified(executableWorkflow);
 
   console.log("");
   console.log(c("bright", "Workflow Validation"));
@@ -1234,7 +1262,10 @@ async function syncWorkflow(sourcePath: string, destPath: string): Promise<void>
   }
   const sourceWorkflow = loadWorkflow(sourcePath);
   const destinationWorkflow = loadWorkflow(destPath);
-  const synchronizedWorkflow: WorkflowGraph = JSON.parse(JSON.stringify(sourceWorkflow));
+  const sourceExecutableWorkflow = getExecutableWorkflow(sourcePath, sourceWorkflow);
+  // Validate destination catalog metadata before any write, even though its graph is replaced.
+  getExecutableWorkflow(destPath, destinationWorkflow);
+  const synchronizedWorkflow: WorkflowGraph = JSON.parse(JSON.stringify(sourceExecutableWorkflow));
   synchronizedWorkflow.id = destinationWorkflow.id;
   const sourceRecord = synchronizedWorkflow as WorkflowGraph & Record<string, unknown>;
   const destinationRecord = destinationWorkflow as WorkflowGraph & Record<string, unknown>;
@@ -1256,6 +1287,12 @@ async function syncWorkflow(sourcePath: string, destPath: string): Promise<void>
     errors.forEach((error) => console.error(`  ${c("red", "•")} ${error.message}`));
     console.error(c("dim", `  Destination was not changed: ${destPath}`));
     process.exit(1);
+  }
+
+  // Catalog aliases belong to the destination identity. Add them only after executable validation
+  // so the engine schema remains strict and a workspace copy cannot overwrite migration history.
+  if (destinationRecord.previousSlugs !== undefined) {
+    sourceRecord.previousSlugs = JSON.parse(JSON.stringify(destinationRecord.previousSlugs));
   }
 
   createBackup(destPath);
@@ -1743,7 +1780,7 @@ async function main(): Promise<void> {
     }
 
     case "validate":
-      await cmdValidateWorkflow(workflow);
+      await cmdValidateWorkflow(workflow, config.file);
       break;
 
     case "variables":

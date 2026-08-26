@@ -912,8 +912,10 @@ describe("execution-retrospective validation packet", () => {
       visibility: "public",
     });
     expect(workflow).toMatchObject({
-      metadata: { name: "Execution Retrospective", version: "1.0.0" },
+      metadata: { name: "Execution Retrospective", version: "1.0.1" },
     });
+    expect(workflow.metadata.description).toContain("agent-session evidence");
+    expect(workflow.metadata.description).toContain("proposal-only");
     expect(workflow.nodes).toHaveLength(17);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "subject_execution_id",

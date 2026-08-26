@@ -42,7 +42,9 @@ describe("todo-list minimal sequential checklist", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("3.4.5");
+    expect(workflow.metadata.version).toBe("3.4.6");
+    expect(workflow.metadata.description).toContain("minimal orchestration");
+    expect(workflow.metadata.description).toContain("no plan-design review");
 
     expect(new Set(workflow.nodes.map((node) => node.id))).toEqual(
       new Set([

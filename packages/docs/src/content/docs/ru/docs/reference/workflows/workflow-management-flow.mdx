@@ -1,0 +1,25 @@
+---
+title: Workflow Management Flow
+description: Долговечное evidence-aware создание и редактирование полных Moira workflow definitions с independent design/artifact review.
+---
+
+Workflow Management Flow создаёт новый Moira workflow или редактирует одну полную существующую definition через source preparation, requirements, design, official tooling, independent review и явно разрешённую publication.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/workflow-management-flow",
+  parentExecutionId: "none"
+})
+```
+
+## Authoring lifecycle
+
+Flow определяет create/edit identity, online/offline source boundaries, local source hint и autonomous/interactive mode. Он материализует execution-correlated workspace с текущим authoring reference, получает полные server/repository candidates, записывает provenance и semantic differences и никогда механически не объединяет JSON.
+
+Requirements и опциональный full antipattern audit формируют один outcome-oriented design contract. Independent pre-mutation review должен пройти до изменений полного артефакта через official workflow CLI. Результат проходит validation и официальный structural schema projection, затем independently review по полному JSON, requirements, design, authority и evidence modalities.
+
+Artifact-owned findings исправляют workflow и повторяют stale gates. Invalid criteria или upstream process defects приводят к replan. Final report описывает точные starts, teleports, terminals, routes, cycles, reachability, coverage, data flow и каждый frozen semantic guarantee.
+
+## Publication и local synchronization
+
+Server upload — отдельное решение: standard, copy-new или явно разрешённый admin override. Autonomous mode не придумывает upload authority. Repository synchronization сохраняет identity выбранного target и не пишет посторонние paths. WMF создаёт definition, но не выполняет downstream task будущего workflow.

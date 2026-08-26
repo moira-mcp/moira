@@ -67,7 +67,9 @@ describe("quick-task scenarios", () => {
     expect(validation.errors).toHaveLength(0);
     // Pinned so a directive change cannot ship without the version that publishes it, and without
     // this file being reopened alongside the flow.
-    expect(workflow.metadata.version).toBe("4.4.0");
+    expect(workflow.metadata.version).toBe("4.4.2");
+    expect(workflow.metadata.description).toContain("bounded non-development task");
+    expect(workflow.metadata.description).toContain("Todo List");
   });
 
   it("keeps only the plan reference, approved length, execution cursor, and operating mode globals", () => {

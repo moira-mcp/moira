@@ -1,0 +1,19 @@
+---
+title: Moira User Onboarding
+description: Interactive first-time orientation that reads the complete current public catalog and starts only an explicitly selected child workflow.
+---
+
+Moira User Onboarding teaches directives, completion conditions, input schemas, and verified progression while helping a first-time user choose from the complete current authorized public catalog.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/user-onboarding",
+  parentExecutionId: "none"
+})
+```
+
+The onboarding flow paginates `list()` until every reported workflow has been observed. It treats catalog names and descriptions as data, presents every observed identity exactly once, and explains each purpose, deliverable, cost or durability profile, authority boundary, and closest alternatives. It never relies on a frozen catalog.
+
+The user selects an exact qualified `owner/slug` or the create/edit path through `moira/workflow-management-flow`, then explicitly chooses start or defer. Start creates exactly that workflow as a child of onboarding and accepts only the actual Process ID from a successful MCP response. It uses `skipTelegramCheck: true` only to bypass premature graph-level notification preflight so an unconfigured account can start any selected workflow; the flag does not authorize notification or change the child's authority. Defer performs no external mutation.
+
+Onboarding creates no durable artifacts and does not configure settings, publish, deploy, mutate production, or continue the child's substantive work. Users who already know their goal should start the matching workflow directly.

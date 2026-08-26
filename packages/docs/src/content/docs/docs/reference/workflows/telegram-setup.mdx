@@ -1,0 +1,30 @@
+---
+title: Telegram Setup
+description: Secret-safe current-user Telegram configuration with persisted-state verification and observed test receipt.
+---
+
+Telegram Setup configures or tests the current user's Moira Telegram notifications. It inspects masked existing settings, supports explicit replacement, verifies persisted values, sends a bounded secret-free test, and distinguishes handler send, API error, skipped send, actual user receipt, retry, reconfiguration, incomplete, blocked, and skipped outcomes.
+
+```bash
+mcp__moira__start({
+  workflowId: "moira/telegram-setup",
+  parentExecutionId: "none",
+  skipTelegramCheck: true
+})
+```
+
+`skipTelegramCheck: true` is required on an unconfigured account because the workflow contains its own `telegram-notification` test node and would otherwise trigger normal Telegram preflight.
+
+## Process
+
+The workflow reads only the current user's masked notification settings. If they are complete, the user may test them or explicitly choose replacement. Configuration guides bot creation or reuse and safe chat-ID discovery, writes only `telegram.bot_token`, `telegram.chat_id`, and `telegram.enabled`, then verifies masked token presence, the intended chat ID, and enabled state.
+
+The bot token is used only in the live authorized settings call. It is not a workflow field, global, artifact, notification, summary, or terminal output. Do not place it in a browser URL.
+
+After settings verification, the handler must report `telegramNotificationSent=true` before the workflow asks about receipt. A thrown error, a skipped send, and user-reported non-receipt have separate recovery paths. Retry and reconfiguration require changed evidence; otherwise the run ends incomplete.
+
+## Authority and outcomes
+
+Proceeding authorizes only the current user's three Telegram settings and the bounded test or explicitly selected retries. It does not authorize another user or chat, arbitrary later messages, product changes, VCS, release, or deployment.
+
+Outcomes distinguish configured-and-received, configured-but-unconfirmed for each current cause, blocked, and skipped. Final output never contains the bot token or full chat ID.

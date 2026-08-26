@@ -1,0 +1,28 @@
+---
+title: Deep Corpus Research
+description: Отдельно разрешённое исследование всего корпуса с долговечными evidence, адаптивным планом, независимым ревью и честными локальными исходами.
+---
+
+Deep Corpus Research — дорогой исследовательский уровень для одного вопроса, ответ на который требует прочитать заданный корпус источников целиком. В autonomous и interactive mode требуется явное согласие исходного пользователя на эту стоимость. Для пропорционального ограниченного набора источников используйте [Verified Research](/ru/docs/reference/workflows/verified-research/), для повторной критики — [Iterative Research](/ru/docs/reference/workflows/iterative-research/), а при переносимых storage/method условиях — [Universal Research](/ru/docs/reference/workflows/universal-research-workflow/).
+
+```bash
+mcp__moira__start({ workflowId: "moira/deep-corpus-research", parentExecutionId: "none" })
+```
+
+## Результаты
+
+Workflow создаёт execution-correlated workspace с неизменяемым исходным контрактом, manifest и access-account корпуса, адаптивным планом, source-linked readings, synthesis, limitations, deterministic observations, независимыми findings, repair-account, corrected-contract supplement и финальным локальным отчётом. Новый in-scope источник добавляется в manifest до использования в утверждениях.
+
+## Как определяется завершение
+
+- Отдельный однократный owner фиксирует вопрос, применение, scope, согласие на стоимость и authority; последующие этапы не переписывают этот контракт.
+- Делегированный planning-peer строит адаптивный план ближайшего горизонта.
+- `ready` research допускает только актуальный `ready` или `limited` corpus status. Счётчики и receipts не доказывают понимание корпуса.
+- Deterministic validation проверяет наблюдаемую структуру, schemas, references и links. Независимый reviewer оценивает границу корпуса, provenance, полноту чтения, выводы, uncertainty и complete/limited class.
+- Package, evidence и plan findings получают source-specific repair owners. Ошибочные критерии и методы передают один ограниченный revision request через независимое ревью исправленного контракта.
+
+Autonomous mode пропускает только финальную пользовательскую приёмку. Interactive mode позволяет принять, прервать или отправить конкретный rework request владельцу corpus, plan, research, synthesis либо contract. Complete, limited, blocked, refused, aborted, intake-blocked и workspace-blocked остаются разными исходами.
+
+## Полномочия
+
+Результат остаётся локальным. Workflow не публикует, не уведомляет, не коммитит, не выпускает релиз, не деплоит и не изменяет production. Для этого нужен отдельный workflow и явное разрешение.

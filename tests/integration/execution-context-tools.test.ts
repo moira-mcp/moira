@@ -6,7 +6,7 @@
 import { describe, test, expect, beforeAll } from "@jest/globals";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph, WorkflowExecution } from "@mcp-moira/workflow-engine";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "node:crypto";
 
 const TEST_USER_ID = "test-user-exec-context";
 
@@ -73,7 +73,7 @@ describe("Execution Context Tools", () => {
     testWorkflowId = saveResult.id;
 
     // Generate UUID for execution
-    testExecutionId = uuidv4();
+    testExecutionId = randomUUID();
 
     // Create test execution in running state (Issue #386: "waiting" merged into "running")
     const testExecution: WorkflowExecution = {
@@ -147,7 +147,7 @@ describe("Execution Context Tools", () => {
 
   test("execution in non-waiting state can still be retrieved", async () => {
     // Create completed execution with a new UUID
-    const completedExecutionId = uuidv4();
+    const completedExecutionId = randomUUID();
     const completedExecution: WorkflowExecution = {
       executionId: completedExecutionId,
       workflowId: testWorkflowId,

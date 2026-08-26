@@ -48,7 +48,7 @@ describe("user-onboarding", () => {
     expect(catalogEntry.slug).toBe("user-onboarding");
     expect(catalogEntry.visibility).toBe("public");
     expect(workflow.id).toBe("a1838a9a-d3a5-448e-aae1-18e15eeb8286");
-    expect(workflow.metadata.version).toBe("3.0.0");
+    expect(workflow.metadata.version).toBe("3.0.2");
 
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
@@ -77,17 +77,19 @@ describe("user-onboarding", () => {
     const description = workflow.metadata.description;
     for (const phrase of [
       "current authorized public catalog",
-      "exact current qualified workflow identity",
+      "every observed workflow exactly once",
+      "exact qualified current identity",
       "explicit start-or-defer decision",
       "child of the onboarding execution",
       "exact Process ID",
+      "skipTelegramCheck only to bypass premature graph-level notification preflight",
       "Invalid or absent catalog choices return to selection",
       "defer performs no mutation",
       "does not change settings",
       "publish",
       "deploy",
       "first Moira orientation",
-      "start the relevant task workflow directly",
+      "start the relevant workflow directly",
     ]) {
       expect(description).toContain(phrase);
     }
@@ -126,18 +128,19 @@ describe("user-onboarding", () => {
     );
   });
 
-  test("teaches every required neighboring-flow boundary without a copied catalog", () => {
+  test("teaches every current workflow and decision boundary without a copied catalog", () => {
     const directive = node(workflow, "welcome").directive;
     for (const phrase of [
-      "bounded Quick Task",
-      "durable or recoverable Robust Task",
-      "full Software Development",
-      "external-source Research",
-      "already supplied or authorized data",
-      "Test Planning versus test implementation",
-      "Product Requirements",
-      "Content work",
-      "creating or editing a workflow",
+      "Present every observed workflow exactly once",
+      "purpose, concrete deliverable",
+      "cost or durability profile",
+      "authority and side-effect boundary",
+      "closest alternatives",
+      "Lite versus full software development",
+      "external-source research versus supplied-data analysis",
+      "test strategy versus executable test code",
+      "workflow authoring versus executing the downstream task",
+      "Do not omit an observed identity",
     ]) {
       expect(directive).toContain(phrase);
     }
@@ -181,10 +184,10 @@ describe("user-onboarding", () => {
     expect(handoff.directive).toContain('workflowId: "{{selected_workflow}}"');
     expect(handoff.directive).toContain('parentExecutionId: "{{executionId}}"');
     expect(handoff.directive).toContain('Do not use parentExecutionId "none"');
-    expect(handoff.directive).toContain("do not set skipTelegramCheck");
+    expect(handoff.directive).toContain("skipTelegramCheck: true");
+    expect(handoff.directive).toContain("does not authorize notification");
     expect(handoff.directive).toContain("exact full process UUID from that successful response");
     expect(handoff.directive).toContain("A random UUID, an error");
-    expect(handoff.directive).toContain("Telegram configuration preflight with no created process");
     expect(handoff.directive).toContain("leave this step incomplete");
     expect(handoff.inputSchema.required).toEqual(["child_execution_id"]);
   });
@@ -229,7 +232,7 @@ describe("user-onboarding", () => {
         mockInputs: {
           welcome: {
             user_intent: "try_existing",
-            selected_workflow: "moira/research",
+            selected_workflow: "moira/verified-research",
             selection_valid: true,
           },
           "launch-workflow": { handoff_decision: "defer" },

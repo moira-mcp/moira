@@ -1021,40 +1021,40 @@
         },
         "lite": {
           "label": "SDF Lite",
-          "badge": "42 nodes",
-          "description": "Streamlined workflow for quick tasks and smaller changes. Same quality guarantees, fewer ceremony steps.",
+          "badge": "Risk-based fast path",
+          "description": "Complete delivery for one bounded low-risk change, with full-SDF handoff when work spreads.",
           "phases": {
             "requirements": {
-              "name": "Requirements",
-              "description": "Quick task definition and scope"
+              "name": "Eligibility",
+              "description": "Reuse the task and confirm the bounded low-risk product boundary"
             },
             "planning": {
               "name": "Planning",
-              "description": "Create plan with agent review"
+              "description": "Repository-grounded plan with independent semantic review"
             },
             "approval": {
               "name": "User Approval",
-              "description": "Approve plan before work begins"
+              "description": "Interactive mode only; autonomous mode skips the wait"
             },
             "implementation": {
               "name": "Implementation",
-              "description": "Execute with progress tracking"
+              "description": "One producer owns applicable code, tests, documentation, and integrations"
             },
             "testing": {
               "name": "Testing",
-              "description": "Run and validate tests"
+              "description": "Run only project-applicable deterministic and runtime checks"
             },
             "quality": {
-              "name": "Code Quality",
-              "description": "Quality check and self-validation"
+              "name": "Independent Review",
+              "description": "Whole-result semantic and architectural judgment"
             },
             "review": {
-              "name": "Review & Commit",
-              "description": "Agent validation, commit, user review"
+              "name": "Repair or Reassessment",
+              "description": "Route product, evidence, contract, blocked, or full-SDF handoff causes"
             },
             "completion": {
               "name": "Completion",
-              "description": "Report and notifications"
+              "description": "Truthful local result and only explicitly authorized VCS closure"
             }
           }
         }

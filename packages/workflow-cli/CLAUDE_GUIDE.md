@@ -64,8 +64,11 @@ moira-workflow create <file.json> --name "Name"
 ```
 
 `sync` preserves the destination workflow identity (`id`, `slug`, `owner`, and
-`visibility`) and validates the fully synchronized workflow before creating a backup or
-writing. Validation errors leave the destination byte-for-byte unchanged.
+`visibility`) plus its catalog migration aliases in `previousSlugs`. Catalog aliases are
+validated by the catalog reader and excluded from the executable graph passed to the engine
+validator. The CLI validates the fully synchronized executable workflow before restoring the
+destination aliases, creating a backup, or writing. Metadata or graph errors leave the destination
+byte-for-byte unchanged.
 
 ## update Options
 

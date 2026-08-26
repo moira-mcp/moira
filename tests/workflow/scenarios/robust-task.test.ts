@@ -333,11 +333,13 @@ describe("Robust Task cause-aware contract", () => {
       expect(serialized).not.toContain(removed);
     }
 
-    expect(workflow.metadata.version).toBe("9.1.1");
+    expect(workflow.metadata.version).toBe("9.1.2");
     expect(node(workflow, "initialize-workspace").directive).toContain("process-id.txt");
 
     // Version is pinned so a directive change cannot ship without reopening this file.
-    expect(workflow.metadata.version).toBe("9.1.1");
+    expect(workflow.metadata.version).toBe("9.1.2");
+    expect(workflow.metadata.description).toContain("restartable state across context loss");
+    expect(workflow.metadata.description).toContain("truthfully incomplete");
     // A plan step fixes what must become true, the evidence that would accept it, and what it
     // depends on; it never carries the deliverable. The rule is written
     // out once where the first plan is made, and every node that publishes a later plan version
