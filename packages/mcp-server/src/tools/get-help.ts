@@ -445,7 +445,7 @@ function getTopicList(): string {
   result += `| bounded non-development filesystem task (1-10 work units) **Recommended** | \`moira/quick-task\` |\n`;
   result += `| complex critical task needing durable recovery, cause-aware independent review, bounded result/evidence repair, replanning, and truthful incomplete delivery | \`moira/robust-task\` |\n`;
   result += `| "create workflow", "make workflow", "new workflow" | \`moira/workflow-management-flow\` |\n`;
-  result += `| "write tests", "create tests", "add tests" | \`moira/test-generation\` |\n`;
+  result += `| implement executable tests for one authorized existing-project target without changing production code | \`moira/test-generation\` |\n`;
   result += `| "test plan", "QA strategy" | \`moira/test-planning\` |\n`;
   result += `| "audit tests", "test suite audit", "find test gaps or redundancy" | \`moira/test-suite-audit\` |\n`;
   result += `| one reviewed article, post, documentation, email or other bounded text with durable evidence and optional target-bound delivery | \`moira/content-creation\` |\n`;

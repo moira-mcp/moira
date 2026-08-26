@@ -1,112 +1,30 @@
 ---
 title: Test Generation
-description: Генерация кода автотестов
+description: Реализация executable test code с переиспользованием project patterns, реальными командами, independent review и production-change handoff.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
-
-Workflow для генерации кода автотестов включая unit, integration и e2e тесты. Анализирует существующие паттерны проекта и генерирует тесты по установленным conventions.
-
-## Запуск
+Test Generation добавляет или обновляет executable tests для одной разрешённой цели в существующем проекте.
 
 ```bash
-mcp__moira__start({ workflowId: "test-generation" })
+mcp__moira__start({ workflowId: "moira/test-generation", parentExecutionId: "none" })
 ```
 
-## Процесс
+Используйте его, когда результатом является test code. Для стратегии без реализации выбирайте [Test Planning](/ru/docs/reference/workflows/test-planning/), для аудита существующего suite — Test Suite Audit, а при необходимости менять production code — Software Development Flow.
+
+Workflow материализует durable workspace, изучает реальное target behavior и project test patterns, проектирует behavioral/risk/boundary cases, записывает принятые tests и необходимые test-side fixtures/configuration в разрешённые project paths, выполняет producer completion до команд, запускает targeted и broader gates и получает настоящее independent semantic review.
 
 ```mermaid
 flowchart LR
-    A[Код] --> B[Анализ проекта]
-    B --> C[Выбор подхода]
-    C --> D[Анализ структуры]
-    D --> E[Выбор типа]
-    E --> F[Генерация кейсов]
-    F --> G[План]
-    G --> H[Генерация тестов]
-    H --> I[Ревью]
-    I --> J[Сохранение]
+  A[Intake] --> B[Target и case design]
+  B --> C[Test implementation]
+  C --> D[Producer completion]
+  D --> E[Targeted и broader commands]
+  E --> F[Independent review]
+  F --> G[Accepted tests]
 ```
 
-## Шаги
+Tests должны защищать observable behavior и правдоподобные regressions. Существующий project mutation tooling можно использовать при наличии разрешения; его отсутствие не является дефектом. Workflow не меняет production code и не создаёт proof-only proxies, guards, metatests, adapters или mutation harnesses только ради демонстрации failure sensitivity.
 
-| Шаг | Действие | Результат |
-|-----|----------|-----------|
-| 1. Код | Получение кода для тестирования | Целевой код |
-| 2. Анализ проекта | Изучение существующих тестов и паттернов | Анализ проекта |
-| 3. Выбор подхода | Использовать существующие паттерны или создать новые | Решение по подходу |
-| 4. Анализ структуры | Определение testable units (функции, классы, методы) | Инвентарь units |
-| 5. Выбор типа | Выбор unit, integration или e2e | Тип тестов |
-| 6. Генерация кейсов | Генерация тест-кейсов (happy path, edge, error) | Список кейсов |
-| 7. План | Финальный план тестирования | Согласованный план |
-| 8. Генерация | Генерация кода тестов | Файлы тестов |
-| 9. Ревью | Ревью пользователем | Одобренные тесты |
-| 10. Сохранение | Сохранение тестов в проект | Сохранённые тесты |
+Test-code и evidence defects получают разных repair owners. Необходимость production/testability implementation создаёт durable Software Development Flow handoff. Ошибочные criteria проходят cumulative independently reviewed contract correction с typed target, design, tests, evidence или completion re-entry.
 
-## Особенности
-
-<Aside type="tip">
-Workflow ищет существующие тесты в директориях `tests/`, `__tests__/` и `spec/` для соответствия conventions проекта.
-</Aside>
-
-### Анализ проекта
-
-| Элемент | Детекция |
-|---------|----------|
-| Директории тестов | `tests/`, `__tests__/`, `spec/` |
-| Фреймворки | Jest, Playwright, pytest, Vitest |
-| Conventions | Паттерны именования, использование helpers |
-
-### Типы тестов
-
-| Тип | Описание |
-|-----|----------|
-| `unit` | Изолированное тестирование функций/методов |
-| `integration` | Тестирование взаимодействия компонентов |
-| `e2e` | Тестирование полных user flows |
-
-### Категории тест-кейсов
-
-| Категория | Фокус |
-|-----------|-------|
-| Happy path | Нормальное ожидаемое поведение |
-| Edge cases | Граничные условия, лимиты |
-| Error cases | Невалидный input, обработка ошибок |
-
-### Циклы валидации
-
-- **Анализ проекта**: Проверка полноты понимания
-- **Анализ структуры**: Подтверждение определённых testable units
-- **Покрытие кейсов**: Обеспечение адекватного покрытия
-- **Валидация синтаксиса**: Проверка валидности сгенерированного кода
-
-<Aside type="caution">
-До 3 попыток retry для генерации тестов. При повторных неудачах workflow эскалирует к пользователю.
-</Aside>
-
-### Точки согласования
-
-- **Подтверждение подхода**: Согласование стратегии тестирования
-- **Подтверждение типа**: Одобрение выбора типа тестов
-- **Подтверждение плана**: Одобрение финального плана
-- **Ревью**: Одобрение сгенерированных тестов
-
-## Пример конфигурации ноды
-
-```json
-{
-  "id": "generate-tests",
-  "type": "agent-directive",
-  "directive": "Сгенерируй код тестов по утверждённому плану. Используй conventions проекта для именования, структуры и helpers.",
-  "completionCondition": "Файлы тестов сгенерированы с валидным синтаксисом, покрывающие все запланированные тест-кейсы",
-  "connections": {
-    "next": "review-tests"
-  }
-}
-```
-
-## Связанное
-
-- [Test Planning](/ru/docs/reference/workflows/test-planning/) — Для создания тест-планов без генерации кода
-- [Robust Task](/ru/docs/reference/workflows/robust-task/) — Для сложных задач тестирования
-- [Обзор шаблонов](/ru/docs/reference/workflow-templates/) — Все доступные шаблоны
+Autonomous mode пропускает только финальную приёмку. Commit и push требуют раздельного originating authority и возвращают отдельные outcomes. Workflow не публикует, не уведомляет, не выпускает релиз, не деплоит и не ослабляет project checks.
