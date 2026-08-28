@@ -23,7 +23,6 @@ describe("runtime execution variables", () => {
     client = authenticated.client;
     cleanup = authenticated.cleanup;
     const credentials = getAdminCredentials();
-    cookie = await signInUser(getTestBaseUrl(), credentials.email, credentials.password);
     const creation = await callMCPToolRaw(client, "manage", {
       action: "create",
       overwrite: true,
@@ -125,14 +124,24 @@ describe("runtime execution variables", () => {
       "Runtime Variable Foreign User",
       true,
     );
-    const approval = await fetch(
-      `${getTestFetchUrl()}/api/admin/users/${foreignUser.userId}/approve`,
-      {
-        method: "POST",
-        headers: { Cookie: `better-auth.session_token=${cookie}` },
-      },
-    );
-    expect(approval.status).toBe(200);
+    // User creation/verification obtains its own admin session. Refresh the long-lived cookie after
+    // that helper completes so this suite never keeps an older session across admin setup calls.
+    cookie = await signInUser(getTestFetchUrl(), credentials.email, credentials.password);
+    const featuresResponse = await fetch(`${getTestFetchUrl()}/api/features`);
+    expect(featuresResponse.status).toBe(200);
+    const features = (await featuresResponse.json()) as {
+      data: { features: { accountApproval: boolean } };
+    };
+    if (features.data.features.accountApproval) {
+      const approval = await fetch(
+        `${getTestFetchUrl()}/api/admin/users/${foreignUser.userId}/approve`,
+        {
+          method: "POST",
+          headers: { Cookie: `better-auth.session_token=${cookie}` },
+        },
+      );
+      expect(approval.status).toBe(200);
+    }
     const foreignAuthenticated = await createAuthenticatedMCPClient({
       email: foreignEmail,
       password: foreignPassword,

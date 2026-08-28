@@ -91,6 +91,13 @@ function exceedsValidationComplexity(input: unknown): boolean {
 export class GraphValidator {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private ajv: any;
+  // Exact discriminator branches validate untrusted node bodies fail-fast. The aggregate workflow
+  // validator may collect all top-level findings, but recursively reporting every nested node error
+  // lets a small adversarial schema amplify validation work.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private nodeAjv: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private nodeValidators = new Map<string, any>();
   private schema: object;
   private logger = createLogger({ component: "GraphValidator" });
 
@@ -138,6 +145,14 @@ export class GraphValidator {
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (addFormatsModule as any).default(this.ajv);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.nodeAjv = new (AjvModule as any).default({
+      allErrors: false,
+      verbose: true,
+      strict: false,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (addFormatsModule as any).default(this.nodeAjv);
 
     // Load schema - handle both source and compiled contexts
     const defaultSchemaPath = this.resolveSchemaPath(schemaPath);
@@ -257,10 +272,14 @@ export class GraphValidator {
       // definition name in schemaPath. Validate the observed node against its exact discriminator
       // branch instead of guessing which flattened errors belong to it.
       const node = workflow.nodes?.[nodeIndex];
-      const validateNode = this.ajv.compile({
-        $ref: `#/$defs/${expectedDef}`,
-        $defs: (this.schema as { $defs: Record<string, unknown> }).$defs,
-      });
+      let validateNode = this.nodeValidators.get(expectedDef);
+      if (!validateNode) {
+        validateNode = this.nodeAjv.compile({
+          $ref: `#/$defs/${expectedDef}`,
+          $defs: (this.schema as { $defs: Record<string, unknown> }).$defs,
+        });
+        this.nodeValidators.set(expectedDef, validateNode);
+      }
       validateNode(node);
       const relevantErrors = validateNode.errors ?? [];
 

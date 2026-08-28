@@ -130,23 +130,26 @@ export const ApiTokensSettings: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (token: ApiToken) => {
-    if (token.isRevoked) {
-      return <Badge variant="destructive">{t("pages.settings.apiTokens.statusRevoked")}</Badge>;
-    }
-    if (token.isExpired) {
+  const getStatusBadge = useCallback(
+    (token: ApiToken) => {
+      if (token.isRevoked) {
+        return <Badge variant="destructive">{t("pages.settings.apiTokens.statusRevoked")}</Badge>;
+      }
+      if (token.isExpired) {
+        return (
+          <Badge variant="secondary" className="text-orange-600 dark:text-orange-400">
+            {t("pages.settings.apiTokens.statusExpired")}
+          </Badge>
+        );
+      }
       return (
-        <Badge variant="secondary" className="text-orange-600 dark:text-orange-400">
-          {t("pages.settings.apiTokens.statusExpired")}
+        <Badge variant="outline" className="text-chart-2 border-chart-2/30">
+          {t("pages.settings.apiTokens.statusActive")}
         </Badge>
       );
-    }
-    return (
-      <Badge variant="outline" className="text-chart-2 border-chart-2/30">
-        {t("pages.settings.apiTokens.statusActive")}
-      </Badge>
-    );
-  };
+    },
+    [t],
+  );
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -212,7 +215,7 @@ export const ApiTokensSettings: React.FC = () => {
         </CardContent>
       </Card>
     ),
-    [revoking, t],
+    [getStatusBadge, revoking, t],
   );
 
   return (

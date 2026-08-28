@@ -38,7 +38,7 @@ test("shows an interactive always-visible progress graph across desktop and mobi
 
   let mode: "initial" | "middle" | "repair" | "long" | "none" | "error" | "slow" = "initial";
   let releaseSlow: (() => void) | undefined;
-  let updatedLabel: string | undefined;
+  const progressContext = { updatedLabel: undefined as string | undefined };
   await page.route(`**/api/executions/${executionId}/progress`, async (route) => {
     if (mode === "none") {
       await route.fulfill({
@@ -62,8 +62,8 @@ test("shows an interactive always-visible progress graph across desktop and mobi
     const nodes = labels.map((label, index) => ({
       id: `stage-${index}`,
       label:
-        updatedLabel && index === 2
-          ? updatedLabel
+        progressContext.updatedLabel && index === 2
+          ? progressContext.updatedLabel
           : mode === "long" && index === 1
             ? "Implementation and documentation for a deliberately long execution milestone"
             : label,
@@ -151,7 +151,7 @@ test("shows an interactive always-visible progress graph across desktop and mobi
   await expect(page.getByTestId("execution-progress")).toBeVisible();
 
   mode = "middle";
-  updatedLabel = "Tests updated from context";
+  progressContext.updatedLabel = "Tests updated from context";
   await page.route(`**/api/executions/${executionId}/context`, async (route) => {
     await route.fulfill({
       status: 200,
@@ -162,7 +162,9 @@ test("shows an interactive always-visible progress graph across desktop and mobi
   await page.getByRole("tab", { name: /Context|Контекст/ }).click();
   await page.getByTestId("context-var-input-terminal_status").fill("updated");
   await page.getByTestId("context-var-save-terminal_status").click();
-  await expect(page.getByTestId("progress-node-stage-2")).toContainText(updatedLabel);
+  await expect(page.getByTestId("progress-node-stage-2")).toContainText(
+    progressContext.updatedLabel,
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   mode = "middle";

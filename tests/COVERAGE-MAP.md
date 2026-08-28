@@ -718,7 +718,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress materialize grant URLs from access logs
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress materialize grant URLs from access logs and accept request bodies up to the backend parser limit
 - `tests/unit/shared/logging/express-middleware.test.ts` — materialize grant redaction with routing/query preservation and unrelated-URL non-regression
 - `tests/unit/web-backend/execution-materialize.test.ts` — current-definition fetch, execution binding, tar response, one-use endpoint behavior, non-consumption on render overflow, and expected-4xx versus unexpected-boundary error mapping
 - `tests/unit/logging/compute-changes.test.ts`
