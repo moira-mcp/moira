@@ -44,6 +44,17 @@ distinct fresh database and applies one transaction only when source identity, c
 conflict-set digest, and every revision still match. The staged artifact never transports or
 replaces the database snapshot.
 
+Self-host recovery persists a separate `data/.moira-reconciliation/pending` directory before the
+startup guard restores the coherent database. Candidate files and the manifest are immutable. CLI
+`choose` atomically accumulates revision-bound decisions only in `decisions.json`; it never mutates
+SQLite. CLI `apply` requires a decision for the complete conflict set, recomputes the actual bundled
+catalog against the restored database and applies one transaction. After commit it atomically
+retires the pending directory and cleans it best-effort. A retirement/cleanup warning describes a
+committed database with pending or retired local cleanup; it never claims rollback. Before retirement
+the CLI persists `applied.json` with the committed artifact digest, so a repeated apply performs only
+idempotent cleanup and never replays the semantic decision. The next startup may also finish that
+cleanup. No HTTP, MCP, UI, or token transport participates in this image-upgrade recovery path.
+
 ### List Query Builder
 
 Shared utility for paginated list endpoints: `packages/shared/src/database/list-query-builder.ts`

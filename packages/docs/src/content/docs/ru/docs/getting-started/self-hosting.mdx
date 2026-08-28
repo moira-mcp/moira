@@ -257,9 +257,28 @@ docker compose ps
 [GitHub Releases](https://github.com/moira-mcp/moira/releases), выполните `docker compose up -d`,
 а после исправленного релиза вернитесь на `latest`.
 
-Конфликты сверки managed workflow остаются нефатальными в self-host. Используйте
-Workflow Management Flow и MCP-инструмент `reconciliation`, чтобы изучить previous/current/incoming
-кандидаты и отправить семантическое слияние; не применяйте `--force` для удаления локальных изменений.
+Когда обнаружение конфликта создало локальный bundle в `data/.moira-reconciliation/pending`,
+выполните его `AGENT INSTRUCTIONS` через одноразовые Compose CLI-контейнеры. Сам CLI не останавливает
+и не перезапускает сервисы и не подменяет snapshot базы. Он использует только локальные файлы — без
+`--force`, MCP, HTTP API и UI-транспорта. По логу текущего образа определите, остаётся ли контейнер
+доступным или его нужно снова запустить после recovery.
+
+```bash
+docker compose run --rm moira npm run reconcile -- status
+docker compose run --rm moira npm run reconcile -- diff --reference owner/slug
+# Прочитайте previous.json, current.json и incoming.json по выведенным путям.
+# Запишите revision-bound решение current, incoming или merged для каждого конфликта:
+docker compose run --rm moira npm run reconcile -- choose \
+  --reference owner/slug --selection incoming --revision REVISION \
+  --rationale "Incoming заменяет локальный эксперимент"
+docker compose run --rm moira npm run reconcile -- apply
+docker compose up -d
+```
+
+Для слияния возьмите `incoming.json` за основу, перенесите только всё ещё нужное локальное намерение
+из `previous.json → current.json`, проверьте полный merged state через `reconcile validate` и передайте
+его в `choose --selection merged --file ...`. `choose` меняет только локальный decisions manifest.
+Только `apply` изменяет базу и отказывается работать с неполным или устаревшим manifest.
 
 ### Необязательный preflight до остановки
 

@@ -183,8 +183,10 @@ export {
   formatWorkflowReconciliationNotice,
   resolveWorkflowReconciliation,
   createWorkflowReconciliationStagedArtifact,
+  createWorkflowReconciliationStagedArtifactFromConflicts,
   applyWorkflowReconciliationStagedArtifact,
   workflowCatalogDigest,
+  workflowReconciliationConflictSetDigest,
   workflowReconciliationStagedArtifactDigest,
   type EntryOutcome,
   type CatalogLoadResult,
@@ -201,6 +203,28 @@ export {
   type ReconciliationClassification,
   type ReconciliationDecision,
 } from "./managed-resource-reconciler.js";
+
+export {
+  publishWorkflowReconciliationBundle,
+  loadWorkflowReconciliationBundle,
+  readWorkflowReconciliationBundleConflicts,
+  readWorkflowReconciliationBundleCandidate,
+  chooseWorkflowReconciliationBundleDecision,
+  buildWorkflowReconciliationArtifactFromBundle,
+  finalizeWorkflowReconciliationBundle,
+  markWorkflowReconciliationBundleApplied,
+  readWorkflowReconciliationBundleApplied,
+  isWorkflowReconciliationBundleApplied,
+  applyWorkflowReconciliationBundle,
+  workflowReconciliationAgentInstructions,
+  withWorkflowReconciliationBundleLock,
+  type WorkflowReconciliationBundleManifest,
+  type WorkflowReconciliationBundleChoice,
+  type WorkflowReconciliationInstructionKind,
+  WorkflowReconciliationBundleError,
+  type WorkflowReconciliationBundleErrorKind,
+  type WorkflowReconciliationAppliedMarker,
+} from "./workflow-reconciliation-bundle.js";
 
 export {
   LockService,

@@ -14,6 +14,7 @@ import { describe, test, expect, beforeAll, beforeEach, afterEach } from "@jest/
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import Database from "better-sqlite3";
 import { manageReconciliation } from "../../packages/mcp-server/src/tools/manage-reconciliation.js";
@@ -41,6 +42,9 @@ import {
   managedWorkflowStateDigest,
   WorkflowReconciliationRepository,
   workflowReconciliationStagedArtifactDigest,
+  publishWorkflowReconciliationBundle,
+  workflowReconciliationAgentInstructions,
+  applyWorkflowReconciliationBundle,
   type CatalogEntry,
 } from "@mcp-moira/shared";
 
@@ -1961,6 +1965,347 @@ describe("Workflow Catalog Loader Integration", () => {
         )
         .get(OWNER_A, ...slugs),
     ).toEqual({ count: 0 });
+  });
+
+  test("completes recovery through local CLI choose and one atomic apply", async () => {
+    const slug = `loader-local-cli-${Date.now()}`;
+    const keepSlug = `${slug}-keep`;
+    const v1 = entry(OWNER_A, slug, "1.0.0", "public", "base");
+    const v2 = entry(OWNER_A, slug, "2.0.0", "public", "incoming");
+    const keepV1 = entry(OWNER_A, keepSlug, "1.0.0", "public", "keep-base");
+    const keepV2 = entry(OWNER_A, keepSlug, "2.0.0", "public", "keep-incoming");
+    await installCatalogEntries([v1, keepV1], deps);
+    for (const [currentSlug, directive] of [
+      [slug, "instance-change"],
+      [keepSlug, "keep-instance-change"],
+    ]) {
+      const currentId = await deps.workflowRepo.resolveSlug(currentSlug, OWNER_A);
+      const current = await deps.workflowRepo.get(currentId!, OWNER_A);
+      (current!.nodes[1] as { directive: string }).directive = directive;
+      await deps.mutationService.save({
+        graph: current!,
+        userId: OWNER_A,
+        slug: currentSlug,
+        visibility: "public",
+        skipAudit: true,
+      });
+    }
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "reconciliation-cli-"));
+    const targetDb = path.join(temp, "test-reconciliation-cli.db");
+    const catalogRoot = path.join(temp, "catalog");
+    const flowsDir = path.join(catalogRoot, "flows");
+    fs.mkdirSync(flowsDir, { recursive: true });
+    try {
+      await getSqliteInstance().backup(targetDb);
+      await installCatalogEntries([v2, keepV2], deps);
+      const conflicts = getWorkflowReconciliationStatus(getSqliteInstance()).conflicts;
+      publishWorkflowReconciliationBundle(
+        path.join(temp, ".moira-reconciliation"),
+        "development-local",
+        [v2, keepV2],
+        conflicts,
+      );
+      fs.writeFileSync(
+        path.join(flowsDir, `${v2.id}.json`),
+        JSON.stringify({ ...v2.graph, owner: v2.owner, slug: v2.slug, visibility: v2.visibility }),
+      );
+      fs.writeFileSync(
+        path.join(flowsDir, `${keepV2.id}.json`),
+        JSON.stringify({
+          ...keepV2.graph,
+          owner: keepV2.owner,
+          slug: keepV2.slug,
+          visibility: keepV2.visibility,
+        }),
+      );
+      const runCli = (args: string[]) =>
+        spawnSync(
+          process.execPath,
+          ["node_modules/tsx/dist/cli.mjs", "scripts/reconcile-workflows.ts", ...args],
+          {
+            cwd: process.cwd(),
+            env: {
+              ...process.env,
+              DB_PATH: targetDb,
+              WORKFLOWS_DIR: catalogRoot,
+              DEPLOYMENT_MODE: "self-host",
+            },
+            encoding: "utf8",
+          },
+        );
+      const decisionsPath = path.join(temp, ".moira-reconciliation", "pending", "decisions.json");
+      const validDecisions = fs.readFileSync(decisionsPath, "utf8");
+      fs.writeFileSync(decisionsPath, "{not-json");
+      const malformedStatus = runCli(["status"]);
+      expect(malformedStatus.status).toBe(1);
+      expect(malformedStatus.stderr).toContain("Regenerate evidence with: docker compose up -d");
+      expect(malformedStatus.stderr).not.toContain("npm run reconcile -- apply");
+      expect(malformedStatus.stderr).not.toContain("choose --reference");
+      fs.writeFileSync(decisionsPath, validDecisions);
+      const manifestPath = path.join(temp, ".moira-reconciliation", "pending", "manifest.json");
+      const validManifest = fs.readFileSync(manifestPath, "utf8");
+      const manifest = JSON.parse(validManifest);
+      const conflictMeta = manifest.conflicts.find(
+        (item: { reference: string }) => item.reference === `${OWNER_A}/${slug}`,
+      );
+      const currentCandidatePath = path.join(
+        temp,
+        ".moira-reconciliation",
+        "pending",
+        "conflicts",
+        conflictMeta.key,
+        "current.json",
+      );
+      const validCurrentCandidate = fs.readFileSync(currentCandidatePath);
+      const invalidState = Buffer.from('{"lifecycle":"invalid"}\n');
+      fs.writeFileSync(currentCandidatePath, invalidState);
+      conflictMeta.candidateDigests.current = createHash("sha256")
+        .update(invalidState)
+        .digest("hex");
+      fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+      const malformedCandidate = runCli([
+        "get",
+        "--reference",
+        `${OWNER_A}/${slug}`,
+        "--candidate",
+        "current",
+      ]);
+      expect(malformedCandidate.status).toBe(1);
+      expect(malformedCandidate.stderr).toContain("Regenerate evidence with: docker compose up -d");
+      expect(malformedCandidate.stderr).not.toContain("npm run reconcile -- apply");
+      expect(malformedCandidate.stderr).not.toContain("choose --reference");
+      fs.writeFileSync(currentCandidatePath, validCurrentCandidate);
+      fs.writeFileSync(manifestPath, validManifest);
+      const status = runCli(["status"]);
+      expect(status.status).toBe(0);
+      expect(status.stdout).toContain(slug);
+      expect(status.stdout).toContain("AGENT INSTRUCTIONS");
+      const diff = runCli(["diff", "--reference", `${OWNER_A}/${slug}`]);
+      expect(diff.status).toBe(0);
+      expect(diff.stdout).toContain("previous.json");
+      expect(diff.stdout).toContain("current.json");
+      expect(diff.stdout).toContain("incoming.json");
+      const getIncoming = runCli([
+        "get",
+        "--reference",
+        `${OWNER_A}/${slug}`,
+        "--candidate",
+        "incoming",
+      ]);
+      expect(getIncoming.status).toBe(0);
+      expect(getIncoming.stdout).toContain('"directive": "incoming"');
+      const forbiddenPrevious = runCli([
+        "choose",
+        "--reference",
+        `${OWNER_A}/${slug}`,
+        "--selection",
+        "previous",
+        "--revision",
+        conflicts.find((item) => item.slug === slug)!.revision,
+        "--rationale",
+        "Previous is not a valid result.",
+      ]);
+      expect(forbiddenPrevious.status).toBe(1);
+      expect(forbiddenPrevious.stderr).toContain("AGENT INSTRUCTIONS");
+      const choose = runCli([
+        "choose",
+        "--reference",
+        `${OWNER_A}/${slug}`,
+        "--selection",
+        "incoming",
+        "--revision",
+        conflicts.find((item) => item.slug === slug)!.revision,
+        "--rationale",
+        "Incoming supersedes the local experiment.",
+      ]);
+      expect(choose.status).toBe(0);
+      const incompleteApply = runCli(["apply"]);
+      expect(incompleteApply.status).toBe(1);
+      expect(incompleteApply.stderr).toContain("Reconciliation decisions are incomplete");
+      expect(incompleteApply.stderr).toContain("AGENT INSTRUCTIONS");
+      expect(fs.existsSync(path.join(temp, ".moira-reconciliation", "pending"))).toBe(true);
+      const keepConflict = conflicts.find((item) => item.slug === keepSlug)!;
+      const mergedState = structuredClone(keepConflict.incoming);
+      if (mergedState.lifecycle !== "present") throw new Error("Expected present merge fixture");
+      (mergedState.content.graph.nodes as Array<{ directive?: string }>)[1].directive =
+        "keep-merged-change";
+      const mergedFile = path.join(temp, "keep-merged.json");
+      fs.writeFileSync(mergedFile, JSON.stringify(mergedState));
+      const decisionsBeforeInvalidMerge = fs.readFileSync(decisionsPath, "utf8");
+      const invalidMergedFile = path.join(temp, "invalid-merged.json");
+      fs.writeFileSync(invalidMergedFile, JSON.stringify({ lifecycle: "present", content: {} }));
+      const invalidValidate = runCli(["validate", "--file", invalidMergedFile]);
+      expect(invalidValidate.status).toBe(1);
+      expect(invalidValidate.stderr).toContain("AGENT INSTRUCTIONS");
+      expect(fs.readFileSync(decisionsPath, "utf8")).toBe(decisionsBeforeInvalidMerge);
+      expect(fs.existsSync(path.join(temp, ".moira-reconciliation", "pending"))).toBe(true);
+      const validate = runCli(["validate", "--file", mergedFile]);
+      expect(validate.status).toBe(0);
+      const keepChoice = runCli([
+        "choose",
+        "--reference",
+        `${OWNER_A}/${keepSlug}`,
+        "--selection",
+        "merged",
+        "--revision",
+        keepConflict.revision,
+        "--rationale",
+        "Retain the instance-specific behavior.",
+        "--file",
+        mergedFile,
+      ]);
+      expect(keepChoice.status).toBe(0);
+      const decisionsBeforeStaleApply = fs.readFileSync(decisionsPath, "utf8");
+      const beforeApply = new Database(targetDb, { readonly: true });
+      try {
+        const row = beforeApply
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, slug) as { graph: string };
+        expect(JSON.parse(row.graph).nodes).toEqual(
+          expect.arrayContaining([expect.objectContaining({ directive: "instance-change" })]),
+        );
+        const keepRow = beforeApply
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, keepSlug) as { graph: string };
+        expect(JSON.parse(keepRow.graph).nodes).toEqual(
+          expect.arrayContaining([expect.objectContaining({ directive: "keep-instance-change" })]),
+        );
+      } finally {
+        beforeApply.close();
+      }
+      const catalogFile = path.join(flowsDir, `${v2.id}.json`);
+      const validCatalogFile = fs.readFileSync(catalogFile, "utf8");
+      fs.writeFileSync(
+        catalogFile,
+        JSON.stringify({
+          ...v2.graph,
+          owner: v2.owner,
+          slug: v2.slug,
+          visibility: v2.visibility,
+          metadata: { ...v2.graph.metadata, description: "stale catalog" },
+        }),
+      );
+      const staleCatalogApply = runCli(["apply"]);
+      expect(staleCatalogApply.status).toBe(1);
+      expect(staleCatalogApply.stderr).toContain("reconciliation catalog is stale");
+      expect(staleCatalogApply.stderr).toContain("Regenerate evidence with: docker compose up -d");
+      expect(fs.readFileSync(decisionsPath, "utf8")).toBe(decisionsBeforeStaleApply);
+      expect(fs.existsSync(path.join(temp, ".moira-reconciliation", "pending"))).toBe(true);
+      fs.writeFileSync(catalogFile, validCatalogFile);
+
+      const driftDb = new Database(targetDb);
+      const beforeDriftGraph = (
+        driftDb
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, slug) as { graph: string }
+      ).graph;
+      const driftGraph = JSON.parse(beforeDriftGraph);
+      driftGraph.nodes[1].directive = "concurrent-target-change";
+      driftDb
+        .prepare("UPDATE workflow SET graph = ? WHERE userId = ? AND slug = ?")
+        .run(JSON.stringify(driftGraph), OWNER_A, slug);
+      driftDb.close();
+      const staleTargetApply = runCli(["apply"]);
+      expect(staleTargetApply.status).toBe(1);
+      expect(staleTargetApply.stderr).toContain("AGENT INSTRUCTIONS");
+      expect(staleTargetApply.stderr).toContain("Regenerate evidence with: docker compose up -d");
+      const driftCheck = new Database(targetDb);
+      expect(
+        (
+          driftCheck
+            .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+            .get(OWNER_A, slug) as { graph: string }
+        ).graph,
+      ).toBe(JSON.stringify(driftGraph));
+      driftCheck
+        .prepare("UPDATE workflow SET graph = ? WHERE userId = ? AND slug = ?")
+        .run(beforeDriftGraph, OWNER_A, slug);
+      driftCheck.close();
+      const appliedMarkerPath = path.join(temp, ".moira-reconciliation", "pending", "applied.json");
+      fs.writeFileSync(
+        appliedMarkerPath,
+        JSON.stringify({
+          version: 1,
+          artifactDigest: "f".repeat(64),
+          committedAt: new Date().toISOString(),
+        }),
+      );
+      const forgedApply = runCli(["apply"]);
+      expect(forgedApply.status).toBe(1);
+      expect(forgedApply.stderr).toContain("Applied marker");
+      expect(forgedApply.stderr).toContain("Regenerate evidence with: docker compose up -d");
+      expect(fs.existsSync(appliedMarkerPath)).toBe(true);
+      fs.rmSync(appliedMarkerPath);
+      const targetForApply = new Database(targetDb);
+      try {
+        const appliedWithRetirementFault = await applyWorkflowReconciliationBundle(
+          path.join(temp, ".moira-reconciliation"),
+          "development-local",
+          [v2, keepV2],
+          {
+            sqlite: targetForApply,
+            mutationService: deps.mutationService,
+            userRepo: {
+              getProfile: async (owner) =>
+                targetForApply.prepare("SELECT id FROM user WHERE id = ?").get(owner) ?? null,
+            },
+          },
+          { actorId: "system-admin", source: "test-cli" },
+          {
+            rename: () => {
+              throw new Error("retirement fault");
+            },
+          },
+        );
+        expect(appliedWithRetirementFault).toMatchObject({
+          alreadyApplied: false,
+          finalization: { state: "pending", warning: expect.stringContaining("committed") },
+        });
+      } finally {
+        targetForApply.close();
+      }
+      expect(fs.existsSync(appliedMarkerPath)).toBe(true);
+      const chooseAfterCommit = runCli([
+        "choose",
+        "--reference",
+        `${OWNER_A}/${slug}`,
+        "--selection",
+        "current",
+        "--revision",
+        conflicts.find((item) => item.slug === slug)!.revision,
+        "--rationale",
+        "Must be rejected after commit.",
+      ]);
+      expect(chooseAfterCommit.status).toBe(1);
+      expect(chooseAfterCommit.stderr).toContain("already committed");
+      fs.rmSync(appliedMarkerPath);
+      const apply = runCli(["apply"]);
+      if (apply.status !== 0) throw new Error(`${apply.stdout}\n${apply.stderr}`);
+      expect(apply.status).toBe(0);
+      expect(apply.stdout).toContain("already committed");
+      expect(apply.stdout).toContain("docker compose up -d");
+      const applied = new Database(targetDb, { readonly: true });
+      try {
+        const row = applied
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, slug) as { graph: string };
+        expect(JSON.parse(row.graph).nodes).toEqual(
+          expect.arrayContaining([expect.objectContaining({ directive: "incoming" })]),
+        );
+        const keepRow = applied
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, keepSlug) as { graph: string };
+        expect(JSON.parse(keepRow.graph).nodes).toEqual(
+          expect.arrayContaining([expect.objectContaining({ directive: "keep-merged-change" })]),
+        );
+      } finally {
+        applied.close();
+      }
+      expect(fs.existsSync(path.join(temp, ".moira-reconciliation", "pending"))).toBe(false);
+      expect(workflowReconciliationAgentInstructions()).not.toContain("MCP");
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
   });
 
   describe("multi-directory catalog → install (Step 2 end-to-end)", () => {

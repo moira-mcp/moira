@@ -41,12 +41,26 @@ import {
   resolveWorkflowReconciliation,
   isSaas,
   formatWorkflowReconciliationNotice,
+  publishWorkflowReconciliationBundle,
+  WorkflowReconciliationRepository,
+  getDbPath,
 } from "@mcp-moira/shared";
+import fs from "node:fs";
+import path from "node:path";
 
 const forceUpdate = process.argv.includes("--force");
 const resolveIndex = process.argv.indexOf("--resolve");
 const revisionIndex = process.argv.indexOf("--revision");
 const rationaleIndex = process.argv.indexOf("--rationale");
+
+function buildIdentity(): string {
+  for (const candidate of ["/app/BUILD_INFO", path.resolve("BUILD_INFO")]) {
+    if (!fs.existsSync(candidate)) continue;
+    const commit = /^commit:\s*(.+)$/m.exec(fs.readFileSync(candidate, "utf8"))?.[1]?.trim();
+    if (commit) return commit;
+  }
+  return "development-local";
+}
 
 async function migrate(): Promise<void> {
   console.log("Loading workflow catalog into database...");
@@ -115,6 +129,14 @@ async function migrate(): Promise<void> {
       process.exit(1);
     }
     if (error instanceof CatalogReconciliationError) {
+      if (!isSaas()) {
+        publishWorkflowReconciliationBundle(
+          path.join(path.dirname(path.resolve(getDbPath())), ".moira-reconciliation"),
+          buildIdentity(),
+          entries,
+          new WorkflowReconciliationRepository(sqlite).listConflicts(),
+        );
+      }
       const notice = formatWorkflowReconciliationNotice(sqlite);
       console.error(
         `\n❌ FATAL: ${error.message}\n` +
@@ -137,6 +159,14 @@ async function migrate(): Promise<void> {
       `❌ Reconciliation required: ${result.conflicts} (self-host remains operable but degraded)`,
     );
   if (result.conflicts > 0) {
+    if (!isSaas()) {
+      publishWorkflowReconciliationBundle(
+        path.join(path.dirname(path.resolve(getDbPath())), ".moira-reconciliation"),
+        buildIdentity(),
+        entries,
+        new WorkflowReconciliationRepository(sqlite).listConflicts(),
+      );
+    }
     console.error(formatWorkflowReconciliationNotice(sqlite));
   }
   if (result.skipped > 0) console.log(`⏭️  Skipped:  ${result.skipped} (exists/older/unchanged)`);

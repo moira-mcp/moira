@@ -579,7 +579,9 @@ export interface WorkflowReconciliationStagedArtifact {
   artifactDigest: string;
 }
 
-function conflictSetDigest(conflicts: WorkflowReconciliationConflictRecord[]): string {
+export function workflowReconciliationConflictSetDigest(
+  conflicts: WorkflowReconciliationConflictRecord[],
+): string {
   return createHash("sha256")
     .update(
       JSON.stringify(
@@ -690,6 +692,23 @@ export function createWorkflowReconciliationStagedArtifact(
     throw new Error("sourceIdentity is required");
   }
   const conflicts = new WorkflowReconciliationRepository(sqlite).listConflicts();
+  return createWorkflowReconciliationStagedArtifactFromConflicts(
+    conflicts,
+    sourceIdentity,
+    entries,
+    decisions,
+  );
+}
+
+export function createWorkflowReconciliationStagedArtifactFromConflicts(
+  conflicts: WorkflowReconciliationConflictRecord[],
+  sourceIdentity: string,
+  entries: CatalogEntry[],
+  decisions: WorkflowReconciliationDecisionInput[],
+): WorkflowReconciliationStagedArtifact {
+  if (!sourceIdentity.trim()) {
+    throw new Error("sourceIdentity is required");
+  }
   const byReference = new Map(conflicts.map((item) => [`${item.owner}/${item.slug}`, item]));
   if (decisions.length !== conflicts.length) {
     throw new Error("A staged artifact must decide the complete current conflict set");
@@ -710,7 +729,7 @@ export function createWorkflowReconciliationStagedArtifact(
     version: 1 as const,
     sourceIdentity,
     catalogDigest: workflowCatalogDigest(entries),
-    conflictSetDigest: conflictSetDigest(conflicts),
+    conflictSetDigest: workflowReconciliationConflictSetDigest(conflicts),
     decisions,
   };
   return { ...body, artifactDigest: workflowReconciliationStagedArtifactDigest(body) };
@@ -772,7 +791,7 @@ export async function applyWorkflowReconciliationStagedArtifact(
       recoveryLocation: "",
     }),
   );
-  if (artifact.conflictSetDigest !== conflictSetDigest(conflicts)) {
+  if (artifact.conflictSetDigest !== workflowReconciliationConflictSetDigest(conflicts)) {
     throw new Error("Staged reconciliation conflict set changed");
   }
   const byReference = new Map(conflicts.map((item) => [`${item.owner}/${item.slug}`, item]));
