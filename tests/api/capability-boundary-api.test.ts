@@ -131,7 +131,6 @@ describe("self-host capability authorization", () => {
     ["GET", "/api/admin/EXECUTIONS", undefined],
     ["GET", "/api/admin/executions/not-an-execution", undefined],
     ["GET", "/api/admin/executions/not-an-execution/context", undefined],
-    ["PUT", "/api/admin/executions/not-an-execution/context", { variables: {} }],
     ["GET", "/api/admin/executions/not-an-execution/locks", undefined],
     ["POST", "/api/admin/executions/not-an-execution/locks/not-a-lock/unlock", {}],
     ["GET", "/api/admin/artifacts", undefined],

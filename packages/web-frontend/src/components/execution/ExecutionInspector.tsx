@@ -20,6 +20,8 @@ import { useTranslation } from "react-i18next";
 import { apiClient } from "../../services/api-client";
 import { ContextVariableEditor } from "./ContextVariableEditor";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
+import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
+import { ExecutionProgressStrip } from "./ExecutionProgressStrip";
 import {
   ExecutionErrorHistory,
   type ExecutionErrorEntry,
@@ -68,6 +70,7 @@ export interface ExecutionData {
   status: string;
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
+  revision: number;
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -115,6 +118,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [progress, setProgress] = useState<ExecutionProgress | null>(null);
+  const [progressError, setProgressError] = useState(false);
+  const [progressLoading, setProgressLoading] = useState(false);
+  const progressRequestRef = useRef(0);
 
   // Context editing state (per-variable save is handled inside ContextVariableEditor)
   const [contextFullscreen, setContextFullscreen] = useState(false);
@@ -146,6 +153,25 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   // Copy to clipboard state
   const [copied, setCopied] = useState(false);
 
+  const loadProgress = useCallback(async (id: string): Promise<void> => {
+    const request = ++progressRequestRef.current;
+    setProgressLoading(true);
+    try {
+      const next = await apiClient.getExecutionProgress(id);
+      if (request === progressRequestRef.current) {
+        setProgress(next);
+        setProgressError(false);
+      }
+    } catch {
+      if (request === progressRequestRef.current) {
+        setProgress(null);
+        setProgressError(true);
+      }
+    } finally {
+      if (request === progressRequestRef.current) setProgressLoading(false);
+    }
+  }, []);
+
   // Extract error node IDs from errors array for graph highlighting
   const errorNodeIds = useMemo(() => {
     if (!execution?.errors) return [];
@@ -169,6 +195,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         const workflowData = await apiClient.getWorkflow(execData.workflowId);
         setWorkflow(workflowData);
         setError(null);
+        void loadProgress(execData.executionId);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : t("common.errors.failedToLoad");
         setError(message);
@@ -177,7 +204,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         setRefreshing(false);
       }
     },
-    [executionId, fetchExecution, t],
+    [executionId, fetchExecution, loadProgress, t],
   );
 
   useEffect(() => {
@@ -270,6 +297,10 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
     }
   }, [execution?.currentNodeId]);
 
+  const handleProgressFocus = useCallback((nodeId: string) => {
+    workflowGraphRef.current?.focusOnNode(nodeId);
+  }, []);
+
   const handleCopyExecutionId = useCallback(async () => {
     if (execution?.executionId) {
       await navigator.clipboard.writeText(execution.executionId);
@@ -296,6 +327,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         execution.executionId,
         path,
         value,
+        execution.revision,
       );
       if (success) {
         // Refresh execution state only. On a transient fetch error, keep the current
@@ -304,13 +336,14 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         try {
           const execData = await fetchExecution(execution.executionId);
           setExecution(execData);
+          await loadProgress(execData.executionId);
         } catch {
           /* keep existing execution state; save already persisted */
         }
       }
       return success;
     },
-    [editable, execution, fetchExecution],
+    [editable, execution, fetchExecution, loadProgress],
   );
 
   const getCurrentNode = () => {
@@ -519,6 +552,22 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
           {errorsCount > 0 && <ErrorCountBadge count={errorsCount} />}
         </div>
       </div>
+
+      {progress ? (
+        <ExecutionProgressStrip progress={progress} onFocusNode={handleProgressFocus} />
+      ) : progressLoading ? (
+        <div
+          className="border-b bg-muted/20 px-4 py-3 text-xs text-muted-foreground"
+          role="status"
+          data-testid="execution-progress-loading"
+        >
+          {t("pages.executionInspector.progress.loading")}
+        </div>
+      ) : progressError ? (
+        <div className="border-b bg-destructive/5 px-4 py-2 text-xs text-destructive" role="status">
+          {t("pages.executionInspector.progress.error")}
+        </div>
+      ) : null}
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">

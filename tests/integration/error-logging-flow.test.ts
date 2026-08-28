@@ -9,6 +9,7 @@ import type {
   UniversalGraphExecutor,
   InMemoryRepository,
 } from "@mcp-moira/workflow-engine";
+import { projectExecutionProgress } from "@mcp-moira/workflow-engine";
 
 describe("Error Logging Flow (Issue #386)", () => {
   let executor: UniversalGraphExecutor;
@@ -286,11 +287,13 @@ describe("Error Logging Flow (Issue #386)", () => {
       const workflow: WorkflowGraph = {
         id: "cancel-test",
         metadata: { name: "Cancel Test", version: "1.0.0", description: "Test cancellation" },
+        progress: { nodes: [{ id: "work", label: "Work" }] },
         nodes: [
           { type: "start", id: "start", connections: { default: "step" } },
           {
             type: "agent-directive",
             id: "step",
+            progressNodeId: "work",
             directive: "Wait for input",
             completionCondition: "Input received",
             connections: { success: "end" },
@@ -315,6 +318,30 @@ describe("Error Logging Flow (Issue #386)", () => {
       expect(execution!.errors!.length).toBeGreaterThan(0);
       expect(execution!.errors![0].errorType).toBe("system");
       expect(execution!.errors![0].message).toContain("cancelled");
+
+      const revisionAfterCancellation = execution!.revision;
+      const errorsAfterCancellation = structuredClone(execution!.errors);
+      await executor.cancelExecution(executionId);
+      const afterRepeatedCancellation = await executor.getExecutionState(executionId);
+      expect(afterRepeatedCancellation!.revision).toBe(revisionAfterCancellation);
+      expect(afterRepeatedCancellation!.errors).toEqual(errorsAfterCancellation);
+
+      expect(projectExecutionProgress(workflow, execution!)?.nodes).toEqual([
+        expect.objectContaining({ id: "work", state: "current" }),
+      ]);
+
+      const completedExecutionId = await executor.startWorkflow(
+        workflow,
+        undefined,
+        "test-user-123",
+      );
+      await executor.executeStep(completedExecutionId);
+      await executor.executeStep(completedExecutionId, {});
+      const completedExecution = await executor.getExecutionState(completedExecutionId);
+      expect(completedExecution).toMatchObject({ status: "completed", currentNodeId: null });
+      expect(projectExecutionProgress(workflow, completedExecution!)?.nodes).toEqual([
+        expect.objectContaining({ id: "work", state: "completed" }),
+      ]);
     });
   });
 });

@@ -109,7 +109,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 - POST /api/admin/settings/definitions
 - PUT /api/admin/settings/definitions/:key
 - DELETE /api/admin/settings/definitions/:key
-- POST /api/admin/executions/:id/context
+- GET /api/admin/executions/:id/context
 - POST /api/admin/database/vacuum
 - POST /api/admin/database/backup
 - GET /api/admin/status

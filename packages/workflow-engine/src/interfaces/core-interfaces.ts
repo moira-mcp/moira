@@ -3,7 +3,12 @@
  * Clean dependency injection architecture with minimal contracts
  */
 
-import { WorkflowExecution, ExecutionContext } from "../types/base-types.js";
+import {
+  WorkflowExecution,
+  ExecutionContext,
+  type ProgressContentTemplate,
+  type ProgressFactTone,
+} from "../types/base-types.js";
 import { NodeExecutionResult } from "../types/node-execution.js";
 import { GraphNode, VariableRegistry } from "../types/graph-nodes.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
@@ -12,6 +17,26 @@ import type { IGraphExecutionEngine } from "./graph-execution-engine.js";
 // Re-export GraphNode for tools
 export type { GraphNode } from "../types/graph-nodes.js";
 import { GraphValidationResult } from "../validation/graph-validator.js";
+
+export interface WorkflowProgressNode {
+  id: string;
+  label: string;
+  connections?: { default?: string };
+  content?: ProgressContentTemplate;
+}
+
+export interface WorkflowProgressFact {
+  label: string;
+  value: string;
+  tone?: ProgressFactTone;
+}
+
+export interface WorkflowProgress {
+  title?: string;
+  goal?: string;
+  facts?: WorkflowProgressFact[];
+  nodes: WorkflowProgressNode[];
+}
 
 // Re-export message types for external use
 export { AgentMessageType } from "../services/agent-message-queue.js";
@@ -41,6 +66,11 @@ export interface WorkflowGraph {
    * Bare-name references resolve against this; node-local values use `node-id.name`.
    */
   variableRegistry?: VariableRegistry;
+  runtimePolicy?: {
+    externalVariableWrites?: Record<string, { allowedNodeIds?: string[] }>;
+  };
+  /** Static user-facing projection over the executable workflow graph. */
+  progress?: WorkflowProgress;
 
   /**
    * Per-workflow system reminder (optional)

@@ -6,10 +6,16 @@ import {
   GraphValidator,
   MaterializeHandler,
   detectCycles,
+  projectExecutionProgress,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
-import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
+import {
+  runScenario as runScenarioBase,
+  type MockInput,
+  type MockInputContext,
+  type TestScenario,
+} from "../../helpers/scenario-runner.js";
 
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(
@@ -105,6 +111,87 @@ function editInputs(name: string, localPath = `workflows/${name}.json`): Record<
     "handle-upload-error": { error_action: "retry" },
     "sync-local-file": {},
   };
+}
+
+function progressOutputsFor(
+  workflow: WorkflowGraph,
+  nodeId: string,
+  input: Record<string, unknown>,
+): Record<string, string> {
+  const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+  const globals = node?.inputSchema?.globalInputs ?? [];
+  const ownOutcome = node?.progressNodeId ? `progress_${node.progressNodeId}_outcome` : null;
+  return Object.fromEntries(
+    globals
+      .filter((name) => name.startsWith("progress_"))
+      .map((name) => {
+        if (name !== ownOutcome) return [name, `Pending — invalidated by ${nodeId}`];
+        if (nodeId === "ask-upload") {
+          return [
+            name,
+            input.upload_confirmed
+              ? "Approved workflow is authorized for server upload"
+              : "Server upload is not authorized; local result remains accepted",
+          ];
+        }
+        if (nodeId === "save-workflow-to-target") {
+          return [
+            name,
+            input.upload_success === "yes"
+              ? "Authorized server upload completed"
+              : "Authorized server upload failed; recovery decision required",
+          ];
+        }
+        if (nodeId === "handle-upload-error") {
+          return [name, `Upload recovery selected: ${String(input.error_action)}`];
+        }
+        if (nodeId === "sync-local-file") {
+          return [name, "Accepted workflow synchronized to its repository target"];
+        }
+        if (nodeId === "user-final-review") {
+          return [
+            name,
+            input.work_approved === "yes"
+              ? "Final workflow approved; delivery decision pending"
+              : "Final workflow rejected; requirements revision required",
+          ];
+        }
+        return [name, `${node?.progressNodeId ?? "workflow"}: ${nodeId} result accepted`];
+      }),
+  );
+}
+
+function addProgressOutputs(workflow: WorkflowGraph, nodeId: string, input: MockInput): MockInput {
+  if (Array.isArray(input)) {
+    return input.map((item) => ({ ...progressOutputsFor(workflow, nodeId, item), ...item }));
+  }
+  if (typeof input === "function") {
+    return (context: MockInputContext) => {
+      const resolved = input(context);
+      return { ...progressOutputsFor(workflow, nodeId, resolved), ...resolved };
+    };
+  }
+  return { ...progressOutputsFor(workflow, nodeId, input), ...input };
+}
+
+async function runScenario(
+  workflow: WorkflowGraph,
+  testScenario: TestScenario,
+  options?: Parameters<typeof runScenarioBase>[2],
+): ReturnType<typeof runScenarioBase> {
+  return runScenarioBase(
+    workflow,
+    {
+      ...testScenario,
+      mockInputs: Object.fromEntries(
+        Object.entries(testScenario.mockInputs).map(([nodeId, input]) => [
+          nodeId,
+          addProgressOutputs(workflow, nodeId, input),
+        ]),
+      ),
+    },
+    options,
+  );
 }
 
 /** Same run as the interactive helpers, but with the mode that routes around the approval gates. */
@@ -372,9 +459,9 @@ describe("workflow-management-flow v6", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("6.2.2");
-    expect(workflow.metadata.description).toContain("complete existing definition");
-    expect(workflow.metadata.description).toContain("official workflow schema tool");
+    expect(workflow.metadata.version).toBe("6.5.0");
+    expect(workflow.metadata.description).toContain("one complete Moira workflow");
+    expect(workflow.metadata.description).toContain("content-rich execution progress");
     // One node fewer than upstream 6.1.0: the analysis responsibility moved into the planning node.
     expect(workflow.nodes).toHaveLength(57);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
@@ -389,6 +476,12 @@ describe("workflow-management-flow v6", () => {
       "workflow_authoring_reference",
       "operating_mode",
       "workspace_process_id_file",
+      "progress_source_outcome",
+      "progress_requirements_outcome",
+      "progress_design_outcome",
+      "progress_build_outcome",
+      "progress_review_outcome",
+      "progress_delivery_outcome",
     ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     const reference = String(workflow.variableRegistry?.workflow_authoring_reference?.default);
@@ -425,6 +518,9 @@ describe("workflow-management-flow v6", () => {
       "mechanical validation",
       "decorative flags",
       "do not force the same agent to reread",
+      "## Content-rich execution progress",
+      "progressActiveContent",
+      "shallowly replaces only supplied",
     ]) {
       expect(reference.toLowerCase()).toContain(section.toLowerCase());
     }
@@ -502,6 +598,206 @@ describe("workflow-management-flow v6", () => {
     expect(nodes["design-workflow-structure"].directive).toContain("plausible wrong state");
     expect(nodes["create-edit-plan"].directive).toContain("observation that distinguishes");
     expect(nodes["review-workflow-quality"].directive).toContain("surrogate signal");
+    for (const id of ["design-workflow-structure", "create-edit-plan"]) {
+      expect(nodes[id].directive).toContain("optional static execution-progress presentation");
+      expect(nodes[id].directive).toContain("3–10 ordered milestones");
+      expect(nodes[id].directive).toContain("mobile horizontal readability");
+      expect(nodes[id].directive).toContain("always-visible UI and PNG renderer");
+      expect(nodes[id].directive).toContain("short-lived one-time PNG download metadata");
+      expect(nodes[id].directive).toContain("internal direct `attachProgressImage`");
+    }
+    for (const id of ["create-workflow-json", "apply-workflow-changes"]) {
+      expect(nodes[id].directive).toContain("array order alone determines");
+      expect(nodes[id].directive).toContain("shared projection/model parity across UI and PNG");
+      expect(nodes[id].directive).toContain("only on a mapped Telegram node");
+      expect(nodes[id].directive).toContain("do not place an agent one-time download token");
+    }
+    for (const id of ["review-workflow-design", "review-workflow-quality"]) {
+      expect(nodes[id].directive).toContain("complete observable-wait mapping");
+      expect(nodes[id].directive).toContain("consumer drift");
+      expect(nodes[id].directive).toContain("incomplete mappings");
+      expect(nodes[id].directive).toContain("Block dynamic/state/routing progress fields");
+    }
+    for (const id of ["design-workflow-structure", "create-edit-plan"]) {
+      expect(nodes[id].directive).toContain("progressActiveLabel");
+      expect(nodes[id].directive).toContain("inactive milestones keep the stable base label");
+      expect(nodes[id].directive).toContain("authoritative on every route");
+    }
+    for (const id of ["create-workflow-json", "apply-workflow-changes"]) {
+      expect(nodes[id].directive).toContain("progressActiveLabel");
+      expect(nodes[id].directive).toContain("official CLI");
+      expect(nodes[id].directive).toContain("initial, active, next-iteration and replan contexts");
+    }
+    for (const id of ["review-workflow-design", "review-workflow-quality"]) {
+      expect(nodes[id].directive).toContain("progressActiveLabel");
+      expect(nodes[id].directive).toContain("undefined/stale counters");
+      expect(nodes[id].directive).toContain("inactive-label drift");
+    }
+    expect(workflow.progress).toMatchObject({
+      title: "Workflow Management Flow",
+      nodes: [
+        expect.objectContaining({ id: "source" }),
+        expect.objectContaining({ id: "requirements" }),
+        expect.objectContaining({ id: "design" }),
+        expect.objectContaining({ id: "build" }),
+        expect.objectContaining({ id: "review" }),
+        expect.objectContaining({ id: "delivery" }),
+      ],
+    });
+    expect(workflow.progress?.nodes.map((node) => node.id)).toEqual([
+      "source",
+      "requirements",
+      "design",
+      "build",
+      "review",
+      "delivery",
+    ]);
+    expect(workflow.progress?.nodes.map((node) => node.content?.outcome)).toEqual([
+      "{{progress_source_outcome}}",
+      "{{progress_requirements_outcome}}",
+      "{{progress_design_outcome}}",
+      "{{progress_build_outcome}}",
+      "{{progress_review_outcome}}",
+      "{{progress_delivery_outcome}}",
+    ]);
+    const visibleWaitingTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    const visibleWaitingNodes = workflow.nodes.filter((node) => visibleWaitingTypes.has(node.type));
+    expect(visibleWaitingNodes).toHaveLength(30);
+    expect(visibleWaitingNodes.filter((node) => !node.progressNodeId)).toEqual([]);
+    expect(visibleWaitingNodes.filter((node) => !node.progressActiveLabel)).toEqual([]);
+    const stageOutcome = {
+      source: "progress_source_outcome",
+      requirements: "progress_requirements_outcome",
+      design: "progress_design_outcome",
+      build: "progress_build_outcome",
+      review: "progress_review_outcome",
+      delivery: "progress_delivery_outcome",
+    } as const;
+    const semanticWriters = visibleWaitingNodes.filter((node) =>
+      node.inputSchema?.globalInputs?.some((name) => name.startsWith("progress_")),
+    );
+    for (const node of semanticWriters) {
+      const expectedOutcome = stageOutcome[node.progressNodeId as keyof typeof stageOutcome];
+      expect(node.inputSchema?.globalInputs).toContain(expectedOutcome);
+      expect(node.inputSchema?.required).toContain(expectedOutcome);
+    }
+    expect(semanticWriters.map((node) => node.id)).toEqual(
+      expect.arrayContaining([
+        "get-action-type",
+        "prepare-edit-workflow",
+        "gather-workflow-requirements",
+        "gather-edit-requirements",
+        "design-workflow-structure",
+        "create-edit-plan",
+        "create-workflow-json",
+        "apply-workflow-changes",
+        "review-workflow-quality",
+        "fix-quality-issues",
+        "report-final-result",
+        "user-final-review",
+        "ask-upload",
+        "save-workflow-to-target",
+        "handle-upload-error",
+        "sync-local-file",
+      ]),
+    );
+    expect(nodes["revise-edit-requirements"].inputSchema.globalInputs).toEqual([
+      "progress_requirements_outcome",
+      "progress_design_outcome",
+      "progress_build_outcome",
+      "progress_review_outcome",
+      "progress_delivery_outcome",
+    ]);
+    expect(nodes["fix-edit-plan"].inputSchema.globalInputs).toEqual([
+      "progress_design_outcome",
+      "progress_build_outcome",
+      "progress_review_outcome",
+      "progress_delivery_outcome",
+    ]);
+    expect(nodes["reassess-design-contract"].inputSchema.globalInputs).toEqual([
+      "progress_requirements_outcome",
+      "progress_design_outcome",
+      "progress_build_outcome",
+      "progress_review_outcome",
+      "progress_delivery_outcome",
+    ]);
+    expect(nodes["fix-quality-issues"].inputSchema.globalInputs).toEqual([
+      "progress_review_outcome",
+      "progress_delivery_outcome",
+    ]);
+    expect(progressOutputsFor(workflow, "fix-edit-plan", { repair_outcome: "changed" })).toEqual({
+      progress_design_outcome: "design: fix-edit-plan result accepted",
+      progress_build_outcome: "Pending — invalidated by fix-edit-plan",
+      progress_review_outcome: "Pending — invalidated by fix-edit-plan",
+      progress_delivery_outcome: "Pending — invalidated by fix-edit-plan",
+    });
+    expect(progressOutputsFor(workflow, "ask-upload", { upload_confirmed: false })).toEqual({
+      progress_delivery_outcome: "Server upload is not authorized; local result remains accepted",
+    });
+    expect(
+      progressOutputsFor(workflow, "save-workflow-to-target", { upload_success: "no" }),
+    ).toEqual({
+      progress_delivery_outcome: "Authorized server upload failed; recovery decision required",
+    });
+    expect(progressOutputsFor(workflow, "sync-local-file", {})).toEqual({
+      progress_delivery_outcome: "Accepted workflow synchronized to its repository target",
+    });
+    for (const [id, nextText] of [
+      ["approve-structure", "refine and re-review"],
+      ["present-edit-plan", "revise and re-review"],
+      ["user-final-review", "revise requirements"],
+      ["save-workflow-to-target", "upload failure"],
+      ["handle-upload-error", "Retry an authorized upload"],
+      ["fix-quality-issues", "Repeat independent quality review"],
+    ] as const) {
+      expect(nodes[id].progressActiveContent?.summary).toBeTruthy();
+      expect(nodes[id].progressActiveContent?.next).toContain(nextText);
+    }
+    const projectionAt = (
+      currentNodeId: string | null,
+      status: "running" | "completed" = "running",
+      waitingForInputNodeId: string | null = currentNodeId,
+    ) =>
+      projectExecutionProgress(workflow, {
+        executionId: "wmf-progress",
+        workflowId: workflow.id ?? "workflow-management-flow",
+        userId: "scenario-user",
+        currentNodeId,
+        waitingForInputNodeId,
+        status,
+        revision: 4,
+        createdAt: 1,
+        updatedAt: 1,
+        globalContext: {
+          variables: {
+            operating_mode: "autonomous",
+            progress_source_outcome: "Source reconciled",
+            progress_requirements_outcome: "Requirements accepted",
+            progress_design_outcome: "Design reviewed",
+            progress_build_outcome: "Workflow built",
+            progress_review_outcome: "Independent review passed",
+            progress_delivery_outcome: "Repository synchronization complete",
+          },
+          nodeStates: {},
+          executionId: "wmf-progress",
+          workflowId: workflow.id ?? "workflow-management-flow",
+          userId: "scenario-user",
+        },
+      });
+    expect(projectionAt("prepare-edit-workflow")?.activeNodeId).toBe("source");
+    expect(projectionAt("sync-local-file")?.activeNodeId).toBe("delivery");
+    expect(
+      projectionAt(null, "completed", "sync-local-file")?.nodes.map((node) => node.state),
+    ).toEqual(Array(6).fill("completed"));
+    expect(
+      projectionAt(null, "completed", "review-workflow-quality")?.nodes.map((node) => node.state),
+    ).toEqual(["completed", "completed", "completed", "completed", "completed", "pending"]);
     expect(nodes["ask-full-antipattern-audit"].connections.success).toBe(
       "route-full-antipattern-audit",
     );

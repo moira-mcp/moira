@@ -363,6 +363,70 @@ Node task-1: unclosed template bracket '{{' at position 15
 
 ## Workflow Structure
 
+### Static user-facing progress
+
+`WorkflowGraph.progress` is optional presentation metadata. It can declare a template-enabled
+`title`, `goal`, bounded generic `facts`, and ordered nodes. Each progress node has `id`, `label`,
+optional structured `content` (`summary`, `details`, `outcome`, `next`), and an optional display-only
+default connection. A primary node's `progressNodeId` activates a
+progress milestone while that primary node is current. The engine derives ordered
+completed/current/pending state without persistence and renders labels through the existing template
+processor. Progress connections never participate in execution routing.
+
+When `progress` exists, every user-visible waiting node (`agent-directive`, `teleport`, `lock`,
+`materialize`, and `subgraph`) must declare a valid `progressNodeId`; automatic transient nodes may
+omit it. Multiple primary nodes may map to one milestone. The active primary node is that
+milestone's focus target, while every other milestone deterministically focuses its first mapped
+primary node in workflow order. At terminal completion, the last persisted mapped waiting node is
+the completion frontier: that milestone and earlier milestones are complete, while later milestones
+remain pending. This lets an early stopped terminal preserve its actual reach. Older completion
+records without a usable mapped frontier retain the fully-complete fallback.
+
+A user-visible waiting node may set template-enabled `progressActiveLabel`. The projection uses it
+only while that exact primary node is current; inactive milestones keep the stable base label from
+`progress.nodes`. The field requires `progressNodeId`, follows ordinary template validation, and
+never changes focus, state, connections, routing, or persistence.
+
+The execution `note` is projected separately as `taskTitle`. A user-visible waiting node may also
+set `progressActiveContent` with the same structured fields; while that exact node is current its
+fields replace matching base milestone fields and omitted fields keep their base values. All nested
+strings use ordinary template validation and resolution. Content is bounded plain text, not HTML.
+Resolved values are checked against the same consumer-safe limits after interpolation. Overflow is
+an explicit projection error; values are never silently truncated into a misleading task, goal, or
+stage result. The projection has no stored presentation state: changing a declared context value, including an
+atomic plan-revision projection, produces a complete replacement on the next read rather than
+merging history from prior revisions.
+An `outcome` is exposed only for a completed or current milestone. Pending milestones keep their
+summary, details, and next guidance but suppress an old outcome, so an engine-owned revision or unit
+transition cannot temporarily present a prior result as current truth.
+
+The shared visual model renders the full task identity and goal, facts, and every milestone's
+structured content without hover-only information. It wraps valid text without truncation, packs
+cards into deterministic left-to-right rows for the requested viewport, and routes forward,
+backward, and cross-row display edges without affecting execution. `session progress-image-token`
+and the matching HTTP endpoint render that model as a
+bounded light/dark PNG behind a short-lived, revision-bound, single-use URL. A
+`telegram-notification` node can set `attachProgressImage: true`; it must map to a progress milestone
+and sends the rendered PNG with its normal message as the caption.
+
+Engine callers that hold a workflow and execution use
+`renderExecutionProgressImage(workflow, execution, options?)`. It returns `null` when no progress
+definition exists; otherwise it returns `{ buffer, mimeType: "image/png", width, height,
+workflowVersion, executionRevision }`. Projection/render failures propagate. The lower-level
+projection and PNG adapter remain available when their narrower contracts are required.
+
+The execution inspector renders the same complete visual model below the execution header and above
+the technical graph/tabs. Task, goal, facts, completed outcomes, current activity, details and next
+action are visible immediately. It scrolls only when needed and focuses the projection-selected
+primary workflow node when an actionable milestone is selected; unmapped stages remain readable
+non-controls. Workflows without `progress` keep the existing inspector layout.
+
+The bundled Software Development Flow uses this contract as a static phase projection over its
+existing lifecycle: Intake, Plan, Implement, Tests, Review, Checkpoint, and Finalize. Its checkpoint
+display edge returns to Implement because that is the normal multi-unit route; finalization is
+activated directly only after the primary graph decides the plan is complete. This keeps the
+display honest without adding conditional progress edges or duplicating SDF routing.
+
 ### Required Fields
 
 ```json

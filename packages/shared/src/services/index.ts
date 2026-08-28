@@ -36,6 +36,7 @@ export {
   type SaveWorkflowResult,
 } from "./workflow-service.js";
 export { ExecutionService } from "./execution-service.js";
+export { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 export { SettingsService } from "./settings-service.js";
 export { GlobalSettingsService } from "./global-settings-service.js";
 export { UserService } from "./user-service.js";
@@ -126,6 +127,7 @@ export {
   validateWorkflow,
   validateWorkflowUnified,
   getWorkflowVariables,
+  queryWorkflowVariables,
   getWorkflowVariableValues,
   getWorkflowVariable,
   setWorkflowVariable,
@@ -142,6 +144,9 @@ export {
   type WorkflowValidationIssue,
   type ValidationWarning,
   type VariableInfo,
+  type WorkflowVariableFilters,
+  type WorkflowVariableQueryEntry,
+  type WorkflowVariableQueryResult,
   // New types for CLI/MCP parity
   type CompactNode,
   type ListNodesOptions,

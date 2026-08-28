@@ -19,8 +19,15 @@ import {
   normalizeError,
   isOperationalError,
   getLockService,
+  isExecutionParentReference,
+  ValidationError,
 } from "@mcp-moira/shared";
-import { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  projectExecutionProgress,
+  prepareExecutionVariableWrite,
+  queryExecutionVariables,
+} from "@mcp-moira/workflow-engine";
 import { MCPEngine } from "../core/mcp-engine.js";
 import { ERRORS, formatDomainError } from "../messages/index.js";
 
@@ -28,7 +35,22 @@ const logger = createLogger({ component: "GetSessionInfo" });
 
 const GetSessionInfoParamsSchema = z.object({
   action: z
-    .enum(["user", "executions", "execution_context", "current_step", "update-note"])
+    .enum([
+      "user",
+      "executions",
+      "execution_context",
+      "current_step",
+      "update-note",
+      "set-parent",
+      "add-reminder",
+      "reminders",
+      "update-reminder",
+      "remove-reminder",
+      "variables",
+      "set-variable",
+      "progress",
+      "progress-image-token",
+    ])
     .describe("Action to perform"),
   executionId: z
     .string()
@@ -60,6 +82,21 @@ const GetSessionInfoParamsSchema = z.object({
     .max(500)
     .optional()
     .describe("New note value (max 500 chars, required for update-note action)"),
+  parentExecutionId: z.string().optional().describe("Parent execution ID for set-parent action"),
+  expectedRevision: z.number().int().min(0).optional().describe("Expected execution revision"),
+  reminderId: z.string().optional().describe("Reminder ID"),
+  reminderText: z.string().optional().describe("Reminder text"),
+  idempotencyKey: z.string().optional().describe("Idempotency key for add-reminder"),
+  reminderStatus: z.enum(["active", "cancelled"]).optional().describe("Reminder status filter"),
+  names: z.array(z.string()).optional(),
+  theme: z.enum(["light", "dark"]).optional(),
+  viewportWidth: z.number().int().min(480).max(4096).optional(),
+  types: z.array(z.string()).optional(),
+  editable: z.boolean().optional(),
+  hasValue: z.boolean().optional(),
+  writePhase: z.enum(["current", "other"]).optional(),
+  variableName: z.string().optional(),
+  variableValue: z.unknown().optional(),
   // Parameters for execution_context action
   variables: z
     .array(z.string())
@@ -106,6 +143,8 @@ interface ExecutionContextData {
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
   note?: string | null;
+  parentExecutionId?: string | null;
+  revision: number;
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -130,8 +169,25 @@ interface NoteUpdateResult {
   message: string;
 }
 
+interface ParentUpdateResult {
+  executionId: string;
+  parentExecutionId: string | null;
+  revision: number;
+}
+
 type SessionInfoData =
-  UserInfo | ExecutionsResponse | ExecutionContextData | NoteUpdateResult | string;
+  | UserInfo
+  | ExecutionsResponse
+  | ExecutionContextData
+  | NoteUpdateResult
+  | ParentUpdateResult
+  | { reminders: import("@mcp-moira/workflow-engine").ExecutionReminder[]; revision: number }
+  | import("@mcp-moira/workflow-engine").ReminderMutationResult
+  | { variables: Array<Record<string, unknown>>; unknownNames: string[]; revision: number }
+  | { name: string; value: unknown; revision: number }
+  | import("@mcp-moira/workflow-engine").ExecutionProgress
+  | import("@mcp-moira/workflow-engine").ProgressImageGrant
+  | string;
 
 export async function getSessionInfo(
   params: GetSessionInfoParams,
@@ -333,6 +389,8 @@ export async function getSessionInfo(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId || null,
           note: execution.note,
+          parentExecutionId: execution.parentExecutionId,
+          revision: execution.revision,
           context: {
             variables: filteredVariables,
             nodeStates: execution.globalContext.nodeStates,
@@ -477,6 +535,167 @@ export async function getSessionInfo(
             executionId,
             note: params.note,
             message: "Note updated successfully",
+          },
+        };
+      }
+
+      case "set-parent": {
+        if (!executionId || !params.parentExecutionId || params.expectedRevision === undefined) {
+          return {
+            success: false,
+            error:
+              "executionId, parentExecutionId, and expectedRevision are required for set-parent",
+          };
+        }
+        if (!isExecutionParentReference(params.parentExecutionId)) {
+          return { success: false, error: 'parentExecutionId must be a UUID or "none"' };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const updated = await repository.setExecutionParent(
+          executionId,
+          params.parentExecutionId === "none" ? null : params.parentExecutionId,
+          userId,
+          params.expectedRevision,
+        );
+        return {
+          success: true,
+          data: {
+            executionId,
+            parentExecutionId: updated.parentExecutionId ?? null,
+            revision: updated.revision,
+          },
+        };
+      }
+
+      case "reminders": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("reminders") };
+        const execution = await MCPEngine.getInstance().repository.getExecution(executionId);
+        if (!execution) return { success: false, error: ERRORS.execution_not_found(executionId) };
+        if (execution.userId !== userId)
+          return { success: false, error: ERRORS.execution_access_denied };
+        const search = params.search?.toLowerCase();
+        const reminders = (execution.reminders ?? []).filter(
+          (item) =>
+            (!params.reminderStatus || item.status === params.reminderStatus) &&
+            (!search || item.text.toLowerCase().includes(search)),
+        );
+        return { success: true, data: { reminders, revision: execution.revision } };
+      }
+
+      case "add-reminder":
+      case "update-reminder":
+      case "remove-reminder": {
+        if (!executionId || params.expectedRevision === undefined)
+          return { success: false, error: "executionId and expectedRevision are required" };
+        const mutation =
+          action === "add-reminder"
+            ? {
+                action: "add" as const,
+                text: params.reminderText ?? "",
+                idempotencyKey: params.idempotencyKey,
+              }
+            : action === "update-reminder"
+              ? {
+                  action: "update" as const,
+                  reminderId: params.reminderId ?? "",
+                  text: params.reminderText ?? "",
+                }
+              : { action: "cancel" as const, reminderId: params.reminderId ?? "" };
+        const result = await MCPEngine.getInstance().repository.mutateExecutionReminder(
+          executionId,
+          userId,
+          params.expectedRevision,
+          mutation,
+        );
+        return { success: true, data: result };
+      }
+
+      case "variables": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("variables") };
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || execution.userId !== userId)
+          return { success: false, error: ERRORS.execution_access_denied };
+        const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+        if (!graph) return { success: false, error: "Workflow not found" };
+        const result = queryExecutionVariables(execution, graph, params);
+        return {
+          success: true,
+          data: result,
+        };
+      }
+
+      case "progress": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("progress") };
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || execution.userId !== userId)
+          return { success: false, error: ERRORS.execution_access_denied };
+        const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+        if (!graph) return { success: false, error: "Workflow not found" };
+        const progress = projectExecutionProgress(graph, execution);
+        if (!progress) return { success: false, error: "Workflow has no progress graph" };
+        return { success: true, data: progress };
+      }
+
+      case "progress-image-token": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("progress-image-token") };
+        const repository = MCPEngine.getInstance().repository;
+        const { ProgressImageService } = await import("@mcp-moira/workflow-engine");
+        try {
+          const data = await new ProgressImageService(repository).mint(executionId, userId, {
+            theme: params.theme,
+            viewportWidth: params.viewportWidth,
+          });
+          return { success: true, data };
+        } catch (error) {
+          if (error instanceof ValidationError) return { success: false, error: error.message };
+          return { success: false, error: "Progress image could not be created" };
+        }
+      }
+
+      case "set-variable": {
+        if (!executionId || !params.variableName || params.expectedRevision === undefined)
+          return {
+            success: false,
+            error: "executionId, variableName and expectedRevision are required",
+          };
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || execution.userId !== userId)
+          return { success: false, error: ERRORS.execution_access_denied };
+        const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+        if (!graph) return { success: false, error: "Workflow not found" };
+        const updated = prepareExecutionVariableWrite(
+          execution,
+          graph,
+          params.variableName,
+          params.variableValue,
+          params.expectedRevision,
+        );
+        await repository.saveExecution(updated);
+        await logAuditEventDirect(repository as DatabaseRepository, {
+          userId,
+          action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+          resource: "execution",
+          resourceId: executionId,
+          source: "mcp",
+          metadata: {
+            action: "set-variable",
+            variableName: params.variableName,
+            revision: updated.revision,
+          },
+        });
+        return {
+          success: true,
+          data: {
+            name: params.variableName,
+            value: params.variableValue,
+            revision: updated.revision,
           },
         };
       }

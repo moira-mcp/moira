@@ -53,6 +53,7 @@ import { inputContextMiddleware } from "./middleware/input-context-middleware.js
 import { workflowRoutes } from "./routes/workflows.js";
 import { workflowTokenRoutes } from "./routes/workflow-tokens.js";
 import { createExecutionMaterializeRoutes } from "./routes/execution-materialize.js";
+import { createExecutionProgressImageRoutes } from "./routes/execution-progress-image.js";
 import { executionRoutes } from "./routes/executions.js";
 import { healthRoutes } from "./routes/health.js";
 import { featuresRoutes } from "./routes/features.js";
@@ -351,6 +352,11 @@ class MoiraApiServer {
     // Public workflow token routes (token = authorization, no session required)
     this.app.use("/api/public/workflows", apiLimiter, workflowTokenRoutes);
     this.app.use("/api/public/executions", apiLimiter, createExecutionMaterializeRoutes());
+    this.app.use(
+      "/api/public/execution-progress-image",
+      apiLimiter,
+      createExecutionProgressImageRoutes(),
+    );
 
     // Public artifact token routes (token = authorization, no session required)
     this.app.use("/api/public/artifacts", apiLimiter, artifactTokenRoutes);

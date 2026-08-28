@@ -522,6 +522,28 @@ export interface VariableInfo {
   type?: string;
 }
 
+export interface WorkflowVariableFilters {
+  names?: string[];
+  search?: string;
+  types?: string[];
+  hasDefault?: boolean;
+  externallyWritable?: boolean;
+}
+
+export interface WorkflowVariableQueryEntry extends VariableInfo {
+  name: string;
+  schemaType?: string;
+  hasDefault: boolean;
+  externallyWritable: boolean;
+  externalWritePolicy: { allowedNodeIds?: string[] } | null;
+}
+
+export interface WorkflowVariableQueryResult {
+  variables: WorkflowVariableQueryEntry[];
+  unknownNames: string[];
+  appliedFilters: WorkflowVariableFilters;
+}
+
 /**
  * Get a workflow's declared global variables.
  *
@@ -540,6 +562,50 @@ export function getWorkflowVariables(workflow: WorkflowGraph): Record<string, Va
     }
   }
   return result;
+}
+
+/** Query declared workflow globals without transport-specific parsing or presentation. */
+export function queryWorkflowVariables(
+  workflow: WorkflowGraph,
+  filters: WorkflowVariableFilters = {},
+): WorkflowVariableQueryResult {
+  const all = getWorkflowVariables(workflow);
+  const requested = new Set(filters.names ?? []);
+  const search = filters.search?.toLowerCase();
+  const policy = workflow.runtimePolicy?.externalVariableWrites ?? {};
+  const variables = Object.keys(all)
+    .filter((name) => {
+      const declaration = workflow.variableRegistry?.[name];
+      return (
+        (!requested.size || requested.has(name)) &&
+        (!search ||
+          name.toLowerCase().includes(search) ||
+          all[name].description.toLowerCase().includes(search)) &&
+        (!filters.types?.length || filters.types.includes(declaration?.type ?? "")) &&
+        (filters.hasDefault === undefined ||
+          Object.prototype.hasOwnProperty.call(declaration ?? {}, "default") ===
+            filters.hasDefault) &&
+        (filters.externallyWritable === undefined || name in policy === filters.externallyWritable)
+      );
+    })
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => {
+      const declaration = workflow.variableRegistry?.[name];
+      return {
+        name,
+        ...all[name],
+        schemaType: declaration?.type,
+        hasDefault: Object.prototype.hasOwnProperty.call(declaration ?? {}, "default"),
+        externallyWritable: name in policy,
+        externalWritePolicy: policy[name] ?? null,
+      };
+    });
+
+  return {
+    variables,
+    unknownNames: [...requested].filter((name) => !(name in all)),
+    appliedFilters: filters,
+  };
 }
 
 /**

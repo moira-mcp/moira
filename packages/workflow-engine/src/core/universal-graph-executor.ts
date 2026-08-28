@@ -30,6 +30,7 @@ import {
   getMcpTextService,
   getRequestContext,
   ValidationError,
+  ConflictError,
 } from "@mcp-moira/shared";
 
 export class UniversalGraphExecutor implements IGraphExecutor {
@@ -104,6 +105,8 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       status: "running",
       note: note || null,
       parentExecutionId: parentExecutionId || null,
+      revision: 0,
+      reminders: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -155,6 +158,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           : "No active child workflows.";
       throw new ValidationError(`Workflow already completed. ${childInfo}`);
     }
+    const loadedExecution = structuredClone(execution);
 
     this.logger.debug("Execution loaded from repository", {
       executionId: execution.executionId.slice(0, 8),
@@ -246,7 +250,29 @@ export class UniversalGraphExecutor implements IGraphExecutor {
     // appendError modifies execution directly in repository, we need to fetch
     // updated errors before saveExecution overwrites them
     const currentExecution = await this.repository.getExecution(executionId);
-    if (currentExecution?.errors) {
+    if (currentExecution && currentExecution.revision !== loadedExecution.revision) {
+      const coreChanged =
+        currentExecution.status !== loadedExecution.status ||
+        currentExecution.currentNodeId !== loadedExecution.currentNodeId ||
+        currentExecution.waitingForInputNodeId !== loadedExecution.waitingForInputNodeId ||
+        JSON.stringify(currentExecution.globalContext) !==
+          JSON.stringify(loadedExecution.globalContext);
+      if (coreChanged) {
+        throw new ConflictError(
+          "Execution changed while the workflow step was running; retry from current state",
+          {
+            executionId,
+            expectedRevision: loadedExecution.revision,
+            currentRevision: currentExecution.revision,
+          },
+        );
+      }
+      execution.errors = currentExecution.errors;
+      execution.reminders = currentExecution.reminders;
+      execution.parentExecutionId = currentExecution.parentExecutionId;
+      if (currentExecution.note !== loadedExecution.note) execution.note = currentExecution.note;
+      execution.revision = currentExecution.revision;
+    } else if (currentExecution?.errors) {
       execution.errors = currentExecution.errors;
     }
 
@@ -279,6 +305,14 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         return await this.formatQueueResponse(execution.executionId, messageQueue, graph);
       case "complete": {
         let response = `Process ID: ${execution.executionId}\n\nWorkflow completed successfully`;
+        const activeReminders = (execution.reminders ?? []).filter(
+          (reminder) => reminder.status === "active",
+        );
+        if (activeReminders.length > 0) {
+          response += `\n\n---\n**NEXT REQUESTED ACTIONS**\n${activeReminders
+            .map((reminder) => `- ${reminder.text}`)
+            .join("\n")}`;
+        }
         // Add parent execution continuation reminder
         if (execution.parentExecutionId) {
           response += `\n\n---\n**CONTINUATION REMINDER**: This was a child workflow. Parent execution awaits continuation.\nParent execution ID: ${execution.parentExecutionId}\nUse step(processId: "${execution.parentExecutionId}") to continue the parent workflow.`;
@@ -511,23 +545,13 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       const workflowId = execution.workflowId;
 
       // Log cancellation to errors array
-      await this.repository.appendError(executionId, {
+      const cancellation = await this.repository.cancelExecution(executionId, {
         timestamp: Date.now(),
         nodeId: execution.currentNodeId || "unknown",
         errorType: "system",
         message: "Execution cancelled by user",
       });
-
-      // Issue #386: Preserve errors that were appended
-      const currentExecution = await this.repository.getExecution(executionId);
-      if (currentExecution?.errors) {
-        execution.errors = currentExecution.errors;
-      }
-
-      execution.status = "completed";
-      execution.updatedAt = Date.now();
-      execution.completedAt = Date.now();
-      await this.repository.saveExecution(execution);
+      if (!cancellation.changed) return;
 
       // Metrics: decrement active, record cancellation
       activeExecutionsGauge.dec();

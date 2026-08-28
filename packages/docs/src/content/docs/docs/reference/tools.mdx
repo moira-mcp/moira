@@ -849,6 +849,84 @@ session({ action: "update-note", executionId: "abc-123", note: "Step 5: Integrat
 → { success: true, executionId: "abc-123", note: "Step 5: Integration tests" }
 ```
 
+### Action: set-parent
+
+Sets the parent of a running execution. A UUID attaches or replaces the parent; `"none"` detaches
+the execution to standalone. The execution and every new parent must be running and owned by the
+current user, and the link must not create an ancestry cycle. Repeating the current value is an
+idempotent no-op. Linking executions controls continuation only; it does not copy variables or grant
+authority.
+
+**Parameters:**
+
+- `action`: `"set-parent"` (required)
+- `executionId` (string, required) - Running execution to update
+- `parentExecutionId` (string, required) - Same-owner running parent UUID, or `"none"` to detach
+- `expectedRevision` (integer, required) - Revision returned by execution inspection
+
+**Example:**
+
+```json
+session({ action: "set-parent", executionId: "child-123", parentExecutionId: "parent-456", expectedRevision: 2 })
+→ { executionId: "child-123", parentExecutionId: "parent-456", revision: 3 }
+```
+
+A stale revision is rejected instead of overwriting newer execution state. Prefer setting the
+initial `parentExecutionId` when calling `start`; use this action when process orchestration changes
+after start.
+
+### Reminder actions
+
+Execution reminders preserve caller-owned follow-up work without changing the workflow plan or
+appearing in intermediate directives. Active reminders are returned under `NEXT REQUESTED ACTIONS`
+when the workflow completes, for both standalone and child executions. They are plain text and do
+not grant authority or expand workflow templates.
+
+Use `add-reminder`, `reminders`, `update-reminder`, and `remove-reminder` through the existing
+`session` tool. Mutations require `executionId` and `expectedRevision`; add accepts `reminderText`
+and optional `idempotencyKey`, update/remove require `reminderId`. List accepts `reminderStatus` and
+`search`. Mutations apply only while the execution is running; completed reminders remain readable.
+
+```json
+session({ action: "add-reminder", executionId: "abc-123", reminderText: "Open the PR", idempotencyKey: "delivery-pr", expectedRevision: 2 })
+session({ action: "reminders", executionId: "abc-123", reminderStatus: "active", search: "PR" })
+```
+
+### Runtime variable actions
+
+`session({ action: "variables", executionId, ...filters })` returns declared variables, current
+value presence/value, JSON Schema, effective editability and denial reason. Filters `names`,
+`search`, `types`, `hasValue`, `editable`, and `writePhase` (`current` or `other`) compose. Unknown
+requested names are returned separately. Entries include declared external-write policy and the
+response repeats applied filters. `set-variable` writes one declared top-level variable only when the workflow's
+default-deny `runtimePolicy.externalVariableWrites` permits the current paused node; the value must
+pass its registry schema and `expectedRevision` must be current. It never advances the graph or
+changes node state.
+
+Definition `manage list-variables` and `GET /api/workflows/:id/variables` support names/search/types,
+hasDefault and externallyWritable filters and return policy, applied filters and unknown names. The
+result entries include `hasDefault` and declared policy; the local CLI exposes equivalent flags.
+Declared writability does not prove current runtime editability.
+
+### Execution progress
+
+`session({ action: "progress", executionId })` returns the current rendered static progress graph
+for an owned execution. Ordered nodes have `completed`, `current`, or `pending` state, static display
+connections, mapped primary-node IDs, and a deterministic `focusNodeId`. The action is read-only and
+does not change context, node state, graph position, or execution revision. A workflow without a
+`progress` definition returns an explicit error.
+
+`session({ action: "progress-image-token", executionId, theme?, viewportWidth? })` returns
+`downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision` for a short-lived one-time PNG;
+MCP never carries the binary image. The grant is bound to the
+owner, workflow version, execution revision, and normalized light/dark render options. Rendering or
+validation or failed HTTP response does not consume it, while successful response completion does.
+
+Workflow authors can set the same definition policy locally with
+`moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>`; comma-separated node
+IDs scope writes to those waiting nodes, `all` permits every waiting agent node, and `none` restores
+the default deny state. Normal workflow validation checks the referenced variable and node IDs.
+
 ---
 
 ## lock

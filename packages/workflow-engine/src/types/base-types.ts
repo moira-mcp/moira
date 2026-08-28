@@ -56,6 +56,12 @@ export interface NodeExecutionResult {
 export interface BaseNode {
   type: string;
   id: string;
+  /** User-facing progress milestone activated while this primary node is current. */
+  progressNodeId?: string;
+  /** Template-enabled label used only while this exact primary node is current. */
+  progressActiveLabel?: string;
+  /** Template-enabled presentation merged into the active progress milestone. */
+  progressActiveContent?: ProgressContentTemplate;
   metadata?: {
     displayName?: string;
     description?: string;
@@ -69,6 +75,15 @@ export interface BaseNode {
   connections?: Record<string, string>; // outputPath -> nextNodeId
 }
 
+export interface ProgressContentTemplate {
+  summary?: string;
+  details?: string[];
+  outcome?: string;
+  next?: string;
+}
+
+export type ProgressFactTone = "neutral" | "positive" | "warning" | "critical";
+
 // Workflow execution instance
 export interface WorkflowExecution {
   executionId: string;
@@ -80,11 +95,33 @@ export interface WorkflowExecution {
   status: LegacyExecutionStatus; // TODO(#386): Change to ExecutionStatus after migration
   note?: string | null; // User-provided note for identification (max 500 chars)
   parentExecutionId?: string | null; // Links to parent execution for continuation
+  revision: number; // Optimistic concurrency revision for persisted mutations
+  reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   error?: string; // DEPRECATED: kept for migration, use errors array instead
   errors?: ExecutionError[]; // Persistent error log (Issue #386)
+}
+
+export interface ExecutionReminder {
+  id: string;
+  text: string;
+  status: "active" | "cancelled";
+  idempotencyKey?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ReminderMutation =
+  | { action: "add"; text: string; idempotencyKey?: string }
+  | { action: "update"; reminderId: string; text: string }
+  | { action: "cancel"; reminderId: string };
+
+export interface ReminderMutationResult {
+  reminder: ExecutionReminder;
+  revision: number;
+  changed: boolean;
 }
 
 // WorkflowGraph moved to interfaces/core-interfaces.ts to avoid circular imports

@@ -146,10 +146,109 @@
         },
         "additionalProperties": true
       }
+    },
+    "runtimePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "externalVariableWrites": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "allowedNodeIds": {
+                "type": "array",
+                "items": { "type": "string" },
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "required": ["nodes"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "goal": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "facts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/progressFact" }
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 18,
+          "items": {
+            "type": "object",
+            "required": ["id", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "content": { "$ref": "#/$defs/progressContent" },
+              "connections": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "default": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false,
   "$defs": {
+    "progressNodeId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Static user-facing progress node activated while this primary node is current"
+    },
+    "progressActiveLabel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "Template-enabled milestone label rendered only while this exact primary node is current"
+    },
+    "progressContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "details": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
+        "outcome": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "next": { "type": "string", "minLength": 1, "maxLength": 500 }
+      },
+      "minProperties": 1
+    },
+    "progressFact": {
+      "type": "object",
+      "required": ["label", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "tone": {
+          "type": "string",
+          "enum": ["neutral", "positive", "warning", "critical"]
+        }
+      }
+    },
+    "progressActiveContent": {
+      "allOf": [{ "$ref": "#/$defs/progressContent" }],
+      "description": "Template-enabled presentation merged into the active milestone while this exact primary node is current"
+    },
     "startNode": {
       "type": "object",
       "required": ["type", "id", "connections"],
@@ -161,6 +260,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "initialData": {
           "type": "object",
           "properties": {
@@ -208,6 +308,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "finalOutput": {
           "type": "array",
           "items": {
@@ -228,6 +329,9 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "directive": {
           "type": "string",
           "minLength": 1
@@ -282,6 +386,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "condition": {
           "type": "object"
         },
@@ -313,6 +418,9 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "graphId": {
           "type": "string",
           "minLength": 1,
@@ -369,6 +477,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "message": {
           "type": "string",
           "minLength": 1,
@@ -387,6 +496,10 @@
         "disableNotification": {
           "type": "boolean",
           "description": "Send message silently without notification"
+        },
+        "attachProgressImage": {
+          "type": "boolean",
+          "description": "Attach the current workflow progress graph as a PNG photo"
         },
         "connections": {
           "type": "object",
@@ -448,7 +561,18 @@
           "additionalProperties": false
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "attachProgressImage": { "const": true } },
+            "required": ["attachProgressImage"]
+          },
+          "then": {
+            "properties": { "message": { "maxLength": 1024 } }
+          }
+        }
+      ]
     },
     "expressionNode": {
       "type": "object",
@@ -461,6 +585,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "expressions": {
           "type": "array",
           "minItems": 1,
@@ -503,6 +628,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "outputVariable": {
           "type": "string",
           "minLength": 1,
@@ -563,6 +689,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "key": {
           "type": "string",
           "description": "Note key (supports template expressions). Required in single mode."
@@ -616,6 +743,7 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "search": {
           "type": "object",
           "properties": {
@@ -684,6 +812,9 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "directive": {
           "type": "string",
           "minLength": 1
@@ -733,6 +864,9 @@
           "type": "string",
           "minLength": 1
         },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "reason": {
           "type": "string",
           "minLength": 1,
@@ -762,6 +896,9 @@
       "properties": {
         "type": { "const": "materialize" },
         "id": { "type": "string", "minLength": 1 },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "basePath": { "type": "string", "minLength": 1 },
         "files": {
           "type": "array",

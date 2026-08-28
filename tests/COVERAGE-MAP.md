@@ -47,6 +47,8 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/e2e/admin-analytics.spec.ts`
 - `tests/e2e/admin-execution-errors.spec.ts`
+- `tests/e2e/execution-progress-ui.spec.ts` — real execution inspector desktop/mobile progress states, repair arc, long labels, technical-node focus, tab preservation and no-progress compatibility with inspected screenshots
+- `tests/e2e/sdf-progress-ui.spec.ts` — actual bundled SDF 15.2 projection rendered through the shared model as desktop/mobile UI and matching PNG evidence for plan, implementation, tests, review, and completion states
 - `tests/e2e/admin-executions.spec.ts`
 - `tests/e2e/admin-user-security.spec.ts`
 - `tests/e2e/operational-dashboard.spec.ts`
@@ -252,7 +254,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/error-logging-flow.test.ts`
+- `tests/integration/error-logging-flow.test.ts` — durable validation/system-error history, idempotent cancellation, and the distinct persisted progress projections of real cancellation versus normal graph completion
 - `tests/integration/subgraph-error-scenarios.test.ts` — root/child/grandchild error provenance, durable root ownership, authored recovery edges, and persisted root/one/nested retry exhaustion without mutation replay
 
 **api**
@@ -411,8 +413,14 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/workflow-cli/workflow-schema.test.ts` — deterministic complete workflow control-flow schemas: locale-independent canonical edge/mapping order, basic blocks, conditions, many independent cycles, separate start/teleport/disconnected reachability, dangling edges, current node data-flow declarations including batch write-note and materialize registry reads, context references, deep iterative traversal, terminal-control-safe structural tokens, non-mutation, and duplicate-ID rejection
+- `tests/unit/mcp-server/progress-authoring-schema.test.ts` — MCP manage rich-progress goal/facts/content acceptance plus strict unknown-field and bound rejection
+
+- `tests/unit/workflow-cli/workflow-schema.test.ts` — deterministic complete workflow control-flow schemas: locale-independent canonical edge/mapping order, basic blocks, conditions, many independent cycles, separate start/teleport/disconnected reachability, dangling edges, current node data-flow declarations including batch write-note and materialize registry reads, complete ordered progress topology and structured content with backward display edges and many-to-one primary mappings, context references, deep iterative traversal, terminal-control-safe structural tokens, non-mutation, and duplicate-ID rejection
 - `tests/unit/scripts/workflow-tool-identity.test.ts` — set-name and set-slug: exact replacement, kebab-case validation, catalog-entry warning, version bump, and no collateral change to slug/owner/description/nodes
+- `tests/unit/scripts/workflow-tool-progress.test.ts` — static rich progress graph set/clear, node mapping and active-only label/content set/clear/scope, Telegram attachment set/clear, malformed input, and wrong-node-type rejection
+- `tests/unit/workflow-engine/execution-progress.test.ts` — rich progress task/goal/facts/content projection, active merge and exact context-revision replacement, pending-outcome suppression, mapped terminal completion frontiers with legacy fallback, nested template-reference and injection protection, definition and post-interpolation output bounds with explicit overflow failure, mapping/scope rules, immutability, completion/cancellation, and label-only compatibility
+- `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared rich visual model, full-text wrapping, deterministic multi-row and loop/cross-row edges, SVG escaping, semantic content in PNG, byte determinism, theme/state differences, and image metadata bounds
+- `tests/unit/web-frontend/execution-progress-strip.test.tsx` — always-visible task/goal/facts/stage content, textual state and current-step accessibility, mapped-node focus, and readable non-actionable milestones without hover
 - `tests/unit/scripts/workflow-tool-variables.test.ts` — incl. registry-backed globals, metadata, file-backed arguments, source diagnostics, fail-fast validation, atomic replace/sync, End projection/path qualification, and inert-retry migration
 - `tests/unit/services/mcp-text-service.test.ts`
 
@@ -710,7 +718,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress materialize grant URLs from access logs
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress materialize grant URLs from access logs and accept request bodies up to the backend parser limit
 - `tests/unit/shared/logging/express-middleware.test.ts` — materialize grant redaction with routing/query preservation and unrelated-URL non-regression
 - `tests/unit/web-backend/execution-materialize.test.ts` — current-definition fetch, execution binding, tar response, one-use endpoint behavior, non-consumption on render overflow, and expected-4xx versus unexpected-boundary error mapping
 - `tests/unit/logging/compute-changes.test.ts`
@@ -720,11 +728,23 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/web-frontend/workflow-transformer.test.ts` — including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning
 - `tests/unit/workflow-engine/variable-resolver.test.ts`
 - `tests/unit/workflow-engine/workflow-schema-keywords.test.ts` — ordered unique-reference plans, deep evidence-prefix correlation, protected plan prefixes, non-mutating blocked responses, global-input inlining, and GraphValidator keyword registration
+- `tests/unit/workflow-engine/execution-parent-revision.test.ts` — optimistic execution revision rejects stale full saves and context mutations; same-owner running parent attach, replace, detach and idempotent repetition preserve revision semantics, while foreign, completed, cyclic and stale changes leave state untouched; database integration additionally proves concurrent inverse changes cannot commit a cycle
+- `tests/unit/workflow-engine/execution-reminders.test.ts` — standalone/child completion-only reminder delivery, literal template-like text, no intermediate leakage, idempotent add/conflict, targeted update/cancel and sibling preservation
+- `tests/unit/workflow-engine/execution-progress.test.ts` — static progress schema/semantic validation, template rendering, index-derived loop/replan state, completion-vs-cancellation persistence shape, many-to-one focus metadata and projection immutability
+- `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared horizontal visual model, forward/backward geometry, deterministic light/dark PNG bytes, state differences, bounds and image decoding
+- `tests/unit/workflow-engine/execution-progress-wrapper.test.ts` — public workflow/execution image API metadata and byte parity, null no-progress behavior, render failure propagation, and input immutability
+- `tests/unit/workflow-engine/progress-image-service.test.ts` — normalized revision/version/options-bound grants, successful single use, render-failure non-consumption and stale-revision denial
+- `tests/unit/workflow-engine/telegram-client-photo.test.ts` — reusable MIME-aware Telegram multipart photo transport with exact bytes, caption/options and empty/oversized pre-allocation rejection
+- `tests/unit/web-backend/execution-progress-image.test.ts` — progress image reservation completion on response finish and release on close/write failure
+- `tests/unit/web-frontend/execution-progress-strip.test.tsx` — shared-model progress states/back edge, current accessibility and deterministic technical-node focus callbacks
+- `tests/api/execution-parent-api.test.ts` — authenticated HTTP parent attach, idempotent repetition, replacement, detach, detail projection, and stale-revision conflict against executions created through the public MCP start surface
+- `tests/api/execution-reminders-api.test.ts` — authenticated HTTP reminder add/idempotent retry/filter/update/cancel and revisioned retained history against an execution created through public MCP start
+- `tests/mcp-tools/execution-variables.test.ts` — MCP/HTTP runtime ownership, filters (including false/current/other branches), unknown versus unset, effective editability/denial reasons, revisioned schema-valid top-level and inspector-path mutation, unchanged sibling/node state on path rejection, audit redaction, definition discovery and HTTP policy authoring/invalid-policy reporting; progress create/edit preservation, strict rejection without mutation of forbidden progress/node/connection fields, transport identity, owner/administrator/foreign access, and absent-definition errors
 - `tests/unit/workflow-engine/registry-converter.test.ts`
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection
 - `tests/unit/workflow-engine/strict-schema-validation.test.ts` — recursive strict JSON Schema normalization
 - `tests/unit/workflow-engine/telegram-inline-keyboard.test.ts` — Telegram inline-keyboard schema and rendering contracts
-- `tests/unit/workflow-engine/template-injection-and-validation.test.ts` — template-injection protection and runtime placeholder validation
+- `tests/unit/workflow-engine/template-injection-and-validation.test.ts` — template-injection protection, runtime placeholder validation, and structured StartNode initialData recognition for registry writer analysis
 
 **integration**
 
@@ -813,7 +833,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/content-creation.test.ts` — v2 durable text-deliverable contract; immutable brief and cumulative correction; evidence/content/brief repair cones; strict active-request schemas; complete, limited, blocked, materialize-error, interactive rework and process revision; originating target-bound publication and independent Telegram outcomes
 - `tests/workflow/scenarios/coverage.test.ts`
 - `tests/workflow/scenarios/data-analysis.test.ts` — public identity and detailed neighboring-flow description; immutable source authority separated from typed acquisition evidence; schema rejection of invented availability, incomplete source projection, and hidden canonical mutation; autonomous and interactive runs; inline and filesystem delivery; reviewed limited results; readiness and final repair reaches; guarded process revision; complete ordinary node and branch coverage
-- `tests/workflow/scenarios/development-workflow.test.ts` — v14.1.1 repository-grounded preparation, complete vertical implementation, fresh producer completion with direct-correction/no-findings-only ownership, and completion-before-validation ordering; preparation/completion replans; route-owned ordinary versus bounded-rationale teleport plan revision with valid boundary and missing/empty/oversized rejection; product-repair completion re-entry versus exact contiguous verification-only and gate-local route segments through their stable boundaries; autonomous and gated operation; local semantic gates and delegated completeness review; cause-aware pass/repair/replan contracts; discriminating evidence without surrogate proof; meta-validation drift stop; bounded class-wide repair; architecture-currency reset and invalidation; acceptance, rejection, blockers, VCS, documentation, checkpoint, finalization, and complete executable node/branch coverage
+- `tests/workflow/scenarios/development-workflow.test.ts` — v15.4 seven-stage content-rich execution progress with bounded producer-owned outcomes, accepted-plan synopsis, always-authoritative plan fact, complete waiting-node mapping, truthful active unit/iteration/validation/review/repair content, pending-outcome suppression, mapped normal/early terminal frontiers, multi-unit/replan/finalization projection and authorized Telegram image attachment; development-only planning with caller-owned follow-ups stored as standalone/child completion reminders rather than plan units or authority; one intake visual preference and current-plan-owned `disabled`/`screenshots`/`html_report` plus approval policy; autonomous activation without approval directives and interactive plan/unit/final attention; one screenshot evidence pass reused by execution-linked HTML artifact upload; approval-independent report retention; unit-owned permanent documentation with non-duplicative final reconciliation; distinct normal/stopped terminal notifications; repository-grounded preparation, fresh producer completion, cause-aware repair/replan cones, architecture-currency invalidation, teleport boundaries, Artifact failure contract, VCS authority, and complete executable node/branch coverage
 - `tests/workflow/scenarios/execution-retrospective.test.ts` — catalog identity/version, exact archive materialization, sufficient/partial/unavailable semantic fixtures, independent analysis/final review oracles, proposal-only authority, all nodes/branches and contained/spreading repair routes
 - `tests/workflow/scenarios/directive-validation.test.ts`
 - `tests/workflow/scenarios/infinite-task-loop.test.ts` — public identity/version and detailed neighboring-flow description; exact current-task state; atomic cross-task reset; strict decision and feedback schemas; authority and persistence boundaries; plan revision, result rework, and complete executable node and branch coverage
@@ -840,7 +860,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/universal-research-workflow.test.ts` — public identity/version and neighboring-flow selection description; filesystem and bounded-memory state; execution-bound workspace; authority and evidence-truth boundaries; independent reviews and repair reaches; publication and notification authority; correction, process revision, abort, and materialization fallback
 - `tests/workflow/scenarios/ux-design.test.ts` — public identity/version and neighboring-flow selection description; execution workspace; correlated intake, artifact-path, reviewer, repair, feedback, and authority contracts; foreign-path rejection; accepted, limited, blocked, aborted, repair, feedback, and process-revision outcomes
 - `tests/workflow/scenarios/verified-research.test.ts` — v3 public identity and neighboring-tier selection; execution-correlated evidence package; canonical ready/limited/replan/blocked evidence class; strict autonomous clarification and terminal schemas; deterministic versus independent semantic judgment; answer/evidence repair stale cones; corrected-contract findings; complete, limited, blocked, aborted, materialize-error, interactive rework, and guarded process-revision routes; complete ordinary node and branch coverage
-- `tests/workflow/scenarios/workflow-management-flow.test.ts` — embedded authoring policy, minimal state and operating-mode routing; shared pre-mutation design review; pass/repair/replan and changed/reassess routing; Proxy, scanner, metatest, guard, and proof-token regression fixtures; create, edit, audit, publication, error, local-sync, autonomous, and process-revision routes; complete node and branch coverage
+- `tests/workflow/scenarios/workflow-management-flow.test.ts` — v6.5 embedded authoring policy and six-stage content-rich progress with bounded producer-owned outcomes, complete waiting-node mappings/labels, conditional active content, revision/repair invalidation sets, source/create/edit/review/delivery ownership and old-server stored-field compatibility; minimal state and operating-mode routing; shared pre-mutation design review; pass/repair/replan and changed/reassess routing; Proxy, scanner, metatest, guard, and proof-token regression fixtures; create, edit, audit, publication, error, local-sync, autonomous, and process-revision routes; complete node and branch coverage
 - `tests/workflow/scenarios/workflow-presentation-generator.test.ts` — v2 complete ID/file source and official structural projection; execution-bound local package; source-grounded business and complete progressive-disclosure topology; self-contained network-independent HTML; deterministic versus independent semantic/visual gates; source/content/HTML/validation/completion repair and corrected-contract routes; complete/limited/blocked/abort/materialization outcomes and local-only authority
 
 ## Agent Instructions

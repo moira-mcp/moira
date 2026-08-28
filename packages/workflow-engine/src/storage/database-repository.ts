@@ -31,6 +31,7 @@ import {
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { WorkflowExecution } from "../types/base-types.js";
+import type { ReminderMutation, ReminderMutationResult } from "../types/base-types.js";
 import { createLogger } from "@mcp-moira/shared";
 
 export class DatabaseRepository implements IDataRepository {
@@ -231,15 +232,46 @@ export class DatabaseRepository implements IDataRepository {
     return await this.executionRepo.appendError(executionId, error);
   }
 
+  async cancelExecution(
+    executionId: string,
+    error: ExecutionError,
+  ): Promise<{ changed: boolean; execution: WorkflowExecution | null }> {
+    return await this.executionRepo.cancelExecution(executionId, error);
+  }
+
   async findActiveChildExecutions(parentExecutionId: string): Promise<string[]> {
     return await this.executionRepo.findActiveChildExecutions(parentExecutionId);
+  }
+
+  async setExecutionParent(
+    executionId: string,
+    parentExecutionId: string | null,
+    userId: string,
+    expectedRevision: number,
+  ): Promise<WorkflowExecution> {
+    return await this.executionService.setParent(
+      executionId,
+      parentExecutionId,
+      userId,
+      expectedRevision,
+    );
+  }
+
+  async mutateExecutionReminder(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    mutation: ReminderMutation,
+  ): Promise<ReminderMutationResult> {
+    return this.executionService.mutateReminder(executionId, userId, expectedRevision, mutation);
   }
 
   async updateExecutionContext(
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
+    expectedRevision: number,
   ): Promise<boolean> {
-    return await this.executionRepo.updateContext(executionId, context);
+    return await this.executionRepo.updateContext(executionId, context, expectedRevision);
   }
 
   // === Settings Operations ===

@@ -65,36 +65,6 @@ test.describe("Admin Execution Inspector Error Display", () => {
     } else {
       console.error("Failed to extract execution ID from:", result);
     }
-
-    // Update execution via API to add error for testing
-    // First login to get admin session cookie
-    const loginResponse = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: ADMIN_USER.email,
-        password: ADMIN_USER.password,
-      }),
-    });
-    const cookies = loginResponse.headers.get("set-cookie");
-    const sessionCookie = cookies?.match(/better-auth\.session_token=[^;]+/)?.[0];
-
-    if (sessionCookie) {
-      // Update execution context to add nodeStates with error
-      await fetch(`${FETCH_URL}/api/admin/executions/${executionId}/context`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: sessionCookie,
-        },
-        body: JSON.stringify({
-          nodeStates: {
-            "test-node-1": { error: "Test node error message for E2E testing" },
-          },
-        }),
-      });
-      console.log("✓ Added node error to execution context");
-    }
   });
 
   test.afterAll(async () => {
@@ -177,18 +147,6 @@ test.describe("Admin Execution Inspector Error Display", () => {
     // Verify execution ID is available
     expect(executionId).toBeDefined();
     expect(executionId).not.toBeNull();
-
-    // First, set execution-level error via API
-    const loginResponse = await fetch(`${FETCH_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: ADMIN_USER.email,
-        password: ADMIN_USER.password,
-      }),
-    });
-    const cookies = loginResponse.headers.get("set-cookie");
-    const sessionCookie = cookies?.match(/better-auth\.session_token=[^;]+/)?.[0];
 
     // Note: execution.error is typically set by the workflow engine when execution fails
     // For this test, we verify the UI would display it if present

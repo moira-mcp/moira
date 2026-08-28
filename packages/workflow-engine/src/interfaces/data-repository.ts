@@ -5,7 +5,11 @@
  */
 
 import { WorkflowGraph } from "./core-interfaces.js";
-import { WorkflowExecution } from "../types/base-types.js";
+import {
+  WorkflowExecution,
+  type ReminderMutation,
+  type ReminderMutationResult,
+} from "../types/base-types.js";
 import type {
   ExecutionFilter,
   ExecutionListResult,
@@ -220,12 +224,30 @@ export interface IDataRepository {
    * @returns true if error was appended, false if execution not found
    */
   appendError(executionId: string, error: ExecutionError): Promise<boolean>;
+  cancelExecution(
+    executionId: string,
+    error: ExecutionError,
+  ): Promise<{ changed: boolean; execution: WorkflowExecution | null }>;
 
   /**
    * Find active (running/waiting) child executions for a parent execution
    * Returns executionIds of children that are still running
    */
   findActiveChildExecutions(parentExecutionId: string): Promise<string[]>;
+
+  setExecutionParent(
+    executionId: string,
+    parentExecutionId: string | null,
+    userId: string,
+    expectedRevision: number,
+  ): Promise<WorkflowExecution>;
+
+  mutateExecutionReminder(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    mutation: ReminderMutation,
+  ): Promise<ReminderMutationResult>;
 
   // === Settings Operations ===
 

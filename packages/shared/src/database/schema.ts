@@ -224,6 +224,8 @@ export const workflowExecution = sqliteTable("workflowExecution", {
   errors: text("errors"), // JSON array of ExecutionError (Issue #386)
   note: text("note"), // User-provided note for identification (max 500 chars)
   parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
+  revision: integer("revision").notNull().default(0), // Optimistic concurrency revision
+  reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
   createdAt: integer("createdAt", { mode: "timestamp_ms" }),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
   completedAt: integer("completedAt", { mode: "timestamp_ms" }),
@@ -312,6 +314,11 @@ export const workflowTokens = sqliteTable("workflow_tokens", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   type: text("type").notNull(), // 'upload' | 'download' | 'materialize'
+  workflowVersion: text("workflow_version"),
+  executionRevision: integer("execution_revision"),
+  optionsJson: text("options_json"),
+  claimId: text("claim_id"),
+  claimedAt: integer("claimed_at", { mode: "timestamp_ms" }),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   used: integer("used", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

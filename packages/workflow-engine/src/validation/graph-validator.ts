@@ -91,6 +91,13 @@ function exceedsValidationComplexity(input: unknown): boolean {
 export class GraphValidator {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private ajv: any;
+  // Exact discriminator branches validate untrusted node bodies fail-fast. The aggregate workflow
+  // validator may collect all top-level findings, but recursively reporting every nested node error
+  // lets a small adversarial schema amplify validation work.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private nodeAjv: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private nodeValidators = new Map<string, any>();
   private schema: object;
   private logger = createLogger({ component: "GraphValidator" });
 
@@ -138,6 +145,14 @@ export class GraphValidator {
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (addFormatsModule as any).default(this.ajv);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.nodeAjv = new (AjvModule as any).default({
+      allErrors: false,
+      verbose: true,
+      strict: false,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (addFormatsModule as any).default(this.nodeAjv);
 
     // Load schema - handle both source and compiled contexts
     const defaultSchemaPath = this.resolveSchemaPath(schemaPath);
@@ -180,7 +195,7 @@ export class GraphValidator {
 
     for (const error of ajvErrors) {
       // Extract node index from instancePath (e.g., "/nodes/1/type")
-      const nodeMatch = error.instancePath?.match(/\/nodes\/(\d+)/);
+      const nodeMatch = error.instancePath?.match(/^\/nodes\/(\d+)(?:\/|$)/);
       if (nodeMatch) {
         const nodeIndex = parseInt(nodeMatch[1], 10);
         const node = workflow.nodes?.[nodeIndex];
@@ -213,8 +228,8 @@ export class GraphValidator {
     }
 
     // Process node errors - filter by actual node type
-    for (const [, nodeData] of errorsByNode) {
-      const { nodeType, nodeId, errors: nodeErrors } = nodeData;
+    for (const [nodeIndex, nodeData] of errorsByNode) {
+      const { nodeType, nodeId } = nodeData;
 
       if (!nodeType) {
         // No type specified - show generic error
@@ -253,36 +268,20 @@ export class GraphValidator {
         continue;
       }
 
-      // Filter errors to show only those relevant to this node type
-      // Skip oneOf errors and type mismatches from other branches
-      const relevantErrors = nodeErrors.filter((error) => {
-        // Skip generic oneOf wrapper errors
-        if (error.keyword === "oneOf") {
-          return false;
-        }
-
-        // Skip type constant errors from non-matching branches
-        if (error.keyword === "const" && error.schemaPath?.includes("type")) {
-          return false;
-        }
-
-        // Skip "must NOT have additional properties" from wrong branch
-        if (error.keyword === "additionalProperties") {
-          // Check if error is from wrong branch by looking at schemaPath
-          if (error.schemaPath && !error.schemaPath.includes(expectedDef)) {
-            return false;
-          }
-        }
-
-        // Skip required property errors from wrong branches
-        if (error.keyword === "required" && error.schemaPath) {
-          if (!error.schemaPath.includes(expectedDef)) {
-            return false;
-          }
-        }
-
-        return true;
-      });
+      // AJV may inline local $refs, so errors from oneOf branches no longer reliably carry the
+      // definition name in schemaPath. Validate the observed node against its exact discriminator
+      // branch instead of guessing which flattened errors belong to it.
+      const node = workflow.nodes?.[nodeIndex];
+      let validateNode = this.nodeValidators.get(expectedDef);
+      if (!validateNode) {
+        validateNode = this.nodeAjv.compile({
+          $ref: `#/$defs/${expectedDef}`,
+          $defs: (this.schema as { $defs: Record<string, unknown> }).$defs,
+        });
+        this.nodeValidators.set(expectedDef, validateNode);
+      }
+      validateNode(node);
+      const relevantErrors = validateNode.errors ?? [];
 
       // Create readable error messages for this node
       if (relevantErrors.length > 0) {
@@ -621,6 +620,9 @@ export class GraphValidator {
     // Template syntax validation
     issues.push(...this.validateTemplates(workflow));
 
+    // Static user-facing progress graph and primary-node mappings.
+    issues.push(...this.validateProgress(workflow));
+
     // Check for unreachable nodes (exclude teleport nodes — they are jump targets)
     const reachableNodes = this.findReachableNodes(workflow);
     const unreachableNodes = workflow.nodes
@@ -651,6 +653,136 @@ export class GraphValidator {
 
     // Validate each variableRegistry entry is a well-formed JSON Schema
     issues.push(...this.validateRegistryEntries(workflow));
+
+    return issues;
+  }
+
+  private validateProgress(workflow: WorkflowGraph): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const progress = workflow.progress;
+    const mappedNodes = workflow.nodes.filter((node) => node.progressNodeId);
+    if (!progress) {
+      for (const node of workflow.nodes) {
+        if (node.type === "telegram-notification" && node.attachProgressImage) {
+          issues.push({
+            type: "structure",
+            severity: "error",
+            nodeId: node.id,
+            field: "attachProgressImage",
+            message: `Telegram node '${node.id}' cannot attach progress without a progress graph.`,
+          });
+        }
+      }
+      for (const node of mappedNodes) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `Node '${node.id}' declares progressNodeId but the workflow has no progress graph.`,
+        });
+      }
+      return issues;
+    }
+
+    const ids = new Set<string>();
+    for (const [index, node] of progress.nodes.entries()) {
+      if (ids.has(node.id)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          field: `progress.nodes[${index}].id`,
+          message: `Duplicate progress node id '${node.id}'.`,
+        });
+      }
+      ids.add(node.id);
+    }
+    for (const [index, node] of progress.nodes.entries()) {
+      const target = node.connections?.default;
+      if (target && !ids.has(target)) {
+        issues.push({
+          type: "connection",
+          severity: "error",
+          field: `progress.nodes[${index}].connections.default`,
+          message: `Progress connection references non-existent progress node '${target}'.`,
+        });
+      }
+    }
+
+    const visibleWaitingTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    for (const node of workflow.nodes) {
+      if (node.progressNodeId && !ids.has(node.progressNodeId)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `Node '${node.id}' references unknown progress node '${node.progressNodeId}'.`,
+        });
+      }
+      if (visibleWaitingTypes.has(node.type) && !node.progressNodeId) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `User-visible waiting node '${node.id}' must declare progressNodeId.`,
+        });
+      }
+      if (node.progressActiveLabel && !visibleWaitingTypes.has(node.type)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveLabel",
+          message: `Node '${node.id}' cannot declare progressActiveLabel because it is not a user-visible waiting node.`,
+        });
+      } else if (node.progressActiveLabel && !node.progressNodeId) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveLabel",
+          message: `Node '${node.id}' must declare progressNodeId when progressActiveLabel is set.`,
+        });
+      }
+      if (node.progressActiveContent && !visibleWaitingTypes.has(node.type)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveContent",
+          message: `Node '${node.id}' cannot declare progressActiveContent because it is not a user-visible waiting node.`,
+        });
+      } else if (node.progressActiveContent && !node.progressNodeId) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveContent",
+          message: `Node '${node.id}' must declare progressNodeId when progressActiveContent is set.`,
+        });
+      }
+      if (
+        node.type === "telegram-notification" &&
+        node.attachProgressImage &&
+        !node.progressNodeId
+      ) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `Telegram node '${node.id}' must declare progressNodeId when attachProgressImage is enabled.`,
+        });
+      }
+    }
 
     return issues;
   }
@@ -731,6 +863,30 @@ export class GraphValidator {
           }
         } catch {
           // The registry schema compilation issue is already reported above.
+        }
+      }
+    }
+
+    for (const [name, rule] of Object.entries(
+      workflow.runtimePolicy?.externalVariableWrites ?? {},
+    )) {
+      if (!registry[name]) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          field: `runtimePolicy.externalVariableWrites.${name}`,
+          message: `External-write policy references undeclared variable '${name}'.`,
+        });
+      }
+      for (const nodeId of rule.allowedNodeIds ?? []) {
+        const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+        if (!node || node.type !== "agent-directive") {
+          issues.push({
+            type: "structure",
+            severity: "error",
+            field: `runtimePolicy.externalVariableWrites.${name}.allowedNodeIds`,
+            message: `External-write node '${nodeId}' must be an agent-directive node.`,
+          });
         }
       }
     }
@@ -1612,6 +1768,35 @@ export class GraphValidator {
           );
         }
       }
+
+      if (node.progressActiveLabel) {
+        issues.push(
+          ...this.validateTemplateField(
+            node.progressActiveLabel,
+            node.id,
+            "progressActiveLabel",
+            definedVariables,
+          ),
+        );
+      }
+      if (node.progressActiveContent) {
+        const content = node.progressActiveContent;
+        for (const [field, value] of Object.entries(content)) {
+          const values = Array.isArray(value) ? value : [value];
+          for (const [index, template] of values.entries()) {
+            issues.push(
+              ...this.validateTemplateField(
+                template,
+                node.id,
+                Array.isArray(value)
+                  ? `progressActiveContent.${field}[${index}]`
+                  : `progressActiveContent.${field}`,
+                definedVariables,
+              ),
+            );
+          }
+        }
+      }
     }
 
     // Templates embedded in registry variable default values are processed recursively at
@@ -1629,6 +1814,72 @@ export class GraphValidator {
               { undefinedVarsOnly: true },
             ),
           );
+        }
+      }
+    }
+
+    if (workflow.progress) {
+      if (workflow.progress.title) {
+        issues.push(
+          ...this.validateTemplateField(
+            workflow.progress.title,
+            "progress",
+            "title",
+            definedVariables,
+          ),
+        );
+      }
+      if (workflow.progress.goal) {
+        issues.push(
+          ...this.validateTemplateField(
+            workflow.progress.goal,
+            "progress",
+            "goal",
+            definedVariables,
+          ),
+        );
+      }
+      for (const [index, fact] of (workflow.progress.facts ?? []).entries()) {
+        issues.push(
+          ...this.validateTemplateField(
+            fact.label,
+            "progress",
+            `facts[${index}].label`,
+            definedVariables,
+          ),
+          ...this.validateTemplateField(
+            fact.value,
+            "progress",
+            `facts[${index}].value`,
+            definedVariables,
+          ),
+        );
+      }
+      for (const [index, progressNode] of workflow.progress.nodes.entries()) {
+        issues.push(
+          ...this.validateTemplateField(
+            progressNode.label,
+            `progress.${progressNode.id}`,
+            `nodes[${index}].label`,
+            definedVariables,
+          ),
+        );
+        if (progressNode.content) {
+          for (const [field, value] of Object.entries(progressNode.content)) {
+            const values = Array.isArray(value) ? value : [value];
+            for (const [valueIndex, template] of values.entries()) {
+              issues.push(
+                ...this.validateTemplateField(
+                  template,
+                  `progress.${progressNode.id}`,
+                  Array.isArray(value)
+                    ? `nodes[${index}].content.${field}[${valueIndex}]`
+                    : `nodes[${index}].content.${field}`,
+                  definedVariables,
+                ),
+              );
+            }
+          }
         }
       }
     }
@@ -1743,13 +1994,8 @@ export class GraphValidator {
       }
       // start node seeds its initialData
       if (node.type === "start") {
-        const init = (node as { initialData?: Record<string, unknown> }).initialData;
-        if (init && typeof init === "object") {
-          for (const k of Object.keys(init)) seededOrWritten.add(k);
-          const vars = (init as { variables?: Record<string, unknown> }).variables;
-          if (vars && typeof vars === "object")
-            for (const k of Object.keys(vars)) seededOrWritten.add(k);
-        }
+        const vars = node.initialData?.variables;
+        if (vars) for (const k of Object.keys(vars)) seededOrWritten.add(k);
       }
     }
 

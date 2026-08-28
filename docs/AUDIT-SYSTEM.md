@@ -394,12 +394,6 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 
 **Logged via:** REST API (`/api/admin/settings/definitions`, `/api/admin/global-settings`)
 
-### Admin Execution Management
-
-- `ADMIN_UPDATE_EXECUTION_CONTEXT` - admin changed an execution context
-
-**Logged via:** REST API (`/api/admin/executions/:id/context`)
-
 ### Admin Database Operations
 
 - `ADMIN_VACUUM_DB` - admin ran a database vacuum

@@ -24,15 +24,13 @@ import {
   normalizeError,
   logAuditEventDirect,
   AuditAction,
+  isExecutionParentReference,
 } from "@mcp-moira/shared";
 import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "StartWorkflow" });
 
 const MAX_NOTE_LENGTH = 500;
-
-// UUID v4 regex pattern
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface StartWorkflowParams extends WorkflowSpecificParams {
   workflowId: string;
@@ -60,14 +58,17 @@ function sanitizeNote(note?: string): string | undefined {
  * - Valid UUID must reference existing execution
  * - Returns undefined for "none", throws on invalid
  */
-async function validateParentExecutionId(parentExecutionId: string): Promise<string | undefined> {
+async function validateParentExecutionId(
+  parentExecutionId: string,
+  userId: string,
+): Promise<string | undefined> {
   // "none" means standalone workflow - no parent
   if (parentExecutionId === "none") {
     return undefined;
   }
 
   // Validate UUID format
-  if (!UUID_REGEX.test(parentExecutionId)) {
+  if (!isExecutionParentReference(parentExecutionId)) {
     throw new Error(ERRORS.parent_execution_id_invalid_format);
   }
 
@@ -76,6 +77,12 @@ async function validateParentExecutionId(parentExecutionId: string): Promise<str
   const execution = await engine.repository.getExecution(parentExecutionId);
   if (!execution) {
     throw new Error(ERRORS.parent_execution_not_found(parentExecutionId));
+  }
+  if (execution.userId !== userId) {
+    throw new Error("Parent execution must belong to the authenticated user");
+  }
+  if (execution.status !== "running") {
+    throw new Error("Parent execution must be running");
   }
 
   return parentExecutionId;
@@ -155,7 +162,7 @@ export async function startWorkflow(params: StartWorkflowParams): Promise<ToolRe
     userId = context.userId;
 
     // Validate parentExecutionId (required field)
-    const validatedParentId = await validateParentExecutionId(params.parentExecutionId);
+    const validatedParentId = await validateParentExecutionId(params.parentExecutionId, userId);
 
     // Sanitize note
     const sanitizedNote = sanitizeNote(params.note);

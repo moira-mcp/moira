@@ -87,6 +87,10 @@ describe("Workflow File Tokens", () => {
       "materialize-token-execution",
     );
     db.prepare("DELETE FROM workflow WHERE id = ?").run("materialize-token-workflow");
+    db.prepare("DELETE FROM workflowExecution WHERE executionId = ?").run(
+      "progress-token-execution",
+    );
+    db.prepare("DELETE FROM workflow WHERE id = ?").run("progress-token-workflow");
     jest.restoreAllMocks();
   });
 
@@ -112,6 +116,21 @@ describe("Workflow File Tokens", () => {
        (executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId, context, createdAt, updatedAt)
        VALUES (?, ?, ?, 'running', 'materialize', 'materialize', '{}', ?, ?)`,
     ).run("materialize-token-execution", "materialize-token-workflow", testUserId, now, now);
+  }
+
+  function seedProgressExecution(): void {
+    const db = getSqliteInstance();
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO workflow
+       (id, userId, slug, name, version, graph, visibility, createdAt, updatedAt)
+       VALUES ('progress-token-workflow', ?, 'progress-token-workflow', 'Progress', '2.0.0', '{}', 'private', ?, ?)`,
+    ).run(testUserId, now, now);
+    db.prepare(
+      `INSERT INTO workflowExecution
+       (executionId, workflowId, userId, state, currentNodeId, context, revision, createdAt, updatedAt)
+       VALUES ('progress-token-execution', 'progress-token-workflow', ?, 'running', 'work', '{}', 3, ?, ?)`,
+    ).run(testUserId, now, now);
   }
 
   test("createUploadToken generates valid token", () => {
@@ -206,6 +225,77 @@ describe("Workflow File Tokens", () => {
     expect(
       getSqliteInstance().prepare("SELECT COUNT(*) AS count FROM workflow_tokens").get(),
     ).toEqual({ count: 0 });
+  });
+
+  test("progress image token is bound, expires, and claims once only while current", () => {
+    seedProgressExecution();
+    const now = 1_800_000_000_000;
+    jest.spyOn(Date, "now").mockReturnValue(now);
+    const token = tokenManager.createProgressImageToken(
+      "progress-token-execution",
+      "progress-token-workflow",
+      testUserId,
+      "2.0.0",
+      3,
+      '{"theme":"dark","viewportWidth":720}',
+      1000,
+    );
+    const data = tokenManager.getTokenData(token)!;
+    expect(data).toMatchObject({
+      type: "progress-image",
+      workflowVersion: "2.0.0",
+      executionRevision: 3,
+      optionsJson: '{"theme":"dark","viewportWidth":720}',
+      used: false,
+    });
+    expect(data.expiresAt).toBe(now + 1000);
+    const expiring = tokenManager.createProgressImageToken(
+      "progress-token-execution",
+      "progress-token-workflow",
+      testUserId,
+      "2.0.0",
+      3,
+      "{}",
+      1000,
+    );
+    const clock = jest.spyOn(Date, "now");
+    clock.mockReturnValue(now + 999);
+    expect(tokenManager.validateToken(expiring, "progress-image")).not.toBeNull();
+    clock.mockReturnValue(now + 1000);
+    expect(tokenManager.validateToken(expiring, "progress-image")).toBeNull();
+    clock.mockReturnValue(now);
+    expect(tokenManager.reserveProgressImageToken(token, "claim-a")).toBe(true);
+    expect(tokenManager.reserveProgressImageToken(token, "claim-b")).toBe(false);
+    expect(tokenManager.releaseProgressImageToken(token, "claim-a")).toBe(true);
+    expect(tokenManager.reserveProgressImageToken(token, "claim-b")).toBe(true);
+    expect(tokenManager.completeProgressImageToken(token, "claim-b")).toBe(true);
+    expect(tokenManager.reserveProgressImageToken(token, "claim-c")).toBe(false);
+
+    const staleRevision = tokenManager.createProgressImageToken(
+      "progress-token-execution",
+      "progress-token-workflow",
+      testUserId,
+      "2.0.0",
+      3,
+      "{}",
+      1000,
+    );
+    getSqliteInstance()
+      .prepare(
+        "UPDATE workflowExecution SET revision = 4 WHERE executionId = 'progress-token-execution'",
+      )
+      .run();
+    expect(tokenManager.claimProgressImageToken(staleRevision)).toBe(false);
+    getSqliteInstance()
+      .prepare(
+        "UPDATE workflowExecution SET revision = 3 WHERE executionId = 'progress-token-execution'",
+      )
+      .run();
+    getSqliteInstance()
+      .prepare("UPDATE workflow SET version = '2.1.0' WHERE id = 'progress-token-workflow'")
+      .run();
+    expect(tokenManager.claimProgressImageToken(staleRevision)).toBe(false);
+    clock.mockRestore();
   });
 
   test("materialize claim is atomic, one-use, and checks every binding", async () => {

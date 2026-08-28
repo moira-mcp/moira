@@ -35,6 +35,19 @@ export interface SendMessageParams {
   replyMarkup?: ReplyMarkup;
 }
 
+export interface SendPhotoParams {
+  chatId: string;
+  photo: Uint8Array;
+  filename: string;
+  mimeType: "image/png" | "image/jpeg";
+  caption?: string;
+  parseMode?: "Markdown" | "HTML";
+  disableNotification?: boolean;
+  replyMarkup?: ReplyMarkup;
+}
+
+export const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
+
 /**
  * Response from Telegram Bot API
  * Simplified version focusing on essential fields
@@ -286,4 +299,6 @@ export interface TelegramNodeConfig {
   disableNotification?: boolean;
   /** Optional inline keyboard markup */
   replyMarkup?: InlineKeyboardMarkup;
+  /** Attach the current workflow progress graph as a PNG photo. */
+  attachProgressImage?: boolean;
 }

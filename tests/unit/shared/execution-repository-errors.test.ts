@@ -57,6 +57,7 @@ describe("ExecutionRepository Error Methods", () => {
         userId: TEST_USER_ID,
       },
       status: "running" as LegacyExecutionStatus,
+      revision: 0,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -154,6 +155,35 @@ describe("ExecutionRepository Error Methods", () => {
       expect(loaded?.errors).toHaveLength(2);
       expect(loaded?.errors?.[0].nodeId).toBe("existing");
       expect(loaded?.errors?.[1].nodeId).toBe("new");
+    });
+  });
+
+  describe("cancelExecution", () => {
+    it("atomically preserves accepted state and appends exactly one cancellation error", async () => {
+      const execution = createTestExecution();
+      await repository.save(execution);
+      await repository.updateContext(
+        execution.executionId,
+        { variables: { concurrentlyAccepted: "preserve" } },
+        0,
+      );
+
+      const cancellation = createTestError("cancel-node");
+      cancellation.errorType = "system";
+      cancellation.message = "Execution cancelled by user";
+      const first = await repository.cancelExecution(execution.executionId, cancellation);
+      expect(first.changed).toBe(true);
+      expect(first.execution).toMatchObject({
+        status: "completed",
+        revision: 2,
+        globalContext: { variables: { concurrentlyAccepted: "preserve" } },
+      });
+      expect(first.execution?.errors).toEqual([cancellation]);
+
+      const repeated = await repository.cancelExecution(execution.executionId, cancellation);
+      expect(repeated.changed).toBe(false);
+      expect(repeated.execution?.revision).toBe(2);
+      expect(repeated.execution?.errors).toEqual([cancellation]);
     });
   });
 

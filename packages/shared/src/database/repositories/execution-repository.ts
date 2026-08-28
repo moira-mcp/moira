@@ -3,13 +3,14 @@
  * Drizzle ORM queries for execution operations
  */
 
-import { eq, and, or, like, inArray, isNotNull } from "drizzle-orm";
+import { eq, ne, and, or, like, inArray, isNotNull, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflowExecution } from "../schema.js";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
 import type * as schema from "../schema.js";
 import { type ExecutionError, type LegacyExecutionStatus } from "../../types/execution-error.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
+import { ConflictError, ValidationError } from "../../errors/index.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -62,10 +63,12 @@ export class ExecutionRepository {
     // Serialize errors array to JSON (null if empty/undefined)
     const errorsJson =
       execution.errors && execution.errors.length > 0 ? JSON.stringify(execution.errors) : null;
+    const remindersJson = JSON.stringify(execution.reminders ?? []);
 
     if (existing.length > 0) {
       // Update (note can be updated via execution_note magic variable)
-      await this.db
+      const expectedRevision = execution.revision;
+      const result = await this.db
         .update(workflowExecution)
         .set({
           state: execution.status,
@@ -77,8 +80,24 @@ export class ExecutionRepository {
           note: execution.note || null,
           updatedAt,
           completedAt,
+          revision: expectedRevision + 1,
+          reminders: remindersJson,
         })
-        .where(eq(workflowExecution.executionId, execution.executionId));
+        .where(
+          and(
+            eq(workflowExecution.executionId, execution.executionId),
+            eq(workflowExecution.revision, expectedRevision),
+          ),
+        );
+      if (result.changes === 0) {
+        const current = await this.get(execution.executionId);
+        throw new ConflictError("Execution state changed; reload before writing", {
+          executionId: execution.executionId,
+          expectedRevision,
+          currentRevision: current?.revision,
+        });
+      }
+      execution.revision = expectedRevision + 1;
     } else {
       // Insert
       await this.db.insert(workflowExecution).values({
@@ -93,6 +112,8 @@ export class ExecutionRepository {
         errors: errorsJson,
         note: execution.note || null,
         parentExecutionId: execution.parentExecutionId || null,
+        revision: execution.revision,
+        reminders: remindersJson,
         createdAt,
         updatedAt,
         completedAt,
@@ -128,6 +149,13 @@ export class ExecutionRepository {
         errors = undefined;
       }
     }
+    let reminders: WorkflowExecution["reminders"] = [];
+    try {
+      reminders = JSON.parse(row.reminders) as WorkflowExecution["reminders"];
+      if (!Array.isArray(reminders)) reminders = [];
+    } catch {
+      reminders = [];
+    }
 
     // Parse context JSON defensively: a single malformed row must not crash listing
     // of all executions (e.g. analytics that map over every execution).
@@ -155,6 +183,8 @@ export class ExecutionRepository {
       status: row.state as LegacyExecutionStatus,
       note: row.note ?? undefined,
       parentExecutionId: row.parentExecutionId ?? undefined,
+      revision: row.revision,
+      reminders,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
       completedAt: row.completedAt ? (row.completedAt as Date).getTime() : undefined,
@@ -300,8 +330,91 @@ export class ExecutionRepository {
       .set({
         note,
         updatedAt: new Date(),
+        revision: sql`${workflowExecution.revision} + 1`,
       })
       .where(eq(workflowExecution.executionId, executionId));
+  }
+
+  async setParent(
+    executionId: string,
+    parentExecutionId: string | null,
+    userId: string,
+    expectedRevision: number,
+  ): Promise<WorkflowExecution> {
+    const child = await this.get(executionId);
+    if (!child) throw new ValidationError("Execution must exist");
+    if (child.userId !== userId)
+      throw new ValidationError("Execution must belong to the authenticated user");
+    if (child.status !== "running") throw new ValidationError("Execution must be running");
+    if ((child.parentExecutionId ?? null) === parentExecutionId) return child;
+    if (child.revision !== expectedRevision) {
+      throw new ConflictError("Execution state changed; reload before changing parent", {
+        executionId,
+        expectedRevision,
+        currentRevision: child.revision,
+      });
+    }
+    if (parentExecutionId) {
+      const parent = await this.get(parentExecutionId);
+      if (!parent) throw new ValidationError("Parent execution must exist");
+      if (parent.userId !== userId)
+        throw new ValidationError("Parent execution must belong to the authenticated user");
+      if (parent.status !== "running")
+        throw new ValidationError("Parent execution must be running");
+      if (child.executionId === parent.executionId)
+        throw new ValidationError("An execution cannot be its own parent");
+      const visited = new Set<string>();
+      let cursor: WorkflowExecution | null = parent;
+      while (cursor) {
+        if (cursor.executionId === child.executionId)
+          throw new ValidationError("Parent change would create an execution cycle");
+        if (visited.has(cursor.executionId))
+          throw new ValidationError("Existing execution ancestry contains a cycle");
+        visited.add(cursor.executionId);
+        cursor = cursor.parentExecutionId ? await this.get(cursor.parentExecutionId) : null;
+      }
+    }
+    const parentGuard = parentExecutionId
+      ? sql`EXISTS (
+          SELECT 1 FROM workflowExecution AS requested_parent
+          WHERE requested_parent.executionId = ${parentExecutionId}
+            AND requested_parent.userId = ${userId}
+            AND requested_parent.state = 'running'
+        ) AND NOT EXISTS (
+          WITH RECURSIVE ancestors(executionId, parentExecutionId) AS (
+            SELECT executionId, parentExecutionId
+            FROM workflowExecution
+            WHERE executionId = ${parentExecutionId}
+            UNION
+            SELECT candidate.executionId, candidate.parentExecutionId
+            FROM workflowExecution AS candidate
+            JOIN ancestors ON candidate.executionId = ancestors.parentExecutionId
+          )
+          SELECT 1 FROM ancestors WHERE executionId = ${executionId}
+        )`
+      : sql`1 = 1`;
+    const result = await this.db
+      .update(workflowExecution)
+      .set({ parentExecutionId, revision: expectedRevision + 1, updatedAt: new Date() })
+      .where(
+        and(
+          eq(workflowExecution.executionId, executionId),
+          eq(workflowExecution.revision, expectedRevision),
+          eq(workflowExecution.state, "running"),
+          parentGuard,
+        ),
+      );
+    if (result.changes === 0) {
+      const current = await this.get(executionId);
+      throw new ConflictError("Execution state changed; reload before changing parent", {
+        executionId,
+        expectedRevision,
+        currentRevision: current?.revision,
+      });
+    }
+    const updated = await this.get(executionId);
+    if (!updated) throw new ValidationError("Execution disappeared after parent change");
+    return updated;
   }
 
   /**
@@ -311,11 +424,19 @@ export class ExecutionRepository {
   async updateContext(
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
+    expectedRevision: number,
   ): Promise<boolean> {
     // First get current execution to merge context
     const execution = await this.get(executionId);
     if (!execution) {
       return false;
+    }
+    if (execution.revision !== expectedRevision) {
+      throw new ConflictError("Execution state changed; reload before updating context", {
+        executionId,
+        expectedRevision,
+        currentRevision: execution.revision,
+      });
     }
 
     // Merge new context with existing
@@ -345,96 +466,23 @@ export class ExecutionRepository {
       .set({
         context: JSON.stringify(updatedContext),
         updatedAt: new Date(),
+        revision: expectedRevision + 1,
       })
-      .where(eq(workflowExecution.executionId, executionId));
+      .where(
+        and(
+          eq(workflowExecution.executionId, executionId),
+          eq(workflowExecution.revision, expectedRevision),
+        ),
+      );
+
+    if (result.changes === 0) {
+      throw new ConflictError("Execution state changed; reload before updating context", {
+        executionId,
+        expectedRevision,
+      });
+    }
 
     return result.changes > 0;
-  }
-
-  /**
-   * Update a single value at an arbitrary nesting path inside the execution's
-   * `variables`, reading the current context from the DB first so siblings and other
-   * variables are preserved (stale-overwrite-safe at the path level).
-   *
-   * The path is relative to `variables` (e.g. ["review_findings", "blocking"]).
-   * Returns the old value at the path (or undefined) on success, or the literal
-   * string "__EXECUTION_NOT_FOUND__" if the execution does not exist.
-   */
-  async updateContextByPath(
-    executionId: string,
-    path: Array<string | number>,
-    value: unknown,
-  ): Promise<{ ok: boolean; oldValue?: unknown }> {
-    // Reject prototype-pollution segments before walking the object. A path segment of
-    // __proto__/constructor/prototype could otherwise write into Object.prototype.
-    const FORBIDDEN_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
-    for (const seg of path) {
-      if (typeof seg === "string" && FORBIDDEN_SEGMENTS.has(seg)) {
-        return { ok: false };
-      }
-    }
-
-    const execution = await this.get(executionId);
-    if (!execution) {
-      return { ok: false };
-    }
-
-    // Deep clone the current variables so we mutate a copy, then persist.
-    const variables = JSON.parse(JSON.stringify(execution.globalContext.variables ?? {})) as Record<
-      string,
-      unknown
-    >;
-
-    // Walk to the parent of the target, creating containers as needed.
-    let cursor: unknown = variables;
-    for (let i = 0; i < path.length - 1; i++) {
-      const seg = path[i];
-      if (cursor === null || typeof cursor !== "object") {
-        return { ok: false };
-      }
-      const container = cursor as Record<string | number, unknown>;
-      if (container[seg] === null || typeof container[seg] !== "object") {
-        // Create an object/array container based on the next segment's type.
-        Object.defineProperty(container, seg, {
-          value: typeof path[i + 1] === "number" ? [] : Object.create(null),
-          configurable: true,
-          enumerable: true,
-          writable: true,
-        });
-      }
-      cursor = container[seg];
-    }
-    if (cursor === null || typeof cursor !== "object") {
-      return { ok: false };
-    }
-    const leafKey = path[path.length - 1];
-    const parent = cursor as Record<string | number, unknown>;
-    const oldValue = parent[leafKey];
-    Object.defineProperty(parent, leafKey, {
-      value,
-      configurable: true,
-      enumerable: true,
-      writable: true,
-    });
-
-    const updatedContext = { ...execution.globalContext, variables };
-
-    // Size validation: max 10MB for execution context
-    const contextJson = JSON.stringify(updatedContext);
-    const sizeBytes = Buffer.byteLength(contextJson, "utf8");
-    const maxSize = 10 * 1024 * 1024;
-    if (sizeBytes > maxSize) {
-      const sizeMB = (sizeBytes / 1024 / 1024).toFixed(2);
-      const maxMB = (maxSize / 1024 / 1024).toFixed(0);
-      throw new Error(`Execution context size ${sizeMB}MB exceeds maximum ${maxMB}MB limit`);
-    }
-
-    const result = await this.db
-      .update(workflowExecution)
-      .set({ context: contextJson, updatedAt: new Date() })
-      .where(eq(workflowExecution.executionId, executionId));
-
-    return { ok: result.changes > 0, oldValue };
   }
 
   /**
@@ -488,10 +536,43 @@ export class ExecutionRepository {
       .set({
         errors: JSON.stringify(errors),
         updatedAt: new Date(),
+        revision: sql`${workflowExecution.revision} + 1`,
       })
       .where(eq(workflowExecution.executionId, executionId));
 
     return result.changes > 0;
+  }
+
+  async cancelExecution(
+    executionId: string,
+    error: ExecutionError,
+  ): Promise<{ changed: boolean; execution: WorkflowExecution | null }> {
+    const now = new Date();
+    const errorJson = JSON.stringify(error);
+    const result = await this.db
+      .update(workflowExecution)
+      .set({
+        state: "completed",
+        errors: sql<string>`CASE
+          WHEN ${workflowExecution.errors} IS NULL OR json_valid(${workflowExecution.errors}) = 0
+            THEN json_array(json(${errorJson}))
+          ELSE json_insert(${workflowExecution.errors}, '$[#]', json(${errorJson}))
+        END`,
+        updatedAt: now,
+        completedAt: now,
+        revision: sql`${workflowExecution.revision} + 1`,
+      })
+      .where(
+        and(
+          eq(workflowExecution.executionId, executionId),
+          ne(workflowExecution.state, "completed"),
+        ),
+      );
+
+    return {
+      changed: result.changes > 0,
+      execution: await this.get(executionId),
+    };
   }
 
   /**

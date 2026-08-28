@@ -5,6 +5,7 @@
 
 export { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
 export { TelegramClient } from "./telegram-client.js";
+export * from "./progress-image-service.js";
 export {
   AgentMessageQueue,
   AgentMessageType,

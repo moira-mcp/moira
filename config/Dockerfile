@@ -23,6 +23,7 @@ RUN apk add --no-cache \
     nginx \
     supervisor \
     netcat-openbsd \
+    font-dejavu \
     sqlite
 
 # Install Node.js global tools

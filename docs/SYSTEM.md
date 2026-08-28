@@ -183,6 +183,13 @@ start({
 });
 ```
 
+The parent must be a running execution owned by the authenticated user. A running execution can
+attach, replace, or detach (`parentExecutionId: "none"`) its parent with
+`session({ action: "set-parent", executionId, parentExecutionId, expectedRevision })`. The guarded
+operation rejects stale revisions, cross-owner links, completed new parents, and ancestry cycles;
+repeating the current value is an idempotent no-op. Parent linkage carries continuation only, not
+variables or authority.
+
 When child workflow completes, response includes continuation reminder:
 
 ```

@@ -121,6 +121,89 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(notification.status).toBe(TelegramErrorType.INVALID_CHAT_ID);
   });
 
+  test("renders and sends attached workflow progress through photo transport", async () => {
+    const sent: Array<{ photo: Uint8Array; caption?: string }> = [];
+    const distinctive = Buffer.from("wrapper-image");
+    handler = new TelegramNotificationHandler(async (_workflow, execution) => ({
+      buffer: distinctive,
+      mimeType: "image/png",
+      width: 640,
+      height: 224,
+      workflowVersion: "1.0.0",
+      executionRevision: execution.revision,
+    }));
+    setTestClientFactory(
+      () =>
+        ({
+          getDefaultChatId: () => "12345",
+          sendPhoto: async (params: { photo: Uint8Array; caption?: string }) => {
+            sent.push(params);
+            return { ok: true };
+          },
+        }) as any,
+    );
+    const graph = {
+      metadata: { name: "Progress", version: "1.0.0", description: "" },
+      progress: { nodes: [{ id: "notify", label: "Notify" }] },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "test-telegram-node" } },
+        createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
+        { id: "next-node", type: "end" },
+      ],
+    } as any;
+    const execution = {
+      executionId: "test-exec-123",
+      workflowId: "test-workflow",
+      userId: "system",
+      currentNodeId: "test-telegram-node",
+      status: "running",
+      revision: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      globalContext: createContext(),
+    } as any;
+    mockRepository.getWorkflowGraph = jest.fn(async () => graph);
+    mockRepository.getExecution = jest.fn(async () => execution);
+    mockRepository.getWorkflow = jest.fn(async () => ({ metadata: graph.metadata }) as any);
+
+    const result = await handler.execute(
+      createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
+      createContext(),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(result.action).toBe("continue");
+    expect(sent).toHaveLength(1);
+    expect(Buffer.from(sent[0].photo).equals(distinctive)).toBe(true);
+    expect(sent[0].caption).toContain("Test notification: completed");
+
+    setTestClientFactory(
+      () =>
+        ({
+          getDefaultChatId: () => "12345",
+          sendPhoto: async () => {
+            const error = new Error("chat not found") as TelegramError;
+            error.type = TelegramErrorType.INVALID_CHAT_ID;
+            throw error;
+          },
+        }) as any,
+    );
+    const failureQueue = new AgentMessageQueue();
+    const failure = await handler.execute(
+      createTelegramNode({ progressNodeId: "notify", attachProgressImage: true }),
+      createContext(),
+      failureQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(failure.data).toMatchObject({
+      telegramNotificationFailed: true,
+      errorType: TelegramErrorType.INVALID_CHAT_ID,
+    });
+    expect(failureQueue.flush("test-process").messages).toHaveLength(1);
+  });
+
   test("adds notification with actionable message when INVALID_TOKEN error occurs", async () => {
     setTestClientFactory(
       () =>

@@ -6,9 +6,11 @@
 import {
   TelegramConfig,
   SendMessageParams,
+  SendPhotoParams,
   TelegramResponse,
   TelegramError,
   TelegramErrorType,
+  TELEGRAM_PHOTO_MAX_BYTES,
 } from "../types/telegram-types.js";
 import { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
 import { createLogger, WorkflowLogger } from "@mcp-moira/shared";
@@ -56,6 +58,58 @@ export class TelegramClient {
       const telegramError = this.handleError(error, params);
       // No logging here - boundary handles it
       throw telegramError;
+    }
+  }
+
+  async sendPhoto(params: SendPhotoParams): Promise<TelegramResponse> {
+    try {
+      if (params.photo.byteLength === 0 || params.photo.byteLength > TELEGRAM_PHOTO_MAX_BYTES)
+        throw this.createError(
+          TelegramErrorType.API_ERROR,
+          `Photo size must be between 1 and ${TELEGRAM_PHOTO_MAX_BYTES} bytes`,
+        );
+      await this.rateLimiter.waitForAvailability();
+      if (params.caption && params.caption.length > 1024)
+        throw this.createError(
+          TelegramErrorType.MESSAGE_TOO_LONG,
+          "Photo caption exceeds 1024 characters",
+        );
+      const body = new FormData();
+      body.set("chat_id", params.chatId);
+      const photoBytes = Uint8Array.from(params.photo);
+      body.set("photo", new Blob([photoBytes.buffer], { type: params.mimeType }), params.filename);
+      if (params.caption) body.set("caption", params.caption);
+      if (params.parseMode) body.set("parse_mode", params.parseMode);
+      if (params.disableNotification !== undefined)
+        body.set("disable_notification", String(params.disableNotification));
+      if (params.replyMarkup) body.set("reply_markup", JSON.stringify(params.replyMarkup));
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 5000);
+      try {
+        const response = await fetch(this.buildApiUrl("sendPhoto"), {
+          method: "POST",
+          body,
+          signal: controller.signal,
+        });
+        const data = (await response.json()) as TelegramResponse;
+        if (!response.ok || !data.ok) throw this.createApiError(response, data);
+        return data;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw this.createError(
+          TelegramErrorType.TIMEOUT_ERROR,
+          `Photo request timeout after ${this.config.timeout}ms`,
+          { chatId: params.chatId },
+        );
+      }
+      throw this.handleError(error, {
+        chatId: params.chatId,
+        text: params.caption ?? "",
+        parseMode: params.parseMode,
+      });
     }
   }
 

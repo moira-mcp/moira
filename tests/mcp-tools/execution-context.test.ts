@@ -51,33 +51,4 @@ describe("MCP Execution Context Tools E2E", () => {
 
     expect(context.context).toHaveProperty("variables");
   });
-
-  // test('update_execution_context modifies variables', async () => {
-  //   if (!testExecutionId) {
-  //     console.warn('No execution available, skipping');
-  //     return;
-  //   }
-  //
-  //   // Get current context
-  //   const _beforeUpdate = await callMCPTool(client, 'get_execution_context', {
-  //     executionId: testExecutionId
-  //   });
-  //
-  //   // Update context variables
-  //   const testVariable = { test_key: 'test_value_' + Date.now() };
-  //
-  //   const updateResult = await callMCPTool(client, 'update_execution_context', {
-  //     executionId: testExecutionId,
-  //     variables: testVariable
-  //   });
-  //
-  //   expect(updateResult).toHaveProperty('success', true);
-  //
-  //   // Verify update persisted
-  //   const afterUpdate = await callMCPTool(client, 'get_execution_context', {
-  //     executionId: testExecutionId
-  //   });
-  //
-  //   expect(afterUpdate.context.variables).toMatchObject(testVariable);
-  // });
 });

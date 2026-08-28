@@ -600,28 +600,27 @@ export default {
 
 ## Coverage Matrix
 
-| MCP Tool                       | Tested    | Test File                      | Count  |
-| ------------------------------ | --------- | ------------------------------ | ------ |
-| create_workflow                | ✅        | workflow-crud.test.ts          | 3      |
-| edit_workflow                  | ✅        | workflow-crud.test.ts          | 5      |
-| delete_workflow                | ✅        | workflow-soft-delete.test.ts   | 2      |
-| restore_workflow               | ✅        | workflow-soft-delete.test.ts   | 2      |
-| list_deleted_workflows         | ✅        | workflow-soft-delete.test.ts   | 2      |
-| list_workflows                 | ✅        | Multiple                       | 8      |
-| get_workflow_details           | ✅        | workflow-pagination.test.ts    | 4      |
-| start_workflow                 | ✅        | workflow-execution.test.ts     | 4      |
-| execute_step                   | ✅        | workflow-execution.test.ts     | 5      |
-| get_current_step               | ✅        | workflow-execution.test.ts     | 2      |
-| get_execution_context          | ✅        | execution-context.test.ts      | 1      |
-| update_execution_context       | ✅        | execution-context.test.ts      | 1      |
-| get_workflow_documentation     | ✅        | workflow-documentation.test.ts | 14     |
-| create_workflow_upload_token   | ✅        | workflow-tokens.test.ts        | 1      |
-| create_workflow_download_token | ✅        | workflow-tokens.test.ts        | 1      |
-| list_setting_definitions       | ✅        | user-settings.test.ts          | 1      |
-| get_user_settings              | ✅        | user-settings.test.ts          | 2      |
-| set_user_setting               | ✅        | user-settings.test.ts          | 1      |
-| delete_user_setting            | ✅        | user-settings.test.ts          | 1      |
-| **Total**                      | **19/19** | **8 files**                    | **52** |
+| MCP Tool                       | Tested | Test File                      | Count |
+| ------------------------------ | ------ | ------------------------------ | ----- |
+| create_workflow                | ✅     | workflow-crud.test.ts          | 3     |
+| edit_workflow                  | ✅     | workflow-crud.test.ts          | 5     |
+| delete_workflow                | ✅     | workflow-soft-delete.test.ts   | 2     |
+| restore_workflow               | ✅     | workflow-soft-delete.test.ts   | 2     |
+| list_deleted_workflows         | ✅     | workflow-soft-delete.test.ts   | 2     |
+| list_workflows                 | ✅     | Multiple                       | 8     |
+| get_workflow_details           | ✅     | workflow-pagination.test.ts    | 4     |
+| start_workflow                 | ✅     | workflow-execution.test.ts     | 4     |
+| execute_step                   | ✅     | workflow-execution.test.ts     | 5     |
+| get_current_step               | ✅     | workflow-execution.test.ts     | 2     |
+| session execution_context      | ✅     | execution-context.test.ts      | 1     |
+| session variables/set-variable | ✅     | execution-variables.test.ts    | 2     |
+| get_workflow_documentation     | ✅     | workflow-documentation.test.ts | 14    |
+| create_workflow_upload_token   | ✅     | workflow-tokens.test.ts        | 1     |
+| create_workflow_download_token | ✅     | workflow-tokens.test.ts        | 1     |
+| list_setting_definitions       | ✅     | user-settings.test.ts          | 1     |
+| get_user_settings              | ✅     | user-settings.test.ts          | 2     |
+| set_user_setting               | ✅     | user-settings.test.ts          | 1     |
+| delete_user_setting            | ✅     | user-settings.test.ts          | 1     |
 
 ## HTTP Endpoints Tested
 
