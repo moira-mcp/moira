@@ -29,7 +29,7 @@ describe("agent-facing CLI diagnostics", () => {
   test("--version identifies both the package version and exact source checkout", () => {
     const output = runWorkflowTool(["--version"], os.tmpdir());
 
-    expect(output).toContain("@mcp-moira/workflow-cli 0.4.0");
+    expect(output).toContain("@mcp-moira/workflow-cli 0.6.0");
     expect(output).toContain(path.normalize("packages/workflow-cli/src/workflow-tool.ts"));
   });
 

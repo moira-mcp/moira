@@ -16,6 +16,18 @@ mcp__moira__start({
 
 The flow captures source-grounded requirements and authority, resolves one simple visual preference (`disabled`, `screenshots`, or `html_report`), creates and independently reviews an architecture-aware plan, and then treats that current plan as the sole source of each unit's visual and user-approval policy. It prepares every unit from the real repository before mutation, implements complete vertical behavior, and runs a fresh producer-completion pass before deterministic validation and independent semantic review. Documentation and tests are part of production, not late cleanup.
 
+Every execution also exposes one always-visible static progress strip: Intake, Plan, Implement,
+Tests, Review, Checkpoint, and Finalize. It is derived from the current primary workflow node, so
+repair, replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier phase
+without separate status variables. The same shared model renders the PNG attached to existing
+authorized plan/report/approval/completion Telegram attention; stopped notifications remain text-only
+because an arbitrary abort has no truthful single phase. Progress never changes SDF routing or its
+authority boundary.
+
+The stable inactive labels stay short. While an exact implementation, validation, independent
+review, repair, or checkpoint node is current, its active-only label adds the authoritative unit,
+total, and iteration values for that role. Plan/replan nodes never reuse stale unit counters.
+
 `screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through Telegram when notifications are configured; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Telegram absence or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives.
 
 Findings are classified as product, test/validation, evidence, documentation/projection, invalid criterion, or upstream plan/process defects. Product repair returns through producer completion. Verification-only or gate-local repair reruns only stale evidence. Mixed or invalid causes trigger quality-preserving replan rather than expanding implementation against a broken contract.

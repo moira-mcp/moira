@@ -13,6 +13,17 @@ import type { IGraphExecutionEngine } from "./graph-execution-engine.js";
 export type { GraphNode } from "../types/graph-nodes.js";
 import { GraphValidationResult } from "../validation/graph-validator.js";
 
+export interface WorkflowProgressNode {
+  id: string;
+  label: string;
+  connections?: { default?: string };
+}
+
+export interface WorkflowProgress {
+  title?: string;
+  nodes: WorkflowProgressNode[];
+}
+
 // Re-export message types for external use
 export { AgentMessageType } from "../services/agent-message-queue.js";
 export type {
@@ -44,6 +55,8 @@ export interface WorkflowGraph {
   runtimePolicy?: {
     externalVariableWrites?: Record<string, { allowedNodeIds?: string[] }>;
   };
+  /** Static user-facing projection over the executable workflow graph. */
+  progress?: WorkflowProgress;
 
   /**
    * Per-workflow system reminder (optional)

@@ -57,6 +57,60 @@ describe("workflow schema renderer", () => {
     expect(output).toContain("COVERAGE nodes=3/3 edges=2/2");
   });
 
+  test("renders the complete static progress topology and many-to-one primary mappings", () => {
+    const workflow = graph([
+      { id: "start", type: "start", connections: { default: "work" } },
+      {
+        id: "work",
+        type: "agent-directive",
+        progressNodeId: "implementation",
+        progressActiveLabel: "Implement {{unit}}/{{total}}",
+        directive: "Work",
+        completionCondition: "Done",
+        connections: { success: "review-one" },
+      },
+      {
+        id: "review-one",
+        type: "agent-directive",
+        progressNodeId: "review",
+        directive: "Review",
+        completionCondition: "Done",
+        connections: { success: "review-two" },
+      },
+      {
+        id: "review-two",
+        type: "agent-directive",
+        progressNodeId: "review",
+        directive: "Review again",
+        completionCondition: "Done",
+        connections: { success: "end" },
+      },
+      { id: "end", type: "end" },
+    ]);
+    workflow.progress = {
+      title: "Development {{mode}}",
+      nodes: [
+        {
+          id: "implementation",
+          label: "Implementation",
+          connections: { default: "review" },
+        },
+        { id: "review", label: "Review", connections: { default: "implementation" } },
+      ],
+    };
+
+    const output = renderWorkflowSchema(workflow);
+
+    expect(output).toContain("progress_nodes=2 progress_edges=2 progress_mappings=3");
+    expect(output).toContain('TITLE "Development {{mode}}"');
+    expect(output).toContain('PROGRESS_NODE implementation label="Implementation" primary=work');
+    expect(output).toContain('PROGRESS_NODE review label="Review" primary=review-one, review-two');
+    expect(output).toContain("EDGE [default] -> implementation");
+    expect(output).toContain("PROGRESS_NODE review");
+    expect(output).toContain('PROGRESS_ACTIVE_LABEL "Implement {{unit}}/{{total}}"');
+    expect(output).toContain("COVERAGE nodes=2/2 edges=2/2 mappings=3/3");
+  });
+
   test("should render a deep graph without recursive traversal overflow", () => {
     const depth = 5_000;
     const nodes: WorkflowGraph["nodes"] = [

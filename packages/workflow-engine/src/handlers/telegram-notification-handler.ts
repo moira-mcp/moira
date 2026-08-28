@@ -22,6 +22,7 @@ import {
 } from "../types/telegram-types.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { createLogger, WorkflowLogger, InternalError } from "@mcp-moira/shared";
+import { renderExecutionProgressImage } from "../utils/execution-progress-image.js";
 
 /**
  * Handler for telegram-notification nodes
@@ -31,7 +32,9 @@ export class TelegramNotificationHandler implements INodeHandler {
   private templateProcessor: GraphTemplateProcessor;
   private logger: WorkflowLogger;
 
-  constructor() {
+  constructor(
+    private readonly progressImageRenderer: typeof renderExecutionProgressImage = renderExecutionProgressImage,
+  ) {
     this.templateProcessor = new GraphTemplateProcessor();
     this.logger = createLogger({ component: "TelegramNotificationHandler" });
 
@@ -207,13 +210,42 @@ export class TelegramNotificationHandler implements INodeHandler {
     });
 
     // Send message via HTTP client
-    await telegramClient.sendMessage({
-      chatId: targetChatId,
-      text: processedMessage,
-      parseMode: node.parseMode,
-      disableNotification: node.disableNotification,
-      replyMarkup: node.replyMarkup,
-    });
+    if (node.attachProgressImage) {
+      const graph = await repository.getWorkflowGraph(context.workflowId, userId);
+      const persisted = await repository.getExecution(context.executionId);
+      if (!graph?.progress || !persisted)
+        throw this.createTelegramError(
+          TelegramErrorType.TEMPLATE_ERROR,
+          "Workflow has no progress graph",
+        );
+      const rendered = await this.progressImageRenderer(graph, {
+        ...persisted,
+        currentNodeId: node.id,
+      });
+      if (!rendered)
+        throw this.createTelegramError(
+          TelegramErrorType.TEMPLATE_ERROR,
+          "Workflow has no progress graph",
+        );
+      await telegramClient.sendPhoto({
+        chatId: targetChatId,
+        photo: rendered.buffer,
+        filename: "workflow-progress.png",
+        mimeType: "image/png",
+        caption: processedMessage,
+        parseMode: node.parseMode,
+        disableNotification: node.disableNotification,
+        replyMarkup: node.replyMarkup,
+      });
+    } else {
+      await telegramClient.sendMessage({
+        chatId: targetChatId,
+        text: processedMessage,
+        parseMode: node.parseMode,
+        disableNotification: node.disableNotification,
+        replyMarkup: node.replyMarkup,
+      });
+    }
 
     return true; // Notification sent successfully
   }

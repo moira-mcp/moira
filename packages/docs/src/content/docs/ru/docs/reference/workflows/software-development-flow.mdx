@@ -16,6 +16,19 @@ mcp__moira__start({
 
 Flow фиксирует source-grounded требования и полномочия, определяет одну простую visual preference (`disabled`, `screenshots` или `html_report`), создаёт и независимо проверяет architecture-aware план, после чего именно текущий план становится единственным источником visual и user-approval policy каждого unit. Flow готовит каждый unit по реальному репозиторию до мутации, реализует полное вертикальное поведение и запускает fresh producer completion до deterministic validation и independent semantic review. Документация и тесты являются частью production, а не поздней уборкой.
 
+Каждый execution также показывает постоянно видимую статическую полосу progress: Intake, Plan,
+Implement, Tests, Review, Checkpoint и Finalize. Она выводится из текущей primary workflow node,
+поэтому repair, replan и обычный multi-unit loop из checkpoint снова открывают соответствующую
+раннюю фазу без отдельных status variables. Та же shared model формирует PNG для существующих
+авторизованных Telegram attention на plan/report/approval/completion; stopped notification остаётся
+текстовым, потому что у произвольного abort нет одной правдивой фазы. Progress не меняет routing SDF
+или его границы полномочий.
+
+Стабильные inactive labels остаются короткими. Пока текущей является точная implementation,
+validation, independent review, repair или checkpoint node, её active-only label добавляет
+авторитетные unit, total и iteration для этой роли. Plan/replan nodes не используют stale unit
+counters.
+
 `screenshots` один раз снимает и действительно просматривает необходимые состояния. `html_report` переиспользует эти же принятые изображения в self-contained отчёте, загружает его через Moira Artifact API и отправляет публичный URL в Telegram, когда уведомления настроены; второй screenshot pass не выполняется. Сбой Artifact upload блокирует unit. Отсутствие Telegram или ошибка отправки в достигнутой notification node не блокируют работу. Interactive approval плана, выбранных units и финального результата получает attention notification и ждёт решения в обычной директиве. В autonomous mode human-approval directives отсутствуют.
 
 Findings классифицируются как product, test/validation, evidence, documentation/projection, invalid criterion или upstream plan/process defects. Product repair возвращается через producer completion. Verification-only и gate-local repair повторяют только устаревшие evidence. Mixed или invalid causes приводят к quality-preserving replan, а не к расширению реализации по сломанному контракту.

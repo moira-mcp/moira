@@ -55,6 +55,20 @@ moira-workflow ./workflow.json set-description --file ./description.txt
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+Static execution progress uses the same file-backed authoring surface. Set the complete display
+graph from JSON, then map each user-visible waiting node. Telegram attachment is available only on
+`telegram-notification` nodes; `none` and `false` clear the corresponding optional fields.
+
+```bash
+moira-workflow ./workflow.json set-progress --file ./progress.json
+moira-workflow ./workflow.json update implement --progress-node-id implementation
+moira-workflow ./workflow.json update implement --progress-active-label "Implement {{unit}}/{{total}}"
+moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
+```
+
+These commands persist schema fields; they do not derive milestone meaning or replace final
+`validate`, `schema`, behavioral scenarios, or independent semantic review.
+
 For a complete planned rewrite, `sync` preserves the destination identity and its catalog migration
 aliases in `previousSlugs`. The catalog reader validates those aliases separately; only the
 executable graph is passed to the engine validator. Aliases always come from the real destination,
@@ -75,9 +89,10 @@ moira-workflow ./workflows/production/flows/<flow>.json schema
 
 The schema names every real node and labelled connection, conditions, cycles, declared outputs and
 mappings, context references, normal start paths, explicit teleport-only regions, and disconnected
-components. It is a read-only structural projection for agent or human reasoning; it does not run
-the workflow, interpret workflow-specific meaning, or claim that a structurally visible route is
-semantically correct.
+components. When the workflow defines user-facing progress, the same projection includes every
+ordered milestone, display connection, and primary-node mapping. It is a read-only structural
+projection for agent or human reasoning; it does not run the workflow, interpret workflow-specific
+meaning, or claim that a structurally visible route is semantically correct.
 
 ### How workflow-management-flow handles edits
 

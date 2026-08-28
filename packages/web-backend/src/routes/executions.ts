@@ -8,6 +8,8 @@ import { asyncHandler, createApiError } from "../middleware/error-middleware.js"
 import {
   DatabaseRepository,
   WorkflowExecution,
+  projectExecutionProgress,
+  ProgressImageService,
   prepareExecutionVariablePathWrite,
   prepareExecutionVariableWrite,
   queryExecutionVariables,
@@ -28,6 +30,50 @@ const router = Router();
 
 // Create repository instance (uses shared database singleton)
 const repository = new DatabaseRepository();
+const progressImages = new ProgressImageService(repository);
+
+router.post(
+  "/:id/progress-image-token",
+  asyncHandler(async (req: Request, res: Response) => {
+    const authenticatedRequest = req as AuthenticatedRequest;
+    const execution = await repository.getExecution(req.params.id);
+    if (!execution) throw createApiError.notFound("Execution not found");
+    if (execution.userId !== authenticatedRequest.userId)
+      throw createApiError.unauthorized("Access denied");
+    if (req.body?.theme !== undefined && !["light", "dark"].includes(req.body.theme))
+      throw createApiError.validationFailed("theme must be light or dark");
+    if (
+      req.body?.viewportWidth !== undefined &&
+      (!Number.isInteger(req.body.viewportWidth) ||
+        req.body.viewportWidth < 480 ||
+        req.body.viewportWidth > 4096)
+    )
+      throw createApiError.validationFailed("viewportWidth must be an integer from 480 to 4096");
+    const grant = await progressImages.mint(execution.executionId, execution.userId, {
+      theme: req.body?.theme,
+      viewportWidth: req.body?.viewportWidth,
+    });
+    res.json({ success: true, data: grant, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.get(
+  "/:id/progress",
+  asyncHandler(async (req: Request, res: Response) => {
+    const authenticatedRequest = req as AuthenticatedRequest;
+    const execution = await repository.getExecution(req.params.id);
+    if (!execution) throw createApiError.notFound("Execution not found");
+    const isAdmin = authenticatedRequest.userInfo?.isAdmin ?? false;
+    if (!isAdmin && execution.userId !== authenticatedRequest.userId) {
+      throw createApiError.unauthorized("Access denied");
+    }
+    const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
+    if (!graph) throw createApiError.notFound("Workflow not found");
+    const progress = projectExecutionProgress(graph, execution);
+    if (!progress) throw createApiError.notFound("Workflow has no progress graph");
+    res.json({ success: true, data: progress, timestamp: new Date().toISOString() });
+  }),
+);
 
 /**
  * GET /api/executions

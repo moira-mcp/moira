@@ -24,7 +24,7 @@ describe("runtime execution variables", () => {
     cleanup = authenticated.cleanup;
     const credentials = getAdminCredentials();
     cookie = await signInUser(getTestBaseUrl(), credentials.email, credentials.password);
-    await callMCPTool(client, "manage", {
+    const creation = await callMCPToolRaw(client, "manage", {
       action: "create",
       overwrite: true,
       workflow: {
@@ -61,11 +61,19 @@ describe("runtime execution variables", () => {
             object_value: { allowedNodeIds: ["task"] },
           },
         },
+        progress: {
+          title: "Runtime progress",
+          nodes: [
+            { id: "first", label: "First", connections: { default: "second" } },
+            { id: "second", label: "Second", connections: { default: "first" } },
+          ],
+        },
         nodes: [
           { id: "start", type: "start", connections: { default: "task" } },
           {
             id: "task",
             type: "agent-directive",
+            progressNodeId: "first",
             directive: "Wait",
             completionCondition: "Done",
             inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -74,6 +82,7 @@ describe("runtime execution variables", () => {
           {
             id: "other",
             type: "agent-directive",
+            progressNodeId: "second",
             directive: "Other",
             completionCondition: "Done",
             inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -83,13 +92,28 @@ describe("runtime execution variables", () => {
         ],
       },
     });
+    if (creation.includes("Error:")) throw new Error(`Workflow creation failed: ${creation}`);
+    const edited = await callMCPTool<any>(client, "manage", {
+      action: "edit",
+      workflowId: "runtime-variable-test",
+      changes: {
+        progress: {
+          title: "Edited runtime progress",
+          nodes: [
+            { id: "first", label: "First", connections: { default: "second" } },
+            { id: "second", label: "Second", connections: { default: "first" } },
+          ],
+        },
+      },
+    });
+    expect(edited).toMatchObject({ success: true, validation: { valid: true } });
     const started = await callMCPToolRaw(client, "start", {
       workflowId: "runtime-variable-test",
       parentExecutionId: "none",
       skipTelegramCheck: true,
     });
     const id = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];
-    if (!id) throw new Error("Process ID missing");
+    if (!id) throw new Error(`Process ID missing: ${started}`);
     executionId = id;
 
     const foreignEmail = `runtime-variable-foreign-${randomUUID()}@example.com`;
@@ -401,11 +425,13 @@ describe("runtime execution variables", () => {
         runtimePolicy: {
           externalVariableWrites: { settings: { allowedNodeIds: ["task"] } },
         },
+        progress: { nodes: [{ id: "work", label: "Foreign work" }] },
         nodes: [
           { id: "start", type: "start", connections: { default: "task" } },
           {
             id: "task",
             type: "agent-directive",
+            progressNodeId: "work",
             directive: "Wait",
             completionCondition: "Done",
             connections: { success: "end" },
@@ -430,6 +456,14 @@ describe("runtime execution variables", () => {
       headers: { Cookie: `better-auth.session_token=${cookie}` },
     });
     expect(adminRead.status).toBe(200);
+    const adminProgress = await fetch(
+      `${getTestBaseUrl()}/api/executions/${foreignExecutionId}/progress`,
+      { headers: { Cookie: `better-auth.session_token=${cookie}` } },
+    );
+    expect(adminProgress.status).toBe(200);
+    expect(await adminProgress.json()).toMatchObject({
+      data: { activeNodeId: "work", nodes: [{ id: "work", state: "current" }] },
+    });
     const adminMutation = await fetch(
       `${getTestBaseUrl()}/api/executions/${foreignExecutionId}/context`,
       {
@@ -559,6 +593,232 @@ describe("runtime execution variables", () => {
     const messages = result.errors.map((error: { message: string }) => error.message).join(" ");
     expect(messages).toContain("undeclared variable");
     expect(messages).toContain("agent-directive");
+  });
+
+  test("projects owner-scoped progress consistently through session and HTTP", async () => {
+    const sessionProgress = await callMCPTool<any>(client, "session", {
+      action: "progress",
+      executionId,
+    });
+    expect(sessionProgress).toMatchObject({
+      title: "Edited runtime progress",
+      activeNodeId: "first",
+      workflowVersion: "1.0.0",
+    });
+    expect(sessionProgress.nodes).toEqual([
+      expect.objectContaining({ id: "first", state: "current", focusNodeId: "task" }),
+      expect.objectContaining({ id: "second", state: "pending", focusNodeId: "other" }),
+    ]);
+
+    const httpResponse = await fetch(`${getTestBaseUrl()}/api/executions/${executionId}/progress`, {
+      headers: { Cookie: `better-auth.session_token=${cookie}` },
+    });
+    expect(httpResponse.status).toBe(200);
+    const httpBody = (await httpResponse.json()) as { data: unknown };
+    expect(httpBody.data).toEqual(sessionProgress);
+
+    const denied = await fetch(`${getTestBaseUrl()}/api/executions/${executionId}/progress`, {
+      headers: { Cookie: `better-auth.session_token=${foreignCookie}` },
+    });
+    expect(denied.status).toBe(401);
+    const deniedMcp = await callMCPToolRaw(foreignClient, "session", {
+      action: "progress",
+      executionId,
+    });
+    expect(deniedMcp).toMatch(/access denied/i);
+
+    const invalidCreate = await callMCPToolRaw(client, "manage", {
+      action: "create",
+      workflow: {
+        metadata: {
+          name: `Invalid Dynamic Progress ${randomUUID()}`,
+          version: "1.0.0",
+          description: "Must be rejected instead of narrowed",
+        },
+        progress: {
+          nodes: [{ id: "work", label: "Work", condition: { operator: "always" } }],
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "work" } },
+          {
+            id: "work",
+            type: "agent-directive",
+            progressNodeId: "work",
+            directive: "Work",
+            completionCondition: "Done",
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end" },
+        ],
+      },
+    });
+    expect(invalidCreate).toMatch(/invalid|unrecognized/i);
+
+    const invalidEditProgressDefinitions = [
+      {
+        title: "Must not persist progress state",
+        currentNodeId: "first",
+        nodes: [
+          { id: "first", label: "First" },
+          { id: "second", label: "Second" },
+        ],
+      },
+      {
+        title: "Must not persist status",
+        nodes: [
+          { id: "first", label: "First", status: "completed" },
+          { id: "second", label: "Second" },
+        ],
+      },
+      {
+        title: "Must not persist type",
+        nodes: [
+          { id: "first", label: "First", type: "condition" },
+          { id: "second", label: "Second" },
+        ],
+      },
+      {
+        title: "Must not persist connection",
+        nodes: [
+          { id: "first", label: "First" },
+          {
+            id: "second",
+            label: "Second",
+            connections: { default: "first", error: "first" },
+          },
+        ],
+      },
+    ];
+    for (const progress of invalidEditProgressDefinitions) {
+      const invalidEdit = await callMCPToolRaw(client, "manage", {
+        action: "edit",
+        workflowId: "runtime-variable-test",
+        changes: { progress },
+      });
+      expect(invalidEdit).toMatch(/invalid|unrecognized/i);
+    }
+    expect(
+      await callMCPTool<any>(client, "session", { action: "progress", executionId }),
+    ).toMatchObject({ title: "Edited runtime progress", activeNodeId: "first" });
+
+    const noProgressWorkflow = await callMCPTool<any>(client, "manage", {
+      action: "create",
+      workflow: {
+        metadata: {
+          name: `No Progress ${randomUUID()}`,
+          version: "1.0.0",
+          description: "No progress error fixture",
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "end" } },
+          { id: "end", type: "end" },
+        ],
+      },
+    });
+    const noProgressStarted = await callMCPToolRaw(client, "start", {
+      workflowId: noProgressWorkflow.workflowId,
+      parentExecutionId: "none",
+      skipTelegramCheck: true,
+    });
+    const noProgressExecutionId = noProgressStarted.match(/Process ID: ([a-f0-9-]+)/)?.[1];
+    expect(noProgressExecutionId).toBeDefined();
+    expect(
+      await callMCPToolRaw(client, "session", {
+        action: "progress",
+        executionId: noProgressExecutionId,
+      }),
+    ).toContain("no progress graph");
+    const noProgressHttp = await fetch(
+      `${getTestBaseUrl()}/api/executions/${noProgressExecutionId}/progress`,
+      { headers: { Cookie: `better-auth.session_token=${cookie}` } },
+    );
+    expect(noProgressHttp.status).toBe(404);
+
+    const imageGrant = await callMCPTool<any>(client, "session", {
+      action: "progress-image-token",
+      executionId,
+      theme: "dark",
+      viewportWidth: 720,
+    });
+    expect(imageGrant).toMatchObject({
+      mimeType: "image/png",
+      workflowVersion: "1.0.0",
+      options: { theme: "dark", viewportWidth: 720 },
+    });
+    const imagePath = new URL(imageGrant.downloadUrl).pathname;
+    const concurrentImages = await Promise.all([
+      fetch(`${getTestBaseUrl()}${imagePath}`),
+      fetch(`${getTestBaseUrl()}${imagePath}`),
+    ]);
+    expect(concurrentImages.map((response) => response.status).sort()).toEqual([200, 401]);
+    const firstImage = concurrentImages.find((response) => response.status === 200)!;
+    expect(firstImage.status).toBe(200);
+    expect(firstImage.headers.get("content-type")).toContain("image/png");
+    expect(
+      Buffer.from(await firstImage.arrayBuffer())
+        .subarray(0, 8)
+        .toString("hex"),
+    ).toBe("89504e470d0a1a0a");
+    expect((await fetch(`${getTestBaseUrl()}${imagePath}`)).status).toBe(401);
+
+    const httpMint = await fetch(
+      `${getTestBaseUrl()}/api/executions/${executionId}/progress-image-token`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `better-auth.session_token=${cookie}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ theme: "light", viewportWidth: 600 }),
+      },
+    );
+    expect(httpMint.status).toBe(200);
+    const httpGrantBody = (await httpMint.json()) as { data: any };
+    expect(httpGrantBody).toMatchObject({
+      data: { mimeType: "image/png", options: { theme: "light", viewportWidth: 600 } },
+    });
+    const foreignHttpMint = await fetch(
+      `${getTestBaseUrl()}/api/executions/${executionId}/progress-image-token`,
+      {
+        method: "POST",
+        headers: { Cookie: `better-auth.session_token=${foreignCookie}` },
+      },
+    );
+    expect(foreignHttpMint.status).toBe(401);
+    const invalidHttpMint = await fetch(
+      `${getTestBaseUrl()}/api/executions/${executionId}/progress-image-token`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `better-auth.session_token=${cookie}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ theme: "sepia", viewportWidth: 12 }),
+      },
+    );
+    expect(invalidHttpMint.status).toBe(400);
+    const currentEditable = await callMCPTool<any>(client, "session", {
+      action: "variables",
+      executionId,
+      names: ["editable_value"],
+    });
+    await callMCPTool<any>(client, "session", {
+      action: "set-variable",
+      executionId,
+      variableName: "editable_value",
+      variableValue: currentEditable.variables[0].value === "old" ? "new" : "old",
+      expectedRevision: httpGrantBody.data.executionRevision,
+    });
+    expect(
+      (await fetch(`${getTestBaseUrl()}${new URL(httpGrantBody.data.downloadUrl).pathname}`))
+        .status,
+    ).toBe(401);
+    expect(
+      await callMCPToolRaw(foreignClient, "session", {
+        action: "progress-image-token",
+        executionId,
+      }),
+    ).toMatch(/access denied/i);
   });
 
   test("HTTP definition authoring persists valid policy and reports invalid policy", async () => {

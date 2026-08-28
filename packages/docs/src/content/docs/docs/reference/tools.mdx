@@ -907,6 +907,21 @@ Definition `manage list-variables` and `GET /api/workflows/:id/variables` suppor
 hasDefault and externallyWritable filters and return policy, applied filters and unknown names. The
 result entries include `hasDefault` and declared policy; the local CLI exposes equivalent flags.
 Declared writability does not prove current runtime editability.
+
+### Execution progress
+
+`session({ action: "progress", executionId })` returns the current rendered static progress graph
+for an owned execution. Ordered nodes have `completed`, `current`, or `pending` state, static display
+connections, mapped primary-node IDs, and a deterministic `focusNodeId`. The action is read-only and
+does not change context, node state, graph position, or execution revision. A workflow without a
+`progress` definition returns an explicit error.
+
+`session({ action: "progress-image-token", executionId, theme?, viewportWidth? })` returns
+`downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision` for a short-lived one-time PNG;
+MCP never carries the binary image. The grant is bound to the
+owner, workflow version, execution revision, and normalized light/dark render options. Rendering or
+validation or failed HTTP response does not consume it, while successful response completion does.
+
 Workflow authors can set the same definition policy locally with
 `moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>`; comma-separated node
 IDs scope writes to those waiting nodes, `all` permits every waiting agent node, and `none` restores

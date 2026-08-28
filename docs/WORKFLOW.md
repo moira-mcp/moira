@@ -363,6 +363,50 @@ Node task-1: unclosed template bracket '{{' at position 15
 
 ## Workflow Structure
 
+### Static user-facing progress
+
+`WorkflowGraph.progress` is optional presentation metadata. Each progress node has `id`, `label`,
+and an optional display-only default connection. A primary node's `progressNodeId` activates a
+progress milestone while that primary node is current. The engine derives ordered
+completed/current/pending state without persistence and renders labels through the existing template
+processor. Progress connections never participate in execution routing.
+
+When `progress` exists, every user-visible waiting node (`agent-directive`, `teleport`, `lock`,
+`materialize`, and `subgraph`) must declare a valid `progressNodeId`; automatic transient nodes may
+omit it. Multiple primary nodes may map to one milestone. The active primary node is that
+milestone's focus target, while every other milestone deterministically focuses its first mapped
+primary node in workflow order. A completed execution is shown as fully complete only when
+`currentNodeId` is null; cancellation retains its earlier node and therefore its last-known
+index-derived state.
+
+A user-visible waiting node may set template-enabled `progressActiveLabel`. The projection uses it
+only while that exact primary node is current; inactive milestones keep the stable base label from
+`progress.nodes`. The field requires `progressNodeId`, follows ordinary template validation, and
+never changes focus, state, connections, routing, or persistence.
+
+The shared visual model lays these milestones out horizontally with forward row edges and lower
+backward arcs. `session progress-image-token` and the matching HTTP endpoint render that model as a
+bounded light/dark PNG behind a short-lived, revision-bound, single-use URL. A
+`telegram-notification` node can set `attachProgressImage: true`; it must map to a progress milestone
+and sends the rendered PNG with its normal message as the caption.
+
+Engine callers that hold a workflow and execution use
+`renderExecutionProgressImage(workflow, execution, options?)`. It returns `null` when no progress
+definition exists; otherwise it returns `{ buffer, mimeType: "image/png", width, height,
+workflowVersion, executionRevision }`. Projection/render failures propagate. The lower-level
+projection and PNG adapter remain available when their narrower contracts are required.
+
+The execution inspector renders the same visual model as an always-visible horizontal strip below
+the execution header and above the technical graph/tabs. It auto-centers the current milestone,
+scrolls horizontally on narrow screens, and focuses the projection-selected primary workflow node
+when a milestone is selected. Workflows without `progress` keep the existing inspector layout.
+
+The bundled Software Development Flow uses this contract as a static phase projection over its
+existing lifecycle: Intake, Plan, Implement, Tests, Review, Checkpoint, and Finalize. Its checkpoint
+display edge returns to Implement because that is the normal multi-unit route; finalization is
+activated directly only after the primary graph decides the plan is complete. This keeps the
+display honest without adding conditional progress edges or duplicating SDF routing.
+
 ### Required Fields
 
 ```json

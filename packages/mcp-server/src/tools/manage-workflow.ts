@@ -304,6 +304,9 @@ export async function manageWorkflow(
         if ("runtimePolicy" in changes) {
           modifiedWorkflow.runtimePolicy = changes.runtimePolicy || undefined;
         }
+        if ("progress" in changes) {
+          modifiedWorkflow.progress = changes.progress || undefined;
+        }
 
         if (changes.removeNodes && changes.removeNodes.length > 0) {
           const nodeIdsToRemove = new Set(changes.removeNodes);

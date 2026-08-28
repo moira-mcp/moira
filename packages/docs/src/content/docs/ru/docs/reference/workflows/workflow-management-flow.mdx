@@ -1,6 +1,6 @@
 ---
 title: Workflow Management Flow
-description: Долговечное evidence-aware создание и редактирование полных Moira workflow definitions с independent design/artifact review.
+description: Долговечный evidence-aware workflow authoring с optional static progress design и independent design/artifact review.
 ---
 
 Workflow Management Flow создаёт новый Moira workflow или редактирует одну полную существующую definition через source preparation, requirements, design, official tooling, independent review и явно разрешённую publication.
@@ -17,6 +17,14 @@ mcp__moira__start({
 Flow определяет create/edit identity, online/offline source boundaries, local source hint и autonomous/interactive mode. Он материализует execution-correlated workspace с текущим authoring reference, получает полные server/repository candidates, записывает provenance и semantic differences и никогда механически не объединяет JSON.
 
 Requirements и опциональный full antipattern audit формируют один outcome-oriented design contract. Independent pre-mutation review должен пройти до изменений полного артефакта через official workflow CLI. Результат проходит validation и официальный structural schema projection, затем independently review по полному JSON, requirements, design, authority и evidence modalities.
+
+Если у workflow есть содержательные пользовательские этапы, этот же lifecycle рассматривает опциональный статический граф прогресса. Design задаёт 3–10 кратких milestones с шаблонизируемыми labels, сопоставляет каждый наблюдаемый waiting node одному milestone и оставляет connections только отображением: условия и маршруты исполнения остаются в основном графе workflow. Единые projection и visual model используются и постоянно видимой полосой в интерфейсе, и серверным PNG renderer. Агент может запросить короткоживущую одноразовую ссылку на PNG, а авторизованный Telegram node прикладывает изображение напрямую, не сохраняя этот token в состоянии workflow. WMF не добавляет progress, если он будет декоративным.
+
+Когда один milestone представляет несколько текущих ролей, WMF может спроектировать
+`progressActiveLabel` на mapped waiting nodes. Он показывается только для точной текущей primary
+node; inactive milestones сохраняют стабильный base label. WMF требует, чтобы каждая переменная
+была авторитетна на всех достигающих node маршрутах, и отклоняет stale counters, неверный scope и
+progress-owned state или routing.
 
 Artifact-owned findings исправляют workflow и повторяют stale gates. Invalid criteria или upstream process defects приводят к replan. Final report описывает точные starts, teleports, terminals, routes, cycles, reachability, coverage, data flow и каждый frozen semantic guarantee.
 

@@ -31,6 +31,7 @@
  *   set-slug <slug>                  Set workflow catalog slug (kebab-case)
  *   set-description <text>           Set workflow description
  *   set-version <version>            Set workflow version
+ *   set-progress <json|--file path|none> Set or remove static progress graph
  */
 
 import * as fs from "node:fs";
@@ -361,6 +362,9 @@ interface UpdateOptions {
   addConnection?: { key: string; target: string };
   removeConnection?: string;
   finalOutput?: string;
+  progressNodeId?: string | null;
+  progressActiveLabel?: string | null;
+  attachProgressImage?: boolean;
 }
 
 // === UPDATE COMMAND ===
@@ -438,6 +442,64 @@ function updateNode(
     }
   }
 
+  if (options.progressNodeId !== undefined) {
+    if (options.progressNodeId === null) {
+      delete node.progressNodeId;
+      console.log(c("green", "✓ Cleared progressNodeId"));
+    } else {
+      node.progressNodeId = options.progressNodeId;
+      console.log(c("green", `✓ Updated progressNodeId: ${options.progressNodeId}`));
+    }
+    changes++;
+  }
+
+  if (options.progressActiveLabel !== undefined) {
+    const activeLabelNodeTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    if (!activeLabelNodeTypes.has(node.type as string)) {
+      console.error(
+        c("red", "ERROR: --progress-active-label is valid only for user-visible waiting nodes"),
+      );
+      process.exit(1);
+    }
+    if (options.progressActiveLabel === null) {
+      delete node.progressActiveLabel;
+      console.log(c("green", "✓ Cleared progressActiveLabel"));
+    } else {
+      if (!node.progressNodeId) {
+        console.error(
+          c("red", "ERROR: --progress-active-label requires progressNodeId on the same node"),
+        );
+        process.exit(1);
+      }
+      node.progressActiveLabel = options.progressActiveLabel;
+      console.log(c("green", `✓ Updated progressActiveLabel: ${options.progressActiveLabel}`));
+    }
+    changes++;
+  }
+
+  if (options.attachProgressImage !== undefined) {
+    if (node.type !== "telegram-notification") {
+      console.error(
+        c("red", "ERROR: --attach-progress-image is valid only for telegram-notification nodes"),
+      );
+      process.exit(1);
+    }
+    if (options.attachProgressImage) {
+      node.attachProgressImage = true;
+      console.log(c("green", "✓ Enabled attachProgressImage"));
+    } else {
+      delete node.attachProgressImage;
+      console.log(c("green", "✓ Cleared attachProgressImage"));
+    }
+    changes++;
+  }
+
   if (options.connections !== undefined) {
     try {
       node.connections = JSON.parse(options.connections);
@@ -477,7 +539,7 @@ function updateNode(
     console.log(
       c(
         "yellow",
-        "No changes specified. Use --directive, --completion-condition, --input-schema, --condition, --message, --connections, or --add-connection",
+        "No changes specified. Use --directive, --completion-condition, --input-schema, --condition, --message, --connections, --progress-node-id, --progress-active-label, --attach-progress-image, or --add-connection",
       ),
     );
     process.exit(0);
@@ -489,6 +551,36 @@ function updateNode(
   console.log(JSON.stringify(node, null, 2));
   console.log("");
 
+  return workflow;
+}
+
+function setProgress(workflow: WorkflowGraph, value: string): WorkflowGraph {
+  if (value === "none") {
+    delete workflow.progress;
+    console.log(c("green", "✓ Removed static progress graph"));
+    return workflow;
+  }
+
+  let progress: unknown;
+  try {
+    progress = JSON.parse(value);
+  } catch (error) {
+    console.error(c("red", `ERROR: Invalid progress JSON: ${(error as Error).message}`));
+    process.exit(1);
+  }
+  if (
+    !progress ||
+    typeof progress !== "object" ||
+    Array.isArray(progress) ||
+    !("nodes" in progress) ||
+    !Array.isArray((progress as { nodes?: unknown }).nodes)
+  ) {
+    console.error(c("red", "ERROR: Progress must be a JSON object with a nodes array"));
+    process.exit(1);
+  }
+
+  workflow.progress = progress as NonNullable<WorkflowGraph["progress"]>;
+  console.log(c("green", "✓ Updated static progress graph"));
   return workflow;
 }
 
@@ -1426,6 +1518,8 @@ ${c("cyan", "Commands:")}
   set-slug <slug>                  Set workflow catalog slug (kebab-case)
   set-description <text|--file path> Set workflow description
   set-version <version>            Set workflow version
+  set-progress <json|--file path|none>
+                                     Set or remove the static progress graph
   diff <other-file>                Compare with another workflow file
   create <file> --name <name>      Create new workflow
   copy <dest-file> [--name <name>] Copy workflow to new file
@@ -1436,6 +1530,9 @@ ${c("cyan", "Update Options:")}
   --completion-condition "text"        Update completionCondition
   --input-schema '{"type":"object"}'   Update inputSchema
   --final-output '["result"]'           Update an End node terminal projection
+  --progress-node-id <id|none>          Set or clear the node's progress milestone
+  --progress-active-label <text|none>   Set or clear its active-only milestone label
+  --attach-progress-image <true|false>  Toggle progress image on Telegram nodes
   --condition "expression"             Update condition
   --message "text"                     Update message
   --connections '{"key":"target"}'     Update connections
@@ -1537,6 +1634,19 @@ ${c("cyan", "Examples:")}
       i++;
     } else if (args[i] === "--final-output" && args[i + 1]) {
       config.options.finalOutput = args[i + 1];
+      i++;
+    } else if (args[i] === "--progress-node-id" && args[i + 1]) {
+      config.options.progressNodeId = args[i + 1] === "none" ? null : args[i + 1];
+      i++;
+    } else if (args[i] === "--progress-active-label" && args[i + 1]) {
+      config.options.progressActiveLabel = args[i + 1] === "none" ? null : args[i + 1];
+      i++;
+    } else if (args[i] === "--attach-progress-image" && args[i + 1]) {
+      if (args[i + 1] !== "true" && args[i + 1] !== "false") {
+        console.error(c("red", "ERROR: --attach-progress-image expects true or false"));
+        process.exit(1);
+      }
+      config.options.attachProgressImage = args[i + 1] === "true";
       i++;
     } else if (args[i] === "--connections" && args[i + 1]) {
       config.options.connections = args[i + 1];
@@ -1881,6 +1991,27 @@ async function main(): Promise<void> {
         ...saveOptions,
         skipVersionCheck: true,
       });
+      break;
+    }
+
+    case "set-progress": {
+      const progressFromFile = readTextArgumentFromFile(args, "--file", "Progress");
+      const inlineProgress = args
+        .slice(2)
+        .filter((argument) => argument !== "--force")
+        .join(" ")
+        .trim();
+      if (progressFromFile !== undefined && args[2] !== "--file") {
+        console.error(c("red", "ERROR: Use either inline progress JSON or --file, not both"));
+        process.exit(1);
+      }
+      const progress = progressFromFile ?? inlineProgress;
+      if (!progress) {
+        console.error(c("red", "Usage: set-progress <json|--file path|none>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(config.file, setProgress(workflow, progress), originalWorkflow, saveOptions);
       break;
     }
 

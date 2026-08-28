@@ -180,7 +180,7 @@ export class GraphValidator {
 
     for (const error of ajvErrors) {
       // Extract node index from instancePath (e.g., "/nodes/1/type")
-      const nodeMatch = error.instancePath?.match(/\/nodes\/(\d+)/);
+      const nodeMatch = error.instancePath?.match(/^\/nodes\/(\d+)(?:\/|$)/);
       if (nodeMatch) {
         const nodeIndex = parseInt(nodeMatch[1], 10);
         const node = workflow.nodes?.[nodeIndex];
@@ -213,8 +213,8 @@ export class GraphValidator {
     }
 
     // Process node errors - filter by actual node type
-    for (const [, nodeData] of errorsByNode) {
-      const { nodeType, nodeId, errors: nodeErrors } = nodeData;
+    for (const [nodeIndex, nodeData] of errorsByNode) {
+      const { nodeType, nodeId } = nodeData;
 
       if (!nodeType) {
         // No type specified - show generic error
@@ -253,36 +253,16 @@ export class GraphValidator {
         continue;
       }
 
-      // Filter errors to show only those relevant to this node type
-      // Skip oneOf errors and type mismatches from other branches
-      const relevantErrors = nodeErrors.filter((error) => {
-        // Skip generic oneOf wrapper errors
-        if (error.keyword === "oneOf") {
-          return false;
-        }
-
-        // Skip type constant errors from non-matching branches
-        if (error.keyword === "const" && error.schemaPath?.includes("type")) {
-          return false;
-        }
-
-        // Skip "must NOT have additional properties" from wrong branch
-        if (error.keyword === "additionalProperties") {
-          // Check if error is from wrong branch by looking at schemaPath
-          if (error.schemaPath && !error.schemaPath.includes(expectedDef)) {
-            return false;
-          }
-        }
-
-        // Skip required property errors from wrong branches
-        if (error.keyword === "required" && error.schemaPath) {
-          if (!error.schemaPath.includes(expectedDef)) {
-            return false;
-          }
-        }
-
-        return true;
+      // AJV may inline local $refs, so errors from oneOf branches no longer reliably carry the
+      // definition name in schemaPath. Validate the observed node against its exact discriminator
+      // branch instead of guessing which flattened errors belong to it.
+      const node = workflow.nodes?.[nodeIndex];
+      const validateNode = this.ajv.compile({
+        $ref: `#/$defs/${expectedDef}`,
+        $defs: (this.schema as { $defs: Record<string, unknown> }).$defs,
       });
+      validateNode(node);
+      const relevantErrors = validateNode.errors ?? [];
 
       // Create readable error messages for this node
       if (relevantErrors.length > 0) {
@@ -621,6 +601,9 @@ export class GraphValidator {
     // Template syntax validation
     issues.push(...this.validateTemplates(workflow));
 
+    // Static user-facing progress graph and primary-node mappings.
+    issues.push(...this.validateProgress(workflow));
+
     // Check for unreachable nodes (exclude teleport nodes — they are jump targets)
     const reachableNodes = this.findReachableNodes(workflow);
     const unreachableNodes = workflow.nodes
@@ -651,6 +634,119 @@ export class GraphValidator {
 
     // Validate each variableRegistry entry is a well-formed JSON Schema
     issues.push(...this.validateRegistryEntries(workflow));
+
+    return issues;
+  }
+
+  private validateProgress(workflow: WorkflowGraph): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const progress = workflow.progress;
+    const mappedNodes = workflow.nodes.filter((node) => node.progressNodeId);
+    if (!progress) {
+      for (const node of workflow.nodes) {
+        if (node.type === "telegram-notification" && node.attachProgressImage) {
+          issues.push({
+            type: "structure",
+            severity: "error",
+            nodeId: node.id,
+            field: "attachProgressImage",
+            message: `Telegram node '${node.id}' cannot attach progress without a progress graph.`,
+          });
+        }
+      }
+      for (const node of mappedNodes) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `Node '${node.id}' declares progressNodeId but the workflow has no progress graph.`,
+        });
+      }
+      return issues;
+    }
+
+    const ids = new Set<string>();
+    for (const [index, node] of progress.nodes.entries()) {
+      if (ids.has(node.id)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          field: `progress.nodes[${index}].id`,
+          message: `Duplicate progress node id '${node.id}'.`,
+        });
+      }
+      ids.add(node.id);
+    }
+    for (const [index, node] of progress.nodes.entries()) {
+      const target = node.connections?.default;
+      if (target && !ids.has(target)) {
+        issues.push({
+          type: "connection",
+          severity: "error",
+          field: `progress.nodes[${index}].connections.default`,
+          message: `Progress connection references non-existent progress node '${target}'.`,
+        });
+      }
+    }
+
+    const visibleWaitingTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    for (const node of workflow.nodes) {
+      if (node.progressNodeId && !ids.has(node.progressNodeId)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `Node '${node.id}' references unknown progress node '${node.progressNodeId}'.`,
+        });
+      }
+      if (visibleWaitingTypes.has(node.type) && !node.progressNodeId) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `User-visible waiting node '${node.id}' must declare progressNodeId.`,
+        });
+      }
+      if (node.progressActiveLabel && !visibleWaitingTypes.has(node.type)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveLabel",
+          message: `Node '${node.id}' cannot declare progressActiveLabel because it is not a user-visible waiting node.`,
+        });
+      } else if (node.progressActiveLabel && !node.progressNodeId) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveLabel",
+          message: `Node '${node.id}' must declare progressNodeId when progressActiveLabel is set.`,
+        });
+      }
+      if (
+        node.type === "telegram-notification" &&
+        node.attachProgressImage &&
+        !node.progressNodeId
+      ) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressNodeId",
+          message: `Telegram node '${node.id}' must declare progressNodeId when attachProgressImage is enabled.`,
+        });
+      }
+    }
 
     return issues;
   }
@@ -1636,6 +1732,17 @@ export class GraphValidator {
           );
         }
       }
+
+      if (node.progressActiveLabel) {
+        issues.push(
+          ...this.validateTemplateField(
+            node.progressActiveLabel,
+            node.id,
+            "progressActiveLabel",
+            definedVariables,
+          ),
+        );
+      }
     }
 
     // Templates embedded in registry variable default values are processed recursively at
@@ -1654,6 +1761,29 @@ export class GraphValidator {
             ),
           );
         }
+      }
+    }
+
+    if (workflow.progress) {
+      if (workflow.progress.title) {
+        issues.push(
+          ...this.validateTemplateField(
+            workflow.progress.title,
+            "progress",
+            "title",
+            definedVariables,
+          ),
+        );
+      }
+      for (const [index, progressNode] of workflow.progress.nodes.entries()) {
+        issues.push(
+          ...this.validateTemplateField(
+            progressNode.label,
+            `progress.${progressNode.id}`,
+            `nodes[${index}].label`,
+            definedVariables,
+          ),
+        );
       }
     }
 

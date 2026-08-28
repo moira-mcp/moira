@@ -20,9 +20,11 @@ import {
   isOperationalError,
   getLockService,
   isExecutionParentReference,
+  ValidationError,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
+  projectExecutionProgress,
   prepareExecutionVariableWrite,
   queryExecutionVariables,
 } from "@mcp-moira/workflow-engine";
@@ -46,6 +48,8 @@ const GetSessionInfoParamsSchema = z.object({
       "remove-reminder",
       "variables",
       "set-variable",
+      "progress",
+      "progress-image-token",
     ])
     .describe("Action to perform"),
   executionId: z
@@ -85,6 +89,8 @@ const GetSessionInfoParamsSchema = z.object({
   idempotencyKey: z.string().optional().describe("Idempotency key for add-reminder"),
   reminderStatus: z.enum(["active", "cancelled"]).optional().describe("Reminder status filter"),
   names: z.array(z.string()).optional(),
+  theme: z.enum(["light", "dark"]).optional(),
+  viewportWidth: z.number().int().min(480).max(4096).optional(),
   types: z.array(z.string()).optional(),
   editable: z.boolean().optional(),
   hasValue: z.boolean().optional(),
@@ -179,6 +185,8 @@ type SessionInfoData =
   | import("@mcp-moira/workflow-engine").ReminderMutationResult
   | { variables: Array<Record<string, unknown>>; unknownNames: string[]; revision: number }
   | { name: string; value: unknown; revision: number }
+  | import("@mcp-moira/workflow-engine").ExecutionProgress
+  | import("@mcp-moira/workflow-engine").ProgressImageGrant
   | string;
 
 export async function getSessionInfo(
@@ -617,6 +625,37 @@ export async function getSessionInfo(
           success: true,
           data: result,
         };
+      }
+
+      case "progress": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("progress") };
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || execution.userId !== userId)
+          return { success: false, error: ERRORS.execution_access_denied };
+        const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+        if (!graph) return { success: false, error: "Workflow not found" };
+        const progress = projectExecutionProgress(graph, execution);
+        if (!progress) return { success: false, error: "Workflow has no progress graph" };
+        return { success: true, data: progress };
+      }
+
+      case "progress-image-token": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("progress-image-token") };
+        const repository = MCPEngine.getInstance().repository;
+        const { ProgressImageService } = await import("@mcp-moira/workflow-engine");
+        try {
+          const data = await new ProgressImageService(repository).mint(executionId, userId, {
+            theme: params.theme,
+            viewportWidth: params.viewportWidth,
+          });
+          return { success: true, data };
+        } catch (error) {
+          if (error instanceof ValidationError) return { success: false, error: error.message };
+          return { success: false, error: "Progress image could not be created" };
+        }
       }
 
       case "set-variable": {

@@ -7,6 +7,7 @@
  */
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
+import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
 import {
   ApiResponse,
   ApiErrorCode,
@@ -1432,6 +1433,22 @@ export class MoiraApiClient {
       return response.data.data!.execution;
     } catch (error) {
       throw new ApiClientError("Failed to get execution", ApiErrorCode.INTERNAL_ERROR);
+    }
+  }
+
+  async getExecutionProgress(executionId: string): Promise<ExecutionProgress | null> {
+    try {
+      const response = await this.client.get<ApiResponse<ExecutionProgress>>(
+        `/executions/${executionId}/progress`,
+      );
+      return response.data.data ?? null;
+    } catch (error) {
+      if (
+        (axios.isAxiosError(error) && error.response?.status === 404) ||
+        (error instanceof ApiClientError && error.status === 404)
+      )
+        return null;
+      throw new ApiClientError("Failed to get execution progress", ApiErrorCode.INTERNAL_ERROR);
     }
   }
 

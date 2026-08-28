@@ -208,6 +208,33 @@ to its top-level declared variable.
 
 Authentication: Required
 
+### Execution progress
+
+`GET /api/executions/:id/progress` returns the workflow's read-only user-facing progress projection
+for the execution owner or an administrator. It contains the rendered title, active progress node,
+ordered `completed|current|pending` nodes, static display connections, deterministic primary-node
+focus targets, workflow version, execution revision and diagnostics.
+
+Progress is derived from the current primary node's `progressNodeId` and never changes execution
+state. Real graph completion is `status=completed` with `currentNodeId=null`; cancellation retains
+its earlier node and therefore its index-derived last-known progress state.
+
+Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
+workflow/execution-level image API. It returns `null` for a workflow without progress and otherwise
+returns the PNG buffer, `image/png`, dimensions, workflow version, and execution revision. Failures
+remain errors rather than an empty image. `progressActiveLabel` may replace only the active
+milestone's returned label; inactive labels remain the static definition.
+
+`POST /api/executions/:id/progress-image-token` mints an owner-only, five-minute, single-use PNG
+grant with `downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision`. The optional body accepts
+`theme: "light"|"dark"` and `viewportWidth` from 480 through 4096. `GET
+/api/public/execution-progress-image/:token` uses the token as authorization and returns the exact
+execution revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
+foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the
+reservation; successful response completion consumes it.
+
+Authentication: Required
+
 `GET /api/workflows/:id/variables` provides definition-level names/search/types/hasDefault/
 externallyWritable filters with `hasDefault` and policy on each entry, applied filters and unknown
 names. It does not claim current execution editability.

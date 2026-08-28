@@ -314,6 +314,11 @@ export const workflowTokens = sqliteTable("workflow_tokens", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   type: text("type").notNull(), // 'upload' | 'download' | 'materialize'
+  workflowVersion: text("workflow_version"),
+  executionRevision: integer("execution_revision"),
+  optionsJson: text("options_json"),
+  claimId: text("claim_id"),
+  claimedAt: integer("claimed_at", { mode: "timestamp_ms" }),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   used: integer("used", { mode: "boolean" }).default(false),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),

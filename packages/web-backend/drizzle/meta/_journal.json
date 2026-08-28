@@ -141,6 +141,13 @@
       "when": 1787754600000,
       "tag": "0018_execution_reminders",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1787760000000,
+      "tag": "0019_progress_image_tokens",
+      "breakpoints": true
     }
   ]
 }

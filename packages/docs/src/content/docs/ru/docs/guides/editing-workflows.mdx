@@ -56,6 +56,21 @@ moira-workflow ./workflow.json set-description --file ./description.txt
 moira-workflow ./workflow.json set-variable-schema result --file ./result-schema.json
 ```
 
+Статический progress исполнения использует тот же файловый authoring surface. Задайте полный граф
+отображения из JSON, затем сопоставьте каждую пользовательскую waiting node. Вложение в Telegram
+доступно только для `telegram-notification`; значения `none` и `false` удаляют соответствующие
+опциональные поля.
+
+```bash
+moira-workflow ./workflow.json set-progress --file ./progress.json
+moira-workflow ./workflow.json update implement --progress-node-id implementation
+moira-workflow ./workflow.json update implement --progress-active-label "Implement {{unit}}/{{total}}"
+moira-workflow ./workflow.json update notify --progress-node-id review --attach-progress-image true
+```
+
+Команды сохраняют schema fields, но не выводят смысл milestones и не заменяют итоговые `validate`,
+`schema`, поведенческие scenarios и независимое semantic review.
+
 Для полной спланированной замены `sync` сохраняет идентичность целевого workflow и его catalog
 migration aliases в `previousSlugs`. Catalog reader проверяет aliases отдельно, а в engine validator
 передаётся только executable graph. Aliases всегда берутся из реальной цели, а не из workspace-копии.
@@ -76,9 +91,11 @@ moira-workflow ./workflows/production/flows/<flow>.json schema
 
 Схема показывает каждую реальную ноду и именованный переход, условия, циклы, объявленные выходы и
 маппинги, ссылки на контекст, обычные пути от start, отдельные области, доступные только через
-teleport, и несвязанные компоненты. Это структурная проекция только для чтения и анализа агентом
-или человеком: команда не запускает workflow, не интерпретирует его предметный смысл и не
-утверждает семантическую корректность видимого маршрута.
+teleport, и несвязанные компоненты. Если workflow определяет пользовательский progress, та же
+проекция включает все упорядоченные этапы, отображаемые связи и маппинги нод основного графа. Это
+структурная проекция только для чтения и анализа агентом или человеком: команда не запускает
+workflow, не интерпретирует его предметный смысл и не утверждает семантическую корректность
+видимого маршрута.
 
 ### Как workflow-management-flow выполняет правку
 

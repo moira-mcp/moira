@@ -14,6 +14,12 @@ describe("sanitizeRequestUrl", () => {
     expect(sanitizeRequestUrl("/api/workflows/example")).toBe("/api/workflows/example");
   });
 
+  test("redacts progress image grants including filename suffixes", () => {
+    expect(
+      sanitizeRequestUrl("/api/public/execution-progress-image/secret-token?download=true"),
+    ).toBe("/api/public/execution-progress-image/[REDACTED]?download=true");
+  });
+
   test("request logger emits the redacted URL rather than the materialize grant", async () => {
     const messages: string[] = [];
     const logger = {

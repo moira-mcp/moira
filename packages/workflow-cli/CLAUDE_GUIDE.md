@@ -51,6 +51,8 @@ moira-workflow flow.json set-name "Workflow name"
 moira-workflow flow.json set-slug workflow-slug
 moira-workflow flow.json set-description "Short description"
 moira-workflow flow.json set-description --file <description.txt>
+moira-workflow flow.json set-progress --file <progress.json>
+moira-workflow flow.json set-progress none
 
 # Versioning
 moira-workflow flow.json set-version <version>
@@ -79,6 +81,9 @@ byte-for-byte unchanged.
 --input-schema '{"type":"..."}'  # Update inputSchema
 --condition "expr"              # Update condition
 --message "text"                # Update message
+--progress-node-id <id|none>    # Set or clear the node's progress milestone
+--progress-active-label <text|none> # Set or clear its active-only milestone label
+--attach-progress-image <bool>  # Set true/false; telegram-notification only
 --connections '{"key":"target"}' # Update connections
 --add-connection <key> <target> # Add connection
 --remove-connection <key>       # Remove connection
@@ -109,6 +114,11 @@ moira-workflow --version
 ## Backups
 
 Every change creates a backup in `workflow-backups/` before writing.
+
+Progress mutation uses the same backup and content-version behavior as other edits. `set-progress`
+persists the complete top-level static definition; node update options set or clear mappings and
+Telegram attachment. The CLI does not derive milestone meaning or mapping semantics. Finish staged
+progress edits with `validate` and inspect the complete `schema` projection before semantic review.
 
 ## Versioning
 

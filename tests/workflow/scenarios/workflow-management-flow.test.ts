@@ -372,9 +372,9 @@ describe("workflow-management-flow v6", () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("6.2.2");
-    expect(workflow.metadata.description).toContain("complete existing definition");
-    expect(workflow.metadata.description).toContain("official workflow schema tool");
+    expect(workflow.metadata.version).toBe("6.4.0");
+    expect(workflow.metadata.description).toContain("one complete Moira workflow");
+    expect(workflow.metadata.description).toContain("structural projection");
     // One node fewer than upstream 6.1.0: the analysis responsibility moved into the planning node.
     expect(workflow.nodes).toHaveLength(57);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
@@ -502,6 +502,46 @@ describe("workflow-management-flow v6", () => {
     expect(nodes["design-workflow-structure"].directive).toContain("plausible wrong state");
     expect(nodes["create-edit-plan"].directive).toContain("observation that distinguishes");
     expect(nodes["review-workflow-quality"].directive).toContain("surrogate signal");
+    for (const id of ["design-workflow-structure", "create-edit-plan"]) {
+      expect(nodes[id].directive).toContain("optional static execution-progress presentation");
+      expect(nodes[id].directive).toContain("3–10 ordered milestones");
+      expect(nodes[id].directive).toContain("mobile horizontal readability");
+      expect(nodes[id].directive).toContain("always-visible UI and PNG renderer");
+      expect(nodes[id].directive).toContain("short-lived one-time PNG download metadata");
+      expect(nodes[id].directive).toContain("internal direct `attachProgressImage`");
+    }
+    for (const id of ["create-workflow-json", "apply-workflow-changes"]) {
+      expect(nodes[id].directive).toContain("array order alone determines");
+      expect(nodes[id].directive).toContain("shared projection/model parity across UI and PNG");
+      expect(nodes[id].directive).toContain("only on a mapped Telegram node");
+      expect(nodes[id].directive).toContain("do not place an agent one-time download token");
+    }
+    for (const id of ["review-workflow-design", "review-workflow-quality"]) {
+      expect(nodes[id].directive).toContain("complete observable-wait mapping");
+      expect(nodes[id].directive).toContain("consumer drift");
+      expect(nodes[id].directive).toContain("incomplete mappings");
+      expect(nodes[id].directive).toContain("Block dynamic/state/routing progress fields");
+    }
+    for (const id of ["design-workflow-structure", "create-edit-plan"]) {
+      expect(nodes[id].directive).toContain("progressActiveLabel");
+      expect(nodes[id].directive).toContain("inactive milestones keep the stable base label");
+      expect(nodes[id].directive).toContain("authoritative on every route");
+    }
+    for (const id of ["create-workflow-json", "apply-workflow-changes"]) {
+      expect(nodes[id].directive).toContain("progressActiveLabel");
+      expect(nodes[id].directive).toContain("official CLI");
+      expect(nodes[id].directive).toContain("initial, active, next-iteration and replan contexts");
+    }
+    for (const id of ["review-workflow-design", "review-workflow-quality"]) {
+      expect(nodes[id].directive).toContain("progressActiveLabel");
+      expect(nodes[id].directive).toContain("undefined/stale counters");
+      expect(nodes[id].directive).toContain("inactive-label drift");
+    }
+    expect((workflow as WorkflowGraph & { progress?: unknown }).progress).toBeUndefined();
+    expect(
+      workflow.nodes.filter((node) => "progressNodeId" in node || "attachProgressImage" in node),
+    ).toEqual([]);
+    expect(workflow.nodes.filter((node) => "progressActiveLabel" in node)).toEqual([]);
     expect(nodes["ask-full-antipattern-audit"].connections.success).toBe(
       "route-full-antipattern-audit",
     );

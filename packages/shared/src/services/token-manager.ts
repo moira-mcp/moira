@@ -17,7 +17,12 @@ export interface WorkflowToken {
   userId: string; // User who created the token
   executionId: string | null;
   nodeId: string | null;
-  type: "upload" | "download" | "materialize";
+  type: "upload" | "download" | "materialize" | "progress-image";
+  workflowVersion: string | null;
+  executionRevision: number | null;
+  optionsJson: string | null;
+  claimId?: string | null;
+  claimedAt?: number | null;
   expiresAt: number;
   used: boolean;
   createdAt: number;
@@ -25,6 +30,7 @@ export interface WorkflowToken {
 
 export class TokenManager {
   static readonly MATERIALIZE_TTL_MS = 5 * 60 * 1000;
+  static readonly PROGRESS_IMAGE_TTL_MS = 5 * 60 * 1000;
   private static instance: TokenManager;
 
   private constructor() {
@@ -113,9 +119,40 @@ export class TokenManager {
     }
   }
 
+  createProgressImageToken(
+    executionId: string,
+    workflowId: string,
+    userId: string,
+    workflowVersion: string,
+    executionRevision: number,
+    optionsJson: string,
+    ttlMs: number = TokenManager.PROGRESS_IMAGE_TTL_MS,
+  ): string {
+    const db = getSqliteInstance();
+    const token = randomUUID();
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO workflow_tokens
+       (token, workflow_id, execution_id, user_id, type, workflow_version,
+        execution_revision, options_json, expires_at, used, created_at)
+       VALUES (?, ?, ?, ?, 'progress-image', ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      token,
+      workflowId,
+      executionId,
+      userId,
+      workflowVersion,
+      executionRevision,
+      optionsJson,
+      now + ttlMs,
+      now,
+    );
+    return token;
+  }
+
   validateToken(
     token: string,
-    expectedType: "upload" | "download" | "materialize",
+    expectedType: "upload" | "download" | "materialize" | "progress-image",
   ): WorkflowToken | null {
     const db = getSqliteInstance();
     const now = Date.now();
@@ -134,12 +171,20 @@ export class TokenManager {
       expiresAt: number;
       used: number;
       createdAt: number;
+      workflowVersion: string | null;
+      executionRevision: number | null;
+      optionsJson: string | null;
+      claimId: string | null;
+      claimedAt: number | null;
     }
     const row = db
       .prepare(
         `
       SELECT token, workflow_id as workflowId, execution_id as executionId, node_id as nodeId,
-             user_id as userId, type, expires_at as expiresAt, used, created_at as createdAt
+             user_id as userId, type, workflow_version as workflowVersion,
+             execution_revision as executionRevision, options_json as optionsJson,
+             claim_id as claimId, claimed_at as claimedAt,
+             expires_at as expiresAt, used, created_at as createdAt
       FROM workflow_tokens
       WHERE token = ? AND type = ? AND used = 0 AND expires_at > ?
     `,
@@ -162,7 +207,59 @@ export class TokenManager {
       expiresAt: row.expiresAt,
       used: row.used === 1,
       createdAt: row.createdAt,
+      workflowVersion: row.workflowVersion,
+      executionRevision: row.executionRevision,
+      optionsJson: row.optionsJson,
+      claimId: row.claimId,
+      claimedAt: row.claimedAt,
     };
+  }
+
+  reserveProgressImageToken(token: string, claimId: string): boolean {
+    const db = getSqliteInstance();
+    const result = db
+      .prepare(
+        `UPDATE workflow_tokens SET claim_id = ?, claimed_at = ?
+         WHERE token = ? AND type = 'progress-image' AND used = 0 AND claim_id IS NULL AND expires_at > ?
+           AND EXISTS (
+             SELECT 1 FROM workflowExecution AS execution
+             JOIN workflow ON workflow.id = execution.workflowId
+             WHERE execution.executionId = workflow_tokens.execution_id
+               AND execution.userId = workflow_tokens.user_id
+               AND execution.revision = workflow_tokens.execution_revision
+               AND workflow.version = workflow_tokens.workflow_version
+           )`,
+      )
+      .run(claimId, Date.now(), token, Date.now());
+    return result.changes === 1;
+  }
+
+  completeProgressImageToken(token: string, claimId: string): boolean {
+    const result = getSqliteInstance()
+      .prepare(
+        `UPDATE workflow_tokens SET used = 1, claim_id = NULL, claimed_at = NULL
+         WHERE token = ? AND type = 'progress-image' AND used = 0 AND claim_id = ?`,
+      )
+      .run(token, claimId);
+    return result.changes === 1;
+  }
+
+  releaseProgressImageToken(token: string, claimId: string): boolean {
+    const result = getSqliteInstance()
+      .prepare(
+        `UPDATE workflow_tokens SET claim_id = NULL, claimed_at = NULL
+         WHERE token = ? AND type = 'progress-image' AND used = 0 AND claim_id = ?`,
+      )
+      .run(token, claimId);
+    return result.changes === 1;
+  }
+
+  claimProgressImageToken(token: string): boolean {
+    const claimId = randomUUID();
+    return (
+      this.reserveProgressImageToken(token, claimId) &&
+      this.completeProgressImageToken(token, claimId)
+    );
   }
 
   claimMaterializeToken(
@@ -216,12 +313,20 @@ export class TokenManager {
       expiresAt: number;
       used: number;
       createdAt: number;
+      workflowVersion: string | null;
+      executionRevision: number | null;
+      optionsJson: string | null;
+      claimId: string | null;
+      claimedAt: number | null;
     }
     const row = db
       .prepare(
         `
       SELECT token, workflow_id as workflowId, execution_id as executionId, node_id as nodeId,
-             user_id as userId, type, expires_at as expiresAt, used, created_at as createdAt
+             user_id as userId, type, workflow_version as workflowVersion,
+             execution_revision as executionRevision, options_json as optionsJson,
+             claim_id as claimId, claimed_at as claimedAt,
+             expires_at as expiresAt, used, created_at as createdAt
       FROM workflow_tokens
       WHERE token = ?
     `,
@@ -242,6 +347,11 @@ export class TokenManager {
       expiresAt: row.expiresAt,
       used: row.used === 1,
       createdAt: row.createdAt,
+      workflowVersion: row.workflowVersion,
+      executionRevision: row.executionRevision,
+      optionsJson: row.optionsJson,
+      claimId: row.claimId,
+      claimedAt: row.claimedAt,
     };
   }
 

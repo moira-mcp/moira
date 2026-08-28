@@ -10,11 +10,13 @@
     "./storage": "./src/storage/index.ts",
     "./handlers": "./src/handlers/index.ts",
     "./types": "./src/types/index.ts",
-    "./validation": "./src/validation/graph-validator.ts"
+    "./validation": "./src/validation/graph-validator.ts",
+    "./progress-visual": "./src/utils/execution-progress-visual.ts"
   },
   "scripts": {},
   "dependencies": {
     "@mcp-moira/shared": "*",
+    "sharp": "^0.35.3",
     "tar-stream": "^3.2.1"
   },
   "devDependencies": {

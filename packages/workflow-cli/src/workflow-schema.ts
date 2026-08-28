@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { WorkflowProgress } from "@mcp-moira/workflow-engine";
 import type { GraphNode, VariableRegistry } from "@mcp-moira/workflow-engine/types";
 
 export type WorkflowSchemaNode = GraphNode;
@@ -6,6 +7,7 @@ export interface WorkflowSchemaInput {
   metadata: { name: string; version: string };
   nodes: GraphNode[];
   variableRegistry?: VariableRegistry;
+  progress?: WorkflowProgress;
 }
 
 interface SchemaEdge {
@@ -464,10 +466,13 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
     (id) => !normallyReachable.has(id) && !teleportReachable.has(id),
   );
   const checksum = createHash("sha256").update(stableJson(workflow)).digest("hex");
+  const progressNodes = workflow.progress?.nodes ?? [];
+  const progressEdges = progressNodes.filter((node) => node.connections?.default).length;
+  const progressMappings = workflow.nodes.filter((node) => node.progressNodeId).length;
   const lines = [
     `WORKFLOW ${inlineText(workflow.metadata.name)} v${structuralToken(workflow.metadata.version)}`,
     `CHECKSUM ${checksum}`,
-    `COUNTS nodes=${nodeIds.length} edges=${edges.length} blocks=${blocks.length} cycles=${components.filter((component) => component.cyclic).length}`,
+    `COUNTS nodes=${nodeIds.length} edges=${edges.length} blocks=${blocks.length} cycles=${components.filter((component) => component.cyclic).length} progress_nodes=${progressNodes.length} progress_edges=${progressEdges} progress_mappings=${progressMappings}`,
     `START_ENTRIES ${startEntries.length > 0 ? startEntries.map(structuralToken).join(", ") : "(none)"}`,
     `TELEPORT_ENTRIES ${teleportEntries.length > 0 ? teleportEntries.map(structuralToken).join(", ") : "(none)"}`,
     `DISCONNECTED_ROOTS ${disconnectedRoots.length > 0 ? disconnectedRoots.map(structuralToken).join(", ") : "(none)"}`,
@@ -479,8 +484,28 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
         .join(", ") || "(none)"
     }`,
     "",
-    "BLOCKS",
+    "PROGRESS",
   ];
+  if (!workflow.progress) {
+    lines.push("  (none)");
+  } else {
+    if (workflow.progress.title !== undefined)
+      lines.push(`  TITLE ${quotedText(workflow.progress.title)}`);
+    for (const progressNode of progressNodes) {
+      const primaryNodeIds = workflow.nodes
+        .filter((node) => node.progressNodeId === progressNode.id)
+        .map((node) => structuralToken(node.id));
+      lines.push(
+        `  PROGRESS_NODE ${structuralToken(progressNode.id)} label=${quotedText(progressNode.label)} primary=${primaryNodeIds.join(", ") || "(none)"}`,
+      );
+      if (progressNode.connections?.default)
+        lines.push(`    EDGE [default] -> ${structuralToken(progressNode.connections.default)}`);
+    }
+    lines.push(
+      `  COVERAGE nodes=${progressNodes.length}/${progressNodes.length} edges=${progressEdges}/${progressEdges} mappings=${progressMappings}/${progressMappings}`,
+    );
+  }
+  lines.push("", "BLOCKS");
   let renderedNodes = 0;
   let renderedEdges = 0;
 
@@ -497,6 +522,10 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
       lines.push(
         `  NODE ${structuralToken(node.id)} [${structuralToken(node.type)}]${displayName}`,
       );
+      if (node.progressNodeId)
+        lines.push(`    PROGRESS_NODE ${structuralToken(node.progressNodeId)}`);
+      if (node.progressActiveLabel)
+        lines.push(`    PROGRESS_ACTIVE_LABEL ${quotedText(node.progressActiveLabel)}`);
       renderedNodes++;
       const preview = directivePreview(node);
       if (preview) lines.push(`    DIRECTIVE ${quotedText(preview)}`);

@@ -89,6 +89,23 @@ import { sanitizeMcpError } from "./utils/error-sanitizer.js";
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
 
+const progressAuthoringSchema = z
+  .object({
+    title: z.string().max(200).optional(),
+    nodes: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            label: z.string().max(200),
+            connections: z.object({ default: z.string().optional() }).strict().optional(),
+          })
+          .strict(),
+      )
+      .max(18),
+  })
+  .strict();
+
 function parseBearerToken(authorization: string | undefined): string | undefined {
   if (!authorization || authorization.length > 4096) return undefined;
   const separator = authorization.indexOf(" ");
@@ -419,6 +436,7 @@ function registerAllTools(
                   .optional(),
               })
               .optional(),
+            progress: progressAuthoringSchema.optional(),
             visibility: z
               .enum(["public", "private"])
               .optional()
@@ -455,6 +473,7 @@ function registerAllTools(
                   .optional(),
               })
               .optional(),
+            progress: progressAuthoringSchema.optional(),
             addNodes: z.array(z.record(z.unknown())).optional().describe("New nodes to add"),
             removeNodes: z.array(z.string()).optional().describe("Node IDs to remove"),
             updateNodes: z
@@ -687,9 +706,11 @@ function registerAllTools(
             "remove-reminder",
             "variables",
             "set-variable",
+            "progress",
+            "progress-image-token",
           ])
           .describe(
-            "Action: user, executions, execution_context, current_step, update-note, or set-parent",
+            "Action: user, executions, execution_context, current_step, update-note, set-parent, reminders, variables, progress, or progress-image-token",
           ),
         executionId: z
           .string()
@@ -748,6 +769,8 @@ function registerAllTools(
         writePhase: z.enum(["current", "other"]).optional(),
         variableName: z.string().optional(),
         variableValue: z.unknown().optional(),
+        theme: z.enum(["light", "dark"]).optional(),
+        viewportWidth: z.number().int().min(480).max(4096).optional(),
       }),
     },
     async ({
@@ -774,6 +797,8 @@ function registerAllTools(
       writePhase,
       variableName,
       variableValue,
+      theme,
+      viewportWidth,
     }) => {
       try {
         const result = await getSessionInfo({
@@ -800,6 +825,8 @@ function registerAllTools(
           writePhase,
           variableName,
           variableValue,
+          theme,
+          viewportWidth,
         });
         if (!result.success) {
           return { content: [{ type: "text" as const, text: `Error: ${result.error}` }] };

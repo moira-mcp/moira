@@ -2,8 +2,8 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "15.1.0",
-    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed development-only planning, repository-grounded vertical units, fresh producer completion, cause-aware repair and versioned replan. Already-authorized caller-owned follow-ups are durably returned as completion reminders without becoming development work or authority. Each current plan unit owns code, tests, permanent documentation and applicable runtime evidence, with one plan-owned visual mode: disabled, screenshots, or a self-contained Moira artifact report that reuses the accepted screenshots and is optionally notified through Telegram. Interactive plan, selected-unit and final approvals are directive-based and receive attention notifications; autonomous mode has no approval directives. Final documentation reconciliation reuses current independent unit coverage while preserving cross-unit review, then feature-wide validation, independent semantic review, requirements coverage, factual reporting, authorized local VCS reconciliation and truthful terminal notification. Push, pull request, publication, release and deployment remain caller or parent-process effects.",
+    "version": "15.3.0",
+    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed development-only planning, repository-grounded vertical units, fresh producer completion, cause-aware repair and versioned replan. Its always-visible seven-stage progress graph and matching PNG keep stable inactive milestones while the exact current node truthfully names the active unit, iteration, validation, independent review, repair, checkpoint or finalization role. Existing authorized Telegram attention may attach that same image without changing routing or authority. Caller-owned follow-ups remain durable completion reminders rather than development work. Each plan unit owns code, tests, permanent documentation and applicable runtime evidence; push, pull request, publication, release and deployment remain caller or parent-process effects.",
     "author": "mcp-moira-team",
     "tags": [
       "development",
@@ -47,7 +47,8 @@
       },
       "connections": {
         "success": "materialize-development-standards"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "materialize-development-standards",
@@ -77,7 +78,8 @@
       ],
       "connections": {
         "success": "route-operating-mode-requirements"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "confirm-requirements",
@@ -125,7 +127,8 @@
       },
       "connections": {
         "success": "route-requirements-approval"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-requirements-approval",
@@ -154,7 +157,8 @@
       },
       "connections": {
         "success": "route-operating-mode-requirements"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "assess-project-health",
@@ -181,7 +185,8 @@
       },
       "connections": {
         "success": "route-health-external"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-health-external",
@@ -220,7 +225,8 @@
       },
       "connections": {
         "success": "route-health-retry"
-      }
+      },
+      "progressNodeId": "intake"
     },
     {
       "id": "route-health-retry",
@@ -249,7 +255,9 @@
       },
       "connections": {
         "success": "review-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Plan r{{plan_revision}}"
     },
     {
       "id": "review-plan",
@@ -275,7 +283,9 @@
       },
       "connections": {
         "success": "route-plan-review-replan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Review plan r{{plan_revision}}"
     },
     {
       "id": "route-plan-review",
@@ -315,7 +325,9 @@
       },
       "connections": {
         "success": "route-plan-repair-outcome"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Repair plan r{{plan_revision}}"
     },
     {
       "id": "approve-plan",
@@ -364,7 +376,9 @@
       },
       "connections": {
         "success": "route-plan-approval"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Approve plan r{{plan_revision}}"
     },
     {
       "id": "route-plan-approval",
@@ -393,7 +407,9 @@
       },
       "connections": {
         "success": "review-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Revise plan r{{plan_revision}}"
     },
     {
       "id": "initialize-implementation-iteration",
@@ -419,7 +435,9 @@
       },
       "connections": {
         "success": "complete-plan-unit"
-      }
+      },
+      "progressNodeId": "implement",
+      "progressActiveLabel": "Implement · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "validate-cheap",
@@ -440,7 +458,9 @@
       },
       "connections": {
         "success": "route-cheap-validation"
-      }
+      },
+      "progressNodeId": "tests",
+      "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Checks"
     },
     {
       "id": "route-cheap-validation",
@@ -506,7 +526,9 @@
       },
       "connections": {
         "success": "route-cheap-repair-replan"
-      }
+      },
+      "progressNodeId": "tests",
+      "progressActiveLabel": "Repair validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "review-test-adequacy",
@@ -532,7 +554,9 @@
       },
       "connections": {
         "success": "route-test-adequacy-replan"
-      }
+      },
+      "progressNodeId": "tests",
+      "progressActiveLabel": "Review tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "route-test-adequacy",
@@ -598,7 +622,9 @@
       },
       "connections": {
         "success": "route-test-repair-outcome"
-      }
+      },
+      "progressNodeId": "tests",
+      "progressActiveLabel": "Repair tests · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "review-architecture",
@@ -624,7 +650,9 @@
       },
       "connections": {
         "success": "route-architecture-replan"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Arch review"
     },
     {
       "id": "route-architecture-replan",
@@ -705,7 +733,9 @@
       },
       "connections": {
         "success": "route-architecture-repair-outcome"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Repair architecture · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "approve-current-unit-closure",
@@ -729,7 +759,9 @@
       },
       "connections": {
         "success": "route-current-unit-closure"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan decision · r{{plan_revision}}"
     },
     {
       "id": "route-current-unit-closure",
@@ -758,7 +790,9 @@
       },
       "connections": {
         "success": "review-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan r{{plan_revision}}"
     },
     {
       "id": "validate-runtime",
@@ -784,7 +818,9 @@
       },
       "connections": {
         "success": "route-runtime-external"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Runtime validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "route-runtime-external",
@@ -865,7 +901,9 @@
       },
       "connections": {
         "success": "route-runtime-repair-replan"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Repair runtime · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "wait-for-runtime-state-change",
@@ -889,7 +927,9 @@
       },
       "connections": {
         "success": "route-runtime-retry"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Runtime blocker · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-runtime-retry",
@@ -930,7 +970,9 @@
       },
       "connections": {
         "success": "route-expensive-external"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Broad validation · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "route-expensive-external",
@@ -1011,7 +1053,9 @@
       },
       "connections": {
         "success": "route-expensive-repair-replan"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Repair broad checks · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "wait-for-expensive-state-change",
@@ -1035,7 +1079,9 @@
       },
       "connections": {
         "success": "route-expensive-retry"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Validation blocker · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-expensive-retry",
@@ -1098,7 +1144,9 @@
       },
       "connections": {
         "success": "route-plan-unit-user-review"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Unit review · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-plan-unit-user-review",
@@ -1137,7 +1185,9 @@
       },
       "connections": {
         "success": "route-user-feedback-resolution"
-      }
+      },
+      "progressNodeId": "implement",
+      "progressActiveLabel": "{{current_step_index}}/{{total_steps}} i{{current_iteration}} · Feedback fix"
     },
     {
       "id": "route-vcs-authority",
@@ -1192,7 +1242,9 @@
       },
       "connections": {
         "success": "route-finalization-retry"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Finalization blocker"
     },
     {
       "id": "route-finalization-retry",
@@ -1278,7 +1330,9 @@
       },
       "connections": {
         "success": "route-executable-documentation"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Reconcile documentation"
     },
     {
       "id": "route-executable-documentation",
@@ -1334,7 +1388,9 @@
       },
       "connections": {
         "success": "route-documentation-review-replan"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Independent documentation review"
     },
     {
       "id": "route-documentation-review",
@@ -1374,7 +1430,9 @@
       },
       "connections": {
         "success": "route-documentation-repair-replan"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Repair documentation"
     },
     {
       "id": "validate-feature-wide",
@@ -1400,7 +1458,9 @@
       },
       "connections": {
         "success": "route-feature-external"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Feature validation"
     },
     {
       "id": "route-feature-external",
@@ -1455,7 +1515,9 @@
       },
       "connections": {
         "success": "route-feature-repair-replan"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Repair feature validation"
     },
     {
       "id": "wait-for-feature-state-change",
@@ -1479,7 +1541,9 @@
       },
       "connections": {
         "success": "route-feature-retry"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Feature blocker"
     },
     {
       "id": "route-feature-retry",
@@ -1520,7 +1584,9 @@
       },
       "connections": {
         "success": "route-final-review-replan"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Independent final review"
     },
     {
       "id": "route-final-semantic-review",
@@ -1560,7 +1626,9 @@
       },
       "connections": {
         "success": "route-final-repair-replan"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Repair final evidence"
     },
     {
       "id": "validate-requirements-coverage",
@@ -1581,7 +1649,9 @@
       },
       "connections": {
         "success": "route-requirements-coverage"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Requirements coverage"
     },
     {
       "id": "route-requirements-coverage",
@@ -1610,7 +1680,9 @@
       },
       "connections": {
         "success": "review-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Coverage replan · r{{plan_revision}}"
     },
     {
       "id": "report-and-accept-feature",
@@ -1658,7 +1730,9 @@
       },
       "connections": {
         "success": "route-feature-acceptance"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Final result review"
     },
     {
       "id": "route-feature-acceptance",
@@ -1687,7 +1761,9 @@
       },
       "connections": {
         "success": "review-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Feedback replan · r{{plan_revision}}"
     },
     {
       "id": "end-aborted",
@@ -1734,7 +1810,9 @@
       },
       "connections": {
         "success": "route-finalization-success"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Finalize repository"
     },
     {
       "id": "route-finalization-repository",
@@ -1774,7 +1852,9 @@
       },
       "connections": {
         "success": "route-finalization-repair-replan"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Repair finalization"
     },
     {
       "id": "route-checkpoint-authority",
@@ -1815,7 +1895,9 @@
       },
       "connections": {
         "success": "route-checkpoint-success"
-      }
+      },
+      "progressNodeId": "checkpoint",
+      "progressActiveLabel": "Checkpoint · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-checkpoint-success",
@@ -1886,7 +1968,9 @@
       },
       "connections": {
         "success": "route-completeness-review-replan"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Independent review · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "route-unit-completeness",
@@ -1953,7 +2037,9 @@
       },
       "connections": {
         "success": "route-completeness-repair-outcome"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Repair completeness · {{current_step_index}}/{{total_steps}} · i{{current_iteration}}"
     },
     {
       "id": "teleport-replan",
@@ -1977,7 +2063,9 @@
       },
       "connections": {
         "success": "advance-plan-revision-for-teleport"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan · r{{plan_revision}}"
     },
     {
       "id": "advance-plan-revision-for-teleport",
@@ -2002,7 +2090,9 @@
       },
       "connections": {
         "success": "review-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan · r{{plan_revision}}"
     },
     {
       "id": "route-test-adequacy-reach",
@@ -2153,7 +2243,9 @@
       },
       "connections": {
         "success": "route-checkpoint-repair-replan"
-      }
+      },
+      "progressNodeId": "checkpoint",
+      "progressActiveLabel": "Repair checkpoint · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-checkpoint-repair-reach",
@@ -2586,7 +2678,9 @@
       },
       "connections": {
         "success": "route-implementation-preparation"
-      }
+      },
+      "progressNodeId": "implement",
+      "progressActiveLabel": "Prepare · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-implementation-preparation",
@@ -2626,7 +2720,9 @@
       },
       "connections": {
         "success": "route-plan-unit-completion"
-      }
+      },
+      "progressNodeId": "implement",
+      "progressActiveLabel": "Complete unit · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "route-plan-unit-completion",
@@ -2665,7 +2761,9 @@
       "parseMode": "Markdown",
       "connections": {
         "default": "approve-plan"
-      }
+      },
+      "progressNodeId": "plan",
+      "attachProgressImage": true
     },
     {
       "id": "activate-reviewed-plan",
@@ -2689,7 +2787,9 @@
       },
       "connections": {
         "success": "initialize-implementation-iteration"
-      }
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Activate plan r{{plan_revision}}"
     },
     {
       "id": "route-unit-html-report",
@@ -2727,7 +2827,9 @@
       },
       "connections": {
         "success": "notify-report-ready"
-      }
+      },
+      "progressNodeId": "review",
+      "progressActiveLabel": "Visual report · {{current_step_index}}/{{total_steps}}"
     },
     {
       "id": "notify-report-ready",
@@ -2736,7 +2838,9 @@
       "parseMode": "Markdown",
       "connections": {
         "default": "route-unit-approval-required"
-      }
+      },
+      "progressNodeId": "review",
+      "attachProgressImage": true
     },
     {
       "id": "route-unit-approval-required",
@@ -2760,7 +2864,9 @@
       "parseMode": "Markdown",
       "connections": {
         "default": "review-plan-unit-with-user"
-      }
+      },
+      "progressNodeId": "review",
+      "attachProgressImage": true
     },
     {
       "id": "notify-workflow-complete",
@@ -2769,7 +2875,9 @@
       "parseMode": "Markdown",
       "connections": {
         "default": "end"
-      }
+      },
+      "progressNodeId": "finalize",
+      "attachProgressImage": true
     },
     {
       "id": "notify-workflow-stopped",
@@ -2793,7 +2901,9 @@
       },
       "connections": {
         "success": "route-final-acceptance-mode"
-      }
+      },
+      "progressNodeId": "finalize",
+      "progressActiveLabel": "Create final report"
     },
     {
       "id": "route-final-acceptance-mode",
@@ -2817,7 +2927,9 @@
       "parseMode": "Markdown",
       "connections": {
         "default": "report-and-accept-feature"
-      }
+      },
+      "progressNodeId": "finalize",
+      "attachProgressImage": true
     }
   ],
   "variableRegistry": {
@@ -2917,5 +3029,56 @@
   },
   "slug": "software-development-flow",
   "owner": "system-moira",
-  "visibility": "public"
+  "visibility": "public",
+  "progress": {
+    "title": "Software Development · plan r{{plan_revision}}",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Intake",
+        "connections": {
+          "default": "plan"
+        }
+      },
+      {
+        "id": "plan",
+        "label": "Plan",
+        "connections": {
+          "default": "implement"
+        }
+      },
+      {
+        "id": "implement",
+        "label": "Implement",
+        "connections": {
+          "default": "tests"
+        }
+      },
+      {
+        "id": "tests",
+        "label": "Tests",
+        "connections": {
+          "default": "review"
+        }
+      },
+      {
+        "id": "review",
+        "label": "Review",
+        "connections": {
+          "default": "checkpoint"
+        }
+      },
+      {
+        "id": "checkpoint",
+        "label": "Checkpoint",
+        "connections": {
+          "default": "implement"
+        }
+      },
+      {
+        "id": "finalize",
+        "label": "Finalize"
+      }
+    ]
+  }
 }

@@ -908,6 +908,22 @@ Definition-запросы `manage list-variables` и `GET /api/workflows/:id/var
 names/search/types, hasDefault и externallyWritable и возвращают policy, применённые фильтры и
 неизвестные имена; каждая запись содержит `hasDefault` и объявленную policy. CLI имеет
 соответствующие флаги. Объявленная доступность не доказывает текущую.
+
+### Прогресс выполнения
+
+`session({ action: "progress", executionId })` возвращает текущую отрендеренную статическую схему
+прогресса принадлежащего пользователю execution. Упорядоченные ноды имеют состояние `completed`,
+`current` или `pending`, статические connections, ID связанных нод основного графа и
+детерминированный `focusNodeId`. Действие read-only и не меняет context, node state, позицию графа
+или execution revision. Для workflow без поля `progress` возвращается явная ошибка.
+
+`session({ action: "progress-image-token", executionId, theme?, viewportWidth? })` возвращает
+`downloadUrl`, `expiresAt`, `mimeType` и `executionRevision` короткоживущего одноразового PNG;
+бинарная картинка через MCP не передаётся.
+Grant привязан к владельцу, версии workflow, revision execution и нормализованным настройкам
+светлой или тёмной темы. Ошибка рендера, проверки или HTTP response не расходует grant; успешное
+завершение response расходует его.
+
 Автор workflow может задать ту же policy локально командой
 `moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>`: список ID через
 запятую ограничивает запись этими ожидающими нодами, `all` разрешает все ожидающие agent-ноды, а

@@ -10,6 +10,7 @@ import {
   GraphValidator,
   MaterializeHandler,
   detectCycles,
+  projectExecutionProgress,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
@@ -915,7 +916,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v15.1", () => {
+describe("software-development-flow v15.3", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -926,7 +927,7 @@ describe("software-development-flow v15.1", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("15.1.0");
+    expect(workflow.metadata.version).toBe("15.3.0");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -952,6 +953,42 @@ describe("software-development-flow v15.1", () => {
       "screenshots",
       "html_report",
     ]);
+    expect(workflow.progress).toEqual({
+      title: "Software Development · plan r{{plan_revision}}",
+      nodes: [
+        { id: "intake", label: "Intake", connections: { default: "plan" } },
+        { id: "plan", label: "Plan", connections: { default: "implement" } },
+        { id: "implement", label: "Implement", connections: { default: "tests" } },
+        { id: "tests", label: "Tests", connections: { default: "review" } },
+        { id: "review", label: "Review", connections: { default: "checkpoint" } },
+        { id: "checkpoint", label: "Checkpoint", connections: { default: "implement" } },
+        { id: "finalize", label: "Finalize" },
+      ],
+    });
+    const visibleWaitingTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    const visibleWaitingNodes = workflow.nodes.filter((node) => visibleWaitingTypes.has(node.type));
+    expect(visibleWaitingNodes).toHaveLength(54);
+    expect(visibleWaitingNodes.filter((node) => !node.progressNodeId)).toEqual([]);
+    expect(
+      workflow.nodes
+        .filter((node) => node.type === "telegram-notification" && node.attachProgressImage)
+        .map((node) => [node.id, node.progressNodeId]),
+    ).toEqual([
+      ["notify-plan-approval", "plan"],
+      ["notify-report-ready", "review"],
+      ["notify-unit-approval", "review"],
+      ["notify-workflow-complete", "finalize"],
+      ["notify-final-approval", "finalize"],
+    ]);
+    expect(workflow.nodes.find((node) => node.id === "notify-workflow-stopped")).not.toHaveProperty(
+      "attachProgressImage",
+    );
 
     const approval = workflow.nodes.find((node) => node.id === "approve-plan") as {
       inputSchema: { globalInputs?: string[]; properties: Record<string, unknown> };
@@ -1286,6 +1323,129 @@ describe("software-development-flow v15.1", () => {
     ]) {
       expect(serialized).not.toContain(removed);
     }
+  });
+
+  test("projects truthful progress across unit loops, replan, finalization and completion", () => {
+    const projectionAt = (
+      currentNodeId: string | null,
+      status: "running" | "completed" = "running",
+      variables: Record<string, number> = {},
+    ) =>
+      projectExecutionProgress(workflow, {
+        id: "progress-scenario",
+        workflowId: workflow.id ?? "software-development-flow",
+        userId: "scenario-user",
+        status,
+        currentNodeId,
+        revision: 7,
+        globalContext: {
+          variables: {
+            plan_revision: 3,
+            current_step_index: 2,
+            total_steps: 5,
+            current_iteration: 4,
+            ...variables,
+          },
+          nodeStates: {},
+          executionId: "progress-scenario",
+          workflowId: workflow.id ?? "software-development-flow",
+          currentNodeId,
+        },
+      } as unknown as Parameters<typeof projectExecutionProgress>[1]);
+
+    const cases = [
+      ["capture-task-and-context", "intake", "Intake"],
+      ["create-plan", "plan", "Plan r3"],
+      ["review-plan", "plan", "Review plan r3"],
+      ["repair-plan", "plan", "Repair plan r3"],
+      ["approve-plan", "plan", "Approve plan r3"],
+      ["revise-plan-after-rejection", "plan", "Revise plan r3"],
+      ["activate-reviewed-plan", "plan", "Activate plan r3"],
+      ["prepare-plan-unit-implementation", "implement", "Prepare · 2/5"],
+      ["implement-plan-unit", "implement", "Implement · 2/5"],
+      ["complete-plan-unit", "implement", "Complete unit · 2/5"],
+      ["validate-cheap", "tests", "2/5 i4 · Checks"],
+      ["repair-cheap-validation", "tests", "Repair validation · 2/5 · i4"],
+      ["review-test-adequacy", "tests", "Review tests · 2/5 · i4"],
+      ["repair-test-adequacy", "tests", "Repair tests · 2/5 · i4"],
+      ["review-architecture", "review", "2/5 i4 · Arch review"],
+      ["repair-architecture", "review", "Repair architecture · 2/5 · i4"],
+      ["validate-runtime", "review", "Runtime validation · 2/5 · i4"],
+      ["wait-for-runtime-state-change", "review", "Runtime blocker · 2/5"],
+      ["repair-runtime", "review", "Repair runtime · 2/5 · i4"],
+      ["validate-expensive", "review", "Broad validation · 2/5 · i4"],
+      ["wait-for-expensive-state-change", "review", "Validation blocker · 2/5"],
+      ["repair-expensive", "review", "Repair broad checks · 2/5 · i4"],
+      ["review-unit-completeness", "review", "Independent review · 2/5 · i4"],
+      ["repair-unit-completeness", "review", "Repair completeness · 2/5 · i4"],
+      ["checkpoint-plan-unit", "checkpoint", "Checkpoint · 2/5"],
+      ["repair-checkpoint-repository", "checkpoint", "Repair checkpoint · 2/5"],
+      ["approve-current-unit-closure", "plan", "Replan decision · r3"],
+      ["revise-plan-for-replan", "plan", "Replan r3"],
+      ["teleport-replan", "plan", "Replan · r3"],
+      ["revise-plan-for-teleport", "plan", "Replan · r3"],
+      ["review-plan-unit-with-user", "review", "Unit review · 2/5"],
+      ["create-and-upload-step-report", "review", "Visual report · 2/5"],
+      ["resolve-finalization-blocker", "finalize", "Finalization blocker"],
+      ["reconcile-documentation", "finalize", "Reconcile documentation"],
+      ["validate-documentation", "finalize", "Independent documentation review"],
+      ["repair-documentation", "finalize", "Repair documentation"],
+      ["validate-feature-wide", "finalize", "Feature validation"],
+      ["repair-feature-validation", "finalize", "Repair feature validation"],
+      ["wait-for-feature-state-change", "finalize", "Feature blocker"],
+      ["review-final-semantics", "finalize", "Independent final review"],
+      ["repair-final-semantics", "finalize", "Repair final evidence"],
+      ["validate-requirements-coverage", "finalize", "Requirements coverage"],
+      ["revise-plan-for-coverage", "plan", "Coverage replan · r3"],
+      ["report-and-accept-feature", "finalize", "Final result review"],
+      ["revise-plan-after-feedback", "plan", "Feedback replan · r3"],
+      ["finalize-feature", "finalize", "Finalize repository"],
+      ["create-final-report", "finalize", "Create final report"],
+      ["repair-finalization-repository", "finalize", "Repair finalization"],
+      ["repair-user-feedback", "implement", "2/5 i4 · Feedback fix"],
+    ] as const;
+    expect(
+      cases
+        .map(([nodeId]) => nodeId)
+        .filter((nodeId) => nodeId !== "capture-task-and-context")
+        .sort(),
+    ).toEqual(
+      workflow.nodes
+        .filter((node) => node.progressActiveLabel)
+        .map((node) => node.id)
+        .sort(),
+    );
+    for (const [primaryNodeId, activeNodeId, activeLabel] of cases) {
+      const projected = projectionAt(primaryNodeId);
+      expect(projected?.activeNodeId).toBe(activeNodeId);
+      expect(projected?.title).toBe("Software Development · plan r3");
+      expect(projected?.nodes.find((node) => node.id === activeNodeId)?.label).toBe(activeLabel);
+      expect(
+        projected?.nodes.filter((node) => node.id !== activeNodeId).map((node) => node.label),
+      ).toEqual(
+        workflow
+          .progress!.nodes.filter((node) => node.id !== activeNodeId)
+          .map((node) => node.label),
+      );
+      expect(projected?.nodes.find((node) => node.id === activeNodeId)?.focusNodeId).toBe(
+        primaryNodeId,
+      );
+    }
+
+    expect(
+      projectionAt("checkpoint-plan-unit")?.nodes.find((node) => node.id === "checkpoint")
+        ?.connections,
+    ).toEqual({ default: "implement" });
+    expect(projectionAt("reconcile-documentation")?.nodes.at(-1)?.state).toBe("current");
+    const nextUnit = projectionAt("validate-cheap", "running", {
+      current_step_index: 3,
+      current_iteration: 1,
+    });
+    expect(nextUnit?.nodes.find((node) => node.id === "tests")?.label).toBe("3/5 i1 · Checks");
+    expect(nextUnit?.nodes.find((node) => node.id === "implement")?.label).toBe("Implement");
+    expect(projectionAt(null, "completed")?.nodes.map((node) => node.state)).toEqual(
+      Array(7).fill("completed"),
+    );
   });
 
   test("requires distinguishing evidence and stops recursive meta-validation", () => {

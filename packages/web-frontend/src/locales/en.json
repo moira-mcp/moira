@@ -486,6 +486,15 @@
         "steps": "Steps",
         "locks": "Locks"
       },
+      "progress": {
+        "title": "Execution progress",
+        "hint": "Select a stage to focus its workflow node",
+        "completed": "completed",
+        "current": "current",
+        "pending": "pending",
+        "loading": "Loading execution progress...",
+        "error": "Progress is temporarily unavailable. The execution details remain available below."
+      },
       "locks": {
         "noHistory": "No lock history for this execution",
         "node": "Node:",

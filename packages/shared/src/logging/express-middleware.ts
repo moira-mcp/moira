@@ -15,7 +15,9 @@ export interface RequestLoggerOptions {
 }
 
 export function sanitizeRequestUrl(url: string): string {
-  return url.replace(/(\/api\/public\/executions\/materialize\/)[^/?#]+/g, "$1[REDACTED]");
+  return url
+    .replace(/(\/api\/public\/executions\/materialize\/)[^/?#]+/g, "$1[REDACTED]")
+    .replace(/(\/api\/public\/execution-progress-image\/)[^/?#]+/g, "$1[REDACTED]");
 }
 
 /**
