@@ -5,24 +5,29 @@
 
 import { Router, Request, Response } from "express";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
-import { DatabaseRepository, WorkflowExecution } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  WorkflowExecution,
+  prepareExecutionVariablePathWrite,
+  prepareExecutionVariableWrite,
+  queryExecutionVariables,
+} from "@mcp-moira/workflow-engine";
 import { AuthenticatedRequest } from "../types/express-types.js";
 import {
-  getExecutionService,
   getLockService,
   mapLegacyStatusArray,
   LegacyExecutionStatus,
   workflow,
   getDatabase,
+  isExecutionParentReference,
+  logAuditEventDirect,
+  AuditAction,
 } from "@mcp-moira/shared";
 
 const router = Router();
 
 // Create repository instance (uses shared database singleton)
 const repository = new DatabaseRepository();
-
-// Get ExecutionService for operations with automatic audit
-const executionService = getExecutionService();
 
 /**
  * GET /api/executions
@@ -144,11 +149,9 @@ router.get(
   "/:id",
   asyncHandler(async (req: Request, res: Response) => {
     const { id: executionId } = req.params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userId = (req as any).userId;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userInfo = (req as any).userInfo;
-    const isAdmin = userInfo?.isAdmin || false;
+    const authenticatedRequest = req as AuthenticatedRequest;
+    const userId = authenticatedRequest.userId;
+    const isAdmin = authenticatedRequest.userInfo?.isAdmin ?? false;
 
     const execution = await repository.getExecution(executionId);
 
@@ -183,6 +186,9 @@ router.get(
           currentNodeId: execution.currentNodeId,
           waitingForInputNodeId: execution.waitingForInputNodeId,
           note: execution.note,
+          parentExecutionId: execution.parentExecutionId ?? null,
+          revision: execution.revision,
+          reminders: execution.reminders ?? [],
           context: execution.globalContext,
           createdAt: execution.createdAt,
           updatedAt: execution.updatedAt,
@@ -206,6 +212,189 @@ router.get(
   }),
 );
 
+router.get(
+  "/:id/reminders",
+  asyncHandler(async (req: Request, res: Response) => {
+    const execution = await repository.getExecution(req.params.id);
+    const userId = (req as AuthenticatedRequest).userId;
+    if (!execution) throw createApiError.notFound("Execution not found");
+    if (execution.userId !== userId) throw createApiError.unauthorized("Access denied");
+    const status = req.query.status as "active" | "cancelled" | undefined;
+    const search = String(req.query.search ?? "").toLowerCase();
+    const reminders = (execution.reminders ?? []).filter(
+      (item) =>
+        (!status || item.status === status) &&
+        (!search || item.text.toLowerCase().includes(search)),
+    );
+    res.json({
+      success: true,
+      data: { reminders, revision: execution.revision },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+router.post(
+  "/:id/reminders",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { text, idempotencyKey, expectedRevision } = req.body;
+    if (!Number.isInteger(expectedRevision))
+      throw createApiError.validationFailed("integer expectedRevision is required");
+    const result = await repository.mutateExecutionReminder(
+      req.params.id,
+      userId,
+      expectedRevision,
+      { action: "add", text: typeof text === "string" ? text : "", idempotencyKey },
+    );
+    res.json({ success: true, data: result, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.patch(
+  "/:id/reminders/:reminderId",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const { text, expectedRevision } = req.body;
+    if (!Number.isInteger(expectedRevision))
+      throw createApiError.validationFailed("integer expectedRevision is required");
+    const result = await repository.mutateExecutionReminder(
+      req.params.id,
+      userId,
+      expectedRevision,
+      {
+        action: "update",
+        reminderId: req.params.reminderId,
+        text: typeof text === "string" ? text : "",
+      },
+    );
+    res.json({ success: true, data: result, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.delete(
+  "/:id/reminders/:reminderId",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const expectedRevision = Number(req.body.expectedRevision);
+    if (!Number.isInteger(expectedRevision))
+      throw createApiError.validationFailed("integer expectedRevision is required");
+    const result = await repository.mutateExecutionReminder(
+      req.params.id,
+      userId,
+      expectedRevision,
+      { action: "cancel", reminderId: req.params.reminderId },
+    );
+    res.json({ success: true, data: result, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.get(
+  "/:id/variables",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const execution = await repository.getExecution(req.params.id);
+    if (!execution || execution.userId !== userId)
+      throw createApiError.unauthorized("Access denied");
+    const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+    if (!graph) throw createApiError.notFound("Workflow not found");
+    const result = queryExecutionVariables(execution, graph, {
+      names: String(req.query.names ?? "")
+        .split(",")
+        .filter(Boolean),
+      search: String(req.query.search ?? ""),
+      types: String(req.query.types ?? "")
+        .split(",")
+        .filter(Boolean),
+      editable: req.query.editable === undefined ? undefined : req.query.editable === "true",
+      hasValue: req.query.hasValue === undefined ? undefined : req.query.hasValue === "true",
+      writePhase:
+        req.query.writePhase === "current" || req.query.writePhase === "other"
+          ? req.query.writePhase
+          : undefined,
+    });
+    res.json({
+      success: true,
+      data: result,
+    });
+  }),
+);
+
+router.put(
+  "/:id/variables/:name",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const execution = await repository.getExecution(req.params.id);
+    if (!execution || execution.userId !== userId)
+      throw createApiError.unauthorized("Access denied");
+    const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+    if (!graph) throw createApiError.notFound("Workflow not found");
+    const updated = prepareExecutionVariableWrite(
+      execution,
+      graph,
+      req.params.name,
+      req.body.value,
+      req.body.expectedRevision,
+    );
+    await repository.saveExecution(updated);
+    await logAuditEventDirect(repository, {
+      userId,
+      action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+      resource: "execution",
+      resourceId: req.params.id,
+      source: "api",
+      metadata: {
+        action: "set-variable",
+        variableName: req.params.name,
+        revision: updated.revision,
+      },
+    });
+    res.json({
+      success: true,
+      data: { name: req.params.name, value: req.body.value, revision: updated.revision },
+    });
+  }),
+);
+
+/**
+ * POST /api/executions/:id/parent
+ * Attach a same-owner running parent once, using optimistic concurrency.
+ */
+router.post(
+  "/:id/parent",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id: executionId } = req.params;
+    const userId = (req as AuthenticatedRequest).userId;
+    const { parentExecutionId, expectedRevision } = req.body;
+    if (typeof parentExecutionId !== "string" || !Number.isInteger(expectedRevision)) {
+      throw createApiError.validationFailed(
+        "parentExecutionId and integer expectedRevision are required",
+        { executionId },
+      );
+    }
+    if (!isExecutionParentReference(parentExecutionId)) {
+      throw createApiError.validationFailed('parentExecutionId must be a UUID or "none"', {
+        executionId,
+      });
+    }
+    const updated = await repository.setExecutionParent(
+      executionId,
+      parentExecutionId === "none" ? null : parentExecutionId,
+      userId,
+      expectedRevision,
+    );
+    res.json({
+      success: true,
+      data: {
+        executionId,
+        parentExecutionId: updated.parentExecutionId ?? null,
+        revision: updated.revision,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
 /**
  * PUT /api/executions/:id/context
  * Update execution context variables (only for waiting status)
@@ -215,12 +404,8 @@ router.put(
   "/:id/context",
   asyncHandler(async (req: Request, res: Response) => {
     const { id: executionId } = req.params;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userId = (req as any).userId;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userInfo = (req as any).userInfo;
-    const isAdmin = userInfo?.isAdmin || false;
-    const { variables, nodeStates, variablePath } = req.body;
+    const userId = (req as AuthenticatedRequest).userId;
+    const { variables, nodeStates, variablePath, expectedRevision } = req.body;
 
     // Get execution
     const execution = await repository.getExecution(executionId);
@@ -229,8 +414,9 @@ router.put(
       throw createApiError.notFound(`Execution '${executionId}' not found`, { executionId });
     }
 
-    // Permission check: user can only edit own executions, admins can edit all
-    if (!isAdmin && execution.userId !== userId) {
+    // Parent linkage and execution policy grant no authority. This owner route never elevates an
+    // administrator into another user's workflow execution.
+    if (execution.userId !== userId) {
       throw createApiError.unauthorized("Access denied - not your execution", { executionId });
     }
 
@@ -240,6 +426,11 @@ router.put(
         `Cannot edit context - execution is ${execution.status}. Only running executions can be edited.`,
         { executionId, status: execution.status },
       );
+    }
+    if (!Number.isInteger(expectedRevision)) {
+      throw createApiError.validationFailed("integer expectedRevision is required", {
+        executionId,
+      });
     }
 
     // Per-path update: set a value at any nesting path inside variables without overwriting
@@ -251,25 +442,36 @@ router.put(
           { executionId },
         );
       }
-      // Reject prototype-pollution segments (defense in depth; repository also guards).
-      const forbidden = new Set(["__proto__", "constructor", "prototype"]);
-      if (variablePath.some((seg) => typeof seg === "string" && forbidden.has(seg))) {
-        throw createApiError.validationFailed("variablePath contains a forbidden segment", {
-          executionId,
-        });
-      }
-      const updatedByPath = await executionService.updateContextPath(
-        executionId,
-        userId,
+      const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
+      if (!graph) throw createApiError.notFound("Workflow not found");
+      const updated = prepareExecutionVariablePathWrite(
+        execution,
+        graph,
         variablePath,
         req.body.value,
+        expectedRevision,
       );
-      if (!updatedByPath) {
-        throw createApiError.internal("Failed to update execution context", { executionId });
-      }
+      await repository.saveExecution(updated);
+      const variablePathText = variablePath
+        .map((segment, index) =>
+          typeof segment === "number" ? `[${segment}]` : index === 0 ? segment : `.${segment}`,
+        )
+        .join("");
+      await logAuditEventDirect(repository, {
+        userId,
+        action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+        resource: "execution",
+        resourceId: executionId,
+        source: "api",
+        metadata: {
+          action: "set-variable-path",
+          variablePath: variablePathText,
+          revision: updated.revision,
+        },
+      });
       res.json({
         success: true,
-        data: { executionId, updated: true },
+        data: { executionId, updated: true, revision: updated.revision },
         timestamp: new Date().toISOString(),
       });
       return;
@@ -283,24 +485,9 @@ router.put(
       );
     }
 
-    // Update context via service (handles audit automatically)
-    const updated = await executionService.updateContext(executionId, userId, {
-      variables,
-      nodeStates,
-    });
-
-    if (!updated) {
-      throw createApiError.internal("Failed to update execution context", { executionId });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        executionId,
-        updated: true,
-      },
-      timestamp: new Date().toISOString(),
-    });
+    throw createApiError.badRequest(
+      "Arbitrary variables/nodeStates mutation is disabled; use the policy-governed variable API",
+    );
   }),
 );
 

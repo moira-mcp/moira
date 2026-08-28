@@ -46,6 +46,7 @@ import {
   getWorkflowStructure,
   getNode,
   getWorkflowVariables,
+  queryWorkflowVariables,
   setWorkflowVariable,
   deleteWorkflowVariable,
   // Shared functions for CLI/MCP parity
@@ -696,10 +697,27 @@ function cmdShowVariables(workflow: WorkflowGraph, showUsage: boolean): void {
 }
 
 // === VARIABLE COMMANDS (uses shared service) ===
-function cmdListVariables(workflow: WorkflowGraph): void {
-  const variables = getWorkflowVariables(workflow);
+function cmdListVariables(
+  workflow: WorkflowGraph,
+  search?: string,
+  names?: string[],
+  types?: string[],
+  externallyWritable?: boolean,
+  hasDefault?: boolean,
+): void {
+  const result = queryWorkflowVariables(workflow, {
+    names,
+    search,
+    types,
+    hasDefault,
+    externallyWritable,
+  });
+  console.log(c("dim", `Applied filters: ${JSON.stringify(result.appliedFilters)}`));
+  if (result.unknownNames.length > 0) {
+    console.log(c("yellow", `Unknown names: ${result.unknownNames.join(", ")}`));
+  }
 
-  if (Object.keys(variables).length === 0) {
+  if (result.variables.length === 0) {
     console.log(c("yellow", "No declared globals found in variableRegistry"));
     return;
   }
@@ -707,7 +725,8 @@ function cmdListVariables(workflow: WorkflowGraph): void {
   console.log(c("bright", "Workflow Variables:"));
   console.log(c("dim", "─".repeat(80)));
 
-  Object.entries(variables).forEach(([name, varInfo]) => {
+  result.variables.forEach((varInfo) => {
+    const name = varInfo.name;
     const value = varInfo.value;
     const description = varInfo.description;
     const preview =
@@ -715,13 +734,17 @@ function cmdListVariables(workflow: WorkflowGraph): void {
 
     console.log(c("cyan", `${name}:`));
     console.log(`  ${c("dim", "Description:")} ${description}`);
+    console.log(`  ${c("dim", "Externally writable:")} ${varInfo.externallyWritable}`);
+    console.log(
+      `  ${c("dim", "External write policy:")} ${JSON.stringify(varInfo.externalWritePolicy)}`,
+    );
     console.log(
       `  ${c("dim", "Value:")} ${typeof value === "string" ? preview : JSON.stringify(preview)}`,
     );
     console.log("");
   });
 
-  console.log(c("cyan", `Total: ${c("bright", Object.keys(variables).length)} variable(s)`));
+  console.log(c("cyan", `Total: ${c("bright", result.variables.length)} variable(s)`));
 }
 
 function cmdGetVariable(workflow: WorkflowGraph, varName: string): void {
@@ -793,6 +816,39 @@ function setVariableSchema(
   updated.variableRegistry ??= {};
   updated.variableRegistry[varName] = declaration as (typeof updated.variableRegistry)[string];
   console.log(c("green", `✓ Set variable schema: ${varName}`));
+  return updated;
+}
+
+function setVariableWritePolicy(
+  workflow: WorkflowGraph,
+  varName: string,
+  allowedNodes: string,
+): WorkflowGraph {
+  if (!workflow.variableRegistry?.[varName]) {
+    console.error(c("red", `ERROR: Variable not found: ${varName}`));
+    process.exit(1);
+  }
+
+  const updated = JSON.parse(JSON.stringify(workflow)) as WorkflowGraph;
+  updated.runtimePolicy ??= {};
+  updated.runtimePolicy.externalVariableWrites ??= {};
+
+  if (allowedNodes === "none") {
+    delete updated.runtimePolicy.externalVariableWrites[varName];
+  } else if (allowedNodes === "all") {
+    updated.runtimePolicy.externalVariableWrites[varName] = {};
+  } else {
+    const allowedNodeIds = [...new Set(allowedNodes.split(",").map((id) => id.trim()))].filter(
+      Boolean,
+    );
+    if (allowedNodeIds.length === 0) {
+      console.error(c("red", "ERROR: Provide comma-separated node IDs, 'all', or 'none'"));
+      process.exit(1);
+    }
+    updated.runtimePolicy.externalVariableWrites[varName] = { allowedNodeIds };
+  }
+
+  console.log(c("green", `✓ Set external write policy: ${varName} = ${allowedNodes}`));
   return updated;
 }
 
@@ -1315,6 +1371,10 @@ interface ParsedConfig {
   detailed: boolean;
   typeFilter?: string;
   force: boolean;
+  externallyWritable?: boolean;
+  hasDefault?: boolean;
+  variableNames?: string[];
+  variableTypes?: string[];
 }
 
 function parseArgs(): ParsedConfig {
@@ -1356,8 +1416,12 @@ ${c("cyan", "Commands:")}
   set-variable <name> <value>      Set declared global in variableRegistry
   set-variable-schema <name> <json|--file path>
                                      Replace a declared global's complete JSON Schema
+  set-variable-write-policy <name> <node-ids|all|none>
+                                     Allow named waiting nodes, every waiting node, or deny writes
   delete-variable <name>           Delete declared global from variableRegistry
-  list-variables                   List declared globals from variableRegistry
+  list-variables [search] [--names a,b] [--types string,number]
+                                   [--has-default true|false] [--externally-writable true|false]
+                                   Filter declared globals deterministically
   set-name <text>                  Set workflow display name
   set-slug <slug>                  Set workflow catalog slug (kebab-case)
   set-description <text|--file path> Set workflow description
@@ -1415,6 +1479,9 @@ ${c("cyan", "Examples:")}
     file = args[0];
     command = args[1];
     nodeId = args[2];
+    if (command === "list-variables" && nodeId?.startsWith("--")) {
+      nodeId = undefined;
+    }
   }
 
   const config: ParsedConfig = {
@@ -1426,6 +1493,22 @@ ${c("cyan", "Examples:")}
     detailed: args.includes("--detailed"),
     typeFilter: undefined,
     force: args.includes("--force"),
+    externallyWritable: args.includes("--externally-writable")
+      ? args[args.indexOf("--externally-writable") + 1] === "false"
+        ? false
+        : true
+      : undefined,
+    hasDefault: args.includes("--has-default")
+      ? args[args.indexOf("--has-default") + 1] === "false"
+        ? false
+        : true
+      : undefined,
+    variableNames: args.includes("--names")
+      ? args[args.indexOf("--names") + 1]?.split(",").filter(Boolean)
+      : undefined,
+    variableTypes: args.includes("--types")
+      ? args[args.indexOf("--types") + 1]?.split(",").filter(Boolean)
+      : undefined,
   };
 
   for (let i = 2; i < args.length; i++) {
@@ -1642,7 +1725,14 @@ async function main(): Promise<void> {
       break;
 
     case "list-variables":
-      cmdListVariables(workflow);
+      cmdListVariables(
+        workflow,
+        config.nodeId,
+        config.variableNames,
+        config.variableTypes ?? (config.typeFilter ? [config.typeFilter] : undefined),
+        config.externallyWritable,
+        config.hasDefault,
+      );
       break;
 
     case "get-variable":
@@ -1696,6 +1786,21 @@ async function main(): Promise<void> {
       saveWorkflow(
         config.file,
         setVariableSchema(workflow, config.nodeId, schema),
+        originalWorkflow,
+        saveOptions,
+      );
+      break;
+    }
+
+    case "set-variable-write-policy": {
+      if (!config.nodeId || !args[3]) {
+        console.error(c("red", "Usage: set-variable-write-policy <name> <node-ids|all|none>"));
+        process.exit(1);
+      }
+      createBackup(config.file);
+      saveWorkflow(
+        config.file,
+        setVariableWritePolicy(workflow, config.nodeId, args[3]),
         originalWorkflow,
         saveOptions,
       );

@@ -1,5 +1,5 @@
 /**
- * Observable scenarios for Software Development Flow v14.1.
+ * Observable scenarios for Software Development Flow v15.
  */
 
 import * as fs from "node:fs";
@@ -40,6 +40,7 @@ function ordinaryInputs(): Record<string, MockInput> {
     "capture-task-and-context": {
       workspace_path: "./moira-ws/example",
       operating_mode: "interactive",
+      visual_validation_preference: "disabled",
     },
     "confirm-requirements": { requirements_approval: "yes" },
     "revise-requirements": {},
@@ -48,14 +49,18 @@ function ordinaryInputs(): Record<string, MockInput> {
     "create-plan": {},
     "review-plan": { review_outcome: "pass" },
     "repair-plan": { repair_outcome: "changed" },
-    "approve-plan": {
-      plan_approval: "yes",
+    "approve-plan": { plan_approval: "yes" },
+    "activate-reviewed-plan": {
       current_step_index: 1,
       total_steps: 1,
       vcs_commits_authorized: false,
     },
     "revise-plan-after-rejection": {},
-    "prepare-plan-unit-implementation": { preparation_outcome: "ready" },
+    "prepare-plan-unit-implementation": {
+      preparation_outcome: "ready",
+      visual_mode: "disabled",
+      approval_required: true,
+    },
     "implement-plan-unit": {},
     "complete-plan-unit": { completion_outcome: "ready" },
     "validate-cheap": { issues_count: 0 },
@@ -76,6 +81,7 @@ function ordinaryInputs(): Record<string, MockInput> {
     "repair-expensive": { repair_outcome: "changed", mutation_scope: "product" },
     "wait-for-expensive-state-change": { blocker_decision: "retry" },
     "review-plan-unit-with-user": { acceptance_decision: "accepted" },
+    "create-and-upload-step-report": { report_url: "https://report.example/unit.html" },
     "checkpoint-plan-unit": { checkpoint_outcome: "pass" },
     "repair-user-feedback": { resolution: "in_plan" },
     "reconcile-documentation": { change_scope: "not_applicable" },
@@ -87,6 +93,7 @@ function ordinaryInputs(): Record<string, MockInput> {
     "review-final-semantics": { review_outcome: "pass" },
     "repair-final-semantics": { repair_outcome: "gate_local" },
     "validate-requirements-coverage": { gaps_count: 0 },
+    "create-final-report": {},
     "revise-plan-for-coverage": {},
     "finalize-feature": { finalization_outcome: "pass" },
     "repair-finalization-repository": { repair_outcome: "gate_local" },
@@ -122,6 +129,12 @@ function autonomousInputs(overrides: Record<string, MockInput> = {}): Record<str
     "capture-task-and-context": {
       workspace_path: "./moira-ws/example",
       operating_mode: "autonomous",
+      visual_validation_preference: "disabled",
+    },
+    "prepare-plan-unit-implementation": {
+      preparation_outcome: "ready",
+      visual_mode: "disabled",
+      approval_required: false,
     },
     ...overrides,
   };
@@ -129,6 +142,9 @@ function autonomousInputs(overrides: Record<string, MockInput> = {}): Record<str
 
 const approvedPlan: MockInput = {
   plan_approval: "yes",
+};
+
+const activatedPlan: MockInput = {
   current_step_index: 1,
   total_steps: 1,
   vcs_commits_authorized: false,
@@ -141,12 +157,18 @@ const scenarios: TestScenario[] = [
     [
       "route-operating-mode-requirements",
       "assess-project-health",
+      "route-plan-activation-mode",
+      "activate-reviewed-plan",
+      "create-final-report",
+      "end",
+    ],
+    [
+      "confirm-requirements",
+      "revise-requirements",
       "approve-plan",
       "review-plan-unit-with-user",
       "report-and-accept-feature",
-      "end",
     ],
-    ["confirm-requirements", "revise-requirements"],
   ),
   flow(
     "delegated completeness review sends an incomplete unit back through the cheap gate",
@@ -162,20 +184,7 @@ const scenarios: TestScenario[] = [
   flow(
     "teleport replan rebuilds the plan and returns to implementation",
     {
-      "approve-plan": [
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
-      ],
+      "activate-reviewed-plan": [activatedPlan, activatedPlan],
       "teleport-replan": {
         replan_rationale: "R".repeat(8000),
       },
@@ -206,11 +215,58 @@ const scenarios: TestScenario[] = [
     ["finalize-feature", "end-aborted"],
   ),
   flow(
+    "html report reuses visual evidence and notifies without unit approval",
+    {
+      "prepare-plan-unit-implementation": {
+        preparation_outcome: "ready",
+        visual_mode: "html_report",
+        approval_required: false,
+      },
+    },
+    [
+      "validate-runtime",
+      "route-unit-html-report",
+      "create-and-upload-step-report",
+      "notify-report-ready",
+      "route-unit-approval-required",
+      "create-final-report",
+      "end",
+    ],
+    ["notify-unit-approval", "review-plan-unit-with-user"],
+  ),
+  flow(
+    "screenshot validation runs without an HTML report or unit approval",
+    {
+      "prepare-plan-unit-implementation": {
+        preparation_outcome: "ready",
+        visual_mode: "screenshots",
+        approval_required: false,
+      },
+    },
+    [
+      "validate-runtime",
+      "route-unit-html-report",
+      "route-unit-approval-required",
+      "create-final-report",
+      "end",
+    ],
+    [
+      "create-and-upload-step-report",
+      "notify-report-ready",
+      "notify-unit-approval",
+      "review-plan-unit-with-user",
+    ],
+  ),
+  flow(
     "preparation replans before implementation or validation",
     {
       "prepare-plan-unit-implementation": [
         { preparation_outcome: "replan" },
-        { preparation_outcome: "ready" },
+        {
+          preparation_outcome: "ready",
+          visual_mode: "disabled",
+          approval_required: true,
+        },
       ],
       "approve-plan": [approvedPlan, approvedPlan],
     },
@@ -244,12 +300,7 @@ const scenarios: TestScenario[] = [
       ],
       "approve-plan": [
         { plan_approval: "no", user_feedback: "Split the risky outcome" },
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
+        approvedPlan,
       ],
     },
     ["revise-requirements", "repair-plan", "revise-plan-after-rejection", "end"],
@@ -344,19 +395,9 @@ const scenarios: TestScenario[] = [
     "architecture replan requires approved closure and a new reviewed plan",
     {
       "review-architecture": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
-      "approve-plan": [
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
-        {
-          plan_approval: "yes",
-          current_step_index: 2,
-          total_steps: 2,
-          vcs_commits_authorized: false,
-        },
+      "activate-reviewed-plan": [
+        activatedPlan,
+        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
       ],
     },
     ["approve-current-unit-closure", "revise-plan-for-replan", "review-plan", "end"],
@@ -431,19 +472,9 @@ const scenarios: TestScenario[] = [
         { acceptance_decision: "accepted" },
       ],
       "repair-user-feedback": { resolution: "replan" },
-      "approve-plan": [
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
-        {
-          plan_approval: "yes",
-          current_step_index: 2,
-          total_steps: 2,
-          vcs_commits_authorized: false,
-        },
+      "activate-reviewed-plan": [
+        activatedPlan,
+        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
       ],
     },
     ["route-user-feedback-resolution", "review-plan", "end"],
@@ -451,12 +482,7 @@ const scenarios: TestScenario[] = [
   flow(
     "multiple approved units advance without a report-only turn",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 2,
-        vcs_commits_authorized: false,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, total_steps: 2 },
     },
     ["advance-plan-unit", "reconcile-documentation", "end"],
   ),
@@ -537,19 +563,9 @@ const scenarios: TestScenario[] = [
     "requirements gap creates a reviewed and approved plan revision",
     {
       "validate-requirements-coverage": [{ gaps_count: 1 }, { gaps_count: 0 }],
-      "approve-plan": [
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
-        {
-          plan_approval: "yes",
-          current_step_index: 2,
-          total_steps: 2,
-          vcs_commits_authorized: false,
-        },
+      "activate-reviewed-plan": [
+        activatedPlan,
+        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
       ],
     },
     ["revise-plan-for-coverage", "review-plan", "end"],
@@ -557,12 +573,7 @@ const scenarios: TestScenario[] = [
   flow(
     "authorized finalization repairs repository failure before retry",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": [
         { finalization_outcome: "repository_failure" },
         { finalization_outcome: "pass" },
@@ -573,12 +584,7 @@ const scenarios: TestScenario[] = [
   flow(
     "authorized finalization external blocker can retry skip or abort",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": { finalization_outcome: "external_blocker" },
       "resolve-finalization-blocker": { blocker_decision: "skip" },
     },
@@ -587,12 +593,7 @@ const scenarios: TestScenario[] = [
   flow(
     "authorized finalization external blocker retries after changed state",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": [
         { finalization_outcome: "external_blocker" },
         { finalization_outcome: "pass" },
@@ -604,12 +605,7 @@ const scenarios: TestScenario[] = [
   flow(
     "authorized finalization external blocker can abort",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": { finalization_outcome: "external_blocker" },
       "resolve-finalization-blocker": { blocker_decision: "abort" },
     },
@@ -623,19 +619,9 @@ const scenarios: TestScenario[] = [
         { feature_decision: "rejected", user_feedback: "One requirement remains" },
         { feature_decision: "accepted" },
       ],
-      "approve-plan": [
-        {
-          plan_approval: "yes",
-          current_step_index: 1,
-          total_steps: 1,
-          vcs_commits_authorized: false,
-        },
-        {
-          plan_approval: "yes",
-          current_step_index: 2,
-          total_steps: 2,
-          vcs_commits_authorized: false,
-        },
+      "activate-reviewed-plan": [
+        activatedPlan,
+        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
       ],
     },
     ["revise-plan-after-feedback", "review-plan", "end"],
@@ -643,12 +629,7 @@ const scenarios: TestScenario[] = [
   flow(
     "authorized checkpoint repository failure repairs before cursor advance",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "checkpoint-plan-unit": [
         { checkpoint_outcome: "repository_failure" },
         { checkpoint_outcome: "pass" },
@@ -666,12 +647,7 @@ const scenarios: TestScenario[] = [
   flow(
     "a contained checkpoint repair returns to the checkpoint instead of the whole chain",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "checkpoint-plan-unit": [
         { checkpoint_outcome: "repository_failure" },
         { checkpoint_outcome: "pass" },
@@ -691,12 +667,7 @@ const scenarios: TestScenario[] = [
   flow(
     "a contained finalization repair returns to reconciliation instead of the whole chain",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
-        total_steps: 1,
-        vcs_commits_authorized: true,
-      },
+      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": [
         { finalization_outcome: "repository_failure" },
         { finalization_outcome: "pass" },
@@ -734,9 +705,8 @@ const scenarios: TestScenario[] = [
   flow(
     "authorized checkpoint aborts without cursor advance",
     {
-      "approve-plan": {
-        plan_approval: "yes",
-        current_step_index: 1,
+      "activate-reviewed-plan": {
+        ...activatedPlan,
         total_steps: 2,
         vcs_commits_authorized: true,
       },
@@ -916,9 +886,9 @@ const scenarios: TestScenario[] = [
   flow(
     "checkpoint repair can require replanning",
     {
-      "approve-plan": [
-        { ...approvedPlan, vcs_commits_authorized: true },
-        { ...approvedPlan, vcs_commits_authorized: true },
+      "activate-reviewed-plan": [
+        { ...activatedPlan, vcs_commits_authorized: true },
+        { ...activatedPlan, vcs_commits_authorized: true },
       ],
       "checkpoint-plan-unit": [
         { checkpoint_outcome: "repository_failure" },
@@ -931,9 +901,9 @@ const scenarios: TestScenario[] = [
   flow(
     "finalization repair can require replanning",
     {
-      "approve-plan": [
-        { ...approvedPlan, vcs_commits_authorized: true },
-        { ...approvedPlan, vcs_commits_authorized: true },
+      "activate-reviewed-plan": [
+        { ...activatedPlan, vcs_commits_authorized: true },
+        { ...activatedPlan, vcs_commits_authorized: true },
       ],
       "finalize-feature": [
         { finalization_outcome: "repository_failure" },
@@ -945,7 +915,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v14.1", () => {
+describe("software-development-flow v15.1", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -956,7 +926,7 @@ describe("software-development-flow v14.1", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("14.2.1");
+    expect(workflow.metadata.version).toBe("15.1.0");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -974,8 +944,54 @@ describe("software-development-flow v14.1", () => {
       "previous_plan_revision",
       "previous_iteration",
       "product_review_iteration",
+      "visual_validation_preference",
     ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
+    expect(workflow.variableRegistry?.visual_validation_preference?.enum).toEqual([
+      "disabled",
+      "screenshots",
+      "html_report",
+    ]);
+
+    const approval = workflow.nodes.find((node) => node.id === "approve-plan") as {
+      inputSchema: { globalInputs?: string[]; properties: Record<string, unknown> };
+    };
+    expect(approval.inputSchema.globalInputs).toBeUndefined();
+    expect(Object.keys(approval.inputSchema.properties)).toEqual([
+      "plan_approval",
+      "user_feedback",
+    ]);
+    const activation = workflow.nodes.find((node) => node.id === "activate-reviewed-plan") as {
+      inputSchema: { globalInputs: string[] };
+    };
+    expect(activation.inputSchema.globalInputs).toEqual([
+      "current_step_index",
+      "total_steps",
+      "vcs_commits_authorized",
+    ]);
+    expect(
+      workflow.nodes.find((node) => node.id === "route-plan-activation-mode")?.connections,
+    ).toEqual({
+      true: "notify-plan-approval",
+      false: "activate-reviewed-plan",
+    });
+
+    const preparation = workflow.nodes.find(
+      (node) => node.id === "prepare-plan-unit-implementation",
+    ) as {
+      inputSchema: {
+        properties: {
+          visual_mode: { enum: string[] };
+          approval_required: { type: string };
+        };
+      };
+    };
+    expect(preparation.inputSchema.properties.visual_mode.enum).toEqual([
+      "disabled",
+      "screenshots",
+      "html_report",
+    ]);
+    expect(preparation.inputSchema.properties.approval_required.type).toBe("boolean");
 
     const sharedReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-replan");
     const teleportReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-teleport");
@@ -1092,8 +1108,9 @@ describe("software-development-flow v14.1", () => {
     expect(gate("revise-plan-for-coverage")).toContain("every final coverage gap");
     expect(gate("revise-plan-after-feedback")).toContain("final rejection feedback");
 
+    expect(gate("create-plan")).toContain("every unit has valid visualMode and userApproval");
     expect(gate("create-plan")).toContain(
-      "every unit fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable",
+      "push, PR, publication, release, and deployment are excluded from units",
     );
     for (const nodeId of [
       "repair-plan",
@@ -1108,7 +1125,17 @@ describe("software-development-flow v14.1", () => {
     }
     const owner = workflow.nodes.find((node) => node.id === "capture-task-and-context");
     expect(owner?.directive).toContain("./moira-ws/software-development-flow-{task-name}");
+    expect(owner?.directive).toContain('session({ action: "add-reminder"');
+    expect(owner?.directive).toContain("standalone and child executions alike");
+    expect(owner?.directive).toContain("preserve it in canonical requirements");
+    expect(owner?.directive).toContain("neither performs nor authorizes the effect");
+    expect(owner?.completionCondition).toContain("active execution reminder");
     expect(owner?.connections).toEqual({ success: "materialize-development-standards" });
+    expect(gate("create-plan")).toContain("active execution reminder");
+    expect(
+      (workflow.nodes.find((node) => node.id === "create-plan") as { directive: string }).directive,
+    ).toContain("Do not copy reminder items into the development plan");
+    expect(workflow.runtimePolicy?.externalVariableWrites).toBeUndefined();
 
     // The reviewer contract has one home: the finding format no longer repeats across directives.
     expect(JSON.stringify(workflow)).not.toContain("do not stop after the first");
@@ -1156,11 +1183,20 @@ describe("software-development-flow v14.1", () => {
     expect(start).not.toHaveProperty("initialData");
     expect(workflow.nodes.find((node) => node.id === "route-vcs-authority")?.connections).toEqual({
       true: "finalize-feature",
-      false: "end",
+      false: "notify-workflow-complete",
     });
     expect(
       workflow.nodes.find((node) => node.id === "route-plan-unit-user-review")?.connections,
     ).toEqual({ true: "repair-user-feedback", false: "route-checkpoint-authority" });
+    expect(
+      workflow.nodes.find((node) => node.id === "route-unit-html-report")?.connections,
+    ).toEqual({
+      true: "create-and-upload-step-report",
+      false: "route-unit-approval-required",
+    });
+    expect(
+      workflow.nodes.find((node) => node.id === "route-unit-approval-required")?.connections,
+    ).toEqual({ true: "notify-unit-approval", false: "route-checkpoint-authority" });
     expect(
       workflow.nodes.find((node) => node.id === "route-checkpoint-authority")?.connections,
     ).toEqual({
@@ -1176,6 +1212,17 @@ describe("software-development-flow v14.1", () => {
     expect(workflow.nodes.find((node) => node.id === "end")?.finalOutput).toEqual([
       "workspace_path",
     ]);
+    expect(
+      workflow.nodes.find((node) => node.id === "notify-workflow-complete")?.connections,
+    ).toEqual({
+      default: "end",
+    });
+    expect(
+      workflow.nodes.find((node) => node.id === "notify-workflow-stopped")?.connections,
+    ).toEqual({
+      default: "end-aborted",
+    });
+    expect(workflow.nodes.filter((node) => node.type === "lock")).toEqual([]);
 
     const checkpoint = workflow.nodes.find((node) => node.id === "checkpoint-plan-unit");
     expect(checkpoint?.directive).toContain("only task-owned changes attributable to this unit");
@@ -1183,13 +1230,33 @@ describe("software-development-flow v14.1", () => {
     expect(checkpoint?.directive).toContain("explicitly skip this checkpoint, or abort");
 
     const runtime = workflow.nodes.find((node) => node.id === "validate-runtime");
-    expect(runtime?.directive).toContain(
-      "only when this exact approved plan unit explicitly requires",
-    );
+    expect(runtime?.directive).toContain("Use the current visual_mode");
+    expect(runtime?.directive).toContain("does not add a second capture pass");
     expect(runtime?.directive).toContain("open the actual images");
     const unitReview = workflow.nodes.find((node) => node.id === "review-plan-unit-with-user");
-    expect(unitReview?.directive).toContain("portable self-contained");
-    expect(unitReview?.directive).toContain("never concluded without presenting it");
+    expect(unitReview?.directive).toContain("do not decide materiality again");
+    expect(unitReview?.directive).toContain("Do not create or upload reports");
+    const reportProducer = workflow.nodes.find(
+      (node) => node.id === "create-and-upload-step-report",
+    );
+    expect(reportProducer?.directive).toContain("Reuse the exact screenshots already captured");
+    expect(reportProducer?.directive).toContain("do not run capture tooling");
+    expect(reportProducer?.directive).toContain("do not submit success");
+    const finalSemanticReview = workflow.nodes.find((node) => node.id === "review-final-semantics");
+    expect(finalSemanticReview?.directive).toContain(
+      "every current html_report obligation has current inspected evidence and a successfully uploaded current report",
+    );
+    expect(finalSemanticReview?.directive).toContain(
+      "user acceptance required only when that exact unit's current plan policy required it",
+    );
+    const finalReport = workflow.nodes.find((node) => node.id === "create-final-report");
+    expect(finalReport?.directive).toContain("every current successfully uploaded visual report");
+    expect(finalReport?.directive).toContain(
+      "interactive acceptance outcomes where the current plan required them",
+    );
+    expect(`${finalSemanticReview?.directive} ${finalReport?.directive}`).not.toContain(
+      "accepted visual report",
+    );
     // Both answers route somewhere observable, so a unit is never concluded with a value that means
     // nothing to the engine.
     expect(
@@ -1202,7 +1269,6 @@ describe("software-development-flow v14.1", () => {
       "approval.md",
       "acceptance.md",
       "updated implementation report",
-      "telegram-notification",
       "maxRetries",
       "retryMessage",
       "validation_attempt_count",
@@ -1404,7 +1470,7 @@ describe("software-development-flow v14.1", () => {
         name: "second unit gets a fresh architecture review",
         mockInputs: {
           ...ordinaryInputs(),
-          "approve-plan": { ...approvedPlan, total_steps: 2 },
+          "activate-reviewed-plan": { ...activatedPlan, total_steps: 2 },
         },
         expect: { status: "completed", maxSteps: 220 },
       },
@@ -1671,6 +1737,9 @@ describe("software-development-flow v14.1", () => {
           ...verificationTailWithoutArchitecture,
           "route-completeness-review-replan",
           "route-unit-completeness",
+          "route-unit-html-report",
+          "route-unit-approval-required",
+          "notify-unit-approval",
           "review-plan-unit-with-user",
           "route-plan-unit-user-review",
           "route-checkpoint-authority",

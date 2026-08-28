@@ -10,7 +10,6 @@ export { manageWorkflow } from "./manage-workflow.js";
 export { getHelp } from "./get-help.js";
 export { manageSettings } from "./manage-settings.js";
 export { createWorkflowToken } from "./create-workflow-token.js";
-export { updateExecutionContext } from "./update-execution-context.js";
 export { getSessionInfo } from "./get-session-info.js";
 export { manageNotes, manageNotesSchema } from "./manage-notes.js";
 export { manageArtifacts, manageArtifactsSchema } from "./manage-artifacts.js";

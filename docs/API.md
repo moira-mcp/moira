@@ -195,6 +195,27 @@ Behavior:
 
 Authentication: Required
 
+### Execution variables
+
+`GET /api/executions/:id/variables` returns registry declarations, current value presence/value,
+declared policy, write phase, effective editability, denial reasons and applied filters. `names`,
+`search`, `types`, `hasValue`, `editable`, and `writePhase=current|other` filter results;
+unknown requested names are returned separately. `PUT /api/executions/:id/variables/:name` accepts
+`value` and `expectedRevision` and writes only when `runtimePolicy.externalVariableWrites` permits
+the current paused node and the value satisfies its registry JSON Schema. Arbitrary bulk variables
+and `nodeStates` mutation is rejected; the legacy context-path route applies the same policy/schema
+to its top-level declared variable.
+
+Authentication: Required
+
+`GET /api/workflows/:id/variables` provides definition-level names/search/types/hasDefault/
+externallyWritable filters with `hasDefault` and policy on each entry, applied filters and unknown
+names. It does not claim current execution editability.
+
+The local definition CLI authors policy with
+`moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>` and discovers it with
+`list-variables` plus the same definition filters.
+
 ### PUT /api/settings/:key
 
 Update setting value.
@@ -1464,7 +1485,7 @@ Response:
       workflowId: string;
       workflowName: string | null; // Resolved from workflow table, null if workflow deleted
       userId: string;
-      status: "running" | "completed";
+      status: "running" | "completed" | "locked";
       currentNodeId: string;
       note?: string;
       createdAt: number;
@@ -1497,11 +1518,20 @@ Response:
       workflowId: string;
       workflowName: string | null; // Resolved from workflow table, null if workflow deleted
       userId: string;
-      status: "running" | "completed";
-      currentNodeId: string;
+      status: "running" | "completed" | "locked";
+      currentNodeId: string | null;
       waitingForInputNodeId: string | null;
-      errors: ExecutionError[]; // persistent error log
-      note?: string;
+      note?: string | null;
+      parentExecutionId: string | null; // null for a standalone execution
+      revision: number; // expectedRevision source for guarded mutations
+      reminders: Array<{
+        id: string;
+        text: string;
+        status: "active" | "cancelled";
+        idempotencyKey?: string;
+        createdAt: number;
+        updatedAt: number;
+      }>;
       context: {
         variables: Record<string, unknown>;
         nodeStates: Record<string, unknown>;
@@ -1509,6 +1539,7 @@ Response:
       createdAt: number;
       updatedAt: number;
       completedAt?: number;
+      error?: string; // deprecated compatibility field; use errors
       errors: Array<{
         timestamp: number;
         nodeId: string;
@@ -1516,6 +1547,13 @@ Response:
         message: string;
         input?: unknown;
       }>;
+      activeLock: {
+        id: string;
+        nodeId: string;
+        reason: string;
+        status: "active";
+        createdAt: string; // ISO timestamp
+      } | null;
     }
   }
 }
@@ -1523,37 +1561,59 @@ Response:
 
 Authentication: Required
 
-### PUT /api/executions/:id/context
+### POST /api/executions/:id/parent
 
-Update execution context variables (only for running status). Owner or admin only.
-
-Two request shapes are supported. Both read the current context from the database before writing,
-so a client working from a stale snapshot does not overwrite values changed on the server.
-
-**Per-key merge.** Provided `variables` / `nodeStates` keys are merged by key into the current
-context; keys not present in the request are left unchanged. Merge cannot remove a key (omitting
-a key preserves it).
+Attach, replace, or detach the parent of a running execution. The execution and every new parent
+must belong to the authenticated user and be running; self-links and ancestry cycles are rejected.
+Use `"none"` to detach. Repeating the current value is an idempotent no-op.
 
 ```typescript
 {
-  variables?: Record<string, unknown>;
-  nodeStates?: Record<string, unknown>;
+  parentExecutionId: string | "none";
+  expectedRevision: number;
 }
 ```
 
-**Per-path update.** When `variablePath` is present, only the value at that nested path inside
-`variables` is set; sibling keys and other branches of the same object are preserved. Used by the
-context tree editor to edit a leaf at any nesting level without resending the whole top-level
-object.
+The response contains the effective `parentExecutionId` (`null` when standalone) and current
+revision. A stale revision returns `409`. Parent linkage controls continuation only and does not
+copy variables or grant authority.
+
+Authentication: Required
+
+### Execution reminders
+
+`GET /api/executions/:id/reminders` lists owner-scoped reminders and current revision. Optional
+`status=active|cancelled` and `search` filters compose. Mutations require a running execution and
+`expectedRevision`:
+
+- `POST /api/executions/:id/reminders` with `text`, optional `idempotencyKey`, and revision;
+- `PATCH /api/executions/:id/reminders/:reminderId` with `text` and revision;
+- `DELETE /api/executions/:id/reminders/:reminderId` with revision cancels without deleting history.
+
+Matching idempotent additions return the existing reminder without advancing revision; a reused key
+with different text returns conflict. Reminder text is never authority and is returned literally in
+the normal completion response only.
+
+Authentication: Required
+
+### PUT /api/executions/:id/context
+
+This legacy editor route accepts only a per-path update whose first segment names one declared
+registry variable permitted by `runtimePolicy.externalVariableWrites` at the execution's current
+waiting node. The complete projected top-level value must satisfy its registry schema, and
+`expectedRevision` provides compare-and-swap protection.
 
 ```typescript
 {
   variablePath: string[]; // e.g. ["review_findings", "blocking"]
   value: unknown;
+  expectedRevision: number;
 }
 ```
 
-Path segments `__proto__`, `constructor`, and `prototype` are rejected (prototype-pollution guard).
+Arbitrary `variables` and every `nodeStates` payload are rejected. The admin context route is
+read-only: administrator status does not bypass workflow policy. Use
+`PUT /api/executions/:id/variables/:name` for a top-level write.
 
 Response:
 
@@ -1568,16 +1628,15 @@ Response:
 }
 ```
 
-Audit: logs `EXECUTION_UPDATE_CONTEXT`. Per-key writes record `changedVariableKeys` and a per-key
-`changes` diff (old → new); per-path writes record the dotted path with its old and new value.
+Audit metadata records the variable name/path and revision, never the variable value.
 
 Errors:
 
 - `404` execution not found
-- `401` not owner (non-admin)
-- `400` execution not in `running` status; neither `variables`/`nodeStates` nor `variablePath`
-  provided; empty `variablePath`; or a forbidden path segment
-- Context size over 10MB is rejected
+- `401` not owner
+- `409` execution revision changed; reload before writing
+- `400` execution is not running/paused at an allowed node, variable/path is not permitted, schema
+  validation fails, or arbitrary variables/node state mutation is requested
 
 Authentication: Required
 

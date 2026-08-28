@@ -127,6 +127,20 @@
       "when": 1787609362000,
       "tag": "0016_better_auth_redirect_urls",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1787751000000,
+      "tag": "0017_execution_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1787754600000,
+      "tag": "0018_execution_reminders",
+      "breakpoints": true
     }
   ]
 }

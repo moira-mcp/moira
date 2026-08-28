@@ -85,6 +85,7 @@ export * from "./errors/index.js";
 
 // Validation utilities (slug/handle validation)
 export * from "./validation/slug-handle.js";
+export * from "./validation/execution-parent.js";
 
 // Domain errors (slug/handle specific errors)
 export * from "./errors/domain-errors.js";

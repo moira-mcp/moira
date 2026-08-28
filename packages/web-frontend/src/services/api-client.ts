@@ -1386,6 +1386,7 @@ export class MoiraApiClient {
     status: string;
     currentNodeId: string | null;
     waitingForInputNodeId: string | null;
+    revision: number;
     context: {
       variables: Record<string, unknown>;
       nodeStates: Record<string, unknown>;
@@ -1410,6 +1411,7 @@ export class MoiraApiClient {
           status: string;
           currentNodeId: string | null;
           waitingForInputNodeId: string | null;
+          revision: number;
           context: {
             variables: Record<string, unknown>;
             nodeStates: Record<string, unknown>;
@@ -1433,39 +1435,22 @@ export class MoiraApiClient {
     }
   }
 
-  async updateExecutionContext(
-    executionId: string,
-    context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
-  ): Promise<boolean> {
-    try {
-      type UpdateContextResponse = {
-        updated: boolean;
-      };
-      const response = await this.client.put<ApiResponse<UpdateContextResponse>>(
-        `/executions/${executionId}/context`,
-        context,
-      );
-      return response.data.data!.updated;
-    } catch (error) {
-      throw new ApiClientError("Failed to update execution context", ApiErrorCode.INTERNAL_ERROR);
-    }
-  }
-
   /**
-   * Update a single value at an arbitrary nesting path inside the execution's variables,
-   * without overwriting the rest of the object. Path is relative to `variables`
-   * (e.g. ["review_findings", "blocking"]).
+   * Update one path inside an owner execution's policy-enabled declared variable without
+   * overwriting siblings. The server enforces current waiting-node policy, complete top-level
+   * registry schema and expected revision. Path is relative to `variables`.
    */
   async updateExecutionContextPath(
     executionId: string,
     variablePath: Array<string | number>,
     value: unknown,
+    expectedRevision: number,
   ): Promise<boolean> {
     try {
       type UpdateContextResponse = { updated: boolean };
       const response = await this.client.put<ApiResponse<UpdateContextResponse>>(
         `/executions/${executionId}/context`,
-        { variablePath, value },
+        { variablePath, value, expectedRevision },
       );
       return response.data.data!.updated;
     } catch (error) {

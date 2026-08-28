@@ -735,6 +735,30 @@ export class GraphValidator {
       }
     }
 
+    for (const [name, rule] of Object.entries(
+      workflow.runtimePolicy?.externalVariableWrites ?? {},
+    )) {
+      if (!registry[name]) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          field: `runtimePolicy.externalVariableWrites.${name}`,
+          message: `External-write policy references undeclared variable '${name}'.`,
+        });
+      }
+      for (const nodeId of rule.allowedNodeIds ?? []) {
+        const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+        if (!node || node.type !== "agent-directive") {
+          issues.push({
+            type: "structure",
+            severity: "error",
+            field: `runtimePolicy.externalVariableWrites.${name}.allowedNodeIds`,
+            message: `External-write node '${nodeId}' must be an agent-directive node.`,
+          });
+        }
+      }
+    }
+
     return issues;
   }
 

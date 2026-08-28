@@ -1102,66 +1102,6 @@ router.get(
 );
 
 /**
- * PUT /api/admin/executions/:id/context - Update execution context
- */
-router.put(
-  "/executions/:id/context",
-  asyncHandler(async (req: Request, res: Response) => {
-    const { id } = req.params;
-    const { variables, nodeStates } = req.body;
-
-    const execution = await repository.getExecution(id);
-    if (!execution) {
-      throw createApiError.notFound(`Execution not found: ${id}`, { executionId: id });
-    }
-
-    // Validate execution state - can only edit running executions (Issue #386: "waiting" merged into "running")
-    if (execution.status !== "running") {
-      throw createApiError.badRequest(
-        `Cannot edit execution in state '${execution.status}'. Only 'running' executions can be edited.`,
-        { executionId: id, status: execution.status },
-      );
-    }
-
-    // Update context
-    if (variables) {
-      execution.globalContext.variables = {
-        ...execution.globalContext.variables,
-        ...variables,
-      };
-    }
-
-    if (nodeStates) {
-      execution.globalContext.nodeStates = {
-        ...execution.globalContext.nodeStates,
-        ...nodeStates,
-      };
-    }
-
-    await repository.saveExecution(execution);
-
-    // Audit logging
-    const currentUserId = (req as AuthenticatedRequest).userId;
-    await logAuditEvent(repository, req, {
-      userId: currentUserId,
-      action: AuditAction.ADMIN_UPDATE_EXECUTION_CONTEXT,
-      resource: "execution",
-      resourceId: id,
-      metadata: {
-        variables: Object.keys(variables || {}),
-        nodeStates: Object.keys(nodeStates || {}),
-      },
-    });
-
-    res.json({
-      success: true,
-      data: { executionId: id, updated: true },
-      timestamp: new Date().toISOString(),
-    });
-  }),
-);
-
-/**
  * POST /api/admin/database/vacuum - Vacuum database
  */
 router.post(

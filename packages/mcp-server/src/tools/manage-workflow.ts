@@ -33,7 +33,7 @@ import {
   getWorkflowStructure,
   getNode as getNodeFromWorkflow,
   searchNodes as searchNodesInWorkflow,
-  getWorkflowVariables,
+  queryWorkflowVariables,
   getWorkflowVariable,
   setWorkflowVariable,
   deleteWorkflowVariable,
@@ -100,6 +100,10 @@ const ManageWorkflowParamsSchema = z.object({
     .optional()
     .describe("Variable name (required for get-variable, set-variable, delete-variable)"),
   variableValue: z.any().optional().describe("Variable value (required for set-variable)"),
+  variableNames: z.array(z.string()).optional(),
+  variableTypes: z.array(z.string()).optional(),
+  hasDefault: z.boolean().optional(),
+  externallyWritable: z.boolean().optional(),
   // Diff parameters
   compareWorkflowId: z
     .string()
@@ -296,6 +300,9 @@ export async function manageWorkflow(
         // Replace the declared global variable registry
         if ("variableRegistry" in changes) {
           modifiedWorkflow.variableRegistry = changes.variableRegistry || undefined;
+        }
+        if ("runtimePolicy" in changes) {
+          modifiedWorkflow.runtimePolicy = changes.runtimePolicy || undefined;
         }
 
         if (changes.removeNodes && changes.removeNodes.length > 0) {
@@ -703,28 +710,38 @@ export async function manageWorkflow(
           return { success: false, error: ERRORS.workflow_not_found(workflowId) };
         }
 
-        const variables = getWorkflowVariables(workflowInfo.workflow);
-        const variableNames = Object.keys(variables);
+        const queryResult = queryWorkflowVariables(workflowInfo.workflow, {
+          names: params.variableNames,
+          search: params.query,
+          types: params.variableTypes,
+          hasDefault: params.hasDefault,
+          externallyWritable: params.externallyWritable,
+        });
 
         return {
           success: true,
           data: {
             success: true,
             workflowId,
-            variableCount: variableNames.length,
-            variables: variableNames.map((name) => {
-              const varInfo = variables[name];
-              const value = varInfo.value;
+            variableCount: queryResult.variables.length,
+            variables: queryResult.variables.map((variable) => {
+              const value = variable.value;
               return {
-                name,
-                description: varInfo.description,
+                name: variable.name,
+                description: variable.description,
                 type: typeof value,
+                schemaType: variable.schemaType,
+                hasDefault: variable.hasDefault,
+                externallyWritable: variable.externallyWritable,
+                externalWritePolicy: variable.externalWritePolicy,
                 preview:
                   typeof value === "string" && value.length > 100
                     ? value.substring(0, 100) + "..."
                     : value,
               };
             }),
+            unknownNames: queryResult.unknownNames,
+            appliedFilters: queryResult.appliedFilters,
           },
         };
       }

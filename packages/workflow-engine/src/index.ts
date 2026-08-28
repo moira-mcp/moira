@@ -51,6 +51,8 @@ export { detectCycles } from "./validation/cycle-detector.js";
 
 // Utils
 export * from "./utils/schema-validator.js";
+export * from "./utils/registry-value-validator.js";
+export * from "./utils/execution-variable-policy.js";
 export { ContextMapper } from "./utils/context-mapper.js";
 export { ContextHelpers } from "./utils/context-helpers.js";
 export { PathResolver } from "./utils/path-resolver.js";

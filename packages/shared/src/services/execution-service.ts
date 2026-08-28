@@ -3,7 +3,11 @@
  * Centralized execution operations with audit trail
  */
 
-import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
+import type {
+  ReminderMutation,
+  ReminderMutationResult,
+  WorkflowExecution,
+} from "@mcp-moira/workflow-engine";
 import type {
   ExecutionRepository,
   ExecutionFilter,
@@ -11,9 +15,10 @@ import type {
 } from "../database/repositories/execution-repository.js";
 import type { AuditRepository } from "../database/repositories/audit-repository.js";
 import { getAuditSource } from "../logging/context.js";
-import { computeChanges } from "../logging/audit-logger.js";
 import { createLogger, Component } from "../logging/logger.js";
 import { AuditAction } from "../audit/actions.js";
+import { ConflictError, ValidationError } from "../errors/index.js";
+import { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 
 export class ExecutionService {
   private logger = createLogger({ component: Component.Execution });
@@ -290,97 +295,70 @@ export class ExecutionService {
     return true;
   }
 
-  /**
-   * Update execution context with audit.
-   *
-   * Performs a per-key merge: only the variables/nodeStates keys present in
-   * `context` are written; every other key already stored for the execution is
-   * preserved as-is from the database. This makes the update safe against a
-   * stale client view — a caller that sends only the key it changed can never
-   * clobber other keys that moved on the server in the meantime.
-   *
-   * The audit entry records exactly which variable keys changed (old → new),
-   * so per-key edits are individually traceable.
-   */
-  async updateContext(
+  async setParent(
     executionId: string,
+    parentExecutionId: string | null,
     userId: string,
-    context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
-  ): Promise<boolean> {
-    // Read current state first so we can compute the exact per-key diff for audit.
-    const before = await this.executionRepo.get(executionId);
-    if (!before) {
-      return false;
-    }
-
-    const success = await this.executionRepo.updateContext(executionId, context);
-
-    if (success) {
-      const changes = context.variables
-        ? computeChanges(
-            before.globalContext.variables ?? {},
-            context.variables,
-            Object.keys(context.variables),
-          )
-        : [];
-
-      await this.auditRepo.log({
-        userId,
-        action: AuditAction.EXECUTION_UPDATE_CONTEXT,
-        resource: "execution",
-        resourceId: executionId,
-        source: getAuditSource(),
-        metadata: JSON.stringify({
-          hasVariables: !!context.variables,
-          hasNodeStates: !!context.nodeStates,
-          changedVariableKeys: context.variables ? Object.keys(context.variables) : [],
-        }),
-        changes: changes.length > 0 ? JSON.stringify(changes) : undefined,
-      });
-
-      this.logger.info("Execution context updated", {
-        executionId,
-        userId,
-        changedVariableKeys: context.variables ? Object.keys(context.variables).length : 0,
-      });
-    }
-
-    return success;
-  }
-
-  /**
-   * Update a single value at an arbitrary nesting path inside the execution's variables,
-   * preserving all siblings and other variables (per-path, stale-overwrite-safe). Audits the
-   * change with the dotted path and old/new value.
-   */
-  async updateContextPath(
-    executionId: string,
-    userId: string,
-    path: Array<string | number>,
-    value: unknown,
-  ): Promise<boolean> {
-    const result = await this.executionRepo.updateContextByPath(executionId, path, value);
-    if (!result.ok) {
-      return false;
-    }
-
-    const dottedPath = path
-      .map((seg) => (typeof seg === "number" ? `[${seg}]` : seg))
-      .join(".")
-      .replace(/\.\[/g, "[");
-
+    expectedRevision: number,
+  ): Promise<WorkflowExecution> {
+    const updated = await this.executionRepo.setParent(
+      executionId,
+      parentExecutionId,
+      userId,
+      expectedRevision,
+    );
     await this.auditRepo.log({
       userId,
       action: AuditAction.EXECUTION_UPDATE_CONTEXT,
       resource: "execution",
       resourceId: executionId,
       source: getAuditSource(),
-      metadata: JSON.stringify({ variablePath: dottedPath }),
-      changes: JSON.stringify([{ field: dottedPath, oldValue: result.oldValue, newValue: value }]),
+      metadata: JSON.stringify({
+        action: "set-parent",
+        parentExecutionId,
+        revision: updated.revision,
+      }),
     });
+    return updated;
+  }
 
-    this.logger.info("Execution context path updated", { executionId, userId, path: dottedPath });
-    return true;
+  async mutateReminder(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    mutation: ReminderMutation,
+  ): Promise<ReminderMutationResult> {
+    const execution = await this.executionRepo.get(executionId);
+    if (!execution) throw new ValidationError("Execution must exist");
+    if (execution.userId !== userId)
+      throw new ValidationError("Execution must belong to the authenticated user");
+    if (execution.status !== "running")
+      throw new ValidationError("Only running executions accept reminder mutations");
+    const applied = applyExecutionReminderMutation(execution.reminders ?? [], mutation);
+    if (!applied.changed)
+      return { reminder: applied.reminder, revision: execution.revision, changed: false };
+    if (execution.revision !== expectedRevision)
+      throw new ConflictError("Execution state changed; reload before changing reminders", {
+        executionId,
+        expectedRevision,
+        currentRevision: execution.revision,
+      });
+    execution.reminders = applied.reminders;
+    execution.updatedAt = Date.now();
+    await this.executionRepo.save(execution);
+    await this.auditRepo.log({
+      userId,
+      action: AuditAction.EXECUTION_UPDATE_CONTEXT,
+      resource: "execution",
+      resourceId: executionId,
+      source: getAuditSource(),
+      metadata: JSON.stringify({
+        action: `reminder:${mutation.action}`,
+        reminderId: applied.reminder.id,
+        revision: execution.revision,
+      }),
+    });
+    return { reminder: applied.reminder, revision: execution.revision, changed: true };
   }
 
   /**

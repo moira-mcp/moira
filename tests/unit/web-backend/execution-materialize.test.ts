@@ -26,6 +26,7 @@ const grant: WorkflowToken = {
 };
 
 const execution: WorkflowExecution = {
+  revision: 0,
   executionId: "execution-1",
   workflowId: "workflow-1",
   userId: "user-1",

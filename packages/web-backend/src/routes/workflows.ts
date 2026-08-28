@@ -27,9 +27,44 @@ import {
 } from "../middleware/error-middleware.js";
 import { WorkflowValidationService } from "../services/validation-service.js";
 import { DatabaseRepository, WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
-import { getWorkflowService, validateSlug } from "@mcp-moira/shared";
+import { getWorkflowService, queryWorkflowVariables, validateSlug } from "@mcp-moira/shared";
 
 const router = Router();
+
+router.get(
+  "/:id/variables",
+  asyncHandler(async (req: Request, res: Response) => {
+    const userId = (req as AuthenticatedRequest).userId;
+    const repository = new DatabaseRepository();
+    const resolved = await repository.resolveWorkflow(req.params.id, userId);
+    const info = resolved ? await repository.getWorkflow(resolved.workflowId, userId) : null;
+    if (!info) throw createApiError.notFound("Workflow not found");
+    const names = String(req.query.names ?? "")
+      .split(",")
+      .filter(Boolean);
+    const types = String(req.query.types ?? "")
+      .split(",")
+      .filter(Boolean);
+    const search = String(req.query.search ?? "");
+    const hasDefault =
+      req.query.hasDefault === undefined ? undefined : req.query.hasDefault === "true";
+    const externallyWritable =
+      req.query.externallyWritable === undefined
+        ? undefined
+        : req.query.externallyWritable === "true";
+    const result = queryWorkflowVariables(info.workflow, {
+      names,
+      types,
+      search,
+      hasDefault,
+      externallyWritable,
+    });
+    res.json({
+      success: true,
+      data: result,
+    });
+  }),
+);
 
 // Create repository instance (uses shared database singleton)
 const repository = new DatabaseRepository();

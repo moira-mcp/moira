@@ -315,6 +315,13 @@ describe("Error Logging Flow (Issue #386)", () => {
       expect(execution!.errors!.length).toBeGreaterThan(0);
       expect(execution!.errors![0].errorType).toBe("system");
       expect(execution!.errors![0].message).toContain("cancelled");
+
+      const revisionAfterCancellation = execution!.revision;
+      const errorsAfterCancellation = structuredClone(execution!.errors);
+      await executor.cancelExecution(executionId);
+      const afterRepeatedCancellation = await executor.getExecutionState(executionId);
+      expect(afterRepeatedCancellation!.revision).toBe(revisionAfterCancellation);
+      expect(afterRepeatedCancellation!.errors).toEqual(errorsAfterCancellation);
     });
   });
 });

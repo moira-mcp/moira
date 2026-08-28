@@ -92,6 +92,102 @@ describe("agent-facing CLI diagnostics", () => {
 });
 
 describe("workflow-tool variables command", () => {
+  test("list-variables reports filters, unknown names and external policy deterministically", () => {
+    const tmpFile = createTempWorkflow({
+      metadata: { name: "Filtered", version: "1.0.0", description: "Filtered" },
+      variableRegistry: {
+        alpha: { type: "string", description: "Alpha", default: "a" },
+        beta: { type: "number", description: "Beta" },
+      },
+      runtimePolicy: { externalVariableWrites: { alpha: { allowedNodeIds: ["task"] } } },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          directive: "Task",
+          completionCondition: "Done",
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      const output = runWorkflowTool([
+        tmpFile,
+        "list-variables",
+        "alpha",
+        "--names",
+        "alpha,missing",
+        "--types",
+        "string",
+        "--has-default",
+        "true",
+        "--externally-writable",
+        "true",
+      ]);
+      expect(output).toContain("Unknown names: missing");
+      expect(output).toContain('"allowedNodeIds":["task"]');
+      expect(output).toContain("Applied filters:");
+      expect(output).not.toContain("beta:");
+
+      const falseOutput = runWorkflowTool([
+        tmpFile,
+        "list-variables",
+        "--names",
+        "alpha,beta",
+        "--has-default",
+        "false",
+        "--externally-writable",
+        "false",
+      ]);
+      expect(falseOutput).toContain("beta:");
+      expect(falseOutput).not.toContain("alpha:");
+      expect(falseOutput).toContain(
+        'Applied filters: {"names":["alpha","beta"],"hasDefault":false,"externallyWritable":false}',
+      );
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  test("set-variable-write-policy authors scoped, all-node and default-deny policies", () => {
+    const tmpFile = createTempWorkflow({
+      metadata: { name: "Policy", version: "1.0.0", description: "Policy" },
+      variableRegistry: { alpha: { type: "string", description: "Alpha" } },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "task" } },
+        {
+          id: "task",
+          type: "agent-directive",
+          directive: "Task",
+          completionCondition: "Done",
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    });
+    try {
+      runWorkflowTool([tmpFile, "set-variable-write-policy", "alpha", "task"]);
+      expect(JSON.parse(fs.readFileSync(tmpFile, "utf8")).runtimePolicy).toEqual({
+        externalVariableWrites: { alpha: { allowedNodeIds: ["task"] } },
+      });
+
+      runWorkflowTool([tmpFile, "set-variable-write-policy", "alpha", "all"]);
+      expect(JSON.parse(fs.readFileSync(tmpFile, "utf8")).runtimePolicy).toEqual({
+        externalVariableWrites: { alpha: {} },
+      });
+
+      runWorkflowTool([tmpFile, "set-variable-write-policy", "alpha", "none"]);
+      expect(JSON.parse(fs.readFileSync(tmpFile, "utf8")).runtimePolicy).toEqual({
+        externalVariableWrites: {},
+      });
+    } finally {
+      fs.unlinkSync(tmpFile);
+      const backup = `${tmpFile}.backup`;
+      if (fs.existsSync(backup)) fs.unlinkSync(backup);
+    }
+  });
   describe("initialData extraction", () => {
     test("extracts variables from initialData", () => {
       const workflow = {

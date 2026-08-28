@@ -68,6 +68,7 @@ export interface ExecutionData {
   status: string;
   currentNodeId: string | null;
   waitingForInputNodeId: string | null;
+  revision: number;
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -296,6 +297,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         execution.executionId,
         path,
         value,
+        execution.revision,
       );
       if (success) {
         // Refresh execution state only. On a transient fetch error, keep the current

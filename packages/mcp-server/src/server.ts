@@ -412,6 +412,13 @@ function registerAllTools(
               .describe(
                 "Declared global variables (JSON-Schema-shaped: name -> {type, description, default?}). Required for any variable referenced by bare name in directives/conditions/templates.",
               ),
+            runtimePolicy: z
+              .object({
+                externalVariableWrites: z
+                  .record(z.object({ allowedNodeIds: z.array(z.string()).optional() }))
+                  .optional(),
+              })
+              .optional(),
             visibility: z
               .enum(["public", "private"])
               .optional()
@@ -441,6 +448,13 @@ function registerAllTools(
               .record(z.unknown())
               .optional()
               .describe("Replace the workflow's declared global variable registry"),
+            runtimePolicy: z
+              .object({
+                externalVariableWrites: z
+                  .record(z.object({ allowedNodeIds: z.array(z.string()).optional() }))
+                  .optional(),
+              })
+              .optional(),
             addNodes: z.array(z.record(z.unknown())).optional().describe("New nodes to add"),
             removeNodes: z.array(z.string()).optional().describe("Node IDs to remove"),
             updateNodes: z
@@ -487,6 +501,10 @@ function registerAllTools(
           .optional()
           .describe("Variable name for get/set/delete-variable actions"),
         variableValue: z.any().optional().describe("Variable value for set-variable action"),
+        variableNames: z.array(z.string()).optional(),
+        variableTypes: z.array(z.string()).optional(),
+        hasDefault: z.boolean().optional(),
+        externallyWritable: z.boolean().optional(),
         compareWorkflowId: z.string().optional().describe("Second workflow ID for diff action"),
         newName: z.string().optional().describe("New name for copied workflow (copy action)"),
         newId: z.string().optional().describe("New ID for cloned node (clone-node action)"),
@@ -605,28 +623,6 @@ function registerAllTools(
     },
   );
 
-  // === Execution Context Inspection Tools ===
-
-  // mcpServer.registerTool("update_execution_context", {
-  //   description: "Update execution context variables (only for waiting executions)",
-  //   inputSchema: {
-  //     executionId: z.string().describe('Execution ID to update'),
-  //     variables: z.record(z.unknown()).optional().describe('Context variables to update'),
-  //     nodeStates: z.record(z.unknown()).optional().describe('Node states to update')
-  //   }
-  // }, async ({ executionId, variables, nodeStates }) => {
-  //   try {
-  //     const result = await updateExecutionContext({ executionId, variables, nodeStates });
-  //     if (!result.success) {
-  //       return { content: [{ type: 'text' as const, text: `Error: ${result.error}` }] };
-  //     }
-  //
-  //     return { content: [{ type: 'text' as const, text: `Execution context updated successfully for '${executionId}'.` }] };
-  //   } catch (error) {
-  //     return { content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }] };
-  //   }
-  // });
-
   // === Large Workflow File Handling Tool ===
 
   registerTool(
@@ -678,9 +674,22 @@ function registerAllTools(
       description: toolDescriptions.session,
       inputSchema: wrapSchemaWithAutoparse({
         action: z
-          .enum(["user", "executions", "execution_context", "current_step", "update-note"])
+          .enum([
+            "user",
+            "executions",
+            "execution_context",
+            "current_step",
+            "update-note",
+            "set-parent",
+            "add-reminder",
+            "reminders",
+            "update-reminder",
+            "remove-reminder",
+            "variables",
+            "set-variable",
+          ])
           .describe(
-            "Action: user (current user), executions (list), execution_context (full context), current_step (resume info), update-note (change note)",
+            "Action: user, executions, execution_context, current_step, update-note, or set-parent",
           ),
         executionId: z
           .string()
@@ -715,6 +724,30 @@ function registerAllTools(
           .max(500)
           .optional()
           .describe("New note text for update-note action (max 500 chars)"),
+        parentExecutionId: z
+          .string()
+          .optional()
+          .describe('Parent execution UUID or "none" for set-parent'),
+        expectedRevision: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Expected execution revision"),
+        reminderId: z.string().optional().describe("Reminder ID"),
+        reminderText: z.string().optional().describe("Reminder text"),
+        idempotencyKey: z.string().optional().describe("Idempotency key for add-reminder"),
+        reminderStatus: z
+          .enum(["active", "cancelled"])
+          .optional()
+          .describe("Reminder status filter"),
+        names: z.array(z.string()).optional(),
+        types: z.array(z.string()).optional(),
+        editable: z.boolean().optional(),
+        hasValue: z.boolean().optional(),
+        writePhase: z.enum(["current", "other"]).optional(),
+        variableName: z.string().optional(),
+        variableValue: z.unknown().optional(),
       }),
     },
     async ({
@@ -728,6 +761,19 @@ function registerAllTools(
       limit,
       offset,
       note,
+      parentExecutionId,
+      expectedRevision,
+      reminderId,
+      reminderText,
+      idempotencyKey,
+      reminderStatus,
+      names,
+      types,
+      editable,
+      hasValue,
+      writePhase,
+      variableName,
+      variableValue,
     }) => {
       try {
         const result = await getSessionInfo({
@@ -741,6 +787,19 @@ function registerAllTools(
           limit,
           offset,
           note,
+          parentExecutionId,
+          expectedRevision,
+          reminderId,
+          reminderText,
+          idempotencyKey,
+          reminderStatus,
+          names,
+          types,
+          editable,
+          hasValue,
+          writePhase,
+          variableName,
+          variableValue,
         });
         if (!result.success) {
           return { content: [{ type: "text" as const, text: `Error: ${result.error}` }] };

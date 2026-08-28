@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS workflowExecution (
   waitingForInputNodeId TEXT,
   context TEXT NOT NULL,
   error TEXT,
+  revision INTEGER NOT NULL DEFAULT 0,
+  reminders TEXT NOT NULL DEFAULT '[]',
   createdAt INTEGER,
   updatedAt INTEGER,
   completedAt INTEGER,

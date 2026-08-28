@@ -2,8 +2,8 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "14.2.1",
-    "description": "Implements a complete software change as independently accepted vertical units, including source-grounded requirements, architecture-aware planning, repository-grounded preparation before mutation, complete production across code, tests, coverage, documentation and integration consequences, and a fresh producer completion pass before deterministic validation and semantic review. Product-scope repairs return through producer completion; bounded verification-only and gate-local repairs revalidate only conclusions made stale by their actual reach. Reviews classify product, test/validation, evidence, documentation/projection, criterion and upstream plan/process causes and route them to owned repair or quality-preserving material replan. The flow includes conditional runtime and visual evidence, checkpoints, final documentation reconciliation, feature-wide validation, final semantic review, requirements coverage and authority-bound VCS reconciliation. Choose it for repository implementation that must finish the complete result and evidence together; use Quick Task for bounded non-development work, Robust Task for durable retry/recovery, or planning/research flows when implementation is not requested.",
+    "version": "15.1.0",
+    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed development-only planning, repository-grounded vertical units, fresh producer completion, cause-aware repair and versioned replan. Already-authorized caller-owned follow-ups are durably returned as completion reminders without becoming development work or authority. Each current plan unit owns code, tests, permanent documentation and applicable runtime evidence, with one plan-owned visual mode: disabled, screenshots, or a self-contained Moira artifact report that reuses the accepted screenshots and is optionally notified through Telegram. Interactive plan, selected-unit and final approvals are directive-based and receive attention notifications; autonomous mode has no approval directives. Final documentation reconciliation reuses current independent unit coverage while preserving cross-unit review, then feature-wide validation, independent semantic review, requirements coverage, factual reporting, authorized local VCS reconciliation and truthful terminal notification. Push, pull request, publication, release and deployment remain caller or parent-process effects.",
     "author": "mcp-moira-team",
     "tags": [
       "development",
@@ -28,18 +28,21 @@
     {
       "id": "capture-task-and-context",
       "type": "agent-directive",
-      "directive": "Capture the user's development task and authority before task-specific discovery or repository mutation. Read all standing project instructions. Create ./moira-ws/software-development-flow-{task-name}-{YYYYMMDD}-{HHMM}/ and treat it as the new workspace throughout this directive; do not use workspace_path before returning it. Inside that workspace, write this execution ID to process-id.txt and keep task-requirements.md as the single canonical requirements source. Resolve every explicitly assigned ticket, pull request, issue, specification, or document through available project-native mechanisms; preserve its identity, retrieval location, and complete current content in durable source files without preliminary relevance filtering, then separately incorporate all authoritative requirements without reducing them to a lossy summary. If a source cannot be obtained, expose that blocker instead of planning without it. Before mutation, inspect project-native VCS read-only and record VCS kind, branch or bookmark, status, relevant diff/baseline, unrelated changes to preserve, and already authorized side effects in vcs-baseline.md without assuming Git or requiring a clean tree. Discover task-relevant entry points, interfaces and data flow, implementations, dependencies and consumers, tests and fixtures, coverage policy/maps, documentation, configuration and schemas, generated artifacts, project-native commands, build/environment/health, runtime/integration surfaces, UI/browser architecture, CI/review/checklists, ownership boundaries, and applicable security/performance constraints. Record exact locations/evidence or a justified N/A in project-context.md. Use additional project-native searches when one search is insufficient; never conclude that an artifact or dependency does not exist from one superficial search. Ask only for a material fact that cannot be discovered. Do not create permanent guides merely because one is absent, and do not mutate the repository here. Return the new workspace path as workspace_path.\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there are no intermediate approvals of requirements, plan, units, or result, only the final report, while `interactive` keeps every current approval. The mode holds for the whole run and is never asked again.",
-      "completionCondition": "Task, authority, assigned sources, canonical requirements, read-only VCS baseline, correlated workspace, and relevant project context are durably captured before mutation",
+      "directive": "Capture the user's development task and authority before task-specific discovery or repository mutation. Read all standing project instructions. Create ./moira-ws/software-development-flow-{task-name}-{YYYYMMDD}-{HHMM}/ and treat it as the new workspace throughout this directive; do not use workspace_path before returning it. Inside that workspace, write this execution ID to process-id.txt and keep task-requirements.md as the single canonical requirements source. Resolve every explicitly assigned ticket, pull request, issue, specification, or document through available project-native mechanisms; preserve its identity, retrieval location, and complete current content in durable source files without preliminary relevance filtering, then separately incorporate all authoritative requirements without reducing them to a lossy summary. If a source cannot be obtained, expose that blocker instead of planning without it. Before mutation, inspect project-native VCS read-only and record VCS kind, branch or bookmark, status, relevant diff/baseline, unrelated changes to preserve, and already authorized side effects in vcs-baseline.md without assuming Git or requiring a clean tree. Discover task-relevant entry points, interfaces and data flow, implementations, dependencies and consumers, tests and fixtures, coverage policy/maps, documentation, configuration and schemas, generated artifacts, project-native commands, build/environment/health, runtime/integration surfaces, UI/browser architecture, CI/review/checklists, ownership boundaries, and applicable security/performance constraints. Record exact locations/evidence or a justified N/A in project-context.md. Use additional project-native searches when one search is insufficient; never conclude that an artifact or dependency does not exist from one superficial search. Ask only for a material fact that cannot be discovered. Do not create permanent guides merely because one is absent, and do not mutate the repository here. Return the new workspace path as workspace_path.\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there are no intermediate approvals of requirements, plan, units, or result, only the final report, while `interactive` keeps every current approval. The mode holds for the whole run and is never asked again.\n\nResolve visual_validation_preference in this same turn before planning. Reuse an explicit user choice. When the task context does not determine it, recommend the proportionate value, ask one simple question with disabled, screenshots, and html_report, and explain that exact units can still be refined during interactive plan approval. This preference guides plan construction only; the current reviewed plan becomes the sole runtime source of each unit policy.\n\nWhen the originating request already authorizes a later push, pull request, publication, release, deployment, or another caller-owned effect after development, preserve it in canonical requirements as caller-owned downstream intent without adding it to development plan units. Query this execution's reminders through `session({ action: \"reminders\", executionId })` to obtain the current revision, then add one durable reminder through `session({ action: \"add-reminder\", executionId, reminderText, idempotencyKey, expectedRevision })`. State the concrete requested next action and its existing authority; use a stable idempotency key for retries. Do this for standalone and child executions alike. A reminder neither performs nor authorizes the effect, changes no development plan or `vcs_commits_authorized`, and appears only in the normal completion response as a requested next action.",
+      "completionCondition": "Task, authority, assigned sources, canonical requirements, read-only VCS baseline, operating mode, visual preference, correlated workspace, and relevant project context are durably captured before mutation; every already-authorized caller-owned follow-up is stored as an active execution reminder without becoming development work or authority",
       "inputSchema": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {},
         "required": [
           "workspace_path",
-          "operating_mode"
+          "operating_mode",
+          "visual_validation_preference"
         ],
         "globalInputs": [
           "workspace_path",
-          "operating_mode"
+          "operating_mode",
+          "visual_validation_preference"
         ]
       },
       "connections": {
@@ -231,14 +234,14 @@
       },
       "connections": {
         "true": "assess-project-health",
-        "false": "end-aborted"
+        "false": "notify-workflow-stopped"
       }
     },
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Create the current material plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md from the canonical requirements, resolved assigned sources, task-relevant project evidence, VCS baseline, and actual repository contracts. Define independently completable outcome-oriented units with affected responsibilities and boundaries, dependencies and ordering, contracts and invariants, observable acceptance evidence, expected task-owned files, applicable tests and coverage-map updates, permanent documentation, security/performance/runtime/UI obligations, risks, and unresolved decisions. Map every affected or at-risk behavior to automated evidence or a justified manual check. Explicitly mark each unit that requires screenshot capture, actual visual inspection, and a self-contained step-report.html; do not infer or add that obligation later merely because a UI file changed. Record the requested project-native authority for checkpoint commits after accepted units and final reconciliation. Preserve executor freedom over exploration, decomposition details, tools, edit order, and repair tactics unless a real external contract constrains them.\n\nFollow `{{workspace_path}}/standards/planning.md`; the path is canonical and unchanged content need not be reread when already present and certain.\n\nBefore making an acceptance mechanism contractual, name the required state, a plausible wrong state that can look similar, and the observation that reliably differs; match mechanical, behavioral, semantic, architectural, or user evidence to the property. If the observation is compatible with both states, revise the criterion or evidence method before implementation. Require each unit's producer to own every foreseeable consequence of its complete outcome before review. Treat expected files only as known ownership or external-contract boundaries, never an exhaustive implementation whitelist. Do not create a validation-only unit unless validation itself is the requested result with a consumer and distinguishing output.\n\nA unit fixes an outcome, its acceptance evidence, and what it depends on; it does not carry the deliverable itself. The test that holds in any medium: after the plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here.`standards/planning.md` states this in full.\nClosed units stay as they were closed and keep the index they were closed at: a unit report lives at a path addressed by that index, so a revision that shifts a closed unit makes a later executor overwrite another unit's account.",
-      "completionCondition": "A complete outcome-oriented current plan exists with discriminating evidence, producer-owned completeness, conditional visual obligations, requested VCS authority, and every unit fixes what must become true, the evidence that would accept it, and what it depends on rather than carrying the deliverable, and closed units keep both their content and the index they were closed at",
+      "directive": "Create the current material plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md from the canonical requirements, resolved assigned sources, task-relevant project evidence, VCS baseline, and actual repository contracts. Define independently completable outcome-oriented units with affected responsibilities and boundaries, dependencies and ordering, contracts and invariants, observable acceptance evidence, expected task-owned files, applicable tests and coverage-map updates, permanent documentation, security/performance/runtime/UI obligations, risks, and unresolved decisions. Map every affected or at-risk behavior to automated evidence or a justified manual check. Give every unit one explicit visualMode value — disabled, screenshots, or html_report — and one userApproval boolean. html_report includes the same screenshot capture and actual inspection as screenshots and never creates a second capture pass. In autonomous mode every userApproval is false. Apply visual_validation_preference proportionately; in interactive mode the user may refine exact unit policies during plan approval. Record the requested project-native authority for checkpoint commits after accepted units and final reconciliation. Preserve executor freedom over exploration, decomposition details, tools, edit order, and repair tactics unless a real external contract constrains them.\n\nFollow `{{workspace_path}}/standards/planning.md`; the path is canonical and unchanged content need not be reread when already present and certain.\n\nBefore making an acceptance mechanism contractual, name the required state, a plausible wrong state that can look similar, and the observation that reliably differs; match mechanical, behavioral, semantic, architectural, or user evidence to the property. If the observation is compatible with both states, revise the criterion or evidence method before implementation. Require each unit's producer to own every foreseeable consequence of its complete outcome before review. Treat expected files only as known ownership or external-contract boundaries, never an exhaustive implementation whitelist. Do not create a validation-only unit unless validation itself is the requested result with a consumer and distinguishing output.\n\nA unit fixes an outcome, its acceptance evidence, and what it depends on; it does not carry the deliverable itself. The test that holds in any medium: after the plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here.`standards/planning.md` states this in full.\nClosed units stay as they were closed and keep the index they were closed at: a unit report lives at a path addressed by that index, so a revision that shifts a closed unit makes a later executor overwrite another unit's account.\n\nThis is a repository development plan. It may own implementation, tests, permanent documentation, generated or executable consequences, validation, review, and authorized project-native local commits or checkpoints. It must not create units for push, pull request creation or merge, publication, release, or deployment. Keep any already authorized downstream delivery intent visible for the caller or parent in the final report. Verify that every caller-owned follow-up from intake already has an active execution reminder; if a newly clarified authorized follow-up appears here, record it through the same revisioned `session` reminder API before completing this step. Do not copy reminder items into the development plan, treat reminder storage as execution or authority, or assume a parent execution exists.",
+      "completionCondition": "A complete outcome-oriented current development plan exists; every unit has valid visualMode and userApproval, discriminating evidence, producer-owned code/tests/documentation completeness, dependencies, and stable closed-unit origins; push, PR, publication, release, and deployment are excluded from units and every already-authorized caller-owned follow-up remains an active execution reminder",
       "inputSchema": {
         "type": "object",
         "properties": {},
@@ -251,7 +254,7 @@
     {
       "id": "review-plan",
       "type": "agent-directive",
-      "directive": "Review {{workspace_path}}/plans/{{plan_revision}}/plan.md independently against the complete canonical requirements, every assigned primary source, standing project instructions, relevant repository architecture and behavior, VCS/side-effect boundaries, and prior completed work. Use a separate reviewer context or subagent when the host supports it; otherwise perform a fresh self-review and disclose that fallback in the report. Read primary artifacts directly when they are not already available or may have changed. Verify requirements coverage, dependencies, writer/reader contracts, executable routes, test and documentation obligations, task-file ownership, checkpoint authority, and observable evidence. When prior completed work is carried forward, verify that every accepted outcome names its originating plan revision and unit index and that cited evidence resolves under that origin; do not accept current array position as proof of origin. Reject an unjustified omission of screenshot/visual/HTML evidence when the outcome cannot be adequately accepted without it. Overwrite {{workspace_path}}/plans/{{plan_revision}}/review.md with the findings, as the review standard requires. Do not block on formatting taste, fixed step counts, or speculative redesign.\n\nThe review subject is this plan for the original task, not the whole product. Use surrounding code and architecture only to judge whether the plan can satisfy the original requirements and preserve affected contracts. Do not invent requirements or widen the task. This boundary does not protect an inadequate plan: when evidence shows that the proposed plan or architecture cannot correctly deliver an original requirement, report the defect and require the plan to change within the original task. If the evidence would require changing the original task boundary itself, report that decision explicitly for the user instead of silently expanding it.\n\nDo not run linters, type checks, test suites, builds, or other mechanical checks during review. Consume current evidence already produced for those properties and spend the review on semantic, architectural, and planning judgement.\n\nJudge the plan by `{{workspace_path}}/standards/planning.md` and conduct the review by `{{workspace_path}}/standards/review.md`; both paths are canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met.\n\nBefore selecting the route, classify each confirmed finding by its earliest cause: product defect, test or validation defect, insufficient existing evidence, documentation or process projection, invalid or undemonstrable criterion, or upstream requirements, plan, or process defect. State the aggregate disposition in the same current report. Return only `review_outcome`: `pass` when there are no blockers; `repair` only when every blocker is owned by this review's paired repair responsibility and its upstream contract remains sound; `replan` when any blocker invalidates a criterion, evidence model, architecture decision, plan, requirements interpretation, or process. Mixed causes return `replan`. Do not return a count.",
+      "directive": "Review {{workspace_path}}/plans/{{plan_revision}}/plan.md independently against the complete canonical requirements, every assigned primary source, standing project instructions, relevant repository architecture and behavior, VCS/side-effect boundaries, and prior completed work. Use a separate reviewer context or subagent when the host supports it; otherwise perform a fresh self-review and disclose that fallback in the report. Read primary artifacts directly when they are not already available or may have changed. Verify requirements coverage, dependencies, writer/reader contracts, executable routes, test and documentation obligations, task-file ownership, checkpoint authority, and observable evidence. When prior completed work is carried forward, verify that every accepted outcome names its originating plan revision and unit index and that cited evidence resolves under that origin; do not accept current array position as proof of origin. Verify the evidence required by each unit's explicit visualMode and the originating task without silently elevating the current reviewed plan from screenshots to html_report or from disabled to another mode. Overwrite {{workspace_path}}/plans/{{plan_revision}}/review.md with the findings, as the review standard requires. Do not block on formatting taste, fixed step counts, or speculative redesign.\n\nThe review subject is this plan for the original task, not the whole product. Use surrounding code and architecture only to judge whether the plan can satisfy the original requirements and preserve affected contracts. Do not invent requirements or widen the task. This boundary does not protect an inadequate plan: when evidence shows that the proposed plan or architecture cannot correctly deliver an original requirement, report the defect and require the plan to change within the original task. If the evidence would require changing the original task boundary itself, report that decision explicitly for the user instead of silently expanding it.\n\nDo not run linters, type checks, test suites, builds, or other mechanical checks during review. Consume current evidence already produced for those properties and spend the review on semantic, architectural, and planning judgement.\n\nJudge the plan by `{{workspace_path}}/standards/planning.md` and conduct the review by `{{workspace_path}}/standards/review.md`; both paths are canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met.\n\nBefore selecting the route, classify each confirmed finding by its earliest cause: product defect, test or validation defect, insufficient existing evidence, documentation or process projection, invalid or undemonstrable criterion, or upstream requirements, plan, or process defect. State the aggregate disposition in the same current report. Return only `review_outcome`: `pass` when there are no blockers; `repair` only when every blocker is owned by this review's paired repair responsibility and its upstream contract remains sound; `replan` when any blocker invalidates a criterion, evidence model, architecture decision, plan, requirements interpretation, or process. Mixed causes return `replan`. Do not return a count.\n\nVerify that every unit has exactly one valid visualMode and userApproval, that html_report inherently includes one screenshot validation pass, and that autonomous units all disable user approval. Reject any unit for push, pull request, publication, release, or deployment. Confirm that the intake visual preference guided planning but does not remain a runtime source beside the current plan.",
       "completionCondition": "Current plan review is complete, cause-classified, scoped to the original task, and review_outcome matches pass, repair, or replan",
       "inputSchema": {
         "type": "object",
@@ -286,7 +289,7 @@
       },
       "connections": {
         "true": "repair-plan",
-        "false": "approve-plan"
+        "false": "route-plan-activation-mode"
       }
     },
     {
@@ -317,8 +320,8 @@
     {
       "id": "approve-plan",
       "type": "agent-directive",
-      "directive": "Present the complete reviewed plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md with its architecture, outcomes, dependencies, evidence obligations, conditional visual-report units, risks, and side effects. When the plan carries accepted completed outcomes, present their recorded originating plan revision and unit index; never present a new array position as their evidence origin. Ask for explicit plan approval and one explicit project-native VCS authority that covers both checkpoint commits after accepted units and final reconciliation. On approval, derive the next uncompleted 1-based plan-unit index and total unit count from this exact revision, respecting the plan's accepted carry-forward records, and return them with vcs_commits_authorized. On rejection, also save verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/user-feedback.md. Do not edit the plan or mutate VCS here.\n\nIn `autonomous` mode do not ask for approval: acceptance follows from the independent plan review that already passed. Derive the cursor and unit bound from this exact revision and set VCS authority strictly from the authority captured at task start in {{workspace_path}}/vcs-baseline.md — never grant authority the task did not give.",
-      "completionCondition": "The user decision, approved cursor and bound, conditional evidence obligations, and checkpoint/final VCS authority or rejection feedback are durable",
+      "directive": "Present the complete independently reviewed current plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md, including architecture, outcomes, dependencies, each unit's visualMode and userApproval, evidence obligations, risks, local VCS boundary, and caller/parent delivery follow-up. When completed outcomes are carried forward, present their originating revision and unit index. Ask only whether the user approves this plan. Plan approval cannot grant, revoke, or transport VCS authority. On rejection, save verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/user-feedback.md. Do not derive cursor or unit count, edit the plan, change authority records, mutate the repository, or touch VCS here.",
+      "completionCondition": "The interactive user approved the exact reviewed plan or supplied actionable verbatim rejection feedback, without changing VCS authority or deriving execution cursor state",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -339,31 +342,7 @@
         "required": [
           "plan_approval"
         ],
-        "globalInputs": [
-          "current_step_index",
-          "total_steps",
-          "vcs_commits_authorized"
-        ],
         "allOf": [
-          {
-            "if": {
-              "properties": {
-                "plan_approval": {
-                  "const": "yes"
-                }
-              },
-              "required": [
-                "plan_approval"
-              ]
-            },
-            "then": {
-              "required": [
-                "current_step_index",
-                "total_steps",
-                "vcs_commits_authorized"
-              ]
-            }
-          },
           {
             "if": {
               "properties": {
@@ -398,7 +377,7 @@
         "right": "yes"
       },
       "connections": {
-        "true": "initialize-implementation-iteration",
+        "true": "activate-reviewed-plan",
         "false": "advance-plan-revision-after-rejection"
       }
     },
@@ -431,7 +410,7 @@
     {
       "id": "implement-plan-unit",
       "type": "agent-directive",
-      "directive": "Implement approved plan unit {{current_step_index}} of {{total_steps}} from {{workspace_path}}/plans/{{plan_revision}}/plan.md, using the complete current plan when it may have changed and the repository-grounded preparation at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md. Own the complete approved vertical outcome: inspect real dependencies and surrounding contracts, change the repository, preserve unrelated work, add or update necessary tests and coverage artifacts, update applicable permanent documentation, and complete configuration, schemas, migrations, generated output, runtime/integration behavior, and applicable security, performance or UI obligations. Run useful focused checks. Do not intentionally defer a known artifact class or integration consequence to the completion turn.\n\nWrite the unit's initial account to {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md in this turn. It is the account of the unit, not of your turn: state what the unit now delivers and the evidence for it — task-owned files, commands and outcomes, behavior/evidence mappings, documentation impact — together with which earlier behavior the change could have disturbed, unresolved facts, and unrelated changes that remain excluded. Carry decisive output instead of prose retelling. Later responsibilities that change the unit leave this same account true, so write present state rather than round history. Open it with the unit baseline in one line: the previous-unit checkpoint where project version control provides one, the state in {{workspace_path}}/vcs-baseline.md for the first unit, otherwise repository state at the start of this unit. Do not commit or publish here.\n\nWork to {{workspace_path}}/standards/engineering.md and {{workspace_path}}/standards/tests.md; when permanent documentation is affected, also use {{workspace_path}}/standards/documentation.md. The paths are canonical and unchanged content need not be reread when already present and certain. Where surrounding code is wrong, implement correctly, say where you diverged, and report the defect rather than repairing unrelated areas. Before adding or elevating validation machinery, name the required and plausible wrong states and use it only when its observation differs or it is itself the requested result with a consumer. Do not create a mechanism whose purpose is proving that another check ran.",
+      "directive": "Implement approved plan unit {{current_step_index}} of {{total_steps}} from {{workspace_path}}/plans/{{plan_revision}}/plan.md, using the complete current plan when it may have changed and the repository-grounded preparation at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md. Own the complete approved vertical outcome: inspect real dependencies and surrounding contracts, change the repository, preserve unrelated work, add or update necessary tests and coverage artifacts, update applicable permanent documentation, and complete configuration, schemas, migrations, generated output, runtime/integration behavior, and applicable security, performance or UI obligations. Run useful focused checks. Do not intentionally defer a known artifact class or integration consequence to the completion turn.\n\nWrite the unit's initial account to {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md in this turn. It is the account of the unit, not of your turn: state what the unit now delivers and the evidence for it — task-owned files, commands and outcomes, behavior/evidence mappings, documentation impact — together with which earlier behavior the change could have disturbed, unresolved facts, and unrelated changes that remain excluded. Carry decisive output instead of prose retelling. Later responsibilities that change the unit leave this same account true, so write present state rather than round history. Open it with the unit baseline in one line: the previous-unit checkpoint where project version control provides one, the state in {{workspace_path}}/vcs-baseline.md for the first unit, otherwise repository state at the start of this unit. Do not commit or publish here.\n\nWork to {{workspace_path}}/standards/engineering.md and {{workspace_path}}/standards/tests.md; when permanent documentation is affected, also use {{workspace_path}}/standards/documentation.md. The paths are canonical and unchanged content need not be reread when already present and certain. Where surrounding code is wrong, implement correctly, say where you diverged, and report the defect rather than repairing unrelated areas. Before adding or elevating validation machinery, name the required and plausible wrong states and use it only when its observation differs or it is itself the requested result with a consumer. Do not create a mechanism whose purpose is proving that another check ran.\n\nKeep the unit account explicit about every affected permanent documentation file and its current reproducible evidence. Documentation is part of the vertical result, not work deferred to final reconciliation.",
       "completionCondition": "The complete approved vertical unit, its initial truthful account, applicable tests and documentation, and focused evidence exist before the fresh producer completion pass",
       "inputSchema": {
         "type": "object",
@@ -764,7 +743,7 @@
       },
       "connections": {
         "true": "advance-plan-revision-for-replan",
-        "false": "end-aborted"
+        "false": "notify-workflow-stopped"
       }
     },
     {
@@ -784,8 +763,8 @@
     {
       "id": "validate-runtime",
       "type": "agent-directive",
-      "directive": "Determine runtime, browser, checklist, security, and performance applicability from canonical requirements, the approved plan unit, project policy, actual diff, changed/at-risk behavior inventory, and current evidence. Screenshot validation is applicable only when this exact approved plan unit explicitly requires screenshot capture, actual visual inspection, and step-report.html; incidental UI impact cannot enable it here. Execute every applicable project checklist item and record PASS with evidence, N/A with reason, or FAIL with location and correction. For applicable UI behavior, cover representative affected states and dependent behavior with project-native browser evidence. When screenshots are required, capture every required state, open the actual images with available visual capability, compare expected and observed behavior, and record the assessment; file existence alone is not evidence and unfinished capture/inspection means this directive is not complete. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md with behavior-to-evidence mappings. Classify reproducible application or permanent project-native capture/tooling defects as repository_failure and unavailable external browser/vision infrastructure as external_blocker. Do not repeat deterministic checks that cannot diagnose runtime behavior.\n\nApplicability and evidence belong to the unit as it now stands against its baseline, the line that opens {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md, not to the latest repair alone: re-establish the behaviour that change could have altered and keep the evidence it could not reach.",
-      "completionCondition": "All applicable runtime and checklist work is complete; any required screenshots were captured, opened, and visually assessed; evidence and classification are truthful",
+      "directive": "Determine runtime, browser, checklist, security, and performance applicability from canonical requirements, the approved plan unit, project policy, actual diff, changed/at-risk behavior inventory, and current evidence. Use the current visual_mode derived by prepare-plan-unit-implementation from the exact current plan. disabled performs no screenshot capture or HTML work. screenshots and html_report both require one current screenshot capture set and actual visual inspection; html_report does not add a second capture pass here. Execute every applicable project checklist item and record PASS with evidence, N/A with reason, or FAIL with location and correction. For applicable UI behavior, cover representative affected states and dependent behavior with project-native browser evidence. When screenshots are required, capture every required state, open the actual images with available visual capability, compare expected and observed behavior, and record the assessment; file existence alone is not evidence and unfinished capture/inspection means this directive is not complete. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{current_iteration}}/runtime-validation.md with behavior-to-evidence mappings. Classify reproducible application or permanent project-native capture/tooling defects as repository_failure and unavailable external browser/vision infrastructure as external_blocker. Do not repeat deterministic checks that cannot diagnose runtime behavior.\n\nApplicability and evidence belong to the unit as it now stands against its baseline, the line that opens {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md, not to the latest repair alone: re-establish the behaviour that change could have altered and keep the evidence it could not reach.",
+      "completionCondition": "All applicable runtime and checklist work is complete; screenshots were captured and actually inspected exactly when current visual_mode requires them, with one current capture set and truthful classification",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -924,7 +903,7 @@
       },
       "connections": {
         "true": "validate-runtime",
-        "false": "end-aborted"
+        "false": "notify-workflow-stopped"
       }
     },
     {
@@ -1070,14 +1049,14 @@
       },
       "connections": {
         "true": "validate-expensive",
-        "false": "end-aborted"
+        "false": "notify-workflow-stopped"
       }
     },
     {
       "id": "review-plan-unit-with-user",
       "type": "agent-directive",
-      "directive": "Determine from the approved plan, task authority, and material impact whether plan unit {{current_step_index}} requires user acceptance. If this exact approved unit requires screenshots and step-report.html, create or regenerate {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/step-report.html from the current stabilized implementation, runtime, screenshot, review, and expensive-validation evidence. Make it a portable self-contained HTML document with embedded styling and no external runtime dependency, responsive readability, explicit PASS/FAIL/warning states, factual language without marketing claims, and embedded images or reliable relative paths that remain valid from the documented location. State outcome, affected behavior, scenarios, commands/tests/reviews, limitations, expected versus observed screenshot assessments with honest baseline handling, and concise manual-verification instructions. Open or otherwise verify the final document and its image references, then present or link that exact report and request approval in the same substantive turn. Such a unit is never concluded without presenting it. If no visual-report obligation exists, do not create screenshot HTML; present concise behavior and exact verification evidence when user acceptance is materially required. Where acceptance is not materially required, conclude the unit yourself and record in {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md why it was not — the answer is the same `accepted` either way, because the run continues identically, and the reason belongs where its readers are. On rejection, also save verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/user-feedback.md. Do not repair here.\n\nIn `autonomous` mode do not wait for user acceptance: still create or regenerate the required step-report.html for units that carry a visual-report obligation, still record the evidence, and conclude the unit yourself with `accepted` so the run continues to the checkpoint decision. Reserve rejection for interactive runs.",
-      "completionCondition": "The applicable acceptance decision and evidence are durable; required current HTML is presented and accepted or rejected; verbatim rejection feedback exists when needed",
+      "directive": "Present the current accepted unit outcome and exact current evidence for user decision. The reviewed current plan already requires this approval; do not decide materiality again. If a visual HTML artifact was required, its public URL has already been sent through the report notification; otherwise present a concise factual behavior and verification summary. Ask for explicit accepted or rejected input. On rejection, save verbatim feedback to {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/user-feedback.md. Do not create or upload reports, capture screenshots, repair, change plan policy, or mutate VCS here.",
+      "completionCondition": "The plan-required user decision is explicit and verbatim rejection feedback exists when rejected; no report, screenshot, policy, product, or VCS mutation occurred here",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1172,7 +1151,7 @@
       },
       "connections": {
         "true": "finalize-feature",
-        "false": "end"
+        "false": "notify-workflow-complete"
       }
     },
     {
@@ -1186,7 +1165,7 @@
         "right": "pass"
       },
       "connections": {
-        "true": "end",
+        "true": "notify-workflow-complete",
         "false": "route-finalization-repository"
       }
     },
@@ -1241,8 +1220,8 @@
         "right": "skip"
       },
       "connections": {
-        "true": "end",
-        "false": "end-aborted"
+        "true": "notify-workflow-complete",
+        "false": "notify-workflow-stopped"
       }
     },
     {
@@ -1278,8 +1257,8 @@
     {
       "id": "reconcile-documentation",
       "type": "agent-directive",
-      "directive": "Reconcile permanent project documentation against the complete requirements, assigned sources, approved plan revisions, actual repository behavior, project documentation rules, and documentation already changed by implementation units. Determine whether documentation is affected even when it is already current and no new edit is needed. Change only genuinely stale affected sections; keep content factual and current-state, omit marketing claims and development history unless explicitly required, do not add unsupported claims, and do not create a new long-lived document without a durable reader need. Include required commands, examples, contracts, generated output, links, rendering, language parity, and coverage-map updates. Write {{workspace_path}}/documentation-reconciliation.md with exact evidence. Return documentation_affected when the task's documentation, or the repository behavior that documentation describes, is in a state no current independent review covers — always so the first time this responsibility runs. Return not_applicable when no documentation review is due, which covers two different situations, and the report must say which one holds: the task affects no permanent documentation at all, or the state already judged in {{workspace_path}}/documentation-review.md is still the present one because neither the documentation nor the repository behavior it describes has changed since that review. Establish that by reading the documents and the repository state the way this reconciliation reads them anyway, never from memory of an earlier pass.\n\nFollow `{{workspace_path}}/standards/documentation.md`; the path is canonical and unchanged content need not be reread when already present and certain.\n\nClassify before mutation. If truthful reconciliation requires changing executable or generated behavior, a schema, configuration, product contract, or test intent after units are complete, do not make that mutation here: record the need and current `replan` disposition in documentation-reconciliation.md and return `change_scope=requires_replan` so a new plan unit owns it. Return `documentation_affected` only for non-executable documentation state requiring independent review, and `not_applicable` under the two existing documented conditions.",
-      "completionCondition": "Documentation applicability is factual; non-executable affected state is reviewed and any required executable mutation replans before changing it",
+      "directive": "Reconcile permanent project documentation against the complete requirements, assigned sources, approved plan revisions, actual repository behavior, project documentation rules, and documentation already changed by implementation units. Determine whether documentation is affected even when it is already current and no new edit is needed. Change only genuinely stale affected sections; keep content factual and current-state, omit marketing claims and development history unless explicitly required, do not add unsupported claims, and do not create a new long-lived document without a durable reader need. Include required commands, examples, contracts, generated output, links, rendering, language parity, and coverage-map updates. Write {{workspace_path}}/documentation-reconciliation.md with exact evidence. Return documentation_affected when reconciliation changes non-executable permanent documentation or when affected current documentation lacks accepted independent unit coverage. Return not_applicable when the task affects no permanent documentation, or when every affected document and the behavior it describes are unchanged since explicit accepted independent unit coverage; name the originating plan revision and unit index evidence in the report. Do not force a duplicate review merely because this is the first final reconciliation.\n\nFollow `{{workspace_path}}/standards/documentation.md`; the path is canonical and unchanged content need not be reread when already present and certain.\n\nClassify before mutation. If truthful reconciliation requires changing executable or generated behavior, a schema, configuration, product contract, or test intent after units are complete, do not make that mutation here: record the need and current `replan` disposition in documentation-reconciliation.md and return `change_scope=requires_replan` so a new plan unit owns it. Return `documentation_affected` only for non-executable documentation state requiring independent review, and `not_applicable` under the two existing documented conditions.",
+      "completionCondition": "Final documentation reconciliation truthfully distinguishes unaffected, unchanged independently covered, changed/uncovered non-executable, and executable-replan states",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1514,13 +1493,13 @@
       },
       "connections": {
         "true": "validate-feature-wide",
-        "false": "end-aborted"
+        "false": "notify-workflow-stopped"
       }
     },
     {
       "id": "review-final-semantics",
       "type": "agent-directive",
-      "directive": "In an independent reviewer context where supported, review the complete final repository state delivered by the original task against all confirmed requirements, assigned primary sources, approved plan revisions, standing project instructions, architecture decisions, tests, permanent documentation, coverage artifacts, unit checkpoints, and current validation evidence; disclose fallback self-review otherwise. Inspect actual code and surrounding project patterns. For each carried-forward completed outcome, follow its recorded originating plan revision and unit index to the revision-qualified unit evidence rather than treating its current plan position as provenance. Verify cross-unit contracts, responsibility boundaries, maintainability, test adequacy, current documentation, preserved unrelated work, and that every conditional visual obligation has current inspected evidence and its accepted report. Overwrite {{workspace_path}}/final-semantic-review.md with the findings, as the review standard requires.\n\nThe review subject is the final result of the original task, not the whole product. Surrounding code and product architecture are context only where needed to judge affected contracts. Do not invent requirements or widen the task. If evidence shows an approved plan or architectural decision could not deliver an original requirement, report that defect for the existing replan route; staying within scope does not preserve a bad plan. A change to the original task boundary itself requires an explicit user decision.\n\nDo not run linters, type checks, test suites, builds, or other mechanical checks during review. Consume their current evidence and perform the final semantic and architectural judgement this gate owns.\n\nJudge by `{{workspace_path}}/standards/review.md`; the path is canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met.\n\nBefore selecting the route, classify each confirmed finding by its earliest cause: product defect, test or validation defect, insufficient existing evidence, documentation or process projection, invalid or undemonstrable criterion, or upstream requirements, plan, or process defect. State the aggregate disposition in the same current report. Return only `review_outcome`: `pass` when there are no blockers; `repair` only for a gate-local documentation, projection, or already-verified evidence defect that can be corrected without changing product behavior, contracts, schemas, configuration, generated behavior, or test intent; `replan` for any cause requiring such a late semantic mutation or invalidating an upstream contract. Mixed causes return `replan`. Do not return a count.",
+      "directive": "In an independent reviewer context where supported, review the complete final repository state delivered by the original task against all confirmed requirements, assigned primary sources, approved plan revisions, standing project instructions, architecture decisions, tests, permanent documentation, coverage artifacts, unit checkpoints, and current validation evidence; disclose fallback self-review otherwise. Inspect actual code and surrounding project patterns. For each carried-forward completed outcome, follow its recorded originating plan revision and unit index to the revision-qualified unit evidence rather than treating its current plan position as provenance. Verify cross-unit contracts, responsibility boundaries, maintainability, test adequacy, current documentation, preserved unrelated work, and that every current html_report obligation has current inspected evidence and a successfully uploaded current report, with user acceptance required only when that exact unit's current plan policy required it. Overwrite {{workspace_path}}/final-semantic-review.md with the findings, as the review standard requires.\n\nThe review subject is the final result of the original task, not the whole product. Surrounding code and product architecture are context only where needed to judge affected contracts. Do not invent requirements or widen the task. If evidence shows an approved plan or architectural decision could not deliver an original requirement, report that defect for the existing replan route; staying within scope does not preserve a bad plan. A change to the original task boundary itself requires an explicit user decision.\n\nDo not run linters, type checks, test suites, builds, or other mechanical checks during review. Consume their current evidence and perform the final semantic and architectural judgement this gate owns.\n\nJudge by `{{workspace_path}}/standards/review.md`; the path is canonical and unchanged content need not be reread when already present and certain. A standard that does not apply to this change is met.\n\nBefore selecting the route, classify each confirmed finding by its earliest cause: product defect, test or validation defect, insufficient existing evidence, documentation or process projection, invalid or undemonstrable criterion, or upstream requirements, plan, or process defect. State the aggregate disposition in the same current report. Return only `review_outcome`: `pass` when there are no blockers; `repair` only for a gate-local documentation, projection, or already-verified evidence defect that can be corrected without changing product behavior, contracts, schemas, configuration, generated behavior, or test intent; `replan` for any cause requiring such a late semantic mutation or invalidating an upstream contract. Mixed causes return `replan`. Do not return a count.",
       "completionCondition": "Independent final semantic review is complete and scoped to the original task; cause classification routes only gate-local repair or a new plan unit before semantic mutation",
       "inputSchema": {
         "type": "object",
@@ -1616,7 +1595,7 @@
       },
       "connections": {
         "true": "advance-plan-revision-for-coverage",
-        "false": "report-and-accept-feature"
+        "false": "create-final-report"
       }
     },
     {
@@ -1636,8 +1615,8 @@
     {
       "id": "report-and-accept-feature",
       "type": "agent-directive",
-      "directive": "Create {{workspace_path}}/final-report.md from the exact current requirements, assigned sources, approved plan revisions, unit accounts, checkpoint reports, validation evidence, final semantic review, requirements coverage, documentation reconciliation, the accepted visual reports where a unit carried that obligation, and the verbatim rejection feedback any earlier round produced. Resolve every carried-forward unit account and evidence item through its recorded originating plan revision and unit index; do not present its current plan position as provenance. State implemented behavior, architecture-relevant outcomes, task-owned files, exact commands and outcomes, automated and manual verification, accepted visual reports where applicable, limitations, and every item that is not implemented, postponed, excluded, unrelated, or externally blocked. Do not copy large diagnostics. Present this current report and ask whether the complete repository result is accepted before any feature-level VCS reconciliation. On rejection, save verbatim feedback to {{workspace_path}}/final-user-feedback.md. Do not repair or mutate VCS here.\n\nIn `autonomous` mode still create and present final-report.md — it is the final report of the run — and conclude the acceptance yourself without asking. Report honestly: unmet requirements, blockers, and excluded scope stay visible in the report rather than being silently accepted.",
-      "completionCondition": "A current factual final report exists and the user accepted the repository result before VCS reconciliation or supplied actionable rejection feedback",
+      "directive": "Read the current final report at {{workspace_path}}/final-report.md and present its exact current repository result for an interactive user decision. Ask only whether the complete result is accepted. On rejection, save verbatim feedback to {{workspace_path}}/final-user-feedback.md. Do not recreate the report, repair, change requirements or plan policy, mutate the repository, or touch VCS here. This directive is unreachable in autonomous mode.",
+      "completionCondition": "The interactive user accepted the exact current final report or supplied actionable verbatim rejection feedback, without report regeneration or repository/VCS mutation",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1864,7 +1843,7 @@
         "right": "abort"
       },
       "connections": {
-        "true": "end-aborted",
+        "true": "notify-workflow-stopped",
         "false": "repair-checkpoint-repository"
       }
     },
@@ -1886,8 +1865,8 @@
     {
       "id": "review-unit-completeness",
       "type": "agent-directive",
-      "directive": "Delegate the completeness review of plan unit {{current_step_index}} to an independent reviewer — a subagent or child context where the host supports one; disclose a fallback self-review honestly otherwise. Do not review it yourself here and do not repair the unit here. The reviewer repairs nothing in the repository either; the single exception is the run's own record, which it corrects under the standard's rule on what a finding is about.\n\nHand the reviewer the primary sources and exact paths without your interpretation: canonical requirements, the approved unit in {{workspace_path}}/plans/{{plan_revision}}/plan.md, the actual changed files, the unit's account at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md, the record of the round just closed at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md when this is not the unit's first pass, and the evidence the cheap, test-adequacy, architecture, runtime and expensive gates already produced. Do not tell it what you improved or fixed, and do not summarise the work in place of the sources. Require it to verify by reading the real artifacts. Scope the review strictly to this approved unit and the original task boundaries. Previous and following units, surrounding architecture, and affected product contracts are context only where necessary to judge whether this unit meets its own approved outcome; they are not additional review subjects. Give the reviewer the unit's baseline — the line that opens {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md — and require the judgement to be of the unit's current state against that baseline rather than of the latest iteration's changes.\n\nIts subject is completeness and quality of the delivered unit, not verification that machines already did. Do not run linters, type checks, test suites, builds, or any other mechanical check: that evidence exists and is current. Instead answer whether this unit's approved outcome is genuinely and completely achieved: gaps against that outcome and the original requirements governing it; work in the unit that is stubbed, faked, hardcoded, silently narrowed, worked around, or left as a TODO while presented as done; required unit behaviour that no evidence covers; and defects in the unit that break an affected contract it must satisfy.\n\nWhen confirming a problem, describe its violated contract or likely root-cause pattern precisely enough for repair to investigate it as a defect class before changing code. Do not turn that diagnosis into a review of other plan units or unrelated product areas, and do not add requirements beyond the original task. If evidence shows that the approved plan itself cannot produce the original required result, report that planning defect explicitly so the existing replan route can own it; the scope boundary does not protect a bad plan.\n\nThe reviewer overwrites {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/completeness-review.md with the complete current set of confirmed findings in this unit, each with its location, violated contract or root-cause pattern, and the outcome required to resolve it, without severity tiers. Zero findings is a valid and expected result. Where a record of this run disagreed with the artifacts, the reviewer corrects that record itself and names the correction in the same report instead of counting it as a finding.\n\n\n\nHand the reviewer `{{workspace_path}}/standards/review.md` as its contract, together with the standard for what it is judging; it reads them itself.\n\nBefore selecting the route, classify each confirmed finding by its earliest cause: product defect, test or validation defect, insufficient existing evidence, documentation or process projection, invalid or undemonstrable criterion, or upstream requirements, plan, or process defect. State the aggregate disposition in the same current report. Return only `review_outcome`: `pass` when there are no blockers; `repair` only when every blocker is owned by this review's paired repair responsibility and its upstream contract remains sound; `replan` when any blocker invalidates a criterion, evidence model, architecture decision, plan, requirements interpretation, or process. Mixed causes return `replan`. Do not return a count.",
-      "completionCondition": "Independent current-unit completeness review is cause-classified, uses current mechanical evidence without rerunning it, and review_outcome exactly matches the report",
+      "directive": "Delegate the completeness review of plan unit {{current_step_index}} to an independent reviewer — a subagent or child context where the host supports one; disclose a fallback self-review honestly otherwise. Do not review it yourself here and do not repair the unit here. The reviewer repairs nothing in the repository either; the single exception is the run's own record, which it corrects under the standard's rule on what a finding is about.\n\nHand the reviewer the primary sources and exact paths without your interpretation: canonical requirements, the approved unit in {{workspace_path}}/plans/{{plan_revision}}/plan.md, the actual changed files, the unit's account at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md, the record of the round just closed at {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md when this is not the unit's first pass, and the evidence the cheap, test-adequacy, architecture, runtime and expensive gates already produced. Do not tell it what you improved or fixed, and do not summarise the work in place of the sources. Require it to verify by reading the real artifacts. Scope the review strictly to this approved unit and the original task boundaries. Previous and following units, surrounding architecture, and affected product contracts are context only where necessary to judge whether this unit meets its own approved outcome; they are not additional review subjects. Give the reviewer the unit's baseline — the line that opens {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md — and require the judgement to be of the unit's current state against that baseline rather than of the latest iteration's changes.\n\nIts subject is completeness and quality of the delivered unit, not verification that machines already did. Do not run linters, type checks, test suites, builds, or any other mechanical check: that evidence exists and is current. Instead answer whether this unit's approved outcome is genuinely and completely achieved: gaps against that outcome and the original requirements governing it; work in the unit that is stubbed, faked, hardcoded, silently narrowed, worked around, or left as a TODO while presented as done; required unit behaviour that no evidence covers; and defects in the unit that break an affected contract it must satisfy.\n\nWhen confirming a problem, describe its violated contract or likely root-cause pattern precisely enough for repair to investigate it as a defect class before changing code. Do not turn that diagnosis into a review of other plan units or unrelated product areas, and do not add requirements beyond the original task. If evidence shows that the approved plan itself cannot produce the original required result, report that planning defect explicitly so the existing replan route can own it; the scope boundary does not protect a bad plan.\n\nThe reviewer overwrites {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/completeness-review.md with the complete current set of confirmed findings in this unit, each with its location, violated contract or root-cause pattern, and the outcome required to resolve it, without severity tiers. Zero findings is a valid and expected result. Where a record of this run disagreed with the artifacts, the reviewer corrects that record itself and names the correction in the same report instead of counting it as a finding.\n\n\n\nHand the reviewer `{{workspace_path}}/standards/review.md` as its contract, together with the standard for what it is judging; it reads them itself.\n\nBefore selecting the route, classify each confirmed finding by its earliest cause: product defect, test or validation defect, insufficient existing evidence, documentation or process projection, invalid or undemonstrable criterion, or upstream requirements, plan, or process defect. State the aggregate disposition in the same current report. Return only `review_outcome`: `pass` when there are no blockers; `repair` only when every blocker is owned by this review's paired repair responsibility and its upstream contract remains sound; `replan` when any blocker invalidates a criterion, evidence model, architecture decision, plan, requirements interpretation, or process. Mixed causes return `replan`. Do not return a count.\n\nExplicitly judge every permanent documentation file affected by this unit against current behavior, requirements, project documentation rules, and the unit account. Record whether current independent coverage exists so final reconciliation can distinguish unchanged covered documentation from changed or uncovered documentation.",
+      "completionCondition": "Independent current-unit completeness review covers current code, tests, permanent documentation, and evidence without rerunning mechanical checks, records current documentation coverage, and returns the exact cause-classified outcome",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1921,7 +1900,7 @@
       },
       "connections": {
         "true": "repair-unit-completeness",
-        "false": "review-plan-unit-with-user"
+        "false": "route-unit-html-report"
       }
     },
     {
@@ -2556,8 +2535,8 @@
     {
       "id": "prepare-plan-unit-implementation",
       "type": "agent-directive",
-      "directive": "Prepare approved plan unit {{current_step_index}} of {{total_steps}} for implementation against the repository as it actually stands. Read the complete current unit from {{workspace_path}}/plans/{{plan_revision}}/plan.md, standing project instructions, primary repository sources, affected dependencies, consumers and contracts, and the acceptance evidence the unit relies on. Use {{workspace_path}}/standards/planning.md when judging plan or evidence assumptions; consult another materialized standard only when the repository fact under assessment makes it applicable. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md with the repository-grounded contracts, integration boundaries, constraints, risks and evidence facts needed to begin the complete vertical outcome. Do not copy the plan into microsteps, prescribe an exhaustive file list, constrain implementation tactics without evidence, mutate product artifacts, revise the plan, or create validation machinery.\n\nReturn `preparation_outcome=ready` only when the approved outcome, architecture fixed by the plan, criterion, evidence model and task boundary remain sound in the actual repository. Normal uncertainty that implementation exploration can resolve is not replan. Return `preparation_outcome=replan` before product mutation when a primary source proves an upstream assumption materially invalid; record the current `replan` disposition, invalid assumption, repository evidence and required kind of plan correction in the preparation artifact. Return only the outcome.",
-      "completionCondition": "The approved unit is grounded in current repository contracts and is either ready for unconstrained vertical implementation or has a concrete pre-mutation replan diagnosis",
+      "directive": "Prepare approved plan unit {{current_step_index}} of {{total_steps}} against the repository as it actually stands. Read the complete current unit from {{workspace_path}}/plans/{{plan_revision}}/plan.md, standing instructions, primary sources, dependencies, consumers, contracts, and acceptance evidence. Use {{workspace_path}}/standards/planning.md when judging plan or evidence assumptions. Write {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md with repository-grounded contracts, integration boundaries, risks, and evidence facts. Do not copy the plan into microsteps, prescribe an exhaustive file list, mutate product artifacts, revise the plan, infer policy from the intake preference, or create validation machinery.\n\nReturn ready only when the outcome, architecture fixed by the plan, criterion, evidence model, task boundary, visualMode, and userApproval remain sound. With ready, return visual_mode and approval_required exactly from this unit; in autonomous mode approval_required must be false. Return replan before mutation when a primary source proves an upstream assumption or current unit policy materially invalid, recording the cause and repository evidence in preparation. Do not return policy fields on replan.",
+      "completionCondition": "The exact current unit is repository-grounded and either ready with visual_mode and approval_required derived from the plan, or has a concrete pre-mutation replan diagnosis",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -2568,10 +2547,41 @@
               "ready",
               "replan"
             ]
+          },
+          "visual_mode": {
+            "type": "string",
+            "enum": [
+              "disabled",
+              "screenshots",
+              "html_report"
+            ]
+          },
+          "approval_required": {
+            "type": "boolean"
           }
         },
         "required": [
           "preparation_outcome"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "preparation_outcome": {
+                  "const": "ready"
+                }
+              },
+              "required": [
+                "preparation_outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "visual_mode",
+                "approval_required"
+              ]
+            }
+          }
         ]
       },
       "connections": {
@@ -2596,7 +2606,7 @@
     {
       "id": "complete-plan-unit",
       "type": "agent-directive",
-      "directive": "Complete plan unit {{current_step_index}} as its current producer before validation or review. Read the complete approved unit, {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md, the actual current repository diff and affected artifacts, standing project instructions, and the current {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md. Work to {{workspace_path}}/standards/engineering.md and {{workspace_path}}/standards/tests.md; when permanent documentation is affected, also use {{workspace_path}}/standards/documentation.md. On initial completion `previous_iteration` is 0 and no repair record is expected. When `previous_iteration` is greater than 0 after product repair, also read {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md to identify the latest mutation and every earlier behavior it could have disturbed; do not reduce this pass to that repair.\n\nReassess the whole current unit against the baseline that opens unit-report.md. Directly finish every reproducible foreseeable in-scope omission or integration correction across product behavior, dependencies, tests, coverage artifacts, permanent documentation, contracts, schemas, configuration, migrations, generated output, runtime/integration behavior, and applicable security, performance or UI obligations. Recheck dependencies exposed by the actual diff, run useful focused checks, and rewrite the existing unit report to the unit's current truth. Do not emit a findings-only handoff, create a second account or validation ledger, rerun broad checks without an invalidation reason, widen class-wide repair beyond real manifestations of a confirmed root in the original scope, or build proof machinery whose signal cannot distinguish the claimed property.\n\nReturn `completion_outcome=ready` only when no known producer-owned omission remains. If the produced state proves that an upstream plan outcome, architecture decision fixed by the plan, criterion, evidence model or process contract cannot deliver the original requirement, do not invent a workaround or continue product mutation: record the concrete current cause and `replan` disposition in unit-report.md and return `completion_outcome=replan`. Return only the outcome.",
+      "directive": "Complete plan unit {{current_step_index}} as its current producer before validation or review. Read the complete approved unit, {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/implementation-preparation.md, the actual current repository diff and affected artifacts, standing project instructions, and the current {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/unit-report.md. Work to {{workspace_path}}/standards/engineering.md and {{workspace_path}}/standards/tests.md; when permanent documentation is affected, also use {{workspace_path}}/standards/documentation.md. On initial completion `previous_iteration` is 0 and no repair record is expected. When `previous_iteration` is greater than 0 after product repair, also read {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/iteration-{{previous_iteration}}/repair.md to identify the latest mutation and every earlier behavior it could have disturbed; do not reduce this pass to that repair.\n\nReassess the whole current unit against the baseline that opens unit-report.md. Directly finish every reproducible foreseeable in-scope omission or integration correction across product behavior, dependencies, tests, coverage artifacts, permanent documentation, contracts, schemas, configuration, migrations, generated output, runtime/integration behavior, and applicable security, performance or UI obligations. Recheck dependencies exposed by the actual diff, run useful focused checks, and rewrite the existing unit report to the unit's current truth. Do not emit a findings-only handoff, create a second account or validation ledger, rerun broad checks without an invalidation reason, widen class-wide repair beyond real manifestations of a confirmed root in the original scope, or build proof machinery whose signal cannot distinguish the claimed property.\n\nReturn `completion_outcome=ready` only when no known producer-owned omission remains. If the produced state proves that an upstream plan outcome, architecture decision fixed by the plan, criterion, evidence model or process contract cannot deliver the original requirement, do not invent a workaround or continue product mutation: record the concrete current cause and `replan` disposition in unit-report.md and return `completion_outcome=replan`. Return only the outcome.\n\nConfirm that the current unit account names every affected permanent documentation file and current evidence, and that no foreseeable documentation consequence was deferred to final reconciliation.",
       "completionCondition": "A fresh producer pass has completed the whole current unit and its truthful account before validation, or has routed a concrete upstream plan defect without surrogate repair",
       "inputSchema": {
         "type": "object",
@@ -2631,6 +2641,182 @@
       "connections": {
         "true": "validate-cheap",
         "false": "approve-current-unit-closure"
+      }
+    },
+    {
+      "id": "route-plan-activation-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "notify-plan-approval",
+        "false": "activate-reviewed-plan"
+      }
+    },
+    {
+      "id": "notify-plan-approval",
+      "type": "telegram-notification",
+      "message": "📋 *Plan approval required*\n\nReviewed development plan revision {{plan_revision}} is ready for your decision.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "approve-plan"
+      }
+    },
+    {
+      "id": "activate-reviewed-plan",
+      "type": "agent-directive",
+      "directive": "Activate the exact independently reviewed current plan revision at {{workspace_path}}/plans/{{plan_revision}}/plan.md without asking for or emitting approval. Read the complete plan when its exact current content is not already available or may have changed. Derive the next uncompleted 1-based unit index and total executable unit count from this revision, respecting accepted carry-forward records and their originating revision/index. Read {{workspace_path}}/vcs-baseline.md and set VCS authority strictly from the originating task authority recorded there; plan approval cannot grant, revoke, or transport it. Return current_step_index, total_steps, and vcs_commits_authorized only. Do not edit the plan, requirements, authority record, repository, or VCS.",
+      "completionCondition": "The exact reviewed plan is activated with a correct cursor, unit bound, and task-start VCS authority without any approval decision",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": [
+          "current_step_index",
+          "total_steps",
+          "vcs_commits_authorized"
+        ],
+        "globalInputs": [
+          "current_step_index",
+          "total_steps",
+          "vcs_commits_authorized"
+        ]
+      },
+      "connections": {
+        "success": "initialize-implementation-iteration"
+      }
+    },
+    {
+      "id": "route-unit-html-report",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "prepare-plan-unit-implementation.visual_mode"
+        },
+        "right": "html_report"
+      },
+      "connections": {
+        "true": "create-and-upload-step-report",
+        "false": "route-unit-approval-required"
+      }
+    },
+    {
+      "id": "create-and-upload-step-report",
+      "type": "agent-directive",
+      "directive": "Create the requested visual HTML report for current plan unit {{current_step_index}} from the stabilized current unit, its unit account, current runtime validation, accepted screenshot files, deterministic and expensive evidence, and independent completeness review. Reuse the exact screenshots already captured and visually inspected by validate-runtime; do not run capture tooling or perform a second screenshot-validation pass. Build {{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}/step-report.html as a factual, responsive, self-contained document with embedded assets and no external runtime dependency. State the unit outcome, affected behavior, evidence, expected-versus-observed visual assessment, limitations, and concise verification guidance. Open and inspect the final HTML and its embedded images. Upload that exact HTML through the supported Moira Artifact API with this execution ID and return the observed public URL as report_url. If artifact upload is unavailable or fails, expose the concrete Moira external blocker and do not submit success, substitute a local path, notify, request approval, retry unchanged state, or continue the workflow.",
+      "completionCondition": "The current accepted screenshots were reused once in an inspected self-contained HTML report and the exact report was uploaded as an execution-linked Moira artifact with an observed public URL",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "report_url": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^https://"
+          }
+        },
+        "required": [
+          "report_url"
+        ]
+      },
+      "connections": {
+        "success": "notify-report-ready"
+      }
+    },
+    {
+      "id": "notify-report-ready",
+      "type": "telegram-notification",
+      "message": "🖼 *Visual report ready*\n\nPlan unit {{current_step_index}} report: {{create-and-upload-step-report.report_url}}",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "route-unit-approval-required"
+      }
+    },
+    {
+      "id": "route-unit-approval-required",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "prepare-plan-unit-implementation.approval_required"
+        },
+        "right": true
+      },
+      "connections": {
+        "true": "notify-unit-approval",
+        "false": "route-checkpoint-authority"
+      }
+    },
+    {
+      "id": "notify-unit-approval",
+      "type": "telegram-notification",
+      "message": "👤 *Unit approval required*\n\nPlan unit {{current_step_index}} is ready and the workflow is waiting for your decision.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "review-plan-unit-with-user"
+      }
+    },
+    {
+      "id": "notify-workflow-complete",
+      "type": "telegram-notification",
+      "message": "✅ *Software Development Flow finished*\n\nThe workflow reached its normal terminal result. Review the final report for exact outcomes, limitations, and follow-up delivery intent.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end"
+      }
+    },
+    {
+      "id": "notify-workflow-stopped",
+      "type": "telegram-notification",
+      "message": "⛔ *Software Development Flow stopped*\n\nThe workflow ended before normal completion. Review the current workspace evidence for the exact blocker, refusal, or abort reason.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "end-aborted"
+      }
+    },
+    {
+      "id": "create-final-report",
+      "type": "agent-directive",
+      "directive": "Create {{workspace_path}}/final-report.md from the exact current requirements, assigned sources, approved plan revisions, revision-qualified unit accounts, checkpoints, validation evidence, final semantic review, requirements coverage, documentation reconciliation, every current successfully uploaded visual report, and any verbatim rejection feedback. State implemented behavior, architecture-relevant outcomes, task-owned files, exact commands and outcomes, automated and manual verification, current uploaded report URLs and, separately, interactive acceptance outcomes where the current plan required them, limitations, and every item not implemented, postponed, excluded, unrelated, or externally blocked. Keep authorized push, pull request, publication, release, or deployment intent visible only as caller or parent follow-up. Do not copy large diagnostics, ask for approval, repair, mutate the repository, or touch VCS. Present the factual current report in both operating modes.",
+      "completionCondition": "A factual current final report covers the complete repository result, evidence, limitations, and caller or parent delivery follow-up without any approval decision or mutation",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "connections": {
+        "success": "route-final-acceptance-mode"
+      }
+    },
+    {
+      "id": "route-final-acceptance-mode",
+      "type": "condition",
+      "condition": {
+        "operator": "eq",
+        "left": {
+          "contextPath": "operating_mode"
+        },
+        "right": "interactive"
+      },
+      "connections": {
+        "true": "notify-final-approval",
+        "false": "route-vcs-authority"
+      }
+    },
+    {
+      "id": "notify-final-approval",
+      "type": "telegram-notification",
+      "message": "👤 *Final result approval required*\n\nThe complete Software Development Flow report is ready and the workflow is waiting for your decision.",
+      "parseMode": "Markdown",
+      "connections": {
+        "default": "report-and-accept-feature"
       }
     }
   ],
@@ -2679,7 +2865,7 @@
     "planning_standards": {
       "type": "string",
       "description": "Planning criteria this flow works to; materialized into the workspace by the engine",
-      "default": "# Planning standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## A unit is a vertical slice\n\nEach unit changes observable behaviour and carries, inside itself, the tests and the verification\nthat prove it. It crosses whatever layers it needs to do that.\n\n*Why.* A unit whose proof lives in a later unit cannot be accepted on its own, and nothing can tell\nwhether it is finished. Splitting by layer instead — one unit for storage, one for the API, one for\nthe interface — produces work that is neither independent nor separately valuable. (INVEST; vertical\nvs horizontal slicing.)\n\n## No unit is only tests, only validation, only documentation, or only cleanup\n\nUnless that is what the task itself asks for.\n\n*Why.* Such a unit is an admission that the previous one was delivered unfinished, and it moves the\nproof away from the work it proves. The verification that ends up in a \"testing\" unit is the same\nverification the implementing unit needed to be acceptable.\n\n## The plan opens with the architecture it assumes\n\nComponents, how they interact, the decisions taken, and the consequences those decisions accept.\nDecisions deliberately deferred are named as deferred.\n\n*Why.* Without it the reviewer judges steps and never the shape, and the first unit silently fixes an\narchitecture nobody agreed to. Consequences are the part that makes the record useful later. (ADR:\ncontext, decision, consequences.)\n\n## Work moves from the core outward\n\nData and domain logic first, then integration and interfaces, then presentation — unless a real\ndependency runs the other way and the plan says which.\n\n*Why.* Building the outer layer first freezes a contract underneath it that nothing has exercised yet.\n\n## Each unit is readable by someone who never saw the conversation\n\nWhat it produces, what it depends on, and what evidence would show it done.\n\n*Why.* The reviewer, and often the executor, arrive without that history; anything they cannot\nreconstruct becomes an assumption nobody checks.\n\n## The plan does not enumerate files, symbols, line numbers, or pseudocode\n\nIt fixes outcomes, contracts, invariants, dependencies, acceptance evidence, and known risks.\n\n*Why.* Naming files before the code has been read chooses tactics blindly and substitutes a false\nsense of completeness for the analysis the executor still has to do. The executor has the repository\nin front of it; the planner does not. (INVEST — negotiable.)\n\n## Size follows the work\n\nOne unit is a complete plan when the task is small. A unit that needs sub-items is two units.\n\n*Why.* Padding a plan to look thorough adds review cycles without adding work, and sub-items hide a\nunit that was never independently completable.\n\n## Every unit names the evidence that would accept it\n\nIn observable terms: a behaviour to exercise, a state to inspect, an artifact to compare.\n\n*Why.* Acceptance criteria written as adjectives — robust, clean, complete — cannot be met or\nrefused, so they end up decided by whoever is more insistent.\n\n## Unresolved decisions are named as unresolved\n\n*Why.* An open question recorded as an assumption becomes a defect that surfaces after the work is\nbuilt on top of it.\n\n\n## Acceptance evidence distinguishes the required state\n\nBefore making a check contractual, name the required state, a plausible wrong state that can look similar, and the observation that reliably differs. Match the method to the property: deterministic structure can be checked mechanically, behavior through actual behavior, semantic completeness through primary-source judgment, and architecture through contextual review. If the observation is compatible with both states, revise the criterion or evidence method before implementation rather than creating a surrogate proof.\n\n*Why.* An executable signal that the wrong result can reproduce turns later review into repeated construction of validators for validators.\n\n## The producer owns foreseeable completeness before review\n\nEach unit includes every consequence discoverable from the requirements and repository contracts: behavior, dependencies, tests, documentation, generated output, runtime, security, performance, compatibility, and operations as applicable. Review independently challenges that outcome; it is not the normal place where the plan first remembers an obvious obligation.\n\n*Why.* A local checklist item can be green while its complete product outcome is still unfinished.\n\n## Validation remains subordinate unless it is the requested result\n\nValidation infrastructure is a legitimate unit when the user requested it, it has a real consumer, and its output distinguishes relevant states. Otherwise it is supporting evidence inside the unit it protects and does not become a separate proof system.\n\n*Why.* A check whose product is proof that another check ran creates another acceptance obligation without improving the requested result.\n\n## A unit does not carry the deliverable\n\nThe rule above catches the code case, where plan and result are written in different media and the\naltitude holds by itself. Where the deliverable is prose — documentation the task produces, briefs\nfor other agents, the answer of an investigation, a body of rules — plan and result share a medium\nand nothing separates them by construction. The test that works in either medium: after the plan is\napproved, work an intelligent executor still has to do remains, and a unit a later step could\nsatisfy by copying text out of the plan is a unit whose result is already written here.\n\n*Why.* When the plan contains the result, the plan review reviews the result, the unit's own review\nreads the same text a second time, and nothing has independently judged the work. The gates all\nreport green because each of them saw the artifact it was asked about; what none of them saw is the\nstep that was supposed to produce it.\n"
+      "default": "# Planning standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## A unit is a vertical slice\n\nEach unit changes observable behaviour and carries, inside itself, the tests and the verification\nthat prove it. It crosses whatever layers it needs to do that.\n\n*Why.* A unit whose proof lives in a later unit cannot be accepted on its own, and nothing can tell\nwhether it is finished. Splitting by layer instead — one unit for storage, one for the API, one for\nthe interface — produces work that is neither independent nor separately valuable. (INVEST; vertical\nvs horizontal slicing.)\n\n## No unit is only tests, only validation, only documentation, or only cleanup\n\nUnless that is what the task itself asks for.\n\n*Why.* Such a unit is an admission that the previous one was delivered unfinished, and it moves the\nproof away from the work it proves. The verification that ends up in a \"testing\" unit is the same\nverification the implementing unit needed to be acceptable.\n\n## The plan opens with the architecture it assumes\n\nComponents, how they interact, the decisions taken, and the consequences those decisions accept.\nDecisions deliberately deferred are named as deferred.\n\n*Why.* Without it the reviewer judges steps and never the shape, and the first unit silently fixes an\narchitecture nobody agreed to. Consequences are the part that makes the record useful later. (ADR:\ncontext, decision, consequences.)\n\n## Work moves from the core outward\n\nData and domain logic first, then integration and interfaces, then presentation — unless a real\ndependency runs the other way and the plan says which.\n\n*Why.* Building the outer layer first freezes a contract underneath it that nothing has exercised yet.\n\n## Each unit is readable by someone who never saw the conversation\n\nWhat it produces, what it depends on, and what evidence would show it done.\n\n*Why.* The reviewer, and often the executor, arrive without that history; anything they cannot\nreconstruct becomes an assumption nobody checks.\n\n## The plan does not enumerate files, symbols, line numbers, or pseudocode\n\nIt fixes outcomes, contracts, invariants, dependencies, acceptance evidence, and known risks.\n\n*Why.* Naming files before the code has been read chooses tactics blindly and substitutes a false\nsense of completeness for the analysis the executor still has to do. The executor has the repository\nin front of it; the planner does not. (INVEST — negotiable.)\n\n## Size follows the work\n\nOne unit is a complete plan when the task is small. A unit that needs sub-items is two units.\n\n*Why.* Padding a plan to look thorough adds review cycles without adding work, and sub-items hide a\nunit that was never independently completable.\n\n## Every unit names the evidence that would accept it\n\nIn observable terms: a behaviour to exercise, a state to inspect, an artifact to compare.\n\n*Why.* Acceptance criteria written as adjectives — robust, clean, complete — cannot be met or\nrefused, so they end up decided by whoever is more insistent.\n\n## Unresolved decisions are named as unresolved\n\n*Why.* An open question recorded as an assumption becomes a defect that surfaces after the work is\nbuilt on top of it.\n\n\n## Acceptance evidence distinguishes the required state\n\nBefore making a check contractual, name the required state, a plausible wrong state that can look similar, and the observation that reliably differs. Match the method to the property: deterministic structure can be checked mechanically, behavior through actual behavior, semantic completeness through primary-source judgment, and architecture through contextual review. If the observation is compatible with both states, revise the criterion or evidence method before implementation rather than creating a surrogate proof.\n\n*Why.* An executable signal that the wrong result can reproduce turns later review into repeated construction of validators for validators.\n\n## The producer owns foreseeable completeness before review\n\nEach unit includes every consequence discoverable from the requirements and repository contracts: behavior, dependencies, tests, documentation, generated output, runtime, security, performance, compatibility, and operations as applicable. Review independently challenges that outcome; it is not the normal place where the plan first remembers an obvious obligation.\n\n*Why.* A local checklist item can be green while its complete product outcome is still unfinished.\n\n## Validation remains subordinate unless it is the requested result\n\nValidation infrastructure is a legitimate unit when the user requested it, it has a real consumer, and its output distinguishes relevant states. Otherwise it is supporting evidence inside the unit it protects and does not become a separate proof system.\n\n*Why.* A check whose product is proof that another check ran creates another acceptance obligation without improving the requested result.\n\n## A unit does not carry the deliverable\n\nThe rule above catches the code case, where plan and result are written in different media and the\naltitude holds by itself. Where the deliverable is prose — documentation the task produces, briefs\nfor other agents, the answer of an investigation, a body of rules — plan and result share a medium\nand nothing separates them by construction. The test that works in either medium: after the plan is\napproved, work an intelligent executor still has to do remains, and a unit a later step could\nsatisfy by copying text out of the plan is a unit whose result is already written here.\n\n*Why.* When the plan contains the result, the plan review reviews the result, the unit's own review\nreads the same text a second time, and nothing has independently judged the work. The gates all\nreport green because each of them saw the artifact it was asked about; what none of them saw is the\nstep that was supposed to produce it.\n\n\n## Development planning stops at the repository delivery boundary\n\nA development unit may own implementation, tests, permanent documentation, generated and executable consequences, validation, review, and explicitly authorized project-native local commits or checkpoints. Push, pull request creation or merge, publication, release, and deployment stay with the caller or parent process and never become development-plan units. Authorized downstream intent remains visible in the final report until a standard parent-process handoff exists.\n\n*Why.* Tool availability does not grant delivery authority, and mixing external delivery into implementation makes one workflow claim effects it neither validates nor owns.\n\n## Each unit carries one visual policy and one approval policy\n\nEvery unit states visualMode as exactly disabled, screenshots, or html_report, and userApproval as true or false. html_report includes the same screenshot capture and actual inspection required by screenshots; it is not a second capture pass. In autonomous mode every userApproval is false. The intake preference guides plan construction only; after approval the current plan is the sole source of these policies.\n\n*Why.* Separate screenshot and report booleans admit contradictory states, while a global preference or old unit index can silently override a revised plan.\n\n"
     },
     "engineering_standards": {
       "type": "string",
@@ -2694,7 +2880,7 @@
     "documentation_standards": {
       "type": "string",
       "description": "Documentation criteria this flow works to; materialized into the workspace by the engine",
-      "default": "# Documentation standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## Documentation describes the current state\n\nNo change history, no \"previously\", no announcements of what is new, no promises about what will\ncome.\n\n*Why.* A reader arrives to learn how the system behaves now. History in a reference page makes them\nreconstruct which sentence is still true, and the version control system already holds the history\nproperly.\n\n## Every claim is checkable against the code, the configuration, or a command that runs\n\nExamples work as written; commands are the ones the project actually has.\n\n*Why.* One example that fails costs more trust than ten missing pages, and readers cannot tell a\nstale example from a mistake of their own.\n\n## Each page has one job\n\nTeaching a newcomer, guiding someone through a task, stating facts to look up, or explaining why the\ndesign is what it is. Knowing which one a page is tells you what belongs in it and what belongs\nelsewhere.\n\n*Why.* A page that mixes them serves nobody: the learner drowns in reference detail and the person\nlooking up a fact wades through narrative. This is a discipline for the author, not a required\ndirectory layout — projects adopt it incrementally. (Diátaxis.)\n\n## What is documented is the contract and the behaviour\n\nInternal detail appears only where a reader must act on it.\n\n*Why.* Documented internals become promises: readers depend on them, and changing them then breaks\npeople who followed the documentation.\n\n## Placement and form follow the project\n\nMatch the structure, depth, and voice of the documentation that already exists; project style comes\nfirst, house style second.\n\n*Why.* Documentation is read as a set, not as pages; a page in a foreign format reads as an\nafterthought regardless of its content. Style guides are guidance and yield to project style.\n(Google developer documentation style guide.)\n\n## Translations stay in parity where the project keeps more than one language\n\nThe same pages, the same structure, the same claims; a change lands in all of them or in none.\n\n*Why.* A partially updated translation is worse than an untranslated one, because it states outdated\nfacts with the same authority as current ones.\n\n## No new long-lived document without a durable reader\n\nUpdate the page that already owns the subject.\n\n*Why.* Documents accumulate faster than they are read; each new one splits the subject and makes the\nnext author guess which is authoritative.\n\n## No numbers that drift\n\nCounts of tests, tools, node types, or packages.\n\n*Why.* They are wrong within weeks and nothing fails when they are, so they teach readers to distrust\nthe rest of the page.\n"
+      "default": "# Documentation standards\n\nThese are outcomes, not procedures. An item that does not apply to the current change is met, and\nnothing needs to be produced to prove it inapplicable. Cite only what is violated; do not walk this\ndocument item by item.\n\n## Documentation describes the current state\n\nNo change history, no \"previously\", no announcements of what is new, no promises about what will\ncome.\n\n*Why.* A reader arrives to learn how the system behaves now. History in a reference page makes them\nreconstruct which sentence is still true, and the version control system already holds the history\nproperly.\n\n## Every claim is checkable against the code, the configuration, or a command that runs\n\nExamples work as written; commands are the ones the project actually has.\n\n*Why.* One example that fails costs more trust than ten missing pages, and readers cannot tell a\nstale example from a mistake of their own.\n\n## Each page has one job\n\nTeaching a newcomer, guiding someone through a task, stating facts to look up, or explaining why the\ndesign is what it is. Knowing which one a page is tells you what belongs in it and what belongs\nelsewhere.\n\n*Why.* A page that mixes them serves nobody: the learner drowns in reference detail and the person\nlooking up a fact wades through narrative. This is a discipline for the author, not a required\ndirectory layout — projects adopt it incrementally. (Diátaxis.)\n\n## What is documented is the contract and the behaviour\n\nInternal detail appears only where a reader must act on it.\n\n*Why.* Documented internals become promises: readers depend on them, and changing them then breaks\npeople who followed the documentation.\n\n## Placement and form follow the project\n\nMatch the structure, depth, and voice of the documentation that already exists; project style comes\nfirst, house style second.\n\n*Why.* Documentation is read as a set, not as pages; a page in a foreign format reads as an\nafterthought regardless of its content. Style guides are guidance and yield to project style.\n(Google developer documentation style guide.)\n\n## Translations stay in parity where the project keeps more than one language\n\nThe same pages, the same structure, the same claims; a change lands in all of them or in none.\n\n*Why.* A partially updated translation is worse than an untranslated one, because it states outdated\nfacts with the same authority as current ones.\n\n## No new long-lived document without a durable reader\n\nUpdate the page that already owns the subject.\n\n*Why.* Documents accumulate faster than they are read; each new one splits the subject and makes the\nnext author guess which is authoritative.\n\n## No numbers that drift\n\nCounts of tests, tools, node types, or packages.\n\n*Why.* They are wrong within weeks and nothing fails when they are, so they teach readers to distrust\nthe rest of the page.\n\n\n## Permanent documentation closes with its vertical unit\n\nThe implementer updates every affected permanent document in the same unit as the behavior it describes, the fresh producer pass leaves the unit account true, and independent completeness review judges current documentation with code and tests. The final reconciliation still checks cross-unit truth, commands, links, generated output, and language parity, but an unchanged document with current independent unit coverage does not require a duplicate independent documentation review.\n\n*Why.* Deferring obvious documentation makes review discover producer work, while reviewing unchanged already accepted documentation again adds a full loop without new evidence.\n\n"
     },
     "review_standards": {
       "type": "string",
@@ -2718,6 +2904,15 @@
       "minimum": 0,
       "default": 0,
       "description": "Evidence iteration on which architecture was last reviewed and accepted; zero means the current unit has no accepted product review"
+    },
+    "visual_validation_preference": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "screenshots",
+        "html_report"
+      ],
+      "description": "User preference used only to construct and review per-unit visualMode policy; the approved current plan is the runtime source of truth"
     }
   },
   "slug": "software-development-flow",

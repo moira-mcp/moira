@@ -1,6 +1,6 @@
 /**
  * Execution Context Tools Integration Tests
- * Tests get_execution_context and update_execution_context functionality
+ * Tests persisted execution-context retrieval used by session inspection
  */
 
 import { describe, test, expect, beforeAll } from "@jest/globals";
@@ -77,6 +77,7 @@ describe("Execution Context Tools", () => {
 
     // Create test execution in running state (Issue #386: "waiting" merged into "running")
     const testExecution: WorkflowExecution = {
+      revision: 0,
       executionId: testExecutionId,
       workflowId: testWorkflowId,
       userId: TEST_USER_ID,
@@ -108,35 +109,6 @@ describe("Execution Context Tools", () => {
     expect(execution!.globalContext.variables.anotherVar).toBe(123);
   });
 
-  test("update_execution_context updates variables", async () => {
-    const execution = await repository.getExecution(testExecutionId);
-
-    // Update variables
-    execution!.globalContext.variables.testVar = "updated value";
-    execution!.globalContext.variables.newVar = "new";
-
-    await repository.saveExecution(execution!);
-
-    // Verify persisted
-    const updated = await repository.getExecution(testExecutionId);
-    expect(updated!.globalContext.variables.testVar).toBe("updated value");
-    expect(updated!.globalContext.variables.newVar).toBe("new");
-    expect(updated!.globalContext.variables.anotherVar).toBe(123); // Unchanged
-  });
-
-  test("update_execution_context updates nodeStates", async () => {
-    const execution = await repository.getExecution(testExecutionId);
-
-    // Update nodeStates
-    execution!.globalContext.nodeStates.task = { visited: true, attempts: 2 };
-
-    await repository.saveExecution(execution!);
-
-    // Verify persisted
-    const updated = await repository.getExecution(testExecutionId);
-    expect(updated!.globalContext.nodeStates.task).toEqual({ visited: true, attempts: 2 });
-  });
-
   test("cannot get execution context of another user", async () => {
     // This would be tested through MCP tool with different userId
     // Repository layer doesn't enforce ownership - tools do
@@ -149,6 +121,7 @@ describe("Execution Context Tools", () => {
     // Create completed execution with a new UUID
     const completedExecutionId = randomUUID();
     const completedExecution: WorkflowExecution = {
+      revision: 0,
       executionId: completedExecutionId,
       workflowId: testWorkflowId,
       userId: TEST_USER_ID,

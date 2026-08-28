@@ -850,6 +850,69 @@ session({ action: "update-note", executionId: "abc-123", note: "Шаг 5: Инт
 → { success: true, executionId: "abc-123", note: "Шаг 5: Интеграционные тесты" }
 ```
 
+### Action: set-parent
+
+Устанавливает родителя запущенного выполнения. UUID прикрепляет или заменяет родителя, а `"none"`
+отсоединяет выполнение и делает его самостоятельным. Выполнение и каждый новый родитель должны быть
+запущены, принадлежать текущему пользователю и не образовывать цикл предков. Повтор текущего значения
+является идемпотентной операцией без изменений. Связь управляет только продолжением процесса: она не
+копирует переменные и не добавляет полномочий.
+
+**Параметры:**
+
+- `action`: `"set-parent"` (обязательный)
+- `executionId` (string, обязательный) — изменяемое запущенное выполнение
+- `parentExecutionId` (string, обязательный) — UUID запущенного родителя того же пользователя или `"none"` для отсоединения
+- `expectedRevision` (integer, обязательный) — ревизия из результата просмотра выполнения
+
+**Пример:**
+
+```json
+session({ action: "set-parent", executionId: "child-123", parentExecutionId: "parent-456", expectedRevision: 2 })
+→ { executionId: "child-123", parentExecutionId: "parent-456", revision: 3 }
+```
+
+Устаревшая ревизия отклоняется и не перезаписывает новое состояние. Начальный
+`parentExecutionId` предпочтительно передавать при вызове `start`; это действие используется, когда
+оркестрация процесса меняется после запуска.
+
+### Действия с напоминаниями
+
+Напоминания выполнения сохраняют последующую работу вызывающей стороны, не меняя план workflow и
+не попадая в промежуточные директивы. Активные напоминания возвращаются в разделе
+`NEXT REQUESTED ACTIONS` при завершении как самостоятельного, так и дочернего выполнения. Это
+обычный текст: он не добавляет полномочий и не раскрывает шаблоны workflow.
+
+Используйте действия `add-reminder`, `reminders`, `update-reminder` и `remove-reminder` существующего
+инструмента `session`. Мутации требуют `executionId` и `expectedRevision`; добавление принимает
+`reminderText` и необязательный `idempotencyKey`, изменение и отмена требуют `reminderId`. Список
+поддерживает `reminderStatus` и `search`. Изменять напоминания можно только пока выполнение запущено;
+после завершения они остаются доступными для чтения.
+
+```json
+session({ action: "add-reminder", executionId: "abc-123", reminderText: "Открыть PR", idempotencyKey: "delivery-pr", expectedRevision: 2 })
+session({ action: "reminders", executionId: "abc-123", reminderStatus: "active", search: "PR" })
+```
+
+### Действия с runtime-переменными
+
+`session({ action: "variables", executionId, ...filters })` возвращает объявленные переменные,
+наличие и текущее значение, JSON Schema, фактическую доступность изменения и причину запрета.
+Фильтры `names`, `search`, `types`, `hasValue`, `editable` и `writePhase` (`current` или `other`)
+работают совместно; неизвестные имена возвращаются отдельно. Записи содержат объявленную policy,
+ответ повторяет применённые фильтры. `set-variable` меняет только одну объявленную верхнеуровневую переменную,
+если default-deny политика `runtimePolicy.externalVariableWrites` разрешает текущую ожидающую ноду,
+значение проходит schema и `expectedRevision` актуальна. Граф и состояние нод не продвигаются.
+
+Definition-запросы `manage list-variables` и `GET /api/workflows/:id/variables` поддерживают
+names/search/types, hasDefault и externallyWritable и возвращают policy, применённые фильтры и
+неизвестные имена; каждая запись содержит `hasDefault` и объявленную policy. CLI имеет
+соответствующие флаги. Объявленная доступность не доказывает текущую.
+Автор workflow может задать ту же policy локально командой
+`moira-workflow <file> set-variable-write-policy <name> <node-ids|all|none>`: список ID через
+запятую ограничивает запись этими ожидающими нодами, `all` разрешает все ожидающие agent-ноды, а
+`none` возвращает default-deny. Обычная валидация workflow проверяет переменную и ID нод.
+
 ---
 
 ## lock

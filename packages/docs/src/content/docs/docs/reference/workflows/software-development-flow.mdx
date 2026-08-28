@@ -1,6 +1,6 @@
 ---
 title: Software Development Flow
-description: Complete repository implementation across code, tests, documentation, integration consequences, validation, review, and authority-bound VCS closure.
+description: Complete development-only repository implementation with plan-owned visual evidence, reports, review, and authority-bound local VCS closure.
 ---
 
 Software Development Flow implements one complete software change as independently accepted vertical units. It owns the full repository result—production code, tests, coverage, documentation, schemas and types, generated or configuration outputs, compatibility, and integration consequences—rather than splitting one lifecycle across several task workflows.
@@ -14,14 +14,20 @@ mcp__moira__start({
 
 ## Lifecycle
 
-The flow captures source-grounded requirements and authority, creates and independently reviews an architecture-aware plan, prepares each unit from the real repository before mutation, implements complete vertical behavior, and runs a fresh producer-completion pass before deterministic validation and independent semantic review. Documentation and tests are part of production, not late cleanup.
+The flow captures source-grounded requirements and authority, resolves one simple visual preference (`disabled`, `screenshots`, or `html_report`), creates and independently reviews an architecture-aware plan, and then treats that current plan as the sole source of each unit's visual and user-approval policy. It prepares every unit from the real repository before mutation, implements complete vertical behavior, and runs a fresh producer-completion pass before deterministic validation and independent semantic review. Documentation and tests are part of production, not late cleanup.
+
+`screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through Telegram when notifications are configured; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Telegram absence or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives.
 
 Findings are classified as product, test/validation, evidence, documentation/projection, invalid criterion, or upstream plan/process defects. Product repair returns through producer completion. Verification-only or gate-local repair reruns only stale evidence. Mixed or invalid causes trigger quality-preserving replan rather than expanding implementation against a broken contract.
 
-Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Final reconciliation covers feature-wide validation, documentation, requirements, checkpoints, and separately authorized VCS effects.
+When the originating request already authorizes a later caller-owned push, pull request, publication, release, or deployment, SDF records that intent through the execution's revisioned `session` reminder API during intake. The reminder is returned under `Next requested actions` on ordinary completion for both standalone and child runs. It never becomes a development-plan unit, changes `vcs_commits_authorized`, performs the effect, or grants new authority.
+
+Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit; final reconciliation still checks cross-unit truth and independently reviews only changed or previously uncovered documentation. The final suffix covers feature-wide validation, semantic review, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. Normal and stopped endings send best-effort Telegram notifications when configured.
 
 ## Choose full or Lite
 
 Use full SDF for security or privacy boundaries, persistent data or migrations, breaking public contracts, multiple vertical units, unresolved architecture, complex rollout or recovery, or spreading work. Use [Software Development Flow Lite](./software-development-flow-lite/) for one bounded low-risk coherent outcome; it hands off here when eligibility is lost. Quick Task and Robust Task do not replace a software lifecycle.
 
-Starting SDF does not itself authorize commit, push, PR, release, deployment, notification, production mutation, or administrative override. Those effects require originating authority.
+The SDF development plan may include explicitly authorized local commits or checkpoints. Push, pull-request creation or merge, publication, release, and deployment are caller or parent-process work and never development-plan units. Starting SDF does not authorize notification, production mutation, or administrative override; every side effect remains bounded by originating authority.
+
+SDF declares no externally writable runtime variables. Agents may inspect its registry through `session variables`, but visual settings, VCS authority, plan cursors, and every other SDF variable remain read-only through the default-deny runtime policy.

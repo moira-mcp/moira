@@ -1,6 +1,6 @@
 ---
 title: Software Development Flow
-description: "Полная реализация изменения репозитория: код, тесты, документация, интеграционные последствия, валидация, review и VCS в пределах полномочий."
+description: "Полная development-only реализация репозитория с plan-owned visual evidence, отчётами, review и локальным VCS в пределах полномочий."
 ---
 
 Software Development Flow реализует одно полное программное изменение как независимо принимаемые вертикальные units. Он владеет всем результатом репозитория — production code, тестами, coverage, документацией, schemas/types, generated/config outputs, compatibility и integration consequences — вместо разделения одного lifecycle между несколькими task workflows.
@@ -14,14 +14,20 @@ mcp__moira__start({
 
 ## Lifecycle
 
-Flow фиксирует source-grounded требования и полномочия, создаёт и независимо проверяет architecture-aware план, готовит каждый unit по реальному репозиторию до мутации, реализует полное вертикальное поведение и запускает fresh producer completion до deterministic validation и independent semantic review. Документация и тесты являются частью production, а не поздней уборкой.
+Flow фиксирует source-grounded требования и полномочия, определяет одну простую visual preference (`disabled`, `screenshots` или `html_report`), создаёт и независимо проверяет architecture-aware план, после чего именно текущий план становится единственным источником visual и user-approval policy каждого unit. Flow готовит каждый unit по реальному репозиторию до мутации, реализует полное вертикальное поведение и запускает fresh producer completion до deterministic validation и independent semantic review. Документация и тесты являются частью production, а не поздней уборкой.
+
+`screenshots` один раз снимает и действительно просматривает необходимые состояния. `html_report` переиспользует эти же принятые изображения в self-contained отчёте, загружает его через Moira Artifact API и отправляет публичный URL в Telegram, когда уведомления настроены; второй screenshot pass не выполняется. Сбой Artifact upload блокирует unit. Отсутствие Telegram или ошибка отправки в достигнутой notification node не блокируют работу. Interactive approval плана, выбранных units и финального результата получает attention notification и ждёт решения в обычной директиве. В autonomous mode human-approval directives отсутствуют.
 
 Findings классифицируются как product, test/validation, evidence, documentation/projection, invalid criterion или upstream plan/process defects. Product repair возвращается через producer completion. Verification-only и gate-local repair повторяют только устаревшие evidence. Mixed или invalid causes приводят к quality-preserving replan, а не к расширению реализации по сломанному контракту.
 
-Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Финальная reconciliation покрывает feature-wide validation, документацию, requirements, checkpoints и отдельно разрешённые VCS effects.
+Если исходный запрос уже разрешает последующий caller-owned push, pull request, publication, release или deployment, SDF во время intake сохраняет это намерение через revisioned `session` reminder API текущего execution. При обычном завершении standalone и child запусков reminder возвращается в `Next requested actions`. Он не становится unit плана разработки, не меняет `vcs_commits_authorized`, не выполняет действие и не даёт новых полномочий.
+
+Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Permanent documentation закрывается вместе со своим vertical unit; финальная reconciliation продолжает проверять cross-unit truth и независимо ревьюит только изменённую либо ранее не покрытую документацию. Финальный suffix включает feature-wide validation, semantic review, requirements coverage, factual report и локальную VCS reconciliation в пределах полномочий. Normal и stopped endings отправляют best-effort Telegram notification, когда он настроен.
 
 ## Выбор full или Lite
 
 Используйте full SDF для security/privacy boundaries, persistent data или migrations, breaking public contracts, нескольких vertical units, неразрешённой архитектуры, сложного rollout/recovery или spreading work. Для одного ограниченного низкорискового результата используйте [Software Development Flow Lite](./software-development-flow-lite/); при потере eligibility он создаёт handoff сюда. Quick Task и Robust Task не заменяют software lifecycle.
 
-Запуск SDF сам по себе не разрешает commit, push, PR, release, deployment, notification, production mutation или administrative override. Эти эффекты требуют originating authority.
+Development-plan SDF может включать явно разрешённые локальные commits или checkpoints. Push, создание или merge pull request, publication, release и deployment являются работой caller или parent process и никогда не становятся development-plan units. Запуск SDF не разрешает notification, production mutation или administrative override; любой side effect остаётся ограничен originating authority.
+
+SDF не объявляет externally writable runtime variables. Агент может просматривать registry через `session variables`, но visual settings, VCS authority, plan cursors и все остальные переменные SDF остаются read-only благодаря default-deny runtime policy.

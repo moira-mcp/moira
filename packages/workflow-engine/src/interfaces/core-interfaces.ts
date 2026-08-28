@@ -41,6 +41,9 @@ export interface WorkflowGraph {
    * Bare-name references resolve against this; node-local values use `node-id.name`.
    */
   variableRegistry?: VariableRegistry;
+  runtimePolicy?: {
+    externalVariableWrites?: Record<string, { allowedNodeIds?: string[] }>;
+  };
 
   /**
    * Per-workflow system reminder (optional)
