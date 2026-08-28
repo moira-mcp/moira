@@ -33,6 +33,22 @@ export interface WorkflowReconciliationConflictRecord {
   recoveryLocation: string;
 }
 
+export type WorkflowReconciliationSelection = "current" | "incoming" | "previous";
+
+export interface WorkflowReconciliationResolutionRecord {
+  owner: string;
+  slug: string;
+  incomingDigest: string;
+  resultDigest: string;
+  selection: WorkflowReconciliationSelection;
+  merged: boolean;
+  rationale: string;
+  residualDelta: string[];
+  actorId: string | null;
+  source: string;
+  createdAt: number;
+}
+
 export interface PersistedWorkflowRow {
   id: string;
   owner: string;
@@ -108,6 +124,7 @@ export interface WorkflowReconciliationApplyPlan {
     selection: "current" | "incoming" | "previous";
     merged: boolean;
   }>;
+  resolutions?: WorkflowReconciliationResolutionRecord[];
 }
 
 export const WORKFLOW_RECONCILIATION_STALE_ERROR_CODE = "MANAGED_WORKFLOW_RECONCILIATION_STALE";
@@ -132,9 +149,9 @@ const candidateRef = (owner: string, slug: string, candidate: string): string =>
 const recoveryLocation = (owner: string, slug: string): string =>
   `database:workflow-reconciliation:${encodeURIComponent(owner)}/${encodeURIComponent(slug)}`;
 
-function parseState(value: string, context: string): ManagedWorkflowState {
+export function parseManagedWorkflowState(value: unknown, context: string): ManagedWorkflowState {
   try {
-    const parsed = JSON.parse(value) as ManagedWorkflowState;
+    const parsed = (typeof value === "string" ? JSON.parse(value) : value) as ManagedWorkflowState;
     if (
       !parsed ||
       (parsed.lifecycle !== "absent" &&
@@ -157,8 +174,9 @@ function parseState(value: string, context: string): ManagedWorkflowState {
   }
 }
 
-function canonicalize(value: unknown, depth = 0): unknown {
-  if (Array.isArray(value)) return value.map((item) => canonicalize(item, depth + 1));
+export function canonicalizeManagedWorkflowValue(value: unknown, depth = 0): unknown {
+  if (Array.isArray(value))
+    return value.map((item) => canonicalizeManagedWorkflowValue(item, depth + 1));
   if (value === null || typeof value !== "object") return value;
   const record = value as Record<string, unknown>;
   const result: Record<string, unknown> = {};
@@ -169,9 +187,24 @@ function canonicalize(value: unknown, depth = 0): unknown {
     ) {
       continue;
     }
-    result[key] = canonicalize(record[key], depth + 1);
+    result[key] = canonicalizeManagedWorkflowValue(record[key], depth + 1);
   }
   return result;
+}
+
+/** Canonical exact identity used by equality, stale checks and staged artifacts. */
+export function managedWorkflowStateDigest(state: ManagedWorkflowState): string {
+  const canonical =
+    state.lifecycle === "absent"
+      ? state
+      : {
+          lifecycle: state.lifecycle,
+          content: {
+            visibility: state.content.visibility,
+            graph: canonicalizeManagedWorkflowValue(state.content.graph),
+          },
+        };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
 
 export function managedWorkflowStatesEqual(
@@ -182,8 +215,8 @@ export function managedWorkflowStatesEqual(
   if (left.lifecycle === "absent" || right.lifecycle === "absent") return true;
   return (
     left.content.visibility === right.content.visibility &&
-    JSON.stringify(canonicalize(left.content.graph)) ===
-      JSON.stringify(canonicalize(right.content.graph))
+    JSON.stringify(canonicalizeManagedWorkflowValue(left.content.graph)) ===
+      JSON.stringify(canonicalizeManagedWorkflowValue(right.content.graph))
   );
 }
 
@@ -200,26 +233,52 @@ interface PersistedConflictRow {
   instruction: string;
 }
 
-function conflictRevision(row: PersistedConflictRow): string {
+export function workflowReconciliationConflictRevision(input: {
+  owner: string;
+  slug: string;
+  currentWorkflowId?: string | null;
+  currentWorkflowSlug?: string | null;
+  previousManagedSlug?: string | null;
+  classification: string;
+  previous: ManagedWorkflowState | null;
+  current: ManagedWorkflowState;
+  incoming: ManagedWorkflowState;
+  instruction: string;
+}): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
-        row.ownerId,
-        row.slug,
-        row.currentWorkflowId,
-        row.currentWorkflowSlug,
-        row.previousManagedSlug,
-        row.classification,
-        row.previousState,
-        row.currentState,
-        row.incomingState,
-        row.instruction,
+        input.owner,
+        input.slug,
+        input.currentWorkflowId ?? null,
+        input.currentWorkflowSlug ?? null,
+        input.previousManagedSlug ?? null,
+        input.classification,
+        input.previous,
+        input.current,
+        input.incoming,
+        input.instruction,
       ]),
     )
     .digest("hex");
 }
 
 function toConflictRecord(row: PersistedConflictRow): WorkflowReconciliationConflictRecord {
+  const previous =
+    row.previousState === null
+      ? null
+      : parseManagedWorkflowState(
+          row.previousState,
+          `workflow reconciliation previous candidate ${row.ownerId}/${row.slug}`,
+        );
+  const current = parseManagedWorkflowState(
+    row.currentState,
+    `workflow reconciliation current candidate ${row.ownerId}/${row.slug}`,
+  );
+  const incoming = parseManagedWorkflowState(
+    row.incomingState,
+    `workflow reconciliation incoming candidate ${row.ownerId}/${row.slug}`,
+  );
   return {
     owner: row.ownerId,
     slug: row.slug,
@@ -227,23 +286,22 @@ function toConflictRecord(row: PersistedConflictRow): WorkflowReconciliationConf
     currentWorkflowSlug: row.currentWorkflowSlug,
     previousManagedSlug: row.previousManagedSlug,
     classification: row.classification,
-    previous:
-      row.previousState === null
-        ? null
-        : parseState(
-            row.previousState,
-            `workflow reconciliation previous candidate ${row.ownerId}/${row.slug}`,
-          ),
-    current: parseState(
-      row.currentState,
-      `workflow reconciliation current candidate ${row.ownerId}/${row.slug}`,
-    ),
-    incoming: parseState(
-      row.incomingState,
-      `workflow reconciliation incoming candidate ${row.ownerId}/${row.slug}`,
-    ),
+    previous,
+    current,
+    incoming,
     instruction: row.instruction,
-    revision: conflictRevision(row),
+    revision: workflowReconciliationConflictRevision({
+      owner: row.ownerId,
+      slug: row.slug,
+      currentWorkflowId: row.currentWorkflowId,
+      currentWorkflowSlug: row.currentWorkflowSlug,
+      previousManagedSlug: row.previousManagedSlug,
+      classification: row.classification,
+      previous,
+      current,
+      incoming,
+      instruction: row.instruction,
+    }),
     candidateRefs: {
       previous: row.previousState === null ? null : candidateRef(row.ownerId, row.slug, "previous"),
       current: candidateRef(row.ownerId, row.slug, "current"),
@@ -269,7 +327,10 @@ export class WorkflowReconciliationRepository {
     return rows.map((row) => ({
       owner: row.ownerId,
       slug: row.slug,
-      state: parseState(row.state, `managed workflow baseline ${row.ownerId}/${row.slug}`),
+      state: parseManagedWorkflowState(
+        row.state,
+        `managed workflow baseline ${row.ownerId}/${row.slug}`,
+      ),
       sourceVersion: row.sourceVersion,
     }));
   }
@@ -329,6 +390,44 @@ export class WorkflowReconciliationRepository {
       )
       .get(owner, slug) as PersistedConflictRow | undefined;
     return row ? toConflictRecord(row) : null;
+  }
+
+  findResolution(owner: string, slug: string): WorkflowReconciliationResolutionRecord | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT ownerId, slug, incomingDigest, resultDigest, selection, merged, rationale,
+                residualDelta, actorId, source, createdAt
+         FROM workflowReconciliationResolution WHERE ownerId = ? AND slug = ?`,
+      )
+      .get(owner, slug) as
+      | {
+          ownerId: string;
+          slug: string;
+          incomingDigest: string;
+          resultDigest: string;
+          selection: WorkflowReconciliationSelection;
+          merged: number;
+          rationale: string;
+          residualDelta: string;
+          actorId: string | null;
+          source: string;
+          createdAt: number;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      owner: row.ownerId,
+      slug: row.slug,
+      incomingDigest: row.incomingDigest,
+      resultDigest: row.resultDigest,
+      selection: row.selection,
+      merged: Boolean(row.merged),
+      rationale: row.rationale,
+      residualDelta: JSON.parse(row.residualDelta) as string[],
+      actorId: row.actorId,
+      source: row.source,
+      createdAt: row.createdAt,
+    };
   }
 
   listConflictSummaries(): WorkflowReconciliationConflictSummary[] {
@@ -453,6 +552,38 @@ export class WorkflowReconciliationRepository {
             now,
           );
       }
+      for (const resolution of plan.resolutions ?? []) {
+        this.sqlite
+          .prepare(
+            `INSERT INTO workflowReconciliationResolution
+              (ownerId, slug, incomingDigest, resultDigest, selection, merged, rationale,
+               residualDelta, actorId, source, createdAt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(ownerId, slug) DO UPDATE SET
+               incomingDigest = excluded.incomingDigest,
+               resultDigest = excluded.resultDigest,
+               selection = excluded.selection,
+               merged = excluded.merged,
+               rationale = excluded.rationale,
+               residualDelta = excluded.residualDelta,
+               actorId = excluded.actorId,
+               source = excluded.source,
+               createdAt = excluded.createdAt`,
+          )
+          .run(
+            resolution.owner,
+            resolution.slug,
+            resolution.incomingDigest,
+            resolution.resultDigest,
+            resolution.selection,
+            resolution.merged ? 1 : 0,
+            resolution.rationale,
+            JSON.stringify(resolution.residualDelta),
+            resolution.actorId,
+            resolution.source,
+            resolution.createdAt,
+          );
+      }
     });
     applyTransaction();
   }
@@ -466,7 +597,7 @@ export class WorkflowReconciliationRepository {
            FROM workflowReconciliationConflict WHERE ownerId = ? AND slug = ?`,
         )
         .get(precondition.owner, precondition.slug) as PersistedConflictRow | undefined;
-      if (!row || conflictRevision(row) !== precondition.revision) {
+      if (!row || toConflictRecord(row).revision !== precondition.revision) {
         throw new WorkflowReconciliationStaleError(precondition.owner, precondition.slug);
       }
     }
@@ -494,7 +625,7 @@ export class WorkflowReconciliationRepository {
             row.slug === precondition.expected.slug &&
             row.sourceVersion === precondition.expected.sourceVersion &&
             managedWorkflowStatesEqual(
-              parseState(
+              parseManagedWorkflowState(
                 row.state,
                 `managed workflow baseline precondition ${precondition.owner}/${precondition.slug}`,
               ),

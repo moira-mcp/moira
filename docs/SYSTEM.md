@@ -27,6 +27,23 @@ interface IGraphStorage {
 - Executions: `.graph-storage/executions/<uuid>.json`
 - Workflows: `workflows/production/flows/<uuid>.json` — one file per flow, named by its stable UUID. Each file carries top-level catalog metadata `owner` (the owning user id) and `visibility` (`public` | `private`) alongside the graph; catalog identity is `(owner, slug)` since a slug is unique only per owner. Read via `readWorkflowCatalog()` in `packages/shared/src/services/workflow-catalog.ts`.
 
+### Bundled Workflow Reconciliation
+
+Bundled workflows use three exact states: the last accepted upstream baseline, the current instance
+state, and the incoming catalog state. Semantic versions control ordering but never establish
+identity or ancestry. Canonical state digests cover lifecycle, visibility, and graph content using
+the same normalization as reconciliation equality.
+
+Unresolved two-sided changes persist all candidates and a revision. A resolution advances the
+baseline to the accepted incoming state and records the selected result, exact digests, bounded
+rationale, and residual representation delta; the delta informs later semantic review and is not an
+automatic merge authorization. Ordinary resolution requires the exact revision inspected by the
+decision maker. Staged reconciliation serializes only revision-bound decisions and
+merged states from an isolated snapshot. Application recomputes the complete conflict set against a
+distinct fresh database and applies one transaction only when source identity, catalog digest,
+conflict-set digest, and every revision still match. The staged artifact never transports or
+replaces the database snapshot.
+
 ### List Query Builder
 
 Shared utility for paginated list endpoints: `packages/shared/src/database/list-query-builder.ts`

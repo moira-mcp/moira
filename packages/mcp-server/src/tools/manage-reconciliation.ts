@@ -18,6 +18,11 @@ export const manageReconciliationSchema = z.object({
   action: z.enum(["status", "get", "resolve"]),
   reference: z.string().optional(),
   selection: z.enum(["current", "incoming", "previous"]).optional(),
+  revision: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  rationale: z.string().trim().min(1).max(2000).optional(),
   mergedGraph: z.record(z.unknown()).optional(),
   visibility: z.enum(["public", "private"]).optional(),
 });
@@ -71,8 +76,8 @@ export async function manageReconciliation(params: z.infer<typeof manageReconcil
         ],
       };
     }
-    if (!params.reference || !params.selection) {
-      throw new Error("reference and selection are required for resolve");
+    if (!params.reference || !params.selection || !params.revision || !params.rationale) {
+      throw new Error("reference, selection, revision, and rationale are required for resolve");
     }
     if (params.mergedGraph && !params.visibility) {
       throw new Error("visibility is required with mergedGraph");
@@ -92,7 +97,12 @@ export async function manageReconciliation(params: z.infer<typeof manageReconcil
       params.selection,
       { sqlite, mutationService: getWorkflowMutationService() },
       merged,
-      { actorId: userId, source: "mcp" },
+      {
+        actorId: userId,
+        source: "mcp",
+        expectedRevision: params.revision,
+        rationale: params.rationale,
+      },
     );
     return {
       content: [

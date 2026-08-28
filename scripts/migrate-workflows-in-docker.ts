@@ -24,7 +24,7 @@
  * Usage:
  *   npx tsx scripts/migrate-workflows-in-docker.ts
  *   npx tsx scripts/migrate-workflows-in-docker.ts --force
- *   npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current
+ *   npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current --revision <sha256> --rationale "..."
  */
 
 import {
@@ -45,6 +45,8 @@ import {
 
 const forceUpdate = process.argv.includes("--force");
 const resolveIndex = process.argv.indexOf("--resolve");
+const revisionIndex = process.argv.indexOf("--revision");
+const rationaleIndex = process.argv.indexOf("--rationale");
 
 async function migrate(): Promise<void> {
   console.log("Loading workflow catalog into database...");
@@ -70,7 +72,18 @@ async function migrate(): Promise<void> {
     if (selection !== "current" && selection !== "incoming" && selection !== "previous") {
       throw new Error("--resolve selection must be current, incoming, or previous");
     }
-    await resolveWorkflowReconciliation(reference, selection, { sqlite, mutationService });
+    const revision = revisionIndex === -1 ? undefined : process.argv[revisionIndex + 1];
+    const rationale = rationaleIndex === -1 ? undefined : process.argv[rationaleIndex + 1];
+    if (!revision || !rationale) {
+      throw new Error("--resolve requires --revision <sha256> and --rationale <text>");
+    }
+    await resolveWorkflowReconciliation(
+      reference,
+      selection,
+      { sqlite, mutationService },
+      undefined,
+      { expectedRevision: revision, rationale, source: "cli" },
+    );
     console.log(`Resolved bundled workflow reconciliation for ${reference} using ${selection}`);
     return;
   }

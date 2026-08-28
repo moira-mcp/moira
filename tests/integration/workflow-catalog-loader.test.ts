@@ -36,6 +36,11 @@ import {
   getWorkflowReconciliationStatus,
   getWorkflowReconciliationStatusSummary,
   resolveWorkflowReconciliation,
+  createWorkflowReconciliationStagedArtifact,
+  applyWorkflowReconciliationStagedArtifact,
+  managedWorkflowStateDigest,
+  WorkflowReconciliationRepository,
+  workflowReconciliationStagedArtifactDigest,
   type CatalogEntry,
 } from "@mcp-moira/shared";
 
@@ -74,6 +79,15 @@ function entry(
       ],
     },
   };
+}
+
+function inspectedResolution(owner: string, slug: string) {
+  const conflict = new WorkflowReconciliationRepository(getSqliteInstance()).findConflict(
+    owner,
+    slug,
+  );
+  if (!conflict) throw new Error(`Missing reconciliation conflict for ${owner}/${slug}`);
+  return { revision: conflict.revision, rationale: "Test decision from inspected candidates." };
 }
 
 describe("Workflow Catalog Loader Integration", () => {
@@ -115,6 +129,9 @@ describe("Workflow Catalog Loader Integration", () => {
       .run(OWNER_A, OWNER_B);
     sqlite
       .prepare("DELETE FROM managedWorkflowBaseline WHERE ownerId IN (?, ?)")
+      .run(OWNER_A, OWNER_B);
+    sqlite
+      .prepare("DELETE FROM workflowReconciliationResolution WHERE ownerId IN (?, ?)")
       .run(OWNER_A, OWNER_B);
     sqlite.prepare("DELETE FROM workflow WHERE userId IN (?, ?)").run(OWNER_A, OWNER_B);
   });
@@ -167,7 +184,6 @@ describe("Workflow Catalog Loader Integration", () => {
       visibility: "public",
       skipAudit: true,
     });
-
     const result = await installCatalogEntries([catalogEntry], deps);
     expect(result.installed).toBe(0);
     expect(result.updated).toBe(0);
@@ -515,6 +531,7 @@ describe("Workflow Catalog Loader Integration", () => {
         action: "resolve",
         reference: `${OWNER_A}/${slug}`,
         selection: "incoming",
+        ...inspectedResolution(OWNER_A, slug),
       }),
     );
     expect(resolution).not.toHaveProperty("isError");
@@ -797,6 +814,7 @@ describe("Workflow Catalog Loader Integration", () => {
         action: "resolve",
         reference: `${OWNER_A}/${slug}`,
         selection: "current",
+        ...inspectedResolution(OWNER_A, slug),
       }),
     );
     expect(deniedResolution).toMatchObject({ isError: true });
@@ -807,6 +825,7 @@ describe("Workflow Catalog Loader Integration", () => {
         action: "resolve",
         reference: `${OWNER_A}/${slug}`,
         selection: "current",
+        ...inspectedResolution(OWNER_A, slug),
         mergedGraph: {
           metadata: { name: slug, version: "2.0.0", description: "invalid merge" },
           nodes: [],
@@ -832,6 +851,7 @@ describe("Workflow Catalog Loader Integration", () => {
         action: "resolve",
         reference: `${OWNER_A}/${slug}`,
         selection: "current",
+        ...inspectedResolution(OWNER_A, slug),
         mergedGraph,
         visibility: "public",
       }),
@@ -854,10 +874,43 @@ describe("Workflow Catalog Loader Integration", () => {
       source: "mcp",
     });
     expect(JSON.parse(resolutionAudit.metadata)).toEqual({ selection: "current", merged: true });
+    const resolutionContext = getSqliteInstance()
+      .prepare(
+        "SELECT selection, merged, rationale, residualDelta FROM workflowReconciliationResolution WHERE ownerId = ? AND slug = ?",
+      )
+      .get(OWNER_A, slug) as {
+      selection: string;
+      merged: number;
+      rationale: string;
+      residualDelta: string;
+    };
+    expect(resolutionContext).toMatchObject({
+      selection: "current",
+      merged: 1,
+      rationale: "Test decision from inspected candidates.",
+    });
+    expect(JSON.parse(resolutionContext.residualDelta)).toContain(
+      "$.content.graph.nodes[1].directive",
+    );
     const repeated = await installCatalogEntries([v2], deps);
     expect(repeated.preserved).toBe(1);
     const stored = await deps.workflowRepo.get(id!, OWNER_A);
     expect((stored!.nodes[1] as { directive: string }).directive).toBe("merged user + upstream");
+    expect(
+      (await installCatalogEntries([entry(OWNER_A, slug, "3.0.0", "public", "upstream-v3")], deps))
+        .conflicts,
+    ).toBe(1);
+    const nextConflict = getWorkflowReconciliationStatus(getSqliteInstance()).conflicts[0];
+    const nextPrevious = nextConflict.previous as {
+      content: { graph: { nodes: Array<{ directive?: string }> } };
+    };
+    expect(nextPrevious.content.graph.nodes[1].directive).toBe("upstream");
+    expect(
+      (nextConflict.current.content.graph.nodes as Array<{ directive?: string }>)[1].directive,
+    ).toBe("merged user + upstream");
+    expect(
+      (nextConflict.incoming.content.graph.nodes as Array<{ directive?: string }>)[1].directive,
+    ).toBe("upstream-v3");
   });
 
   test("rejects every stale resolution path without overwriting a later user edit", async () => {
@@ -900,6 +953,7 @@ describe("Workflow Catalog Loader Integration", () => {
           action: "resolve",
           reference: `${OWNER_A}/${slug}`,
           selection: variant.selection,
+          ...inspectedResolution(OWNER_A, slug),
           ...(variant.merged
             ? {
                 mergedGraph: entry(OWNER_A, slug, "2.0.0", "private", "stale-merge").graph,
@@ -971,6 +1025,7 @@ describe("Workflow Catalog Loader Integration", () => {
         action: "resolve",
         reference: `${OWNER_A}/${slug}`,
         selection: "incoming",
+        ...inspectedResolution(OWNER_A, slug),
       }),
     );
 
@@ -1011,6 +1066,7 @@ describe("Workflow Catalog Loader Integration", () => {
         action: "resolve",
         reference: `${OWNER_A}/${newSlug}`,
         selection: "incoming",
+        ...inspectedResolution(OWNER_A, newSlug),
       }),
     );
 
@@ -1062,8 +1118,14 @@ describe("Workflow Catalog Loader Integration", () => {
         },
       },
       undefined,
-      { actorId: "system-admin", source: "test" },
+      {
+        actorId: "system-admin",
+        source: "test",
+        expectedRevision: inspectedResolution(OWNER_A, slug).revision,
+        rationale: "Test decision from inspected candidates.",
+      },
     );
+    void delayedResolution.catch(() => reportValidationStarted());
     await validationStarted;
 
     await resolveWorkflowReconciliation(
@@ -1071,7 +1133,12 @@ describe("Workflow Catalog Loader Integration", () => {
       "current",
       { sqlite: getSqliteInstance(), mutationService: deps.mutationService },
       undefined,
-      { actorId: "system-admin", source: "test" },
+      {
+        actorId: "system-admin",
+        source: "test",
+        expectedRevision: inspectedResolution(OWNER_A, slug).revision,
+        rationale: "Test decision from inspected candidates.",
+      },
     );
     releaseValidation();
 
@@ -1120,16 +1187,27 @@ describe("Workflow Catalog Loader Integration", () => {
     const validationGate = new Promise<void>((resolve) => {
       releaseValidation = resolve;
     });
-    const delayedResolution = resolveWorkflowReconciliation(`${OWNER_A}/${slug}`, "incoming", {
-      sqlite: getSqliteInstance(),
-      mutationService: {
-        validate: async (candidate) => {
-          reportValidationStarted();
-          await validationGate;
-          return deps.mutationService.validate(candidate);
+    const delayedResolution = resolveWorkflowReconciliation(
+      `${OWNER_A}/${slug}`,
+      "incoming",
+      {
+        sqlite: getSqliteInstance(),
+        mutationService: {
+          validate: async (candidate) => {
+            reportValidationStarted();
+            await validationGate;
+            return deps.mutationService.validate(candidate);
+          },
         },
       },
-    });
+      undefined,
+      {
+        source: "test",
+        expectedRevision: inspectedResolution(OWNER_A, slug).revision,
+        rationale: "Test decision from inspected candidates.",
+      },
+    );
+    void delayedResolution.catch(() => reportValidationStarted());
     const staleResolution = expect(delayedResolution).rejects.toThrow(
       `MANAGED_WORKFLOW_RECONCILIATION_STALE: ${OWNER_A}/${slug}`,
     );
@@ -1211,7 +1289,12 @@ describe("Workflow Catalog Loader Integration", () => {
       "current",
       { sqlite: getSqliteInstance(), mutationService: deps.mutationService },
       undefined,
-      { actorId: "system-admin", source: "test" },
+      {
+        actorId: "system-admin",
+        source: "test",
+        expectedRevision: inspectedResolution(OWNER_A, slug).revision,
+        rationale: "Test decision from inspected candidates.",
+      },
     );
     releaseValidation();
     await staleCatalog;
@@ -1326,7 +1409,12 @@ describe("Workflow Catalog Loader Integration", () => {
       "current",
       { sqlite: getSqliteInstance(), mutationService: deps.mutationService },
       undefined,
-      { actorId: "system-admin", source: "test" },
+      {
+        actorId: "system-admin",
+        source: "test",
+        expectedRevision: inspectedResolution(OWNER_A, newSlug).revision,
+        rationale: "Test decision from inspected candidates.",
+      },
     );
     releaseValidation();
     await staleCatalog;
@@ -1482,6 +1570,7 @@ describe("Workflow Catalog Loader Integration", () => {
           action: "resolve",
           reference: `${OWNER_A}/${newSlug}`,
           selection: variant.selection,
+          ...inspectedResolution(OWNER_A, newSlug),
           ...(variant.name === "merged" ? { mergedGraph, visibility: "public" as const } : {}),
         }),
       );
@@ -1498,6 +1587,380 @@ describe("Workflow Catalog Loader Integration", () => {
       expect(await installCatalogEntry(incoming, deps)).not.toBe("conflict");
       expect(await deps.workflowRepo.resolveSlug(newSlug, OWNER_A)).toBe(originalId);
     }
+  });
+
+  test("uses canonical content identity instead of semantic version equality", async () => {
+    const slug = `loader-same-semver-digest-${Date.now()}`;
+    const previous = entry(OWNER_A, slug, "1.0.0", "public", "base");
+    await installCatalogEntries([previous], deps);
+    const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    const current = await deps.workflowRepo.get(id!, OWNER_A);
+    (current!.nodes[1] as { directive: string }).directive = "instance-two";
+    await deps.mutationService.save({
+      graph: current!,
+      userId: OWNER_A,
+      slug,
+      visibility: "public",
+      skipAudit: true,
+    });
+    const incoming = entry(OWNER_A, slug, "1.0.0", "public", "upstream-two");
+    expect((await installCatalogEntries([incoming], deps)).conflicts).toBe(1);
+    const conflict = getWorkflowReconciliationStatus(getSqliteInstance()).conflicts[0];
+    expect(conflict.current.lifecycle).toBe("present");
+    expect(conflict.incoming.lifecycle).toBe("present");
+    expect(managedWorkflowStateDigest(conflict.current)).not.toBe(
+      managedWorkflowStateDigest(conflict.incoming),
+    );
+    if (conflict.previous?.lifecycle === "present") {
+      expect(
+        managedWorkflowStateDigest({
+          ...conflict.previous,
+          content: {
+            ...conflict.previous.content,
+            graph: { ...conflict.previous.content.graph, id: "database-envelope-id" },
+          },
+        }),
+      ).toBe(managedWorkflowStateDigest(conflict.previous));
+    }
+  });
+
+  test("requires the exact inspected revision before ordinary resolution mutation", async () => {
+    const slug = `loader-required-resolution-revision-${Date.now()}`;
+    await installCatalogEntries([entry(OWNER_A, slug, "1.0.0", "public", "base")], deps);
+    const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    const graph = await deps.workflowRepo.get(id!, OWNER_A);
+    (graph!.nodes[1] as { directive: string }).directive = "current";
+    await deps.mutationService.save({
+      graph: graph!,
+      userId: OWNER_A,
+      slug,
+      visibility: "public",
+      skipAudit: true,
+    });
+    await installCatalogEntries([entry(OWNER_A, slug, "2.0.0", "public", "incoming")], deps);
+    const sqlite = getSqliteInstance();
+    const before = sqlite
+      .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+      .get(OWNER_A, slug);
+    for (const expectedRevision of ["", "0".repeat(64)]) {
+      await expect(
+        resolveWorkflowReconciliation(
+          `${OWNER_A}/${slug}`,
+          "incoming",
+          { sqlite, mutationService: deps.mutationService },
+          undefined,
+          { expectedRevision, rationale: "Inspected decision." },
+        ),
+      ).rejects.toThrow(`MANAGED_WORKFLOW_RECONCILIATION_STALE: ${OWNER_A}/${slug}`);
+    }
+    expect(
+      sqlite.prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?").get(OWNER_A, slug),
+    ).toEqual(before);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflowReconciliationResolution WHERE ownerId = ? AND slug = ?",
+        )
+        .get(OWNER_A, slug),
+    ).toEqual({ count: 0 });
+    const inspected = inspectedResolution(OWNER_A, slug);
+    await resolveWorkflowReconciliation(
+      `${OWNER_A}/${slug}`,
+      "incoming",
+      { sqlite, mutationService: deps.mutationService },
+      undefined,
+      { expectedRevision: inspected.revision, rationale: inspected.rationale },
+    );
+    expect(getWorkflowReconciliationStatusSummary(sqlite).status).toBe("ok");
+  });
+
+  test("applies a portable staged decision atomically to a distinct fresh database", async () => {
+    const slug = `loader-staged-portable-${Date.now()}`;
+    const safeSlug = `${slug}-safe`;
+    const addedSlug = `${slug}-added`;
+    await installCatalogEntries(
+      [
+        entry(OWNER_A, slug, "1.0.0", "public", "base"),
+        entry(OWNER_A, safeSlug, "1.0.0", "public", "safe-v1"),
+      ],
+      deps,
+    );
+    const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    const current = await deps.workflowRepo.get(id!, OWNER_A);
+    (current!.nodes[1] as { directive: string }).directive = "instance-change";
+    await deps.mutationService.save({
+      graph: current!,
+      userId: OWNER_A,
+      slug,
+      visibility: "public",
+      skipAudit: true,
+    });
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "reconciliation-portable-"));
+    const sourcePath = path.join(temp, "source.db");
+    const targetPath = path.join(temp, "target.db");
+    try {
+      await getSqliteInstance().backup(targetPath);
+      const incomingEntries = [
+        entry(OWNER_A, slug, "2.0.0", "public", "upstream-change"),
+        entry(OWNER_A, safeSlug, "2.0.0", "public", "safe-v2"),
+        entry(OWNER_A, addedSlug, "1.0.0", "public", "new-safe-flow"),
+      ];
+      expect((await installCatalogEntries(incomingEntries, deps)).conflicts).toBe(1);
+      await getSqliteInstance().backup(sourcePath);
+      const source = new Database(sourcePath);
+      const target = new Database(targetPath);
+      try {
+        const conflict = new WorkflowReconciliationRepository(source).listConflicts()[0];
+        const artifact = createWorkflowReconciliationStagedArtifact(
+          source,
+          "image@sha256:one",
+          incomingEntries,
+          [
+            {
+              reference: `${OWNER_A}/${slug}`,
+              revision: conflict.revision,
+              selection: "incoming",
+              rationale: "The upstream implementation supersedes the local experiment.",
+            },
+          ],
+        );
+        target.prepare("UPDATE user SET name = ? WHERE id = ?").run("target-only", OWNER_A);
+        await applyWorkflowReconciliationStagedArtifact(
+          artifact,
+          "image@sha256:one",
+          incomingEntries,
+          { ...deps, sqlite: target },
+          { actorId: "system-admin", source: "test-staged" },
+        );
+        const stored = target
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, slug) as { graph: string };
+        expect(JSON.parse(stored.graph).nodes).toEqual(
+          expect.arrayContaining([expect.objectContaining({ directive: "upstream-change" })]),
+        );
+        expect(target.prepare("SELECT name FROM user WHERE id = ?").get(OWNER_A)).toEqual({
+          name: "target-only",
+        });
+        for (const [expectedSlug, directive] of [
+          [safeSlug, "safe-v2"],
+          [addedSlug, "new-safe-flow"],
+        ]) {
+          const safe = target
+            .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+            .get(OWNER_A, expectedSlug) as { graph: string };
+          expect(JSON.parse(safe.graph).nodes).toEqual(
+            expect.arrayContaining([expect.objectContaining({ directive })]),
+          );
+        }
+        expect(
+          target
+            .prepare(
+              "SELECT selection, merged, rationale FROM workflowReconciliationResolution WHERE ownerId = ? AND slug = ?",
+            )
+            .get(OWNER_A, slug),
+        ).toEqual({
+          selection: "incoming",
+          merged: 0,
+          rationale: "The upstream implementation supersedes the local experiment.",
+        });
+        expect(
+          target
+            .prepare(
+              "SELECT COUNT(*) AS count FROM workflowReconciliationConflict WHERE ownerId = ? AND slug = ?",
+            )
+            .get(OWNER_A, slug),
+        ).toEqual({ count: 0 });
+      } finally {
+        source.close();
+        target.close();
+      }
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects staged identity and conflict-set drift without partial mutation", async () => {
+    const slug = `loader-staged-stale-${Date.now()}`;
+    await installCatalogEntries([entry(OWNER_A, slug, "1.0.0", "public", "base")], deps);
+    const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+    const current = await deps.workflowRepo.get(id!, OWNER_A);
+    (current!.nodes[1] as { directive: string }).directive = "instance-change";
+    await deps.mutationService.save({
+      graph: current!,
+      userId: OWNER_A,
+      slug,
+      visibility: "public",
+      skipAudit: true,
+    });
+    const incomingEntries = [entry(OWNER_A, slug, "2.0.0", "public", "incoming")];
+    await installCatalogEntries(incomingEntries, deps);
+    const sqlite = getSqliteInstance();
+    const conflict = getWorkflowReconciliationStatus(sqlite).conflicts[0];
+    const artifact = createWorkflowReconciliationStagedArtifact(
+      sqlite,
+      "image@sha256:expected",
+      incomingEntries,
+      [
+        {
+          reference: `${OWNER_A}/${slug}`,
+          revision: conflict.revision,
+          selection: "incoming",
+          rationale: "Use the accepted upstream behavior.",
+        },
+      ],
+    );
+    const before = sqlite
+      .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+      .get(OWNER_A, slug);
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        artifact,
+        "image@sha256:different",
+        incomingEntries,
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("source or catalog identity changed");
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        artifact,
+        "image@sha256:expected",
+        [entry(OWNER_A, slug, "2.0.0", "public", "different-catalog-content")],
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("source or catalog identity changed");
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        { ...artifact, catalogDigest: "0".repeat(64), artifactDigest: artifact.artifactDigest },
+        "image@sha256:expected",
+        incomingEntries,
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("Invalid staged reconciliation artifact digest");
+    const { artifactDigest: _artifactDigest, ...malformedBody } = artifact;
+    const malformed = {
+      ...malformedBody,
+      decisions: [{ ...artifact.decisions[0], selection: "unknown" }],
+    };
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        {
+          ...malformed,
+          artifactDigest: workflowReconciliationStagedArtifactDigest(malformed),
+        },
+        "image@sha256:expected",
+        incomingEntries,
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("Invalid staged reconciliation decision schema");
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        { ...artifact, artifactDigest: "0".repeat(64) },
+        "image@sha256:expected",
+        incomingEntries,
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("Invalid staged reconciliation artifact digest");
+    expect(
+      sqlite.prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?").get(OWNER_A, slug),
+    ).toEqual(before);
+    const laterGraph = await deps.workflowRepo.get(id!, OWNER_A);
+    (laterGraph!.nodes[1] as { directive: string }).directive = "later-current-change";
+    await deps.mutationService.save({
+      graph: laterGraph!,
+      userId: OWNER_A,
+      slug,
+      visibility: "public",
+      skipAudit: true,
+    });
+    const afterDrift = sqlite
+      .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+      .get(OWNER_A, slug);
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        artifact,
+        "image@sha256:expected",
+        incomingEntries,
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("conflict set changed");
+    expect(
+      sqlite.prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?").get(OWNER_A, slug),
+    ).toEqual(afterDrift);
+  });
+
+  test("rejects a stale later decision before mutating any workflow in a staged batch", async () => {
+    const stamp = Date.now();
+    const slugs = [`loader-staged-batch-a-${stamp}`, `loader-staged-batch-b-${stamp}`];
+    await installCatalogEntries(
+      slugs.map((slug) => entry(OWNER_A, slug, "1.0.0", "public", "base")),
+      deps,
+    );
+    for (const slug of slugs) {
+      const id = await deps.workflowRepo.resolveSlug(slug, OWNER_A);
+      const graph = await deps.workflowRepo.get(id!, OWNER_A);
+      (graph!.nodes[1] as { directive: string }).directive = `current-${slug}`;
+      await deps.mutationService.save({
+        graph: graph!,
+        userId: OWNER_A,
+        slug,
+        visibility: "public",
+        skipAudit: true,
+      });
+    }
+    await installCatalogEntries(
+      slugs.map((slug) => entry(OWNER_A, slug, "2.0.0", "public", `incoming-${slug}`)),
+      deps,
+    );
+    const sqlite = getSqliteInstance();
+    const conflicts = getWorkflowReconciliationStatus(sqlite).conflicts;
+    const artifact = createWorkflowReconciliationStagedArtifact(
+      sqlite,
+      "image@sha256:batch",
+      slugs.map((slug) => entry(OWNER_A, slug, "2.0.0", "public", `incoming-${slug}`)),
+      conflicts.map((conflict) => ({
+        reference: `${conflict.owner}/${conflict.slug}`,
+        revision: conflict.revision,
+        selection: "incoming" as const,
+        rationale: "Use the accepted upstream batch.",
+      })),
+    );
+    const laterId = await deps.workflowRepo.resolveSlug(slugs[1], OWNER_A);
+    const laterGraph = await deps.workflowRepo.get(laterId!, OWNER_A);
+    (laterGraph!.nodes[1] as { directive: string }).directive = "later-batch-change";
+    await deps.mutationService.save({
+      graph: laterGraph!,
+      userId: OWNER_A,
+      slug: slugs[1],
+      visibility: "public",
+      skipAudit: true,
+    });
+    const afterDrift = slugs.map((currentSlug) =>
+      sqlite
+        .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+        .get(OWNER_A, currentSlug),
+    );
+    await expect(
+      applyWorkflowReconciliationStagedArtifact(
+        artifact,
+        "image@sha256:batch",
+        slugs.map((slug) => entry(OWNER_A, slug, "2.0.0", "public", `incoming-${slug}`)),
+        { ...deps, sqlite },
+      ),
+    ).rejects.toThrow("conflict set changed");
+    expect(
+      slugs.map((slug) =>
+        sqlite
+          .prepare("SELECT graph FROM workflow WHERE userId = ? AND slug = ?")
+          .get(OWNER_A, slug),
+      ),
+    ).toEqual(afterDrift);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflowReconciliationResolution WHERE ownerId = ? AND slug IN (?, ?)",
+        )
+        .get(OWNER_A, ...slugs),
+    ).toEqual({ count: 0 });
   });
 
   describe("multi-directory catalog → install (Step 2 end-to-end)", () => {

@@ -181,6 +181,8 @@ step({
 - `action`: `"resolve"` (обязательный)
 - `reference` (string, обязательный) - Идентификатор конфликта в формате `owner/slug`
 - `selection` (string, обязательный) - `"current"`, `"incoming"` или `"previous"`
+- `revision` (string, обязательный) - Точная ревизия конфликта из `status`; устаревшее решение отклоняется
+- `rationale` (string, обязательный, 1–2000 символов) - Смысловая причина принять, сохранить или объединить изменение
 - `mergedGraph` (object, опционально) - Семантически объединённый граф workflow; требует `selection: "current"`
 - `visibility` (`"public" | "private"`, обязательно с `mergedGraph`) - Видимость объединённого workflow
 
@@ -198,6 +200,8 @@ reconciliation({
   action: "resolve",
   reference: "system-admin/my-workflow",
   selection: "current",
+  revision: "<revision из status>",
+  rationale: "Использовать incoming как новую основу и сохранить ветку согласования этой установки.",
   mergedGraph: { metadata: {...}, nodes: [...] },
   visibility: "private"
 })

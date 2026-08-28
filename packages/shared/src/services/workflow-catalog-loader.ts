@@ -1,6 +1,7 @@
 /** Plan and atomically apply the bundled workflow catalog. */
 
 import type Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 import type { CatalogEntry } from "./workflow-catalog.js";
 import { ownerSlugKey } from "./workflow-catalog.js";
@@ -11,11 +12,18 @@ import {
 } from "./managed-resource-reconciler.js";
 import {
   WorkflowReconciliationRepository,
+  WorkflowReconciliationStaleError,
   getWorkflowReconciliationStatusSummary,
   managedWorkflowStatesEqual,
+  managedWorkflowStateDigest,
+  canonicalizeManagedWorkflowValue,
+  workflowReconciliationConflictRevision,
+  parseManagedWorkflowState,
   type ManagedWorkflowBaselineRecord,
   type ManagedWorkflowState,
+  type WorkflowReconciliationConflictRecord,
   type WorkflowReconciliationApplyPlan,
+  type WorkflowReconciliationSelection,
 } from "../database/repositories/workflow-reconciliation-repository.js";
 import { getSqliteInstance } from "../database/connection.js";
 import { MAX_WORKFLOW_SIZE_BYTES } from "../database/repositories/workflow-repository.js";
@@ -253,10 +261,15 @@ function addOutcome(
   else result.skipped++;
 }
 
-export async function installCatalogEntries(
+export interface CatalogApplyPlanResult {
+  result: CatalogLoadResult;
+  applyPlan: WorkflowReconciliationApplyPlan;
+}
+
+export async function planCatalogEntries(
   entries: CatalogEntry[],
   deps: CatalogLoadDeps,
-): Promise<CatalogLoadResult> {
+): Promise<CatalogApplyPlanResult> {
   const sqlite = deps.sqlite ?? getSqliteInstance();
   const repository = new WorkflowReconciliationRepository(sqlite);
   const baselines = repository.listBaselines();
@@ -437,6 +450,16 @@ export async function installCatalogEntries(
   if (result.invalid > 0) {
     throw new CatalogPreflightError(result);
   }
+  return { result, applyPlan };
+}
+
+export async function installCatalogEntries(
+  entries: CatalogEntry[],
+  deps: CatalogLoadDeps,
+): Promise<CatalogLoadResult> {
+  const sqlite = deps.sqlite ?? getSqliteInstance();
+  const repository = new WorkflowReconciliationRepository(sqlite);
+  const { result, applyPlan } = await planCatalogEntries(entries, deps);
   if (result.conflicts > 0 && !deps.force) {
     // Persist complete conflict evidence, but do not partially advance any
     // workflow or baseline while the catalog as a whole is unresolved.
@@ -492,12 +515,378 @@ export function formatWorkflowReconciliationNotice(sqlite: Database.Database): s
   ].join("\n");
 }
 
+const MAX_RESOLUTION_RATIONALE_LENGTH = 2_000;
+const MAX_RESIDUAL_DELTA_PATHS = 1_000;
+
+function boundedResidualDelta(
+  incoming: ManagedWorkflowState,
+  result: ManagedWorkflowState,
+): string[] {
+  const paths: string[] = [];
+  const visit = (left: unknown, right: unknown, path: string): void => {
+    if (paths.length >= MAX_RESIDUAL_DELTA_PATHS) return;
+    if (JSON.stringify(left) === JSON.stringify(right)) return;
+    if (
+      left === null ||
+      right === null ||
+      typeof left !== "object" ||
+      typeof right !== "object" ||
+      Array.isArray(left) !== Array.isArray(right)
+    ) {
+      paths.push(path || "$");
+      return;
+    }
+    if (Array.isArray(left) && Array.isArray(right)) {
+      const length = Math.max(left.length, right.length);
+      for (let index = 0; index < length; index++)
+        visit(left[index], right[index], `${path}[${index}]`);
+      return;
+    }
+    const leftRecord = left as Record<string, unknown>;
+    const rightRecord = right as Record<string, unknown>;
+    const keys = [...new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)])].sort();
+    for (const key of keys) visit(leftRecord[key], rightRecord[key], path ? `${path}.${key}` : key);
+  };
+  const canonicalState = (state: ManagedWorkflowState): unknown =>
+    state.lifecycle === "absent"
+      ? state
+      : {
+          lifecycle: state.lifecycle,
+          content: {
+            visibility: state.content.visibility,
+            graph: canonicalizeManagedWorkflowValue(state.content.graph),
+          },
+        };
+  visit(canonicalState(incoming), canonicalState(result), "$");
+  if (paths.length >= MAX_RESIDUAL_DELTA_PATHS) return ["$ (delta exceeds bounded path detail)"];
+  return paths;
+}
+
+export interface WorkflowReconciliationDecisionInput {
+  reference: string;
+  revision: string;
+  selection: WorkflowReconciliationSelection;
+  merged?: ManagedWorkflowState;
+  rationale: string;
+}
+
+export interface WorkflowReconciliationStagedArtifact {
+  version: 1;
+  sourceIdentity: string;
+  catalogDigest: string;
+  conflictSetDigest: string;
+  decisions: WorkflowReconciliationDecisionInput[];
+  artifactDigest: string;
+}
+
+function conflictSetDigest(conflicts: WorkflowReconciliationConflictRecord[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        conflicts
+          .map((conflict) => `${conflict.owner}/${conflict.slug}:${conflict.revision}`)
+          .sort(),
+      ),
+    )
+    .digest("hex");
+}
+
+export function workflowReconciliationStagedArtifactDigest(artifact: unknown): string {
+  return createHash("sha256").update(JSON.stringify(artifact)).digest("hex");
+}
+
+function validateStagedArtifact(value: unknown): WorkflowReconciliationStagedArtifact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid staged reconciliation artifact schema");
+  }
+  const artifact = value as Record<string, unknown>;
+  const keys = Object.keys(artifact).sort();
+  if (
+    JSON.stringify(keys) !==
+    JSON.stringify(
+      [
+        "artifactDigest",
+        "catalogDigest",
+        "conflictSetDigest",
+        "decisions",
+        "sourceIdentity",
+        "version",
+      ].sort(),
+    )
+  ) {
+    throw new Error("Invalid staged reconciliation artifact schema");
+  }
+  if (
+    artifact.version !== 1 ||
+    typeof artifact.sourceIdentity !== "string" ||
+    artifact.sourceIdentity.trim().length === 0 ||
+    typeof artifact.catalogDigest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(artifact.catalogDigest) ||
+    typeof artifact.conflictSetDigest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(artifact.conflictSetDigest) ||
+    typeof artifact.artifactDigest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(artifact.artifactDigest) ||
+    !Array.isArray(artifact.decisions)
+  ) {
+    throw new Error("Invalid staged reconciliation artifact schema");
+  }
+  for (const rawDecision of artifact.decisions) {
+    if (!rawDecision || typeof rawDecision !== "object" || Array.isArray(rawDecision)) {
+      throw new Error("Invalid staged reconciliation decision schema");
+    }
+    const decision = rawDecision as Record<string, unknown>;
+    if (
+      Object.keys(decision).some(
+        (key) => !["reference", "revision", "selection", "merged", "rationale"].includes(key),
+      )
+    ) {
+      throw new Error("Invalid staged reconciliation decision schema");
+    }
+    if (
+      typeof decision.reference !== "string" ||
+      !/^[^/]+\/[^/]+$/.test(decision.reference) ||
+      typeof decision.revision !== "string" ||
+      !/^[a-f0-9]{64}$/.test(decision.revision) ||
+      (decision.selection !== "current" &&
+        decision.selection !== "incoming" &&
+        decision.selection !== "previous") ||
+      typeof decision.rationale !== "string" ||
+      !decision.rationale.trim() ||
+      decision.rationale.length > MAX_RESOLUTION_RATIONALE_LENGTH
+    ) {
+      throw new Error("Invalid staged reconciliation decision schema");
+    }
+    if (decision.merged !== undefined) {
+      if (decision.selection !== "current") {
+        throw new Error("Invalid staged reconciliation merged state schema");
+      }
+      parseManagedWorkflowState(decision.merged, "staged reconciliation merged state");
+    }
+  }
+  return value as WorkflowReconciliationStagedArtifact;
+}
+
+export function workflowCatalogDigest(entries: CatalogEntry[]): string {
+  const canonical = entries
+    .map((entry) => ({
+      owner: entry.owner,
+      slug: entry.slug,
+      previousSlugs: [...(entry.previousSlugs ?? [])].sort(),
+      state: incomingState(entry),
+    }))
+    .sort((left, right) =>
+      ownerSlugKey(left.owner, left.slug).localeCompare(ownerSlugKey(right.owner, right.slug)),
+    );
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+export function createWorkflowReconciliationStagedArtifact(
+  sqlite: Database.Database,
+  sourceIdentity: string,
+  entries: CatalogEntry[],
+  decisions: WorkflowReconciliationDecisionInput[],
+): WorkflowReconciliationStagedArtifact {
+  if (!sourceIdentity.trim()) {
+    throw new Error("sourceIdentity is required");
+  }
+  const conflicts = new WorkflowReconciliationRepository(sqlite).listConflicts();
+  const byReference = new Map(conflicts.map((item) => [`${item.owner}/${item.slug}`, item]));
+  if (decisions.length !== conflicts.length) {
+    throw new Error("A staged artifact must decide the complete current conflict set");
+  }
+  const seen = new Set<string>();
+  for (const decision of decisions) {
+    const conflict = byReference.get(decision.reference);
+    if (!conflict || seen.has(decision.reference) || conflict.revision !== decision.revision) {
+      const [owner = "unknown", slug = "unknown"] = decision.reference.split("/", 2);
+      throw new WorkflowReconciliationStaleError(owner, slug);
+    }
+    if (!decision.rationale.trim() || decision.rationale.length > MAX_RESOLUTION_RATIONALE_LENGTH) {
+      throw new Error("Resolution rationale must be non-empty and at most 2000 characters");
+    }
+    seen.add(decision.reference);
+  }
+  const body = {
+    version: 1 as const,
+    sourceIdentity,
+    catalogDigest: workflowCatalogDigest(entries),
+    conflictSetDigest: conflictSetDigest(conflicts),
+    decisions,
+  };
+  return { ...body, artifactDigest: workflowReconciliationStagedArtifactDigest(body) };
+}
+
+export async function applyWorkflowReconciliationStagedArtifact(
+  artifactInput: unknown,
+  currentSourceIdentity: string,
+  entries: CatalogEntry[],
+  deps: CatalogLoadDeps,
+  resolutionContext: { actorId?: string; source?: string } = {},
+): Promise<void> {
+  const artifact = validateStagedArtifact(artifactInput);
+  const { artifactDigest, ...body } = artifact;
+  if (
+    artifact.version !== 1 ||
+    workflowReconciliationStagedArtifactDigest(body) !== artifactDigest
+  ) {
+    throw new Error("Invalid staged reconciliation artifact digest");
+  }
+  if (
+    artifact.sourceIdentity !== currentSourceIdentity ||
+    artifact.catalogDigest !== workflowCatalogDigest(entries)
+  ) {
+    throw new Error("Staged reconciliation source or catalog identity changed");
+  }
+  const sqlite = deps.sqlite ?? getSqliteInstance();
+  const repository = new WorkflowReconciliationRepository(sqlite);
+  const planned = await planCatalogEntries(entries, {
+    ...deps,
+    force: false,
+    fatalConflicts: false,
+  });
+  const conflicts: WorkflowReconciliationConflictRecord[] = planned.applyPlan.conflicts.map(
+    (conflict) => ({
+      owner: conflict.owner,
+      slug: conflict.slug,
+      currentWorkflowId: conflict.currentWorkflowId ?? null,
+      currentWorkflowSlug: conflict.currentWorkflowSlug ?? null,
+      previousManagedSlug: conflict.previousSlug ?? null,
+      classification: conflict.classification,
+      previous: conflict.previous,
+      current: conflict.current,
+      incoming: conflict.incoming,
+      instruction: conflict.instruction,
+      revision: workflowReconciliationConflictRevision({
+        owner: conflict.owner,
+        slug: conflict.slug,
+        currentWorkflowId: conflict.currentWorkflowId,
+        currentWorkflowSlug: conflict.currentWorkflowSlug,
+        previousManagedSlug: conflict.previousSlug,
+        classification: conflict.classification,
+        previous: conflict.previous,
+        current: conflict.current,
+        incoming: conflict.incoming,
+        instruction: conflict.instruction,
+      }),
+      candidateRefs: { previous: null, current: "", incoming: "" },
+      recoveryLocation: "",
+    }),
+  );
+  if (artifact.conflictSetDigest !== conflictSetDigest(conflicts)) {
+    throw new Error("Staged reconciliation conflict set changed");
+  }
+  const byReference = new Map(conflicts.map((item) => [`${item.owner}/${item.slug}`, item]));
+  if (artifact.decisions.length !== conflicts.length) {
+    throw new Error("Staged reconciliation decisions do not cover the current conflict set");
+  }
+
+  const applyPlan: WorkflowReconciliationApplyPlan = {
+    ...planned.applyPlan,
+    conflicts: [],
+    resolutionAudits: [],
+    resolutions: [],
+  };
+  const seen = new Set<string>();
+  for (const decision of artifact.decisions) {
+    const conflict = byReference.get(decision.reference);
+    if (!conflict || seen.has(decision.reference) || conflict.revision !== decision.revision) {
+      const [owner = "unknown", slug = "unknown"] = decision.reference.split("/", 2);
+      throw new WorkflowReconciliationStaleError(owner, slug);
+    }
+    seen.add(decision.reference);
+    if (!decision.rationale.trim() || decision.rationale.length > MAX_RESOLUTION_RATIONALE_LENGTH) {
+      throw new Error("Resolution rationale must be non-empty and at most 2000 characters");
+    }
+    if (decision.merged && decision.selection !== "current") {
+      throw new Error("A merged staged decision requires selection=current");
+    }
+    const selected =
+      decision.merged ??
+      (decision.selection === "incoming"
+        ? conflict.incoming
+        : decision.selection === "previous"
+          ? conflict.previous
+          : conflict.current);
+    if (!selected) throw new Error(`${decision.reference} has no previous candidate to select`);
+    for (const state of [conflict.incoming, selected]) {
+      if (state.lifecycle === "absent") continue;
+      if (
+        Buffer.byteLength(JSON.stringify(state.content.graph), "utf8") > MAX_WORKFLOW_SIZE_BYTES
+      ) {
+        throw new Error(
+          `Resolved workflow ${decision.reference} exceeds the maximum workflow size`,
+        );
+      }
+      const checked = await deps.mutationService.validate(
+        state.content.graph as unknown as WorkflowGraph,
+      );
+      if (checked.status !== "valid") {
+        throw new Error(
+          `Resolved workflow ${decision.reference} is invalid: ${checked.errors.join("; ")}`,
+        );
+      }
+    }
+    const currentWorkflowId = conflict.currentWorkflowId ?? undefined;
+    if (
+      decision.selection !== "current" ||
+      decision.merged !== undefined ||
+      conflict.currentWorkflowSlug !== conflict.slug
+    ) {
+      applyPlan.workflows.push({
+        owner: conflict.owner,
+        slug: conflict.slug,
+        workflowId: currentWorkflowId,
+        state: selected,
+      });
+    }
+    applyPlan.baselines.push({
+      owner: conflict.owner,
+      slug: conflict.slug,
+      previousSlug: conflict.previousManagedSlug ?? undefined,
+      state: conflict.incoming,
+      sourceVersion: versionOf(conflict.incoming),
+    });
+    applyPlan.clearConflicts.push({
+      owner: conflict.owner,
+      slug: conflict.slug,
+      previousSlug: conflict.previousManagedSlug ?? undefined,
+    });
+    applyPlan.resolutionAudits!.push({
+      owner: conflict.owner,
+      slug: conflict.slug,
+      actorId: resolutionContext.actorId,
+      source: resolutionContext.source ?? "staged",
+      selection: decision.selection,
+      merged: decision.merged !== undefined,
+    });
+    applyPlan.resolutions!.push({
+      owner: conflict.owner,
+      slug: conflict.slug,
+      incomingDigest: managedWorkflowStateDigest(conflict.incoming),
+      resultDigest: managedWorkflowStateDigest(selected),
+      selection: decision.selection,
+      merged: decision.merged !== undefined,
+      rationale: decision.rationale.trim(),
+      residualDelta: boundedResidualDelta(conflict.incoming, selected),
+      actorId: resolutionContext.actorId ?? null,
+      source: resolutionContext.source ?? "staged",
+      createdAt: Date.now(),
+    });
+  }
+  repository.apply(applyPlan);
+}
+
 export async function resolveWorkflowReconciliation(
   reference: string,
-  selection: "current" | "incoming" | "previous",
+  selection: WorkflowReconciliationSelection,
   deps: Pick<CatalogLoadDeps, "sqlite" | "mutationService">,
   merged?: ManagedWorkflowState,
-  resolutionContext: { actorId?: string; source?: string } = {},
+  resolutionContext: {
+    actorId?: string;
+    source?: string;
+    expectedRevision: string;
+    rationale: string;
+  },
 ): Promise<void> {
   const separator = reference.indexOf("/");
   if (separator <= 0 || separator === reference.length - 1) {
@@ -512,6 +901,12 @@ export async function resolveWorkflowReconciliation(
   const repository = new WorkflowReconciliationRepository(sqlite);
   const conflict = repository.findConflict(owner, slug);
   if (!conflict) throw new Error(`No unresolved workflow reconciliation for ${reference}`);
+  if (
+    !resolutionContext.expectedRevision ||
+    conflict.revision !== resolutionContext.expectedRevision
+  ) {
+    throw new WorkflowReconciliationStaleError(owner, slug);
+  }
   if (merged && selection !== "current") {
     throw new Error("A merged state requires selection=current");
   }
@@ -525,6 +920,10 @@ export async function resolveWorkflowReconciliation(
         : conflict.current);
   if (selection === "previous" && selected === null) {
     throw new Error(`${reference} has no previous candidate to select`);
+  }
+  const rationale = resolutionContext.rationale.trim();
+  if (!rationale || rationale.length > MAX_RESOLUTION_RATIONALE_LENGTH) {
+    throw new Error("Resolution rationale must be non-empty and at most 2000 characters");
   }
 
   const validateResolutionState = async (
@@ -606,5 +1005,23 @@ export async function resolveWorkflowReconciliation(
         merged: merged !== undefined,
       },
     ],
+    resolutions:
+      selected === null
+        ? []
+        : [
+            {
+              owner,
+              slug,
+              incomingDigest: managedWorkflowStateDigest(conflict.incoming),
+              resultDigest: managedWorkflowStateDigest(selected),
+              selection,
+              merged: merged !== undefined,
+              rationale,
+              residualDelta: boundedResidualDelta(conflict.incoming, selected),
+              actorId: resolutionContext.actorId ?? null,
+              source: resolutionContext.source ?? "system",
+              createdAt: Date.now(),
+            },
+          ],
   });
 }

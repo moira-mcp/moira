@@ -181,6 +181,8 @@ Accepts a candidate or a semantically merged current graph, updates the database
 - `action`: `"resolve"` (required)
 - `reference` (string, required) - Conflict identity in `owner/slug` form
 - `selection` (string, required) - `"current"`, `"incoming"`, or `"previous"`
+- `revision` (string, required) - Exact conflict revision returned by `status`; stale decisions are rejected
+- `rationale` (string, required, 1–2000 characters) - Semantic reason for accepting, retaining, or merging the change
 - `mergedGraph` (object, optional) - Semantically merged workflow graph; requires `selection: "current"`
 - `visibility` (`"public" | "private"`, required with `mergedGraph`) - Visibility of the merged workflow
 
@@ -198,6 +200,8 @@ reconciliation({
   action: "resolve",
   reference: "system-admin/my-workflow",
   selection: "current",
+  revision: "<revision from status>",
+  rationale: "Use incoming as the new base and retain the instance-specific approval branch.",
   mergedGraph: { metadata: {...}, nodes: [...] },
   visibility: "private"
 })

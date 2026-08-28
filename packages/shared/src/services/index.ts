@@ -177,13 +177,21 @@ export {
 export {
   installCatalogEntry,
   installCatalogEntries,
+  planCatalogEntries,
   CatalogReconciliationError,
   CatalogPreflightError,
   formatWorkflowReconciliationNotice,
   resolveWorkflowReconciliation,
+  createWorkflowReconciliationStagedArtifact,
+  applyWorkflowReconciliationStagedArtifact,
+  workflowCatalogDigest,
+  workflowReconciliationStagedArtifactDigest,
   type EntryOutcome,
   type CatalogLoadResult,
   type CatalogLoadDeps,
+  type CatalogApplyPlanResult,
+  type WorkflowReconciliationDecisionInput,
+  type WorkflowReconciliationStagedArtifact,
 } from "./workflow-catalog-loader.js";
 
 export {
