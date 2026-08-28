@@ -8,7 +8,8 @@ sentinel_dir=${MOIRA_INIT_SENTINEL_DIR:-/tmp}
   exit 1
 }
 
-rm -f -- "$sentinel_dir/init-success" "$sentinel_dir/init-failed"
+rm -f -- "$sentinel_dir/init-success" "$sentinel_dir/init-failed" \
+  "$sentinel_dir/workflow-reconciliation-required"
 [ ! -e "$sentinel_dir/init-success" ] && [ ! -L "$sentinel_dir/init-success" ]
 [ ! -e "$sentinel_dir/init-failed" ] && [ ! -L "$sentinel_dir/init-failed" ]
 

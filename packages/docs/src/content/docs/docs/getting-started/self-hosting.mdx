@@ -257,8 +257,9 @@ to `latest` after a corrected release.
 When conflict detection has produced a local bundle under `data/.moira-reconciliation/pending`,
 follow its `AGENT INSTRUCTIONS` with one-off Compose CLI containers. The CLI itself does not stop or
 restart services and does not replace the database snapshot. It uses only local files—never
-`--force`, MCP, an HTTP API, or UI transport. Follow the current image's startup log for whether the
-container remains available or must be started again after recovery.
+`--force`, MCP, an HTTP API, or UI transport. Initialization fails closed: after restoring the
+database the container stops with MCP, API, and nginx unavailable. After bundle application, the
+final `docker compose up -d` starts that stopped container normally.
 
 ```bash
 docker compose run --rm moira npm run reconcile -- status

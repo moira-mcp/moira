@@ -1469,6 +1469,8 @@ describe("Workflow Catalog Loader Integration", () => {
         ...process.env,
         DB_PATH: copyPath,
         WORKFLOWS_DIR: path.join(temp, "catalog"),
+        MOIRA_INIT_SENTINEL_DIR: temp,
+        MOIRA_INIT_SENTINEL_OWNER: "guard",
       };
       const selfHostCli = spawnSync(process.execPath, cliArgs, {
         cwd: process.cwd(),
@@ -1476,12 +1478,26 @@ describe("Workflow Catalog Loader Integration", () => {
         encoding: "utf8",
       });
       const selfHostOutput = `${selfHostCli.stdout}\n${selfHostCli.stderr}`;
-      expect(selfHostCli.status).toBe(0);
-      expect(selfHostOutput).toContain("MANAGED_WORKFLOW_RECONCILIATION_REQUIRED");
-      expect(selfHostOutput).toContain("#previous");
-      expect(selfHostOutput).toContain("#current");
-      expect(selfHostOutput).toContain("#incoming");
-      expect(selfHostOutput).toContain("Workflow Management Flow (WMF)");
+      expect(selfHostCli.status).not.toBe(0);
+      expect(selfHostOutput).toContain("Reconciliation required: 1; startup is blocked");
+      expect(selfHostOutput).toContain("=== AGENT INSTRUCTIONS ===");
+      expect(selfHostOutput).toContain("docker compose run --rm moira npm run reconcile -- status");
+      expect(selfHostOutput).not.toContain("self-host remains operable but degraded");
+      expect(selfHostOutput).not.toContain("Workflow Management Flow (WMF)");
+      expect(selfHostOutput).not.toContain("MCP reconciliation tool");
+      expect(
+        fs.existsSync(path.join(temp, ".moira-reconciliation", "pending", "manifest.json")),
+      ).toBe(true);
+      expect(fs.existsSync(path.join(temp, "workflow-reconciliation-required"))).toBe(true);
+      const selfHostManifest = JSON.parse(
+        fs.readFileSync(
+          path.join(temp, ".moira-reconciliation", "pending", "manifest.json"),
+          "utf8",
+        ),
+      );
+      expect(selfHostManifest.conflicts).toEqual([
+        expect.objectContaining({ reference: `${OWNER_A}/${slug}` }),
+      ]);
 
       const cli = spawnSync(process.execPath, cliArgs, {
         cwd: process.cwd(),

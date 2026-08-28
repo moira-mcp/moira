@@ -143,6 +143,11 @@ jobs:
       - name: Create data directory
         run: mkdir -p data
 
+      - name: Test self-host reconciliation lifecycle
+        run: npm run test:docker-reconciliation
+        env:
+          MOIRA_TEST_IMAGE: ${{ env.DOCKER_IMAGE }}:latest
+
       - name: Start Docker container
         run: |
           docker run \

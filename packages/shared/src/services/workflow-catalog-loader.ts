@@ -899,7 +899,7 @@ export async function resolveWorkflowReconciliation(
   reference: string,
   selection: WorkflowReconciliationSelection,
   deps: Pick<CatalogLoadDeps, "sqlite" | "mutationService">,
-  merged?: ManagedWorkflowState,
+  merged: ManagedWorkflowState | undefined,
   resolutionContext: {
     actorId?: string;
     source?: string;

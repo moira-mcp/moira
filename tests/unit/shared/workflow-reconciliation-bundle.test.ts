@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   buildWorkflowReconciliationArtifactFromBundle,
+  cleanupRetiredWorkflowReconciliationBundles,
   chooseWorkflowReconciliationBundleDecision,
   loadWorkflowReconciliationBundle,
   publishWorkflowReconciliationBundle,
@@ -88,6 +89,60 @@ function fixture(slug: string): {
 }
 
 describe("workflow reconciliation local bundle", () => {
+  test("cleans only safe retired bundles and preserves live pending state", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "moira-reconciliation-retired-startup-"));
+    roots.push(root);
+    const pending = path.join(root, "pending");
+    const retiredA = path.join(root, ".applied-00000000-0000-4000-8000-000000000001");
+    const retiredB = path.join(root, ".applied-00000000-0000-4000-8000-000000000002");
+    fs.mkdirSync(pending);
+    fs.writeFileSync(path.join(pending, "live"), "live");
+    fs.mkdirSync(retiredA);
+    fs.mkdirSync(retiredB);
+    fs.writeFileSync(path.join(retiredA, "candidate.json"), "sensitive");
+    fs.writeFileSync(path.join(retiredB, "candidate.json"), "sensitive");
+
+    expect(cleanupRetiredWorkflowReconciliationBundles(root)).toBe(2);
+    expect(fs.readFileSync(path.join(pending, "live"), "utf8")).toBe("live");
+    expect(fs.existsSync(retiredA)).toBe(false);
+    expect(fs.existsSync(retiredB)).toBe(false);
+  });
+
+  test("fails closed for unsafe or partially removable retired bundles", () => {
+    const unsafeRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "moira-reconciliation-retired-unsafe-"),
+    );
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "moira-reconciliation-retired-outside-"));
+    roots.push(unsafeRoot, outside);
+    fs.writeFileSync(path.join(outside, "kept"), "outside");
+    fs.symlinkSync(outside, path.join(unsafeRoot, ".applied-00000000-0000-4000-8000-000000000001"));
+    expect(() => cleanupRetiredWorkflowReconciliationBundles(unsafeRoot)).toThrow(
+      "Unsafe retired reconciliation bundle",
+    );
+    expect(fs.readFileSync(path.join(outside, "kept"), "utf8")).toBe("outside");
+
+    const partialRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "moira-reconciliation-retired-partial-"),
+    );
+    roots.push(partialRoot);
+    const first = path.join(partialRoot, ".applied-00000000-0000-4000-8000-000000000001");
+    const second = path.join(partialRoot, ".applied-00000000-0000-4000-8000-000000000002");
+    fs.mkdirSync(first);
+    fs.mkdirSync(second);
+    let calls = 0;
+    expect(() =>
+      cleanupRetiredWorkflowReconciliationBundles(partialRoot, {
+        remove: (target, options) => {
+          calls += 1;
+          if (calls === 2) throw new Error("cleanup interrupted");
+          fs.rmSync(target, options);
+        },
+      }),
+    ).toThrow("cleanup interrupted");
+    expect(fs.existsSync(first)).toBe(false);
+    expect(fs.existsSync(second)).toBe(true);
+  });
+
   test("does not expose or retain a partial bundle when final publication is interrupted", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "moira-reconciliation-publish-fault-"));
     roots.push(root);

@@ -260,8 +260,9 @@ docker compose ps
 Когда обнаружение конфликта создало локальный bundle в `data/.moira-reconciliation/pending`,
 выполните его `AGENT INSTRUCTIONS` через одноразовые Compose CLI-контейнеры. Сам CLI не останавливает
 и не перезапускает сервисы и не подменяет snapshot базы. Он использует только локальные файлы — без
-`--force`, MCP, HTTP API и UI-транспорта. По логу текущего образа определите, остаётся ли контейнер
-доступным или его нужно снова запустить после recovery.
+`--force`, MCP, HTTP API и UI-транспорта. Инициализация завершается fail-closed: после восстановления
+БД контейнер останавливается, а MCP, API и nginx остаются недоступны. После применения bundle
+финальная команда `docker compose up -d` запускает остановленный контейнер обычным способом.
 
 ```bash
 docker compose run --rm moira npm run reconcile -- status

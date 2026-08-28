@@ -46,13 +46,10 @@ resolution or catalog run that changes either input makes the older plan stale b
 ```bash
 # Default: three-way reconciliation
 npx tsx scripts/migrate-workflows-in-docker.ts
-
-# Explicitly discard local changes (destructive)
-npx tsx scripts/migrate-workflows-in-docker.ts --force
-
-# After reviewing/merging the three candidates, accept the current database graph
-npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current
 ```
+
+`--force` is an exceptional destructive maintenance option that discards local changes. It is not
+part of conflict recovery and must not be added to agent instructions or the sequence below.
 
 The three states are the previous bundled baseline, the current database row, and the incoming
 catalog entry. Presence, soft deletion, hard absence, and graph content all participate in the
@@ -68,17 +65,27 @@ comparison:
 - an invalid semantic version or graph fails catalog-wide preflight before any workflow, baseline,
   or conflict record is written.
 
-Self-host startup remains available in the unresolved state so an administrator or agent can run
-Workflow Management Flow (WMF). `GET /api/health`, `GET /api/health/status`, administrator stats,
-MCP server instructions, MCP health, and the MCP `reconciliation` tool expose the same error code,
-identity, classification, candidate references, and recovery instruction. Public health and ordinary
-MCP users never receive workflow graphs. Their status paths query only conflict metadata and
-candidate references rather than loading the retained graph bodies. Administrator dashboard health
-uses the same lightweight summary; an administrator can use `reconciliation` action `status` or
-`get` when full candidate content is needed, and `resolve` is also administrator-only. A merged graph
-must be submitted with its visibility. The error clears only through this explicit resolution, which
-records the incoming source as the new baseline so the merged database graph remains an intentional
-local delta.
+Self-host startup fails closed in the unresolved state. The startup guard restores the coherent
+database and prompt manifest, retains `data/.moira-reconciliation/pending`, and keeps MCP, API, and
+nginx unavailable by stopping the container after restoration. An administrator or agent reads the
+local previous/current/incoming files and uses only the local Compose CLI:
+
+```bash
+docker compose run --rm moira npm run reconcile -- status
+docker compose run --rm moira npm run reconcile -- diff --reference owner/slug
+docker compose run --rm moira npm run reconcile -- get \
+  --reference owner/slug --candidate previous
+docker compose run --rm moira npm run reconcile -- choose \
+  --reference owner/slug --selection current --revision REVISION \
+  --rationale "Retain the reviewed local intent"
+docker compose run --rm moira npm run reconcile -- apply
+docker compose up -d
+```
+
+For a merged result, start from incoming, reapply only still-valid local intent, run `reconcile
+validate --file FILE`, and use `choose --selection merged --file FILE` with the inspected revision
+and rationale. The error clears only through complete atomic apply, which records the incoming source
+as the new baseline so the merged database graph remains an intentional local delta.
 The selected candidate and whether a merged graph was supplied are stored in the audit log in the
 same transaction as the baseline update and conflict clear.
 Resolution also compares both the live workflow and the durable conflict revision with the evidence
@@ -86,8 +93,8 @@ read before validation. The revision covers the conflict identity, classificatio
 candidates, and recovery instruction. If the workflow changes, another administrator resolves the
 conflict, or catalog reconciliation replaces its evidence, resolution returns
 `MANAGED_WORKFLOW_RECONCILIATION_STALE` without changing the workflow, baseline, current conflict, or
-audit log. Run catalog reconciliation again to capture the new current state, then repeat the
-semantic WMF merge against the refreshed candidates.
+audit log. Do not reuse the stale bundle or decision: run `docker compose up -d` to capture a fresh
+bundle, then repeat local `status`, candidate inspection, revision-bound `choose`, and `apply`.
 For a conflict captured while `previousSlugs` migrates an identity, the retained evidence includes
 the matched workflow ID, its actual database slug, and the previous managed slug. Resolution checks
 both old and new aliases and writes the accepted present/deleted state under the current catalog slug;
@@ -104,8 +111,8 @@ Process:
 4. Classifies the union of incoming identities and stored managed baselines, including declared
    `previousSlugs` and catalog removals
 5. Reads active, soft-deleted, and hard-absent current states and validates every selected graph
-6. Stops workflow/baseline writes when any identity conflicts; self-host persists only conflict
-   evidence, while SaaS exits non-zero
+6. Stops workflow/baseline writes when any identity conflicts and exits non-zero; self-host also
+   publishes the local recovery bundle before the guard restores the database
 7. Verifies captured workflow and baseline inputs, then applies a conflict-free immutable plan and
    all baseline changes in one transaction
 

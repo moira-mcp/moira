@@ -216,6 +216,7 @@ export {
   readWorkflowReconciliationBundleApplied,
   isWorkflowReconciliationBundleApplied,
   applyWorkflowReconciliationBundle,
+  cleanupRetiredWorkflowReconciliationBundles,
   workflowReconciliationAgentInstructions,
   withWorkflowReconciliationBundleLock,
   type WorkflowReconciliationBundleManifest,

@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeSync,
@@ -98,6 +99,8 @@ export interface WorkflowReconciliationAppliedMarker {
 }
 
 const pendingPath = (root: string): string => path.join(root, "pending");
+const RETIRED_BUNDLE_PATTERN =
+  /^\.applied-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function sha256(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
@@ -533,6 +536,30 @@ export function finalizeWorkflowReconciliationBundle(
       warning: `Database reconciliation committed; retired bundle cleanup remains at ${retired}: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+export function cleanupRetiredWorkflowReconciliationBundles(
+  root: string,
+  operations: { remove?: typeof rmSync } = {},
+): number {
+  if (!existsSync(root)) return 0;
+  ensureSafeDirectory(root);
+  let removed = 0;
+  for (const name of readdirSync(root)
+    .filter((entry) => entry.startsWith(".applied-"))
+    .sort()) {
+    const retired = path.join(root, name);
+    const stat = lstatSync(retired);
+    if (!RETIRED_BUNDLE_PATTERN.test(name) || !stat.isDirectory() || stat.isSymbolicLink()) {
+      return bundleError("stale", `Unsafe retired reconciliation bundle: ${retired}`);
+    }
+    (operations.remove ?? rmSync)(retired, { recursive: true });
+    if (existsSync(retired)) {
+      return bundleError("stale", `Retired reconciliation bundle was not removed: ${retired}`);
+    }
+    removed += 1;
+  }
+  return removed;
 }
 
 export function markWorkflowReconciliationBundleApplied(

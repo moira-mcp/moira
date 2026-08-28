@@ -45,15 +45,22 @@ conflict-set digest, and every revision still match. The staged artifact never t
 replaces the database snapshot.
 
 Self-host recovery persists a separate `data/.moira-reconciliation/pending` directory before the
-startup guard restores the coherent database. Candidate files and the manifest are immutable. CLI
-`choose` atomically accumulates revision-bound decisions only in `decisions.json`; it never mutates
+startup guard restores the coherent database. Initialization then stops the container successfully,
+preventing both service exposure and an automatic restart loop; the bounded Compose restart policy
+still retries unexpected nonzero container crashes. Candidate files and the manifest are immutable.
+The guard renders reconciliation instructions only when its current child initialization created
+the attempt-scoped reconciliation marker after publishing the bundle; entrypoint/guard startup clears
+that marker, and direct migration invocations never create it, so a hard failure cannot inherit
+classification from an older pending bundle.
+CLI `choose` atomically accumulates revision-bound decisions only in `decisions.json`; it never mutates
 SQLite. CLI `apply` requires a decision for the complete conflict set, recomputes the actual bundled
 catalog against the restored database and applies one transaction. After commit it atomically
 retires the pending directory and cleans it best-effort. A retirement/cleanup warning describes a
 committed database with pending or retired local cleanup; it never claims rollback. Before retirement
 the CLI persists `applied.json` with the committed artifact digest, so a repeated apply performs only
-idempotent cleanup and never replays the semantic decision. The next startup may also finish that
-cleanup. No HTTP, MCP, UI, or token transport participates in this image-upgrade recovery path.
+idempotent cleanup and never replays the semantic decision. A plain subsequent
+`docker compose up -d` starts the stopped container and may also finish that cleanup. No HTTP, MCP,
+UI, or token transport participates in this image-upgrade recovery path.
 
 ### List Query Builder
 
