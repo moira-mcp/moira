@@ -13,11 +13,31 @@ function graph(): WorkflowGraph {
     variableRegistry: {
       unit: { type: "number", description: "Current unit", default: 2 },
       total: { type: "number", description: "Total units", default: 5 },
+      plan_revision: { type: "number", description: "Current plan revision", default: 1 },
+      plan_units: { type: "string", description: "Current plan unit titles", default: "Core, UI" },
+      activity: { type: "string", description: "Current activity", default: "Implement API" },
+      mode: { type: "string", description: "Execution mode", default: "Autonomous" },
+      attention: { type: "string", description: "Attention state", default: "Not required" },
+      overflow: { type: "string", description: "Resolved-bound test value", default: "safe" },
     },
     progress: {
       title: "Development · unit {{unit}} of {{total}}",
+      goal: "Deliver a content-rich progress map",
+      facts: [
+        { label: "Mode", value: "{{mode}}" },
+        { label: "Attention", value: "{{attention}}", tone: "positive" },
+      ],
       nodes: [
-        { id: "implementation", label: "Implementation", connections: { default: "review" } },
+        {
+          id: "implementation",
+          label: "Implementation",
+          content: {
+            summary: "Plan r{{plan_revision}}",
+            details: ["{{plan_units}}"],
+            next: "Review",
+          },
+          connections: { default: "review" },
+        },
         { id: "review", label: "Review {{unit}}", connections: { default: "repair" } },
         { id: "repair", label: "Repair", connections: { default: "review" } },
       ],
@@ -28,6 +48,7 @@ function graph(): WorkflowGraph {
         id: "implement",
         type: "agent-directive",
         progressNodeId: "implementation",
+        progressActiveContent: { summary: "{{activity}}", outcome: "Unit {{unit}}/{{total}}" },
         directive: "Implement",
         completionCondition: "Done",
         connections: { success: "review-one" },
@@ -74,6 +95,7 @@ function execution(
     revision: 7,
     createdAt: 1,
     updatedAt: 1,
+    note: "Implement rich execution progress without hiding essential information",
   };
 }
 
@@ -81,7 +103,13 @@ describe("execution progress projection", () => {
   test("renders templates and derives index state without following backward edges", () => {
     const projected = projectExecutionProgress(graph(), execution("review-two", "running"));
     expect(projected).toMatchObject({
+      taskTitle: "Implement rich execution progress without hiding essential information",
       title: "Development · unit 2 of 5",
+      goal: "Deliver a content-rich progress map",
+      facts: [
+        { label: "Mode", value: "Autonomous", tone: "neutral" },
+        { label: "Attention", value: "Not required", tone: "positive" },
+      ],
       activeNodeId: "review",
       workflowVersion: "1.0.0",
       executionRevision: 7,
@@ -98,11 +126,96 @@ describe("execution progress projection", () => {
     expect(projected?.nodes[0].focusNodeId).toBe("implement");
   });
 
+  test("projects persistent milestone content and exact active content without retaining an old revision", () => {
+    const first = execution("implement", "running");
+    first.globalContext.variables = {
+      unit: 1,
+      total: 3,
+      plan_revision: 1,
+      plan_units: "Core, UI, Docs",
+      activity: "Implement core",
+      mode: "Autonomous",
+      attention: "Not required",
+    };
+    expect(projectExecutionProgress(graph(), first)?.nodes[0].content).toEqual({
+      summary: "Implement core",
+      details: ["Core, UI, Docs"],
+      outcome: "Unit 1/3",
+      next: "Review",
+    });
+
+    const replanned = structuredClone(first);
+    replanned.globalContext.variables = {
+      ...replanned.globalContext.variables,
+      unit: 1,
+      total: 2,
+      plan_revision: 2,
+      plan_units: "Core v2, UI v2",
+      activity: "Implement revised core",
+    };
+    const projected = projectExecutionProgress(graph(), replanned);
+    expect(projected?.nodes[0].content).toEqual({
+      summary: "Implement revised core",
+      details: ["Core v2, UI v2"],
+      outcome: "Unit 1/2",
+      next: "Review",
+    });
+    expect(JSON.stringify(projected)).not.toContain("Docs");
+    expect(JSON.stringify(projected)).not.toContain("Implement core");
+  });
+
+  test("omits stale outcome from pending milestones while retaining pending guidance", () => {
+    const workflow = graph();
+    workflow.progress!.nodes[2].content = {
+      summary: "Repair a confirmed finding",
+      details: ["Use current evidence"],
+      outcome: "Repair from an earlier revision completed",
+      next: "Return to review",
+    };
+
+    expect(
+      projectExecutionProgress(workflow, execution("implement", "running"))?.nodes[2].content,
+    ).toEqual({
+      summary: "Repair a confirmed finding",
+      details: ["Use current evidence"],
+      outcome: null,
+      next: "Return to review",
+    });
+  });
+
+  test("keeps template syntax inside structured progress data inert", () => {
+    const source = execution("implement", "running");
+    source.globalContext.variables = {
+      ...source.globalContext.variables,
+      activity: "leak={{context.variables}}",
+      secret: "TOPSECRET",
+    };
+    const summary = projectExecutionProgress(graph(), source)?.nodes[0].content.summary;
+    expect(summary).toBe("leak={{context.variables}}");
+    expect(summary).not.toContain("TOPSECRET");
+  });
+
   test("renders registry defaults before the start node has seeded execution context", () => {
     const source = execution("implement", "running");
     source.globalContext.variables = {};
 
     expect(projectExecutionProgress(graph(), source)?.title).toBe("Development · unit 2 of 5");
+  });
+
+  test("falls back to the workflow progress title when an execution has no note", () => {
+    const source = execution("implement", "running");
+    source.note = null;
+    expect(projectExecutionProgress(graph(), source)?.taskTitle).toBe("Development · unit 2 of 5");
+  });
+
+  test("falls back to the workflow name when note and rendered progress title are empty", () => {
+    const workflow = graph();
+    workflow.progress!.title = "{{activity}}";
+    const source = execution("implement", "running");
+    source.note = null;
+    source.globalContext.variables = { ...source.globalContext.variables, activity: "" };
+    expect(projectExecutionProgress(workflow, source)?.taskTitle).toBe("Progress");
+    expect(projectExecutionProgress(workflow, source)?.title).toBeNull();
   });
 
   test("backward activation reopens later stages without mutating execution", () => {
@@ -146,6 +259,41 @@ describe("execution progress projection", () => {
     ).toEqual(["completed", "current", "pending"]);
   });
 
+  test("uses the last mapped waiting responsibility as the terminal completion frontier", () => {
+    const workflow = graph();
+    workflow.nodes.splice(-1, 0, {
+      id: "finalize",
+      type: "agent-directive",
+      progressNodeId: "repair",
+      directive: "Finalize",
+      completionCondition: "Done",
+      connections: { success: "end" },
+    });
+    const normal = execution(null, "completed");
+    normal.waitingForInputNodeId = "finalize";
+    expect(projectExecutionProgress(workflow, normal)?.nodes.map((node) => node.state)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+    ]);
+    expect(projectExecutionProgress(workflow, normal)?.activeNodeId).toBeNull();
+
+    const stoppedEarly = execution(null, "completed");
+    stoppedEarly.waitingForInputNodeId = "implement";
+    expect(
+      projectExecutionProgress(workflow, stoppedEarly)?.nodes.map((node) => node.state),
+    ).toEqual(["completed", "pending", "pending"]);
+    expect(projectExecutionProgress(workflow, stoppedEarly)?.activeNodeId).toBeNull();
+
+    const legacy = execution(null, "completed");
+    legacy.waitingForInputNodeId = "unmapped-legacy-node";
+    expect(projectExecutionProgress(workflow, legacy)?.nodes.map((node) => node.state)).toEqual([
+      "completed",
+      "completed",
+      "completed",
+    ]);
+  });
+
   test("validates static graph references, visible mappings and progress templates", async () => {
     const validator = new GraphValidator();
     expect((await validator.validateWorkflow(graph())).valid).toBe(true);
@@ -171,6 +319,23 @@ describe("execution progress projection", () => {
     result = await validator.validateWorkflow(invalid);
     expect(result.errors.map((error) => error.message)).toContain(
       "Node 'implement' must declare progressNodeId when progressActiveLabel is set.",
+    );
+  });
+
+  test("validates nested progress content templates and active-content scope", async () => {
+    const validator = new GraphValidator();
+    const invalid = graph();
+    invalid.progress!.nodes[0].content!.details = ["{{missing}}"];
+    invalid.nodes[1].progressActiveContent = { summary: "{{also_missing}}" };
+    let result = await validator.validateWorkflow(invalid);
+    expect(result.errors.map((error) => error.message).join(" ")).toContain("missing");
+
+    invalid.progress!.nodes[0].content!.details = ["{{plan_units}}"];
+    invalid.nodes[1].progressActiveContent = { summary: "{{activity}}" };
+    delete invalid.nodes[1].progressNodeId;
+    result = await validator.validateWorkflow(invalid);
+    expect(result.errors.map((error) => error.message)).toContain(
+      "Node 'implement' must declare progressNodeId when progressActiveContent is set.",
     );
   });
 
@@ -310,5 +475,99 @@ describe("execution progress projection", () => {
 
     workflow.progress!.nodes = [{ id: "stage-0", label: "x".repeat(201) }];
     expect((await new GraphValidator().validateWorkflow(workflow)).valid).toBe(false);
+  });
+
+  test.each<[string, (workflow: WorkflowGraph) => void]>([
+    ["goal length", (workflow) => (workflow.progress!.goal = "x".repeat(1001))],
+    [
+      "fact count",
+      (workflow) =>
+        (workflow.progress!.facts = Array.from({ length: 9 }, () => ({
+          label: "Fact",
+          value: "Value",
+        }))),
+    ],
+    ["fact label length", (workflow) => (workflow.progress!.facts![0].label = "x".repeat(101))],
+    ["fact value length", (workflow) => (workflow.progress!.facts![0].value = "x".repeat(501))],
+    [
+      "detail count",
+      (workflow) =>
+        (workflow.progress!.nodes[0].content!.details = Array.from({ length: 13 }, () => "detail")),
+    ],
+    [
+      "detail length",
+      (workflow) => (workflow.progress!.nodes[0].content!.details = ["x".repeat(501)]),
+    ],
+    [
+      "summary length",
+      (workflow) => (workflow.progress!.nodes[0].content!.summary = "x".repeat(1001)),
+    ],
+    [
+      "outcome length",
+      (workflow) => (workflow.progress!.nodes[0].content!.outcome = "x".repeat(1001)),
+    ],
+    ["next length", (workflow) => (workflow.progress!.nodes[0].content!.next = "x".repeat(501))],
+    [
+      "active-content length",
+      (workflow) => (workflow.nodes[1].progressActiveContent = { summary: "x".repeat(1001) }),
+    ],
+  ])("rejects an unsafe structured progress %s", async (_name, mutate) => {
+    const workflow = graph();
+    mutate(workflow);
+    expect((await new GraphValidator().validateWorkflow(workflow)).valid).toBe(false);
+  });
+
+  test.each<
+    [string, number, (workflow: WorkflowGraph, source: WorkflowExecution, variable: string) => void]
+  >([
+    ["taskTitle", 500, (_workflow, source, variable) => (source.note = variable)],
+    ["title", 200, (workflow, _source, _variable) => (workflow.progress!.title = "{{overflow}}")],
+    ["goal", 1000, (workflow, _source, _variable) => (workflow.progress!.goal = "{{overflow}}")],
+    [
+      "fact label",
+      100,
+      (workflow, _source, _variable) => (workflow.progress!.facts![0].label = "{{overflow}}"),
+    ],
+    [
+      "fact value",
+      500,
+      (workflow, _source, _variable) => (workflow.progress!.facts![0].value = "{{overflow}}"),
+    ],
+    [
+      "node label",
+      200,
+      (workflow, _source, _variable) => (workflow.progress!.nodes[0].label = "{{overflow}}"),
+    ],
+    [
+      "summary",
+      1000,
+      (workflow, _source, _variable) =>
+        (workflow.nodes[1].progressActiveContent = { summary: "{{overflow}}" }),
+    ],
+    [
+      "detail",
+      500,
+      (workflow, _source, _variable) =>
+        (workflow.nodes[1].progressActiveContent = { details: ["{{overflow}}"] }),
+    ],
+    [
+      "outcome",
+      1000,
+      (workflow, _source, _variable) =>
+        (workflow.nodes[1].progressActiveContent = { outcome: "{{overflow}}" }),
+    ],
+    [
+      "next",
+      500,
+      (workflow, _source, _variable) =>
+        (workflow.nodes[1].progressActiveContent = { next: "{{overflow}}" }),
+    ],
+  ])("rejects oversized resolved %s without truncating it", (_field, limit, configure) => {
+    const workflow = graph();
+    const source = execution("implement", "running");
+    const variable = "x".repeat(limit + 1);
+    source.globalContext.variables = { ...source.globalContext.variables, overflow: variable };
+    configure(workflow, source, variable);
+    expect(() => projectExecutionProgress(workflow, source)).toThrow(/after template resolution/);
   });
 });

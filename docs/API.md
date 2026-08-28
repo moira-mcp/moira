@@ -211,19 +211,28 @@ Authentication: Required
 ### Execution progress
 
 `GET /api/executions/:id/progress` returns the workflow's read-only user-facing progress projection
-for the execution owner or an administrator. It contains the rendered title, active progress node,
-ordered `completed|current|pending` nodes, static display connections, deterministic primary-node
-focus targets, workflow version, execution revision and diagnostics.
+for the execution owner or an administrator. It contains the execution-note `taskTitle`, rendered
+workflow title and goal, bounded generic facts, active progress node, ordered
+`completed|current|pending` nodes with rendered structured content, static display connections,
+deterministic primary-node focus targets, workflow version, execution revision and diagnostics.
 
 Progress is derived from the current primary node's `progressNodeId` and never changes execution
-state. Real graph completion is `status=completed` with `currentNodeId=null`; cancellation retains
-its earlier node and therefore its index-derived last-known progress state.
+state. With `status=completed` and `currentNodeId=null`, the last persisted mapped
+`waitingForInputNodeId` bounds the terminal completion frontier; later milestones stay pending after
+an early stopped terminal. Older records without a usable mapped frontier retain the all-completed
+fallback. Pending milestones suppress `content.outcome` while retaining summary, details, and next
+guidance, preventing a result from an earlier revision or unit from appearing current.
 
 Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
 workflow/execution-level image API. It returns `null` for a workflow without progress and otherwise
 returns the PNG buffer, `image/png`, dimensions, workflow version, and execution revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active
 milestone's returned label; inactive labels remain the static definition.
+`progressActiveContent` applies the same active-only rule to `summary`, `details`, `outcome`, and
+`next`; omitted active fields retain the milestone's base content. The response is derived afresh
+from the current execution context and does not accumulate values from older revisions. Limits are
+enforced again after template interpolation; an oversized resolved value fails projection instead
+of being silently truncated.
 
 `POST /api/executions/:id/progress-image-token` mints an owner-only, five-minute, single-use PNG
 grant with `downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision`. The optional body accepts
@@ -232,6 +241,11 @@ grant with `downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision`. The 
 execution revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
 foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the
 reservation; successful response completion consumes it.
+
+The Web UI and PNG adapters consume the same wrapped visual model. Both expose the complete task,
+goal, facts and ordered milestone content; no essential field is available only through hover or
+another interactive control. Valid bounded content is wrapped into deterministic rows and is not
+truncated.
 
 Authentication: Required
 

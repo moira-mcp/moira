@@ -60,6 +60,8 @@ export interface BaseNode {
   progressNodeId?: string;
   /** Template-enabled label used only while this exact primary node is current. */
   progressActiveLabel?: string;
+  /** Template-enabled presentation merged into the active progress milestone. */
+  progressActiveContent?: ProgressContentTemplate;
   metadata?: {
     displayName?: string;
     description?: string;
@@ -72,6 +74,15 @@ export interface BaseNode {
   timeout?: number;
   connections?: Record<string, string>; // outputPath -> nextNodeId
 }
+
+export interface ProgressContentTemplate {
+  summary?: string;
+  details?: string[];
+  outcome?: string;
+  next?: string;
+}
+
+export type ProgressFactTone = "neutral" | "positive" | "warning" | "critical";
 
 // Workflow execution instance
 export interface WorkflowExecution {

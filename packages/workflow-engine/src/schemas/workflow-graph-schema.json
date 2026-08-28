@@ -173,6 +173,12 @@
       "additionalProperties": false,
       "properties": {
         "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "goal": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "facts": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/progressFact" }
+        },
         "nodes": {
           "type": "array",
           "minItems": 1,
@@ -184,6 +190,7 @@
             "properties": {
               "id": { "type": "string", "minLength": 1 },
               "label": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "content": { "$ref": "#/$defs/progressContent" },
               "connections": {
                 "type": "object",
                 "additionalProperties": false,
@@ -209,6 +216,38 @@
       "minLength": 1,
       "maxLength": 200,
       "description": "Template-enabled milestone label rendered only while this exact primary node is current"
+    },
+    "progressContent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "details": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        },
+        "outcome": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "next": { "type": "string", "minLength": 1, "maxLength": 500 }
+      },
+      "minProperties": 1
+    },
+    "progressFact": {
+      "type": "object",
+      "required": ["label", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "tone": {
+          "type": "string",
+          "enum": ["neutral", "positive", "warning", "critical"]
+        }
+      }
+    },
+    "progressActiveContent": {
+      "allOf": [{ "$ref": "#/$defs/progressContent" }],
+      "description": "Template-enabled presentation merged into the active milestone while this exact primary node is current"
     },
     "startNode": {
       "type": "object",
@@ -292,6 +331,7 @@
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "directive": {
           "type": "string",
           "minLength": 1
@@ -380,6 +420,7 @@
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "graphId": {
           "type": "string",
           "minLength": 1,
@@ -773,6 +814,7 @@
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "directive": {
           "type": "string",
           "minLength": 1
@@ -824,6 +866,7 @@
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "reason": {
           "type": "string",
           "minLength": 1,
@@ -855,6 +898,7 @@
         "id": { "type": "string", "minLength": 1 },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "basePath": { "type": "string", "minLength": 1 },
         "files": {
           "type": "array",

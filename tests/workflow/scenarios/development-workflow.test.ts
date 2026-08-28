@@ -14,7 +14,12 @@ import {
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
-import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
+import {
+  runScenario as runScenarioBase,
+  type MockInput,
+  type MockInputContext,
+  type TestScenario,
+} from "../../helpers/scenario-runner.js";
 
 const COVERAGE_ARTIFACTS_DIR = path.join(process.cwd(), "test-results/artifacts/coverage");
 
@@ -107,6 +112,57 @@ function ordinaryInputs(): Record<string, MockInput> {
         "Repository facts invalidate the approved plan; preserve completed outcomes",
     },
   };
+}
+
+function progressOutputsFor(workflow: WorkflowGraph, nodeId: string): Record<string, string> {
+  const node = workflow.nodes.find((candidate) => candidate.id === nodeId);
+  const globals = node?.inputSchema?.globalInputs ?? [];
+  return Object.fromEntries(
+    globals
+      .filter((name) => name.startsWith("progress_"))
+      .map((name) => {
+        if (nodeId === "activate-reviewed-plan" && name === "progress_plan_outcome") {
+          return [name, "Plan r1: 1 executable unit — implement and verify the requested change"];
+        }
+        if (nodeId === "review-unit-completeness" && name === "progress_checkpoint_outcome") {
+          return [name, "Checkpoint is not applicable without local commit authority"];
+        }
+        return [name, `${node?.progressNodeId ?? "workflow"}: ${nodeId} completed`];
+      }),
+  );
+}
+
+function addProgressOutputs(workflow: WorkflowGraph, nodeId: string, input: MockInput): MockInput {
+  if (Array.isArray(input)) {
+    return input.map((item) => ({ ...progressOutputsFor(workflow, nodeId), ...item }));
+  }
+  if (typeof input === "function") {
+    return (context: MockInputContext) => ({
+      ...progressOutputsFor(workflow, nodeId),
+      ...input(context),
+    });
+  }
+  return { ...progressOutputsFor(workflow, nodeId), ...input };
+}
+
+async function runScenario(
+  workflow: WorkflowGraph,
+  scenario: TestScenario,
+  options?: Parameters<typeof runScenarioBase>[2],
+): ReturnType<typeof runScenarioBase> {
+  return runScenarioBase(
+    workflow,
+    {
+      ...scenario,
+      mockInputs: Object.fromEntries(
+        Object.entries(scenario.mockInputs).map(([nodeId, input]) => [
+          nodeId,
+          addProgressOutputs(workflow, nodeId, input),
+        ]),
+      ),
+    },
+    options,
+  );
 }
 
 function flow(
@@ -916,7 +972,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v15.3", () => {
+describe("software-development-flow v15.4", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -927,7 +983,7 @@ describe("software-development-flow v15.3", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("15.3.0");
+    expect(workflow.metadata.version).toBe("15.4.0");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -946,6 +1002,13 @@ describe("software-development-flow v15.3", () => {
       "previous_iteration",
       "product_review_iteration",
       "visual_validation_preference",
+      "progress_intake_outcome",
+      "progress_plan_outcome",
+      "progress_implementation_outcome",
+      "progress_tests_outcome",
+      "progress_review_outcome",
+      "progress_checkpoint_outcome",
+      "progress_finalize_outcome",
     ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     expect(workflow.variableRegistry?.visual_validation_preference?.enum).toEqual([
@@ -955,14 +1018,50 @@ describe("software-development-flow v15.3", () => {
     ]);
     expect(workflow.progress).toEqual({
       title: "Software Development · plan r{{plan_revision}}",
+      goal: "Deliver one complete repository change with its tests, permanent documentation, review, and truthful local closure.",
+      facts: [{ label: "Plan", value: "r{{plan_revision}}", tone: "neutral" }],
       nodes: [
-        { id: "intake", label: "Intake", connections: { default: "plan" } },
-        { id: "plan", label: "Plan", connections: { default: "implement" } },
-        { id: "implement", label: "Implement", connections: { default: "tests" } },
-        { id: "tests", label: "Tests", connections: { default: "review" } },
-        { id: "review", label: "Review", connections: { default: "checkpoint" } },
-        { id: "checkpoint", label: "Checkpoint", connections: { default: "implement" } },
-        { id: "finalize", label: "Finalize" },
+        expect.objectContaining({
+          id: "intake",
+          label: "Intake",
+          content: expect.objectContaining({ outcome: "{{progress_intake_outcome}}" }),
+          connections: { default: "plan" },
+        }),
+        expect.objectContaining({
+          id: "plan",
+          label: "Plan",
+          content: expect.objectContaining({ outcome: "{{progress_plan_outcome}}" }),
+          connections: { default: "implement" },
+        }),
+        expect.objectContaining({
+          id: "implement",
+          label: "Implement",
+          content: expect.objectContaining({ outcome: "{{progress_implementation_outcome}}" }),
+          connections: { default: "tests" },
+        }),
+        expect.objectContaining({
+          id: "tests",
+          label: "Tests",
+          content: expect.objectContaining({ outcome: "{{progress_tests_outcome}}" }),
+          connections: { default: "review" },
+        }),
+        expect.objectContaining({
+          id: "review",
+          label: "Review",
+          content: expect.objectContaining({ outcome: "{{progress_review_outcome}}" }),
+          connections: { default: "checkpoint" },
+        }),
+        expect.objectContaining({
+          id: "checkpoint",
+          label: "Checkpoint",
+          content: expect.objectContaining({ outcome: "{{progress_checkpoint_outcome}}" }),
+          connections: { default: "implement" },
+        }),
+        expect.objectContaining({
+          id: "finalize",
+          label: "Finalize",
+          content: expect.objectContaining({ outcome: "{{progress_finalize_outcome}}" }),
+        }),
       ],
     });
     const visibleWaitingTypes = new Set([
@@ -975,6 +1074,27 @@ describe("software-development-flow v15.3", () => {
     const visibleWaitingNodes = workflow.nodes.filter((node) => visibleWaitingTypes.has(node.type));
     expect(visibleWaitingNodes).toHaveLength(54);
     expect(visibleWaitingNodes.filter((node) => !node.progressNodeId)).toEqual([]);
+    expect(visibleWaitingNodes.filter((node) => !node.progressActiveContent)).toEqual([]);
+    const stageOutcome = {
+      intake: "progress_intake_outcome",
+      plan: "progress_plan_outcome",
+      implement: "progress_implementation_outcome",
+      tests: "progress_tests_outcome",
+      review: "progress_review_outcome",
+      checkpoint: "progress_checkpoint_outcome",
+      finalize: "progress_finalize_outcome",
+    } as const;
+    for (const node of visibleWaitingNodes.filter(
+      (candidate) => candidate.type === "agent-directive" || candidate.type === "teleport",
+    )) {
+      const expectedOutcome = stageOutcome[node.progressNodeId as keyof typeof stageOutcome];
+      expect(node.inputSchema?.globalInputs).toContain(expectedOutcome);
+      expect(node.inputSchema?.required).toContain(expectedOutcome);
+    }
+    expect(
+      workflow.nodes.find((node) => node.id === "review-unit-completeness")?.inputSchema
+        ?.globalInputs,
+    ).toContain("progress_checkpoint_outcome");
     expect(
       workflow.nodes
         .filter((node) => node.type === "telegram-notification" && node.attachProgressImage)
@@ -993,7 +1113,7 @@ describe("software-development-flow v15.3", () => {
     const approval = workflow.nodes.find((node) => node.id === "approve-plan") as {
       inputSchema: { globalInputs?: string[]; properties: Record<string, unknown> };
     };
-    expect(approval.inputSchema.globalInputs).toBeUndefined();
+    expect(approval.inputSchema.globalInputs).toEqual(["progress_plan_outcome"]);
     expect(Object.keys(approval.inputSchema.properties)).toEqual([
       "plan_approval",
       "user_feedback",
@@ -1005,7 +1125,12 @@ describe("software-development-flow v15.3", () => {
       "current_step_index",
       "total_steps",
       "vcs_commits_authorized",
+      "progress_plan_outcome",
     ]);
+    expect(
+      (workflow.nodes.find((node) => node.id === "activate-reviewed-plan") as { directive: string })
+        .directive,
+    ).toContain("exact executable unit count returned in total_steps");
     expect(
       workflow.nodes.find((node) => node.id === "route-plan-activation-mode")?.connections,
     ).toEqual({
@@ -1044,7 +1169,7 @@ describe("software-development-flow v15.3", () => {
       properties: { replan_rationale: { type: string; minLength: number; maxLength: number } };
     };
     expect(teleportSchema.additionalProperties).toBe(false);
-    expect(teleportSchema.required).toEqual(["replan_rationale"]);
+    expect(teleportSchema.required).toEqual(["replan_rationale", "progress_plan_outcome"]);
     expect(teleportSchema.properties.replan_rationale).toEqual({
       type: "string",
       minLength: 1,
@@ -1329,7 +1454,8 @@ describe("software-development-flow v15.3", () => {
     const projectionAt = (
       currentNodeId: string | null,
       status: "running" | "completed" = "running",
-      variables: Record<string, number> = {},
+      variables: Record<string, unknown> = {},
+      waitingForInputNodeId: string | null = currentNodeId,
     ) =>
       projectExecutionProgress(workflow, {
         id: "progress-scenario",
@@ -1337,6 +1463,7 @@ describe("software-development-flow v15.3", () => {
         userId: "scenario-user",
         status,
         currentNodeId,
+        waitingForInputNodeId,
         revision: 7,
         globalContext: {
           variables: {
@@ -1344,6 +1471,14 @@ describe("software-development-flow v15.3", () => {
             current_step_index: 2,
             total_steps: 5,
             current_iteration: 4,
+            progress_intake_outcome: "Task and repository context accepted",
+            progress_plan_outcome:
+              "Plan r3: 5 executable units — API, UI, integration, documentation, release checks",
+            progress_implementation_outcome: "Unit 2 implementation complete",
+            progress_tests_outcome: "Unit 2 focused checks and test review passed",
+            progress_review_outcome: "Unit 2 independent review passed",
+            progress_checkpoint_outcome: "Checkpoint is not applicable without local authority",
+            progress_finalize_outcome: "Final reconciliation pending",
             ...variables,
           },
           nodeStates: {},
@@ -1354,7 +1489,12 @@ describe("software-development-flow v15.3", () => {
       } as unknown as Parameters<typeof projectExecutionProgress>[1]);
 
     const cases = [
-      ["capture-task-and-context", "intake", "Intake"],
+      ["capture-task-and-context", "intake", "Capture task and repository context"],
+      ["materialize-development-standards", "intake", "Prepare development standards"],
+      ["confirm-requirements", "intake", "Confirm requirements"],
+      ["revise-requirements", "intake", "Revise requirements"],
+      ["assess-project-health", "intake", "Assess project health"],
+      ["wait-for-health-state-change", "intake", "Resolve project-health blocker"],
       ["create-plan", "plan", "Plan r3"],
       ["review-plan", "plan", "Review plan r3"],
       ["repair-plan", "plan", "Repair plan r3"],
@@ -1404,12 +1544,7 @@ describe("software-development-flow v15.3", () => {
       ["repair-finalization-repository", "finalize", "Repair finalization"],
       ["repair-user-feedback", "implement", "2/5 i4 · Feedback fix"],
     ] as const;
-    expect(
-      cases
-        .map(([nodeId]) => nodeId)
-        .filter((nodeId) => nodeId !== "capture-task-and-context")
-        .sort(),
-    ).toEqual(
+    expect(cases.map(([nodeId]) => nodeId).sort()).toEqual(
       workflow.nodes
         .filter((node) => node.progressActiveLabel)
         .map((node) => node.id)
@@ -1419,7 +1554,12 @@ describe("software-development-flow v15.3", () => {
       const projected = projectionAt(primaryNodeId);
       expect(projected?.activeNodeId).toBe(activeNodeId);
       expect(projected?.title).toBe("Software Development · plan r3");
+      expect(projected?.goal).toContain("one complete repository change");
+      expect(projected?.facts).toEqual([{ label: "Plan", value: "r3", tone: "neutral" }]);
       expect(projected?.nodes.find((node) => node.id === activeNodeId)?.label).toBe(activeLabel);
+      expect(
+        projected?.nodes.find((node) => node.id === activeNodeId)?.content.outcome,
+      ).toBeTruthy();
       expect(
         projected?.nodes.filter((node) => node.id !== activeNodeId).map((node) => node.label),
       ).toEqual(
@@ -1443,9 +1583,29 @@ describe("software-development-flow v15.3", () => {
     });
     expect(nextUnit?.nodes.find((node) => node.id === "tests")?.label).toBe("3/5 i1 · Checks");
     expect(nextUnit?.nodes.find((node) => node.id === "implement")?.label).toBe("Implement");
-    expect(projectionAt(null, "completed")?.nodes.map((node) => node.state)).toEqual(
+    expect(nextUnit?.nodes.find((node) => node.id === "review")?.content.outcome).toBeNull();
+    expect(
+      projectionAt("prepare-plan-unit-implementation")?.nodes.find((node) => node.id === "plan")
+        ?.content.outcome,
+    ).toContain("5 executable units");
+
+    expect(projectionAt(null, "completed", {}, null)?.nodes.map((node) => node.state)).toEqual(
       Array(7).fill("completed"),
     );
+    expect(
+      projectionAt(null, "completed", {}, "create-final-report")?.nodes.map((node) => node.state),
+    ).toEqual(Array(7).fill("completed"));
+    expect(
+      projectionAt(null, "completed", {}, "review-architecture")?.nodes.map((node) => node.state),
+    ).toEqual([
+      "completed",
+      "completed",
+      "completed",
+      "completed",
+      "completed",
+      "pending",
+      "pending",
+    ]);
   });
 
   test("requires distinguishing evidence and stops recursive meta-validation", () => {

@@ -214,10 +214,16 @@ const baseConfig = {
       user,
       url,
     }: {
-      user: { id: string; email: string };
+      user: { id: string; email?: string };
       url: string;
     }) => {
       assertRealEmailDelivery();
+      if (!user.email) {
+        throw new APIError("BAD_REQUEST", {
+          message: "Email address is required for password reset delivery",
+          code: "EMAIL_REQUIRED",
+        });
+      }
       await sendEmail(user.id, "password_reset", {
         to: user.email,
         subject: "Reset your password - MCP Moira",
@@ -242,10 +248,16 @@ const baseConfig = {
       user,
       url,
     }: {
-      user: { id: string; email: string };
+      user: { id: string; email?: string };
       url: string;
     }) => {
       assertRealEmailDelivery();
+      if (!user.email) {
+        throw new APIError("BAD_REQUEST", {
+          message: "Email address is required for verification delivery",
+          code: "EMAIL_REQUIRED",
+        });
+      }
       // Fix callbackURL to go to /app instead of / (landing page)
       // Better Auth uses callbackURL=/ by default when not specified by client
       let fixedUrl = url;
@@ -516,6 +528,11 @@ const baseConfig = {
 
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      const requestBody =
+        ctx.body && typeof ctx.body === "object"
+          ? (ctx.body as Record<string, unknown>)
+          : undefined;
+      const requestEmail = typeof requestBody?.email === "string" ? requestBody.email : undefined;
       if (EMAIL_DELIVERY_PATHS.has(ctx.path)) {
         assertRealEmailDelivery();
       }
@@ -525,7 +542,7 @@ const baseConfig = {
       if (
         ctx.path === "/sign-up/email" &&
         !getFeatureResolver().isEnabled("openRegistration") &&
-        !isValidLoadTestRequest(ctx.body?.email, ctx.headers)
+        !isValidLoadTestRequest(requestEmail, ctx.headers)
       ) {
         throw new APIError("FORBIDDEN", {
           message: "Open registration is disabled. Contact your administrator for an account.",
@@ -627,7 +644,7 @@ const baseConfig = {
       // Validate legal consent on sign-up (saas only). In self-host registration
       // does not require terms/residency consent.
       if (ctx.path === "/sign-up/email" && getFeatureResolver().isEnabled("legalConsents")) {
-        const { acceptedTermsAt, acceptedNotRussianResidentAt } = ctx.body || {};
+        const { acceptedTermsAt, acceptedNotRussianResidentAt } = requestBody ?? {};
 
         if (!acceptedTermsAt) {
           throw new APIError("BAD_REQUEST", {
@@ -650,7 +667,7 @@ const baseConfig = {
       // there is no verification step, so this resend flow is skipped.
       if (
         ctx.path === "/sign-up/email" &&
-        ctx.body?.email &&
+        requestEmail &&
         getFeatureResolver().isEnabled("emailVerificationGate")
       ) {
         const db = getDatabase();
@@ -660,7 +677,7 @@ const baseConfig = {
             emailVerified: user.emailVerified,
           })
           .from(user)
-          .where(eq(user.email, ctx.body.email))
+          .where(eq(user.email, requestEmail))
           .limit(1);
 
         if (existingUser.length > 0 && !existingUser[0].emailVerified) {
@@ -669,7 +686,7 @@ const baseConfig = {
             message:
               "Email not verified. Please check your inbox or request a new verification email.",
             code: "EMAIL_NOT_VERIFIED_RESEND",
-            cause: { userId: existingUser[0].id, email: ctx.body.email },
+            cause: { userId: existingUser[0].id, email: requestEmail },
           });
         }
       }

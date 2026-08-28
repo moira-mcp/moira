@@ -85,6 +85,8 @@ describe("workflow-tool progress authoring", () => {
       "work",
       "--progress-active-label",
       "Implement {{unit}}/3",
+      "--progress-active-content",
+      '{"summary":"Implement API","next":"Review"}',
     ]);
     run([
       file,
@@ -99,6 +101,7 @@ describe("workflow-tool progress authoring", () => {
     expect(workflow.nodes.find((node: { id: string }) => node.id === "task")).toMatchObject({
       progressNodeId: "work",
       progressActiveLabel: "Implement {{unit}}/3",
+      progressActiveContent: { summary: "Implement API", next: "Review" },
     });
     expect(workflow.nodes.find((node: { id: string }) => node.id === "notify")).toMatchObject({
       progressNodeId: "work",
@@ -106,6 +109,7 @@ describe("workflow-tool progress authoring", () => {
     });
 
     run([file, "update", "task", "--progress-active-label", "none"]);
+    run([file, "update", "task", "--progress-active-content", "none"]);
     run([file, "update", "task", "--progress-node-id", "none"]);
     run([file, "update", "notify", "--attach-progress-image", "false"]);
     workflow = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -114,6 +118,9 @@ describe("workflow-tool progress authoring", () => {
     );
     expect(workflow.nodes.find((node: { id: string }) => node.id === "task")).not.toHaveProperty(
       "progressActiveLabel",
+    );
+    expect(workflow.nodes.find((node: { id: string }) => node.id === "task")).not.toHaveProperty(
+      "progressActiveContent",
     );
     expect(workflow.nodes.find((node: { id: string }) => node.id === "notify")).not.toHaveProperty(
       "attachProgressImage",
@@ -130,5 +137,14 @@ describe("workflow-tool progress authoring", () => {
   test("rejects active labels on transient nodes and without a milestone mapping", () => {
     expect(() => run([file, "update", "start", "--progress-active-label", "Starting"])).toThrow();
     expect(() => run([file, "update", "task", "--progress-active-label", "Implement"])).toThrow();
+  });
+
+  test("rejects active content on transient nodes and without a milestone mapping", () => {
+    expect(() =>
+      run([file, "update", "start", "--progress-active-content", '{"summary":"Starting"}']),
+    ).toThrow();
+    expect(() =>
+      run([file, "update", "task", "--progress-active-content", '{"summary":"Work"}']),
+    ).toThrow();
   });
 });

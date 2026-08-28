@@ -65,6 +65,7 @@ describe("workflow schema renderer", () => {
         type: "agent-directive",
         progressNodeId: "implementation",
         progressActiveLabel: "Implement {{unit}}/{{total}}",
+        progressActiveContent: { summary: "Implement API", next: "Review" },
         directive: "Work",
         completionCondition: "Done",
         connections: { success: "review-one" },
@@ -89,10 +90,13 @@ describe("workflow schema renderer", () => {
     ]);
     workflow.progress = {
       title: "Development {{mode}}",
+      goal: "Deliver the requested change",
+      facts: [{ label: "Mode", value: "{{mode}}", tone: "positive" }],
       nodes: [
         {
           id: "implementation",
           label: "Implementation",
+          content: { summary: "Plan accepted", details: ["Core", "UI"] },
           connections: { default: "review" },
         },
         { id: "review", label: "Review", connections: { default: "implementation" } },
@@ -103,11 +107,15 @@ describe("workflow schema renderer", () => {
 
     expect(output).toContain("progress_nodes=2 progress_edges=2 progress_mappings=3");
     expect(output).toContain('TITLE "Development {{mode}}"');
+    expect(output).toContain('GOAL "Deliver the requested change"');
+    expect(output).toContain('FACT label="Mode" value="{{mode}}" tone=positive');
+    expect(output).toContain('CONTENT {"details":["Core","UI"],"summary":"Plan accepted"}');
     expect(output).toContain('PROGRESS_NODE implementation label="Implementation" primary=work');
     expect(output).toContain('PROGRESS_NODE review label="Review" primary=review-one, review-two');
     expect(output).toContain("EDGE [default] -> implementation");
     expect(output).toContain("PROGRESS_NODE review");
     expect(output).toContain('PROGRESS_ACTIVE_LABEL "Implement {{unit}}/{{total}}"');
+    expect(output).toContain('PROGRESS_ACTIVE_CONTENT {"next":"Review","summary":"Implement API"}');
     expect(output).toContain("COVERAGE nodes=2/2 edges=2/2 mappings=3/3");
   });
 

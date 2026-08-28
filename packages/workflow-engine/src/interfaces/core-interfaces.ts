@@ -3,7 +3,12 @@
  * Clean dependency injection architecture with minimal contracts
  */
 
-import { WorkflowExecution, ExecutionContext } from "../types/base-types.js";
+import {
+  WorkflowExecution,
+  ExecutionContext,
+  type ProgressContentTemplate,
+  type ProgressFactTone,
+} from "../types/base-types.js";
 import { NodeExecutionResult } from "../types/node-execution.js";
 import { GraphNode, VariableRegistry } from "../types/graph-nodes.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
@@ -17,10 +22,19 @@ export interface WorkflowProgressNode {
   id: string;
   label: string;
   connections?: { default?: string };
+  content?: ProgressContentTemplate;
+}
+
+export interface WorkflowProgressFact {
+  label: string;
+  value: string;
+  tone?: ProgressFactTone;
 }
 
 export interface WorkflowProgress {
   title?: string;
+  goal?: string;
+  facts?: WorkflowProgressFact[];
   nodes: WorkflowProgressNode[];
 }
 

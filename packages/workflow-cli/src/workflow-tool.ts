@@ -364,6 +364,7 @@ interface UpdateOptions {
   finalOutput?: string;
   progressNodeId?: string | null;
   progressActiveLabel?: string | null;
+  progressActiveContent?: string | null;
   attachProgressImage?: boolean;
 }
 
@@ -483,6 +484,46 @@ function updateNode(
     changes++;
   }
 
+  if (options.progressActiveContent !== undefined) {
+    const activeContentNodeTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    if (!activeContentNodeTypes.has(node.type as string)) {
+      console.error(
+        c("red", "ERROR: --progress-active-content is valid only for user-visible waiting nodes"),
+      );
+      process.exit(1);
+    }
+    if (options.progressActiveContent === null) {
+      delete node.progressActiveContent;
+      console.log(c("green", "✓ Cleared progressActiveContent"));
+    } else {
+      if (!node.progressNodeId) {
+        console.error(
+          c("red", "ERROR: --progress-active-content requires progressNodeId on the same node"),
+        );
+        process.exit(1);
+      }
+      try {
+        const parsed = JSON.parse(options.progressActiveContent);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+          throw new Error("expected a JSON object");
+        node.progressActiveContent = parsed;
+        console.log(c("green", "✓ Updated progressActiveContent"));
+      } catch (error) {
+        console.error(
+          c("red", `ERROR: Invalid progressActiveContent JSON: ${(error as Error).message}`),
+        );
+        process.exit(1);
+      }
+    }
+    changes++;
+  }
+
   if (options.attachProgressImage !== undefined) {
     if (node.type !== "telegram-notification") {
       console.error(
@@ -539,7 +580,7 @@ function updateNode(
     console.log(
       c(
         "yellow",
-        "No changes specified. Use --directive, --completion-condition, --input-schema, --condition, --message, --connections, --progress-node-id, --progress-active-label, --attach-progress-image, or --add-connection",
+        "No changes specified. Use --directive, --completion-condition, --input-schema, --condition, --message, --connections, --progress-node-id, --progress-active-label, --progress-active-content, --attach-progress-image, or --add-connection",
       ),
     );
     process.exit(0);
@@ -1532,6 +1573,7 @@ ${c("cyan", "Update Options:")}
   --final-output '["result"]'           Update an End node terminal projection
   --progress-node-id <id|none>          Set or clear the node's progress milestone
   --progress-active-label <text|none>   Set or clear its active-only milestone label
+  --progress-active-content <json|none> Set or clear its active-only structured content
   --attach-progress-image <true|false>  Toggle progress image on Telegram nodes
   --condition "expression"             Update condition
   --message "text"                     Update message
@@ -1640,6 +1682,9 @@ ${c("cyan", "Examples:")}
       i++;
     } else if (args[i] === "--progress-active-label" && args[i + 1]) {
       config.options.progressActiveLabel = args[i + 1] === "none" ? null : args[i + 1];
+      i++;
+    } else if (args[i] === "--progress-active-content" && args[i + 1]) {
+      config.options.progressActiveContent = args[i + 1] === "none" ? null : args[i + 1];
       i++;
     } else if (args[i] === "--attach-progress-image" && args[i + 1]) {
       if (args[i + 1] !== "true" && args[i + 1] !== "false") {

@@ -149,6 +149,24 @@ describe("§10 Fix A — declared-but-never-defined registry variable warning", 
     const res = await v.validateUnified(graph);
     expect(res.issues.some((i) => i.severity === "warning" && /ghost/.test(i.message))).toBe(false);
   });
+
+  test("registry var seeded by structured start initialData -> no false-positive warning", async () => {
+    const v = new GraphValidator();
+    const graph = wf({ ghost: { type: "string", description: "g" } });
+    graph.nodes[0] = {
+      id: "start",
+      type: "start",
+      initialData: { variables: { ghost: { description: "Seed", value: "ready" } } },
+      connections: { default: "a" },
+    } as never;
+    const res = await v.validateUnified(graph);
+    expect(
+      res.issues.some(
+        (issue) =>
+          issue.severity === "warning" && /never written|without a default/.test(issue.message),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("§14 fragment-var detection (provenance ∪ name convention)", () => {

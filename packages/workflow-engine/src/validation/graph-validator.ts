@@ -733,6 +733,23 @@ export class GraphValidator {
           message: `Node '${node.id}' must declare progressNodeId when progressActiveLabel is set.`,
         });
       }
+      if (node.progressActiveContent && !visibleWaitingTypes.has(node.type)) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveContent",
+          message: `Node '${node.id}' cannot declare progressActiveContent because it is not a user-visible waiting node.`,
+        });
+      } else if (node.progressActiveContent && !node.progressNodeId) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "progressActiveContent",
+          message: `Node '${node.id}' must declare progressNodeId when progressActiveContent is set.`,
+        });
+      }
       if (
         node.type === "telegram-notification" &&
         node.attachProgressImage &&
@@ -1743,6 +1760,24 @@ export class GraphValidator {
           ),
         );
       }
+      if (node.progressActiveContent) {
+        const content = node.progressActiveContent;
+        for (const [field, value] of Object.entries(content)) {
+          const values = Array.isArray(value) ? value : [value];
+          for (const [index, template] of values.entries()) {
+            issues.push(
+              ...this.validateTemplateField(
+                template,
+                node.id,
+                Array.isArray(value)
+                  ? `progressActiveContent.${field}[${index}]`
+                  : `progressActiveContent.${field}`,
+                definedVariables,
+              ),
+            );
+          }
+        }
+      }
     }
 
     // Templates embedded in registry variable default values are processed recursively at
@@ -1775,6 +1810,32 @@ export class GraphValidator {
           ),
         );
       }
+      if (workflow.progress.goal) {
+        issues.push(
+          ...this.validateTemplateField(
+            workflow.progress.goal,
+            "progress",
+            "goal",
+            definedVariables,
+          ),
+        );
+      }
+      for (const [index, fact] of (workflow.progress.facts ?? []).entries()) {
+        issues.push(
+          ...this.validateTemplateField(
+            fact.label,
+            "progress",
+            `facts[${index}].label`,
+            definedVariables,
+          ),
+          ...this.validateTemplateField(
+            fact.value,
+            "progress",
+            `facts[${index}].value`,
+            definedVariables,
+          ),
+        );
+      }
       for (const [index, progressNode] of workflow.progress.nodes.entries()) {
         issues.push(
           ...this.validateTemplateField(
@@ -1784,6 +1845,23 @@ export class GraphValidator {
             definedVariables,
           ),
         );
+        if (progressNode.content) {
+          for (const [field, value] of Object.entries(progressNode.content)) {
+            const values = Array.isArray(value) ? value : [value];
+            for (const [valueIndex, template] of values.entries()) {
+              issues.push(
+                ...this.validateTemplateField(
+                  template,
+                  `progress.${progressNode.id}`,
+                  Array.isArray(value)
+                    ? `nodes[${index}].content.${field}[${valueIndex}]`
+                    : `nodes[${index}].content.${field}`,
+                  definedVariables,
+                ),
+              );
+            }
+          }
+        }
       }
     }
 
@@ -1897,13 +1975,8 @@ export class GraphValidator {
       }
       // start node seeds its initialData
       if (node.type === "start") {
-        const init = (node as { initialData?: Record<string, unknown> }).initialData;
-        if (init && typeof init === "object") {
-          for (const k of Object.keys(init)) seededOrWritten.add(k);
-          const vars = (init as { variables?: Record<string, unknown> }).variables;
-          if (vars && typeof vars === "object")
-            for (const k of Object.keys(vars)) seededOrWritten.add(k);
-        }
+        const vars = node.initialData?.variables;
+        if (vars) for (const k of Object.keys(vars)) seededOrWritten.add(k);
       }
     }
 

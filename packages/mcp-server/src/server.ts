@@ -82,29 +82,13 @@ import {
 } from "./messages/index.js";
 
 import type { McpToolName } from "@mcp-moira/shared";
+import { progressAuthoringSchema } from "./schemas/progress-authoring.js";
 
 // Error sanitization (#276)
 import { sanitizeMcpError } from "./utils/error-sanitizer.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
-
-const progressAuthoringSchema = z
-  .object({
-    title: z.string().max(200).optional(),
-    nodes: z
-      .array(
-        z
-          .object({
-            id: z.string(),
-            label: z.string().max(200),
-            connections: z.object({ default: z.string().optional() }).strict().optional(),
-          })
-          .strict(),
-      )
-      .max(18),
-  })
-  .strict();
 
 function parseBearerToken(authorization: string | undefined): string | undefined {
   if (!authorization || authorization.length > 4096) return undefined;

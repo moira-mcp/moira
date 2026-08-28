@@ -491,6 +491,12 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
   } else {
     if (workflow.progress.title !== undefined)
       lines.push(`  TITLE ${quotedText(workflow.progress.title)}`);
+    if (workflow.progress.goal !== undefined)
+      lines.push(`  GOAL ${quotedText(workflow.progress.goal)}`);
+    for (const fact of workflow.progress.facts ?? [])
+      lines.push(
+        `  FACT label=${quotedText(fact.label)} value=${quotedText(fact.value)} tone=${structuralToken(fact.tone ?? "neutral")}`,
+      );
     for (const progressNode of progressNodes) {
       const primaryNodeIds = workflow.nodes
         .filter((node) => node.progressNodeId === progressNode.id)
@@ -500,6 +506,7 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
       );
       if (progressNode.connections?.default)
         lines.push(`    EDGE [default] -> ${structuralToken(progressNode.connections.default)}`);
+      if (progressNode.content) lines.push(`    CONTENT ${stableJson(progressNode.content)}`);
     }
     lines.push(
       `  COVERAGE nodes=${progressNodes.length}/${progressNodes.length} edges=${progressEdges}/${progressEdges} mappings=${progressMappings}/${progressMappings}`,
@@ -526,6 +533,8 @@ export function renderWorkflowSchema(workflow: WorkflowSchemaInput): string {
         lines.push(`    PROGRESS_NODE ${structuralToken(node.progressNodeId)}`);
       if (node.progressActiveLabel)
         lines.push(`    PROGRESS_ACTIVE_LABEL ${quotedText(node.progressActiveLabel)}`);
+      if (node.progressActiveContent)
+        lines.push(`    PROGRESS_ACTIVE_CONTENT ${stableJson(node.progressActiveContent)}`);
       renderedNodes++;
       const preview = directivePreview(node);
       if (preview) lines.push(`    DIRECTIVE ${quotedText(preview)}`);
