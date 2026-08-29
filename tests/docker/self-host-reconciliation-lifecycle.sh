@@ -98,6 +98,12 @@ fail() {
   exit 1
 }
 
+data_command() {
+  entrypoint=$1
+  shift
+  docker run --rm -v "$DATA:/app/data" --entrypoint "$entrypoint" "$IMAGE" "$@"
+}
+
 write_flow "1.0.0" "baseline" "Baseline catalog"
 docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
 wait_for_file "$CONTAINER" /tmp/init-success
@@ -113,7 +119,7 @@ docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
 wait_for_stopped "$CONTAINER" || fail "conflicting startup did not stop"
 STOP_STATE=$(docker inspect --format '{{.State.ExitCode}} {{.RestartCount}}' "$CONTAINER")
 [ "$STOP_STATE" = "0 0" ] || fail "conflicting startup state was $STOP_STATE, expected 0 0"
-[ -f "$DATA/.moira-reconciliation/pending/manifest.json" ] || fail "pending manifest was not created"
+data_command test -f /app/data/.moira-reconciliation/pending/manifest.json || fail "pending manifest was not created"
 AFTER=$(docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app/data/moira.db .dump | sha256sum)
 [ "$BEFORE" = "$AFTER" ] || fail "conflicting startup changed the database"
 
@@ -123,23 +129,22 @@ printf '%s' "$LOG" | grep -q 'docker compose run --rm moira npm run reconcile --
 ! printf '%s' "$LOG" | grep -q 'self-host remains operable but degraded' || fail "obsolete degraded-mode guidance was emitted"
 ! printf '%s' "$LOG" | grep -q 'Workflow Management Flow (WMF)' || fail "obsolete WMF guidance was emitted"
 
-REVISION=$(sed -n 's/.*"revision": "\([a-f0-9]*\)".*/\1/p' "$DATA/.moira-reconciliation/pending/manifest.json" | head -1)
+REVISION=$(data_command sed -n 's/.*"revision": "\([a-f0-9]*\)".*/\1/p' /app/data/.moira-reconciliation/pending/manifest.json | head -1)
 [ -n "$REVISION" ]
 docker compose -p "$PROJECT" -f "$COMPOSE" run --rm moira npm run reconcile -- choose \
   --reference system-moira/reconciliation-docker-test --selection incoming \
   --revision "$REVISION" --rationale "Docker lifecycle regression"
 docker compose -p "$PROJECT" -f "$COMPOSE" run --rm moira npm run reconcile -- apply
-[ ! -e "$DATA/.moira-reconciliation/pending" ]
-RETIRED="$DATA/.moira-reconciliation/.applied-00000000-0000-4000-8000-000000000001"
-mkdir -p "$RETIRED"
-printf '%s\n' sensitive-candidate >"$RETIRED/candidate.json"
+data_command test ! -e /app/data/.moira-reconciliation/pending
+RETIRED=/app/data/.moira-reconciliation/.applied-00000000-0000-4000-8000-000000000001
+data_command sh -c 'mkdir -p "$1"; printf "%s\n" sensitive-candidate >"$1/candidate.json"' sh "$RETIRED"
 
 docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
 wait_for_file "$CONTAINER" /tmp/init-success
 docker exec "$CONTAINER" /app/scripts/health-check.sh
 [ "$(docker inspect --format '{{.State.Running}} {{.RestartCount}}' "$CONTAINER")" = "true 0" ]
 [ "$(docker exec "$CONTAINER" sqlite3 /app/data/moira.db "SELECT json_extract(graph,'$.nodes[1].directive') FROM workflow WHERE slug='reconciliation-docker-test';")" = "incoming-change" ]
-[ ! -e "$RETIRED" ]
+data_command test ! -e "$RETIRED"
 
 docker compose -p "$PROJECT" -f "$COMPOSE" stop moira
 docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app/data/moira.db \
@@ -147,8 +152,8 @@ docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app/data/moi
 write_flow "3.0.0" "following-incoming" "Following catalog"
 docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
 wait_for_stopped "$CONTAINER"
-[ -f "$DATA/.moira-reconciliation/pending/manifest.json" ]
-OLD_BUNDLE=$(sha256sum "$DATA/.moira-reconciliation/pending/manifest.json")
+data_command test -f /app/data/.moira-reconciliation/pending/manifest.json
+OLD_BUNDLE=$(data_command sha256sum /app/data/.moira-reconciliation/pending/manifest.json | cut -d ' ' -f1)
 HARD_BEFORE=$(docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app/data/moira.db .dump | sha256sum)
 
 write_flow "not-semver" "invalid-incoming" "Invalid catalog"
@@ -156,7 +161,7 @@ docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
 wait_for_stopped "$CONTAINER"
 HARD_AFTER=$(docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app/data/moira.db .dump | sha256sum)
 [ "$HARD_BEFORE" = "$HARD_AFTER" ]
-[ "$OLD_BUNDLE" = "$(sha256sum "$DATA/.moira-reconciliation/pending/manifest.json")" ]
+[ "$OLD_BUNDLE" = "$(data_command sha256sum /app/data/.moira-reconciliation/pending/manifest.json | cut -d ' ' -f1)" ]
 HARD_LOG=$(docker logs "$CONTAINER" 2>&1 | awk '
   /=== AGENT INSTRUCTIONS ===/ { block=$0 ORS; inside=1; next }
   inside { block=block $0 ORS }
