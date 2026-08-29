@@ -92,6 +92,12 @@ wait_for_stopped() {
   return 1
 }
 
+fail() {
+  printf '%s\n' "Self-host reconciliation lifecycle failed: $*" >&2
+  docker logs "$CONTAINER" >&2 2>&1 || true
+  exit 1
+}
+
 write_flow "1.0.0" "baseline" "Baseline catalog"
 docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
 wait_for_file "$CONTAINER" /tmp/init-success
@@ -104,17 +110,18 @@ BEFORE=$(docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app
 
 write_flow "2.0.0" "incoming-change" "Incoming catalog"
 docker compose -p "$PROJECT" -f "$COMPOSE" up -d moira
-wait_for_stopped "$CONTAINER"
-[ "$(docker inspect --format '{{.State.ExitCode}} {{.RestartCount}}' "$CONTAINER")" = "0 0" ]
-[ -f "$DATA/.moira-reconciliation/pending/manifest.json" ]
+wait_for_stopped "$CONTAINER" || fail "conflicting startup did not stop"
+STOP_STATE=$(docker inspect --format '{{.State.ExitCode}} {{.RestartCount}}' "$CONTAINER")
+[ "$STOP_STATE" = "0 0" ] || fail "conflicting startup state was $STOP_STATE, expected 0 0"
+[ -f "$DATA/.moira-reconciliation/pending/manifest.json" ] || fail "pending manifest was not created"
 AFTER=$(docker run --rm -v "$DATA:/app/data" --entrypoint sqlite3 "$IMAGE" /app/data/moira.db .dump | sha256sum)
-[ "$BEFORE" = "$AFTER" ]
+[ "$BEFORE" = "$AFTER" ] || fail "conflicting startup changed the database"
 
 LOG=$(docker logs "$CONTAINER" 2>&1)
-printf '%s' "$LOG" | grep -q '=== AGENT INSTRUCTIONS ==='
-printf '%s' "$LOG" | grep -q 'docker compose run --rm moira npm run reconcile -- status'
-! printf '%s' "$LOG" | grep -q 'self-host remains operable but degraded'
-! printf '%s' "$LOG" | grep -q 'Workflow Management Flow (WMF)'
+printf '%s' "$LOG" | grep -q '=== AGENT INSTRUCTIONS ===' || fail "agent instructions were not emitted"
+printf '%s' "$LOG" | grep -q 'docker compose run --rm moira npm run reconcile -- status' || fail "status recovery command was not emitted"
+! printf '%s' "$LOG" | grep -q 'self-host remains operable but degraded' || fail "obsolete degraded-mode guidance was emitted"
+! printf '%s' "$LOG" | grep -q 'Workflow Management Flow (WMF)' || fail "obsolete WMF guidance was emitted"
 
 REVISION=$(sed -n 's/.*"revision": "\([a-f0-9]*\)".*/\1/p' "$DATA/.moira-reconciliation/pending/manifest.json" | head -1)
 [ -n "$REVISION" ]
