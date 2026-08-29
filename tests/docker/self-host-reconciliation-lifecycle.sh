@@ -10,8 +10,16 @@ FLOW="$ROOT/catalog/flows/reconciliation-test.json"
 CONTAINER="$PROJECT-moira-1"
 
 cleanup() {
+  status=$?
+  trap - EXIT HUP INT TERM
   docker compose -p "$PROJECT" -f "$COMPOSE" down --remove-orphans >/dev/null 2>&1 || true
-  rm -rf -- "$ROOT"
+  docker run --rm -v "$DATA:/app/data" --entrypoint chown "$IMAGE" \
+    -R "$(id -u):$(id -g)" /app/data >/dev/null 2>&1 || true
+  if ! rm -rf -- "$ROOT"; then
+    printf '%s\n' "Failed to remove reconciliation test directory: $ROOT" >&2
+    [ "$status" -ne 0 ] || status=1
+  fi
+  exit "$status"
 }
 trap cleanup EXIT HUP INT TERM
 
