@@ -14,7 +14,8 @@
  *
  * THREE-WAY: compares the last bundled baseline, current database state, and incoming catalog.
  * User-only changes survive; upstream-only changes apply; two-sided changes become durable
- * reconciliation errors. SaaS fails; self-host remains operable for WMF recovery.
+ * reconciliation errors. Both modes fail startup; self-host additionally publishes a local
+ * revision-bound recovery bundle for one-off Compose CLI resolution.
  * MISSING OWNER: when a flow's mapped owner does not exist on the target, the flow is SKIPPED and
  *   reported — it is never silently reassigned to a system owner.
  *
@@ -24,7 +25,7 @@
  * Usage:
  *   npx tsx scripts/migrate-workflows-in-docker.ts
  *   npx tsx scripts/migrate-workflows-in-docker.ts --force
- *   npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current
+ *   npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current --revision <sha256> --rationale "..."
  */
 
 import {
@@ -41,10 +42,35 @@ import {
   resolveWorkflowReconciliation,
   isSaas,
   formatWorkflowReconciliationNotice,
+  publishWorkflowReconciliationBundle,
+  WorkflowReconciliationRepository,
+  getDbPath,
+  workflowReconciliationAgentInstructions,
+  cleanupRetiredWorkflowReconciliationBundles,
 } from "@mcp-moira/shared";
+import fs from "node:fs";
+import path from "node:path";
 
 const forceUpdate = process.argv.includes("--force");
 const resolveIndex = process.argv.indexOf("--resolve");
+const revisionIndex = process.argv.indexOf("--revision");
+const rationaleIndex = process.argv.indexOf("--rationale");
+
+function buildIdentity(): string {
+  for (const candidate of ["/app/BUILD_INFO", path.resolve("BUILD_INFO")]) {
+    if (!fs.existsSync(candidate)) continue;
+    const commit = /^commit:\s*(.+)$/m.exec(fs.readFileSync(candidate, "utf8"))?.[1]?.trim();
+    if (commit) return commit;
+  }
+  return "development-local";
+}
+
+function publishReconciliationFailureMarker(): void {
+  if (process.env.MOIRA_INIT_SENTINEL_OWNER !== "guard") return;
+  const sentinelDir = process.env.MOIRA_INIT_SENTINEL_DIR || "/tmp";
+  const marker = path.join(sentinelDir, "workflow-reconciliation-required");
+  fs.writeFileSync(marker, "current-attempt\n", { flag: "wx", mode: 0o600 });
+}
 
 async function migrate(): Promise<void> {
   console.log("Loading workflow catalog into database...");
@@ -59,6 +85,12 @@ async function migrate(): Promise<void> {
   const mutationService = getWorkflowMutationService();
   const sqlite = getSqliteInstance();
 
+  if (!isSaas()) {
+    cleanupRetiredWorkflowReconciliationBundles(
+      path.join(path.dirname(path.resolve(getDbPath())), ".moira-reconciliation"),
+    );
+  }
+
   if (resolveIndex !== -1) {
     const raw = process.argv[resolveIndex + 1];
     const split = raw?.lastIndexOf(":") ?? -1;
@@ -70,7 +102,18 @@ async function migrate(): Promise<void> {
     if (selection !== "current" && selection !== "incoming" && selection !== "previous") {
       throw new Error("--resolve selection must be current, incoming, or previous");
     }
-    await resolveWorkflowReconciliation(reference, selection, { sqlite, mutationService });
+    const revision = revisionIndex === -1 ? undefined : process.argv[revisionIndex + 1];
+    const rationale = rationaleIndex === -1 ? undefined : process.argv[rationaleIndex + 1];
+    if (!revision || !rationale) {
+      throw new Error("--resolve requires --revision <sha256> and --rationale <text>");
+    }
+    await resolveWorkflowReconciliation(
+      reference,
+      selection,
+      { sqlite, mutationService },
+      undefined,
+      { expectedRevision: revision, rationale, source: "cli" },
+    );
     console.log(`Resolved bundled workflow reconciliation for ${reference} using ${selection}`);
     return;
   }
@@ -102,7 +145,17 @@ async function migrate(): Promise<void> {
       process.exit(1);
     }
     if (error instanceof CatalogReconciliationError) {
-      const notice = formatWorkflowReconciliationNotice(sqlite);
+      if (!isSaas()) {
+        publishWorkflowReconciliationBundle(
+          path.join(path.dirname(path.resolve(getDbPath())), ".moira-reconciliation"),
+          buildIdentity(),
+          entries,
+          new WorkflowReconciliationRepository(sqlite).listConflicts(),
+        );
+        publishReconciliationFailureMarker();
+        console.error(workflowReconciliationAgentInstructions("initial"));
+      }
+      const notice = isSaas() ? formatWorkflowReconciliationNotice(sqlite) : "";
       console.error(
         `\n❌ FATAL: ${error.message}\n` +
           `   Inspect the previous/current/incoming candidates and resolve the semantic merge.\n` +
@@ -120,11 +173,21 @@ async function migrate(): Promise<void> {
   if (result.adopted > 0) console.log(`✅ Adopted:   ${result.adopted}`);
   if (result.preserved > 0) console.log(`🛡️  Preserved: ${result.preserved} user changes`);
   if (result.conflicts > 0)
-    console.error(
-      `❌ Reconciliation required: ${result.conflicts} (self-host remains operable but degraded)`,
-    );
+    console.error(`❌ Reconciliation required: ${result.conflicts}; startup is blocked`);
   if (result.conflicts > 0) {
-    console.error(formatWorkflowReconciliationNotice(sqlite));
+    if (!isSaas()) {
+      publishWorkflowReconciliationBundle(
+        path.join(path.dirname(path.resolve(getDbPath())), ".moira-reconciliation"),
+        buildIdentity(),
+        entries,
+        new WorkflowReconciliationRepository(sqlite).listConflicts(),
+      );
+      publishReconciliationFailureMarker();
+    }
+    if (isSaas()) console.error(formatWorkflowReconciliationNotice(sqlite));
+    else console.error(workflowReconciliationAgentInstructions("initial"));
+    process.exitCode = 1;
+    return;
   }
   if (result.skipped > 0) console.log(`⏭️  Skipped:  ${result.skipped} (exists/older/unchanged)`);
   if (result.skippedMissingOwner > 0)

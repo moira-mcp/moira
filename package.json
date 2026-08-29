@@ -20,6 +20,7 @@
     "test:api:ci": "testfold api -e ci",
     "test:mcp-tools": "testfold mcp-tools -e local",
     "test:e2e": "testfold e2e -e local",
+    "test:docker-reconciliation": "./tests/docker/self-host-reconciliation-lifecycle.sh",
     "test:release-policy": "node scripts/verify-release-policy.js",
     "test:remote": "testfold unit workflow integration api e2e mcp-tools -e remote",
     "test:api:remote": "testfold api -e remote",
@@ -29,6 +30,7 @@
     "docker:restart:remote": "./scripts/docker-build-and-run.sh --remote",
     "docker:stop": ". ./.env.local && docker stop ${DOCKER_CONTAINER_NAME} || true",
     "prepare:account-approval-downgrade": "tsx scripts/prepare-account-approval-downgrade.ts",
+    "reconcile": "tsx scripts/reconcile-workflows.ts",
     "fix": "eslint . --fix && prettier --write ."
   },
   "lint-staged": {

@@ -14,6 +14,7 @@ describe("self-host upgrade documentation parity", () => {
   const envExample = readFileSync(resolve(".env.example"), "utf8");
   const compose = readFileSync(resolve("docker-compose.yml"), "utf8");
   const readme = readFileSync(resolve("README.md"), "utf8");
+  const internalWorkflows = readFileSync(resolve("docs/WORKFLOWS.md"), "utf8");
   const commands = [
     "docker compose pull",
     "docker compose up -d",
@@ -35,7 +36,9 @@ describe("self-host upgrade documentation parity", () => {
 
   test("documents automatic recovery and optional advanced preflight in both languages", () => {
     for (const document of [english, russian]) {
-      expect(document).toContain("Workflow Management Flow");
+      expect(document).toContain("docker compose run --rm moira npm run reconcile -- status");
+      expect(document).toContain("previous.json");
+      expect(document).toContain("incoming.json");
       expect(document).toContain("reconciliation");
       expect(document).toContain("data/.moira-startup-backups/current/");
       expect(document).toContain("previous-1/");
@@ -55,5 +58,18 @@ describe("self-host upgrade documentation parity", () => {
       expect(source).not.toContain("ghcr.io/moira-mcp/moira:0.3.5");
       expect(source).not.toContain("ghcr.io/moira-mcp/moira:0.3.6");
     }
+  });
+
+  test("keeps internal self-host recovery on the revision-bound local Compose CLI", () => {
+    expect(internalWorkflows).toContain(
+      "docker compose run --rm moira npm run reconcile -- status",
+    );
+    expect(internalWorkflows).toContain("--selection current --revision REVISION");
+    expect(internalWorkflows).toContain('--rationale "Retain the reviewed local intent"');
+    expect(internalWorkflows).toContain("docker compose run --rm moira npm run reconcile -- apply");
+    expect(internalWorkflows).not.toContain(
+      "npx tsx scripts/migrate-workflows-in-docker.ts --resolve owner/slug:current",
+    );
+    expect(internalWorkflows).not.toContain("semantic WMF merge against the refreshed candidates");
   });
 });

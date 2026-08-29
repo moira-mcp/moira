@@ -52,10 +52,11 @@ describe("self-host startup guard", () => {
     try {
       fs.writeFileSync(path.join(dir, "init-success"), "stale");
       fs.writeFileSync(path.join(dir, "init-failed"), "stale");
+      fs.writeFileSync(path.join(dir, "workflow-reconciliation-required"), "stale");
       const observed = path.join(dir, "observed");
       const command = writeCommand(
         dir,
-        `test ! -e "${dir}/init-success"\ntest ! -e "${dir}/init-failed"\ntouch "${observed}"`,
+        `test ! -e "${dir}/init-success"\ntest ! -e "${dir}/init-failed"\ntest ! -e "${dir}/workflow-reconciliation-required"\ntouch "${observed}"`,
       );
 
       execFileSync(entrypoint, [command], {
@@ -129,6 +130,38 @@ describe("self-host startup guard", () => {
           "PRAGMA integrity_check;",
         ),
       ).toBe("ok");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("retains a completed reconciliation bundle outside restored startup state", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-startup-bundle-retention-"));
+    const db = path.join(dir, "moira.db");
+    const pending = path.join(dir, ".moira-reconciliation", "pending");
+    try {
+      sqlite(db, "CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES('before');");
+      fs.mkdirSync(pending, { recursive: true });
+      fs.writeFileSync(path.join(pending, "manifest.json"), '{"bundle":"complete"}\n');
+      const command = writeCommand(
+        dir,
+        `sqlite3 "$DB_PATH" "UPDATE marker SET value='partial';"\nexit 19`,
+      );
+
+      let output = "";
+      try {
+        execFileSync(guard, [command], { env: guardEnv(dir, db), encoding: "utf8" });
+      } catch (error) {
+        output = `${(error as { stdout?: string }).stdout ?? ""}${(error as { stderr?: string }).stderr ?? ""}`;
+      }
+
+      expect(sqlite(db, "SELECT value FROM marker;")).toBe("before");
+      expect(fs.readFileSync(path.join(pending, "manifest.json"), "utf8")).toBe(
+        '{"bundle":"complete"}\n',
+      );
+      expect(output).toContain("=== AGENT INSTRUCTIONS ===");
+      expect(output).toContain("not a recoverable workflow reconciliation conflict");
+      expect(output).not.toContain("reconcile choose --reference");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

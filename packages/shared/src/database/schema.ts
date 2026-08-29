@@ -208,6 +208,27 @@ export const workflowReconciliationConflict = sqliteTable(
   }),
 );
 
+/** Bounded evidence for the last accepted resolution of a managed workflow. */
+export const workflowReconciliationResolution = sqliteTable(
+  "workflowReconciliationResolution",
+  {
+    ownerId: text("ownerId").notNull(),
+    slug: text("slug").notNull(),
+    incomingDigest: text("incomingDigest").notNull(),
+    resultDigest: text("resultDigest").notNull(),
+    selection: text("selection").notNull(),
+    merged: integer("merged", { mode: "boolean" }).notNull(),
+    rationale: text("rationale").notNull(),
+    residualDelta: text("residualDelta").notNull(),
+    actorId: text("actorId"),
+    source: text("source").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.ownerId, table.slug] }),
+  }),
+);
+
 export const workflowExecution = sqliteTable("workflowExecution", {
   executionId: text("executionId").primaryKey(),
   workflowId: text("workflowId")

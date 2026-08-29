@@ -177,13 +177,23 @@ export {
 export {
   installCatalogEntry,
   installCatalogEntries,
+  planCatalogEntries,
   CatalogReconciliationError,
   CatalogPreflightError,
   formatWorkflowReconciliationNotice,
   resolveWorkflowReconciliation,
+  createWorkflowReconciliationStagedArtifact,
+  createWorkflowReconciliationStagedArtifactFromConflicts,
+  applyWorkflowReconciliationStagedArtifact,
+  workflowCatalogDigest,
+  workflowReconciliationConflictSetDigest,
+  workflowReconciliationStagedArtifactDigest,
   type EntryOutcome,
   type CatalogLoadResult,
   type CatalogLoadDeps,
+  type CatalogApplyPlanResult,
+  type WorkflowReconciliationDecisionInput,
+  type WorkflowReconciliationStagedArtifact,
 } from "./workflow-catalog-loader.js";
 
 export {
@@ -193,6 +203,29 @@ export {
   type ReconciliationClassification,
   type ReconciliationDecision,
 } from "./managed-resource-reconciler.js";
+
+export {
+  publishWorkflowReconciliationBundle,
+  loadWorkflowReconciliationBundle,
+  readWorkflowReconciliationBundleConflicts,
+  readWorkflowReconciliationBundleCandidate,
+  chooseWorkflowReconciliationBundleDecision,
+  buildWorkflowReconciliationArtifactFromBundle,
+  finalizeWorkflowReconciliationBundle,
+  markWorkflowReconciliationBundleApplied,
+  readWorkflowReconciliationBundleApplied,
+  isWorkflowReconciliationBundleApplied,
+  applyWorkflowReconciliationBundle,
+  cleanupRetiredWorkflowReconciliationBundles,
+  workflowReconciliationAgentInstructions,
+  withWorkflowReconciliationBundleLock,
+  type WorkflowReconciliationBundleManifest,
+  type WorkflowReconciliationBundleChoice,
+  type WorkflowReconciliationInstructionKind,
+  WorkflowReconciliationBundleError,
+  type WorkflowReconciliationBundleErrorKind,
+  type WorkflowReconciliationAppliedMarker,
+} from "./workflow-reconciliation-bundle.js";
 
 export {
   LockService,

@@ -254,9 +254,30 @@ database has not been migrated. Temporarily set `MOIRA_IMAGE` to a previous vers
 [GitHub Releases](https://github.com/moira-mcp/moira/releases), run `docker compose up -d`, and return
 to `latest` after a corrected release.
 
-Managed-workflow reconciliation conflicts remain non-fatal in self-host mode. Use
-Workflow Management Flow and the MCP `reconciliation` tool to inspect previous/current/incoming
-candidates and submit a semantic merge; do not use `--force` to discard local changes.
+When conflict detection has produced a local bundle under `data/.moira-reconciliation/pending`,
+follow its `AGENT INSTRUCTIONS` with one-off Compose CLI containers. The CLI itself does not stop or
+restart services and does not replace the database snapshot. It uses only local files—never
+`--force`, MCP, an HTTP API, or UI transport. Initialization fails closed: after restoring the
+database the container stops with MCP, API, and nginx unavailable. After bundle application, the
+final `docker compose up -d` starts that stopped container normally.
+
+```bash
+docker compose run --rm moira npm run reconcile -- status
+docker compose run --rm moira npm run reconcile -- diff --reference owner/slug
+# Read previous.json, current.json, and incoming.json from the printed bundle paths.
+# Record one revision-bound current, incoming, or merged decision for every conflict:
+docker compose run --rm moira npm run reconcile -- choose \
+  --reference owner/slug --selection incoming --revision REVISION \
+  --rationale "Incoming supersedes the local experiment"
+docker compose run --rm moira npm run reconcile -- apply
+docker compose up -d
+```
+
+For a merge, use `incoming.json` as the base, reapply only local intent still justified by
+`previous.json → current.json`, validate the complete merged state with `reconcile validate`, and
+pass it to `choose --selection merged --file ...`. `choose` changes only the local decisions
+manifest. `apply` refuses an incomplete or stale manifest and is the only command that changes the
+database.
 
 ### Optional preflight before downtime
 

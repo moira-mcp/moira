@@ -5,6 +5,7 @@ set -u
 SENTINEL_DIR=${MOIRA_INIT_SENTINEL_DIR:-/tmp}
 INIT_FAILED="$SENTINEL_DIR/init-failed"
 INIT_SUCCESS="$SENTINEL_DIR/init-success"
+RECONCILIATION_REQUIRED="$SENTINEL_DIR/workflow-reconciliation-required"
 NEXT=""
 SUCCESS_NEXT=""
 DB_RESTORE_TEMP=""
@@ -40,6 +41,7 @@ fail() {
     exit 1
   }
 remove_file "$INIT_SUCCESS" && remove_file "$INIT_FAILED" \
+  && remove_file "$RECONCILIATION_REQUIRED" \
   || {
     echo "ERROR: cannot clear stale initialization sentinels" >&2
     exit 1
@@ -291,11 +293,40 @@ restore_previous_state() {
 }
 
 terminal_failure() {
+  restored=0
   if ! restore_previous_state; then
     echo "ERROR: initialization failed and automatic state restore failed" >&2
     echo "Recovery state retained under: $STATE_DIR" >&2
+  else
+    restored=1
   fi
   publish_failure || true
+
+  reconciliation_pending="$DB_DIR/.moira-reconciliation/pending"
+  reconciliation_current=0
+  if [ "$restored" -eq 1 ] \
+    && [ -f "$RECONCILIATION_REQUIRED" ] && [ ! -L "$RECONCILIATION_REQUIRED" ] \
+    && [ -d "$reconciliation_pending" ] && [ ! -L "$reconciliation_pending" ] \
+    && [ -f /app/package.json ]; then
+    if (cd /app && /usr/local/bin/npm run reconcile -- status) >&2; then
+      reconciliation_current=1
+    fi
+  fi
+  remove_file "$RECONCILIATION_REQUIRED" || true
+
+  if [ "$reconciliation_current" -ne 1 ]; then
+    echo "=== AGENT INSTRUCTIONS ===" >&2
+    echo "This is not a recoverable workflow reconciliation conflict. Do not run reconcile choose or apply." >&2
+    echo "Inspect the startup error and the retained recovery state: docker compose logs moira" >&2
+    echo "Verify the live and backup databases before retrying or selecting a previous image." >&2
+    echo "Do not use --force and do not blindly retry an unchanged image or configuration." >&2
+    echo "=== END AGENT INSTRUCTIONS ===" >&2
+  fi
+
+  if [ "${MOIRA_STOP_CONTAINER_ON_INIT_FAILURE:-0}" = "1" ]; then
+    trap - HUP INT TERM
+    kill -TERM 1 2>/dev/null || true
+  fi
 }
 
 handle_signal() {

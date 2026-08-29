@@ -32,7 +32,10 @@ services:
     #     STATIC_ARTIFACTS_DOMAIN: ${STATIC_ARTIFACTS_DOMAIN:-static.localhost:8080}
     #     APP_BASE_PATH: /
 
-    restart: unless-stopped
+    # Intentional init failure stops with code 0 after restoring state and printing
+    # recovery instructions, so it does not loop. Unexpected non-zero crashes retry
+    # a bounded number of times.
+    restart: "on-failure:3"
 
     # Runtime configuration. Values here override the defaults baked into the
     # image at build time (dotenv does not overwrite existing process.env).

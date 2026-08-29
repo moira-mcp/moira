@@ -19,9 +19,14 @@ describe("self-host upgrade contract", () => {
     );
     expect(supervisor).toContain("stopasgroup=true");
     expect(supervisor).toContain("killasgroup=true");
+    expect(supervisor).toContain("MOIRA_STOP_CONTAINER_ON_INIT_FAILURE=1");
+    expect(supervisor).toContain("stdout_logfile=/dev/fd/1");
+    expect(supervisor).toContain("stdout_logfile_maxbytes=0");
+    expect(compose).toContain('restart: "on-failure:3"');
     expect(entrypoint).toContain(
       'rm -f -- "$sentinel_dir/init-success" "$sentinel_dir/init-failed"',
     );
+    expect(entrypoint).toContain('"$sentinel_dir/workflow-reconciliation-required"');
     expect(startupGuard).toContain("sqlite-online-backup.sh");
     expect(startupGuard).toContain(".moira-startup-backups");
     expect(startupGuard).toContain("initialization.pending");
@@ -29,7 +34,7 @@ describe("self-host upgrade contract", () => {
     expect(startupGuard).toContain("MOIRA_INIT_SENTINEL_OWNER=guard");
     expect(startupGuard).toContain('mktemp -d "$STATE_DIR/.next.XXXXXX"');
     expect(startupGuard).toContain("STARTUP_RESTORE_OK");
-    expect(startupGuard).not.toContain("docker ");
+    expect(startupGuard.split("\n").some((line) => /^\s*docker(?:\s|$)/.test(line))).toBe(false);
   });
 
   test("keeps the advanced helper pinned and delegates coherent backup", () => {

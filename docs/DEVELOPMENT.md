@@ -150,12 +150,13 @@ At Docker container startup, `scripts/migrate-workflows-in-docker.ts` runs:
    database state, including removals, lifecycle state, graph, visibility, and declared previous
    slugs.
 3. Plans every identity before writing. Upstream-only changes advance the managed workflow; user-only
-   changes are preserved; two-sided changes retain previous/current/incoming candidates for Workflow
-   Management Flow recovery.
+   changes are preserved; two-sided self-host changes retain previous/current/incoming candidates in
+   a local recovery bundle and fail initialization.
 4. Applies a conflict-free plan and all baseline changes in one SQLite transaction after verifying
    that the captured workflow and baseline inputs are still current.
-5. Keeps self-host available with structured reconciliation evidence. SaaS exits non-zero on the
-   same unresolved conflict so deployment preflight stops before production swap.
+5. Exits non-zero on unresolved conflicts. The self-host startup guard restores the coherent
+   database and prompt manifest while retaining the local bundle, then stops the container without
+   an automatic restart loop; SaaS deployment preflight stops before production swap.
 
 See `docs/WORKFLOWS.md` for candidate resolution, stale-evidence checks, removal/tombstone behavior,
 and the destructive `--force` escape hatch.
