@@ -40,6 +40,9 @@ const progressOutcome = {
   result: "Reviewed result presented and accepted",
 };
 
+const exclusiveResponseShape =
+  /(?:^|[\n.!?]\s+)Return only\b|(?:^|[\n.!?]\s+)Return [^.\n]+ only\.(?:\s|$)/i;
+
 function successfulInputs(stepCount = 1) {
   return {
     "get-task": {
@@ -97,9 +100,22 @@ describe("quick-task scenarios", () => {
     expect(validation.errors).toHaveLength(0);
     // Pinned so a directive change cannot ship without the version that publishes it, and without
     // this file being reopened alongside the flow.
-    expect(workflow.metadata.version).toBe("4.4.3");
+    expect(workflow.metadata.version).toBe("4.4.4");
     expect(workflow.metadata.description).toContain("bounded non-development task");
     expect(workflow.metadata.description).toContain("Todo List");
+  });
+
+  it("keeps every progress-owning response compatible with its required schema", () => {
+    const progressResponseNodes = workflow.nodes.filter(
+      (node) =>
+        (node.type === "agent-directive" || node.type === "teleport") &&
+        node.inputSchema?.required?.some((field) => field.startsWith("progress_")),
+    );
+
+    expect(progressResponseNodes).toHaveLength(12);
+    for (const node of progressResponseNodes) {
+      expect(node.directive).not.toMatch(exclusiveResponseShape);
+    }
   });
 
   it("keeps functional state separate from bounded render-only progress outcomes", () => {

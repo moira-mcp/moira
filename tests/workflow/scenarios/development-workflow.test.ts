@@ -22,6 +22,8 @@ import {
 } from "../../helpers/scenario-runner.js";
 
 const COVERAGE_ARTIFACTS_DIR = path.join(process.cwd(), "test-results/artifacts/coverage");
+const exclusiveResponseShape =
+  /(?:^|[\n.!?]\s+)Return only\b|(?:^|[\n.!?]\s+)Return [^.\n]+ only\.(?:\s|$)/i;
 
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(
@@ -972,7 +974,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v15.4.1", () => {
+describe("software-development-flow v15.4.2", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -983,7 +985,7 @@ describe("software-development-flow v15.4.1", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("15.4.1");
+    expect(workflow.metadata.version).toBe("15.4.2");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -1504,6 +1506,16 @@ describe("software-development-flow v15.4.1", () => {
       expect(directive).toContain(currentPlanPath);
     }
 
+    const progressResponseNodes = workflow.nodes.filter(
+      (node) =>
+        (node.type === "agent-directive" || node.type === "teleport") &&
+        node.inputSchema?.required?.some((field) => field.startsWith("progress_")),
+    );
+    expect(progressResponseNodes).toHaveLength(53);
+    for (const node of progressResponseNodes) {
+      expect(node.directive).not.toMatch(exclusiveResponseShape);
+    }
+
     for (const [nodeId, functionalOutput, progressOutput] of [
       ["validate-cheap", "issues_count", "progress_tests_outcome"],
       ["review-test-adequacy", "review_outcome", "progress_tests_outcome"],
@@ -1515,7 +1527,6 @@ describe("software-development-flow v15.4.1", () => {
         directive: string;
         inputSchema: { required: string[] };
       };
-      expect(node.directive).not.toMatch(/Return only\b/);
       expect(node.directive).toContain("same response as the required progress output");
       expect(node.inputSchema.required).toEqual(
         expect.arrayContaining([functionalOutput, progressOutput]),
