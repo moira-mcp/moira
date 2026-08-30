@@ -104,6 +104,9 @@ describe("public workflow selection surfaces", () => {
     expect(rootPrompt).toBe(configPrompt);
     expect(packagedPrompt).toBe(configPrompt);
     expect(configPrompt).toContain("complete current `list()` result");
+    expect(configPrompt).toContain('session({ action: "add-reminder", ... })');
+    expect(configPrompt).toContain("active reminders only when that workflow completes");
+    expect(configPrompt).toContain("neither performs nor authorizes it");
     expect(configPrompt).not.toContain(
       "Use one software-development workflow for one complete repository implementation lifecycle",
     );
