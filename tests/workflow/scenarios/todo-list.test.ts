@@ -1,5 +1,10 @@
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
-import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import {
+  GraphValidator,
+  projectExecutionProgress,
+  type WorkflowExecution,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import {
   runScenario as executeScenario,
@@ -31,6 +36,43 @@ const suppliedTasks = [
   },
 ];
 
+const intake = (tasks: typeof suppliedTasks) => ({
+  tasks,
+  progress_checklist_outcome: `${tasks.length} ordered tasks ready`,
+});
+
+const completedTask = (evidence: string) => ({
+  evidence,
+  progress_execution_outcome: evidence,
+});
+
+function progressExecution(
+  currentNodeId: string | null,
+  status: "running" | "completed",
+  waitingForInputNodeId: string,
+  variables: Record<string, unknown>,
+): WorkflowExecution {
+  return {
+    executionId: "todo-progress",
+    workflowId: "todo-list",
+    userId: "user",
+    currentNodeId,
+    waitingForInputNodeId,
+    globalContext: {
+      variables,
+      nodeStates: {},
+      executionId: "todo-progress",
+      workflowId: "todo-list",
+      userId: "user",
+    },
+    status,
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    note: "Complete the release checklist",
+  };
+}
+
 describe("todo-list minimal sequential checklist", () => {
   let workflow: WorkflowGraph;
 
@@ -42,7 +84,7 @@ describe("todo-list minimal sequential checklist", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("3.4.6");
+    expect(workflow.metadata.version).toBe("3.4.7");
     expect(workflow.metadata.description).toContain("minimal orchestration");
     expect(workflow.metadata.description).toContain("no plan-design review");
 
@@ -68,6 +110,8 @@ describe("todo-list minimal sequential checklist", () => {
       "current_task_action",
       "current_task_expected_result",
       "resume_from_task",
+      "progress_checklist_outcome",
+      "progress_execution_outcome",
     ]);
 
     expect(workflow.variableRegistry?.tasks).toMatchObject({
@@ -106,7 +150,7 @@ describe("todo-list minimal sequential checklist", () => {
     // The one case where no such order exists stays passable, and the exception stays attached to
     // that pair: naming one pair must not excuse leaving every other item unordered.
     expect(obtain.completionCondition).toContain(
-      "except a pair that each need the other's result, which is named to the author",
+      "except a pair that each need the result of the other, which is named to the author",
     );
     // Clauses the gate must not lose: the planning branch it carried in 3.3.0, and the two
     // obligations the directive states about a governing remark and about visible reordering.
@@ -124,14 +168,14 @@ describe("todo-list minimal sequential checklist", () => {
       properties: {
         evidence: {
           type: "string",
-          description: "Concise evidence that the current task's expected result was verified",
+          description: "Concise evidence that the current task expected result was verified",
           minLength: 1,
           maxLength: 500,
         },
       },
-      required: ["evidence"],
+      required: ["evidence", "progress_execution_outcome"],
+      globalInputs: ["progress_execution_outcome"],
     });
-    expect(execute.inputSchema).not.toHaveProperty("globalInputs");
     expect(execute.directive).toContain("If the task is incomplete or blocked, do not call step()");
 
     // The checklist may be replaced mid-run, but only through a jump target: no node routes into
@@ -152,8 +196,18 @@ describe("todo-list minimal sequential checklist", () => {
       type: "object",
       additionalProperties: false,
       properties: {},
-      required: ["tasks", "resume_from_task"],
-      globalInputs: ["tasks", "resume_from_task"],
+      required: [
+        "progress_checklist_outcome",
+        "progress_execution_outcome",
+        "resume_from_task",
+        "tasks",
+      ],
+      globalInputs: [
+        "progress_checklist_outcome",
+        "progress_execution_outcome",
+        "resume_from_task",
+        "tasks",
+      ],
     });
     expect(revise.connections).toEqual({ success: "derive-revised-plan-state" });
 
@@ -200,19 +254,101 @@ describe("todo-list minimal sequential checklist", () => {
     }
   });
 
+  test("projects truthful progress for ordinary and empty-tail revision completion", () => {
+    expect(workflow.progress?.nodes.map(({ id }) => id)).toEqual(["checklist", "prepare", "work"]);
+    expect(workflow.progress?.nodes.map((candidate) => candidate.connections?.default)).toEqual([
+      "prepare",
+      "work",
+      undefined,
+    ]);
+
+    const mapped = workflow.nodes
+      .filter((candidate) => candidate.progressNodeId)
+      .map((candidate) => [candidate.id, candidate.progressNodeId, candidate.progressActiveLabel]);
+    expect(mapped).toEqual([
+      ["obtain-tasks", "checklist", "Build checklist"],
+      ["execute-task", "work", "Task {{current_task}}/{{total_tasks}}"],
+      ["teleport-revise-tasks", "work", "Revise checklist"],
+    ]);
+    expect(
+      workflow.nodes
+        .filter((candidate) => candidate.progressNodeId)
+        .every((candidate) => candidate.progressActiveContent?.outcome === undefined),
+    ).toBe(true);
+    expect(JSON.stringify(workflow.progress)).not.toContain("current_task_expected_result");
+
+    const executionVariables = {
+      current_task: 2,
+      total_tasks: 2,
+      current_task_action: suppliedTasks[1].action,
+      current_task_expected_result: suppliedTasks[1].expected_result,
+      progress_checklist_outcome: "2 ordered tasks ready",
+      progress_execution_outcome: "First task verified",
+    };
+    const activeTask = projectExecutionProgress(
+      workflow,
+      progressExecution("execute-task", "running", "execute-task", executionVariables),
+    );
+    expect(activeTask?.activeNodeId).toBe("work");
+    expect(activeTask?.nodes[2]).toMatchObject({
+      label: "Task 2/2",
+      state: "current",
+      content: {
+        summary: suppliedTasks[1].action,
+        outcome: "First task verified",
+        next: "Verify the expected result stated in the current directive",
+      },
+    });
+
+    const activeRevision = projectExecutionProgress(
+      workflow,
+      progressExecution("teleport-revise-tasks", "running", "teleport-revise-tasks", {
+        progress_checklist_outcome: "2 ordered tasks ready",
+        progress_execution_outcome: "First task verified",
+      }),
+    );
+    expect(activeRevision?.activeNodeId).toBe("work");
+    expect(activeRevision?.nodes[2]).toMatchObject({
+      label: "Revise checklist",
+      state: "current",
+      content: {
+        summary: "Correct the remaining checklist while preserving completed positions",
+        outcome: "First task verified",
+      },
+    });
+
+    for (const waitingNode of ["execute-task", "teleport-revise-tasks"]) {
+      expect(
+        projectExecutionProgress(
+          workflow,
+          progressExecution(null, "completed", waitingNode, executionVariables),
+        )?.nodes.map(({ state }) => state),
+      ).toEqual(["completed", "completed", "completed"]);
+    }
+
+    const primaryState = JSON.stringify(
+      workflow.nodes.map((candidate) => ({
+        condition: candidate.type === "condition" ? candidate.condition : undefined,
+        expressions: candidate.type === "expression" ? candidate.expressions : undefined,
+        connections: candidate.connections,
+      })),
+    );
+    expect(primaryState).not.toContain("progress_");
+  });
+
   test("plans once, executes tasks in one-based order, and keeps evidence local", async () => {
     const seen: Array<{ current: unknown; action: unknown; expected: unknown }> = [];
     const result = await runScenario(workflow, {
       name: "direct planning and ordered execution",
       mockInputs: {
-        "obtain-tasks": { tasks: suppliedTasks },
+        "obtain-tasks": intake(suppliedTasks),
         "execute-task": ({ variables }) => {
           seen.push({
             current: variables.current_task,
             action: variables.current_task_action,
             expected: variables.current_task_expected_result,
           });
-          return { evidence: `Verified task ${String(variables.current_task)}` };
+          return completedTask(`Verified task ${String(variables.current_task)}`);
         },
       },
       expect: {
@@ -235,10 +371,10 @@ describe("todo-list minimal sequential checklist", () => {
     const result = await runScenario(workflow, {
       name: "supplied tasks use ordinary intake",
       mockInputs: {
-        "obtain-tasks": { tasks: suppliedTasks },
+        "obtain-tasks": intake(suppliedTasks),
         "execute-task": [
-          { evidence: "First supplied task verified" },
-          { evidence: "Second supplied task verified" },
+          completedTask("First supplied task verified"),
+          completedTask("Second supplied task verified"),
         ],
       },
       expect: {
@@ -258,12 +394,13 @@ describe("todo-list minimal sequential checklist", () => {
     const result = await runScenario(workflow, {
       name: "evidence validation before advancement",
       mockInputs: {
-        "obtain-tasks": { tasks: [suppliedTasks[0]] },
+        "obtain-tasks": intake([suppliedTasks[0]]),
         "execute-task": ({ variables, visitCount }) => {
           observedCursors.push(variables.current_task);
-          if (visitCount === 0) return { evidence: "" };
-          if (visitCount === 1) return { evidence: "x".repeat(501) };
-          return { evidence: "File contents matched the expected value" };
+          if (visitCount === 0) return { evidence: "", progress_execution_outcome: "Task checked" };
+          if (visitCount === 1)
+            return { evidence: "x".repeat(501), progress_execution_outcome: "Task checked" };
+          return completedTask("File contents matched the expected value");
         },
       },
       allowValidationErrorsAt: ["execute-task"],
@@ -283,8 +420,8 @@ describe("todo-list minimal sequential checklist", () => {
     const result = await runScenario(workflow, {
       name: "maximum evidence length",
       mockInputs: {
-        "obtain-tasks": { tasks: [suppliedTasks[0]] },
-        "execute-task": { evidence: "x".repeat(500) },
+        "obtain-tasks": intake([suppliedTasks[0]]),
+        "execute-task": completedTask("x".repeat(500)),
       },
       expect: { status: "completed", reaches: ["advance-task-cursor", "end"] },
     });
@@ -296,10 +433,14 @@ describe("todo-list minimal sequential checklist", () => {
     const result = await runScenario(workflow, {
       name: "additional evidence field rejected",
       mockInputs: {
-        "obtain-tasks": { tasks: [suppliedTasks[0]] },
+        "obtain-tasks": intake([suppliedTasks[0]]),
         "execute-task": [
-          { evidence: "verified", status: "completed" },
-          { evidence: "verified without a duplicate result model" },
+          {
+            evidence: "verified",
+            progress_execution_outcome: "Task verified",
+            status: "completed",
+          },
+          completedTask("verified without a duplicate result model"),
         ],
       },
       allowValidationErrorsAt: ["execute-task"],
@@ -327,12 +468,17 @@ describe("todo-list minimal sequential checklist", () => {
     const result = await runScenario(workflow, {
       name: "checklist revision through the teleport",
       mockInputs: {
-        "obtain-tasks": { tasks: suppliedTasks },
+        "obtain-tasks": intake(suppliedTasks),
         "execute-task": ({ variables }) => {
           executedActions.push(variables.current_task_action);
-          return { evidence: `Verified task ${String(variables.current_task)}` };
+          return completedTask(`Verified task ${String(variables.current_task)}`);
         },
-        "teleport-revise-tasks": { tasks: revisedTasks, resume_from_task: 2 },
+        "teleport-revise-tasks": {
+          tasks: revisedTasks,
+          resume_from_task: 2,
+          progress_checklist_outcome: "3 revised tasks with completed prefix preserved",
+          progress_execution_outcome: "Task 1 verified",
+        },
       },
       // Jump at the second arrival: the first task is really executed, then the checklist is
       // found to be wrong before the second one starts.
@@ -357,6 +503,40 @@ describe("todo-list minimal sequential checklist", () => {
     ]);
     expect(result.finalContext.tasks).toEqual(revisedTasks);
     expect(result.inputSubmissionCounts["teleport-revise-tasks"]).toBe(1);
+  });
+
+  test("completes after revision removes the entire unfinished tail", async () => {
+    const executedActions: unknown[] = [];
+    const result = await runScenario(workflow, {
+      name: "empty-tail checklist revision",
+      mockInputs: {
+        "obtain-tasks": intake(suppliedTasks),
+        "execute-task": ({ variables }) => {
+          executedActions.push(variables.current_task_action);
+          return completedTask("First task verified");
+        },
+        "teleport-revise-tasks": {
+          tasks: [suppliedTasks[0]],
+          resume_from_task: 2,
+          progress_checklist_outcome: "Completed prefix retained with no remaining tasks",
+          progress_execution_outcome: "First task verified",
+        },
+      },
+      teleportAfter: {
+        afterNode: "execute-task",
+        visitNumber: 2,
+        teleportTo: "teleport-revise-tasks",
+      },
+      expect: {
+        status: "completed",
+        reaches: ["teleport-revise-tasks", "derive-revised-plan-state", "end"],
+        contextContains: { total_tasks: 1, current_task: 2 },
+      },
+    });
+
+    expect(executedActions).toEqual([suppliedTasks[0].action]);
+    expect(result.finalContext.tasks).toEqual([suppliedTasks[0]]);
+    expect(result.inputSubmissionCounts["execute-task"]).toBe(1);
   });
 
   test("covers every reachable node and both process decisions", () => {

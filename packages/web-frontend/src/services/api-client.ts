@@ -25,6 +25,11 @@ import {
   AdminSystemStatusResponse,
 } from "../types";
 
+export interface ExecutionVariableAccess {
+  variables: Array<{ name: string; editable: boolean }>;
+  revision: number;
+}
+
 // Public auth endpoints that should not trigger 401/403 interceptor redirects
 // NOTE: Only auth-related endpoints should be here. Other endpoints (settings, user/me)
 // should NOT be excluded - they need to trigger logout for blocked users.
@@ -1450,6 +1455,13 @@ export class MoiraApiClient {
         return null;
       throw new ApiClientError("Failed to get execution progress", ApiErrorCode.INTERNAL_ERROR);
     }
+  }
+
+  async getExecutionVariables(executionId: string): Promise<ExecutionVariableAccess> {
+    const response = await this.client.get<ApiResponse<ExecutionVariableAccess>>(
+      `/executions/${executionId}/variables`,
+    );
+    return response.data.data!;
   }
 
   /**

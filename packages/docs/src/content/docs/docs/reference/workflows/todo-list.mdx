@@ -27,15 +27,26 @@ Both strings are non-empty and limited to 1,000 characters. Array position is th
 
 ## Execution
 
-Todo List owns a one-based cursor. It projects the current task, tells the agent its action and expected result, and waits. The agent performs the real work and verifies the expected result before calling `step()` with exactly one field:
+Todo List owns a one-based cursor. It projects the current task, tells the agent its action and expected result, and waits. The agent performs the real work and verifies the expected result before calling `step()` with the local evidence and the bounded display outcome:
 
 ```json
-{ "evidence": "The focused test command passed." }
+{
+  "evidence": "The focused test command passed.",
+  "progress_execution_outcome": "The affected test suite passed"
+}
 ```
 
-`evidence` is a non-empty string of at most 500 characters. It is a concise acknowledgement for the current step, remains node-local, and is not copied into a workflow-global array or terminal report.
+Both strings are non-empty and at most 500 characters. `evidence` is the concrete acknowledgement for the current step, remains node-local, and is not copied into a workflow-global array or terminal report. `progress_execution_outcome` replaces the latest confirmed Work synopsis for presentation; it is not evidence and never advances the cursor by itself.
 
 If the task is incomplete or blocked, the agent must not call `step()`. It reports the verified blocker to the user, so the cursor stays on the current task. A schema-valid acknowledgement advances the cursor exactly once. Exhausting the ordered array completes the workflow.
+
+## Execution progress
+
+The execution card and exported image share three horizontal milestones: Checklist → Prepare → Work. Checklist shows the latest confirmed synopsis of the authoritative ordered list. Prepare represents the engine's existing derivation of the length, cursor, action, and expected result. Work covers both ordinary task execution and correction of a checklist that stopped describing the remaining work.
+
+The current role remains explicit. Ordinary work is labelled `Task N/M` and shows the complete current action; the full expected result stays in the agent directive because it may be longer than the bounded progress field. A checklist jump is labelled `Revise checklist` and uses no task projection that might be unavailable on that route. Both roles map to the final Work milestone, so normal completion and a revision that removes the whole unfinished tail both finish the progress presentation without adding a synthetic result step.
+
+Checklist and Work outcomes are bounded render-only values. Revision replaces the checklist synopsis and atomically keeps only a completed-task outcome that remains true for the preserved prefix, or `Pending`. Progress does not participate in conditions, cursor arithmetic, task data, completion evidence, terminal output, or authority.
 
 ## Revising the checklist mid-run
 
@@ -55,7 +66,9 @@ The revision step asks for the complete corrected checklist and the position to 
     { "action": "…already executed, unchanged…", "expected_result": "…" },
     { "action": "Repair the configuration the first task revealed as wrong", "expected_result": "The service starts with the corrected configuration" }
   ],
-  "resume_from_task": 2
+  "resume_from_task": 2,
+  "progress_checklist_outcome": "The corrected list contains the preserved prefix and two remaining tasks",
+  "progress_execution_outcome": "The first task remains verified"
 }
 ```
 
@@ -74,7 +87,8 @@ response:
       "action": "Check the implemented requirement",
       "expected_result": "The caller's domain report contains the verified result"
     }
-  ]
+  ],
+  "progress_checklist_outcome": "One ordered task is ready"
 }
 ```
 

@@ -89,6 +89,14 @@ The first step resolves `operating_mode` as `autonomous` or `interactive`. The a
 
 In `interactive` mode everything above is unchanged. In `autonomous` mode the plan-approval gate is bypassed and every bounded decision is made by the agent on evidence: another repair pass only for findings that are reproducible and repairable now, a retry only when something material changed, a replan when the failure invalidates the plan rather than the attempt, and otherwise recorded incompleteness. The independent reviews, the retry and review bounds, the replan routes and the durable records are identical in both modes, and accepted gaps stay visible in the delivery — autonomy removes the waiting, not the honesty.
 
+## Execution progress
+
+The execution card and exported progress image share one six-stage presentation: Intake → Plan → Execute → Step Review → Final Review → Deliver. All 23 user-visible waiting responsibilities, including the jump-only replan entry and every repair, recovery, and replan role, map to one stage. The presentation adds no executable route, counter, authority decision, or proof mechanism.
+
+Each stage shows its stable purpose, the exact current responsibility, the latest confirmed semantic outcome, and the next meaningful action. The role that owns a result replaces one bounded outcome instead of appending history: intake owns the resolved contract, plan roles own the current plan synopsis and disposition, execution owns the latest plan-qualified attempt, each review family owns its current disposition, and delivery owns the truthful terminal result. Active labels describe current work without hiding the last confirmed outcome.
+
+Every directive that reasons about a plan reads the authoritative path `{{workspace_path}}{{current_plan_file}}`. When repair, user revision, teleport, or a cause-specific replan creates a replacement plan, that writer atomically replaces Plan, Execute, Step Review, and Final Review projections with only the completed prefix that is still true or a pending state. This prevents outcomes from different plan revisions from being mixed. Progress values remain render-only; primary conditions, connections, retry budgets, the execution cursor, approvals, and side-effect authority continue to come from ordinary workflow state.
+
 ## Step execution and review
 
 The engine owns the one-based `current_step` cursor. For each plan step:

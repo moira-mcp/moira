@@ -69,7 +69,7 @@ Returned paths are constrained by JSON Schema for shape and length. File existen
 
 The planner writes between one and ten meaningful ordered work units. Each unit states its action, expected result, and a verification method appropriate to the work, and fixes that outcome rather than carrying the deliverable itself: after the plan is approved, work an intelligent executor still has to do remains. The rule matters most where the result is prose — a document, briefs for other agents, an investigation's answer — because there plan and result share a medium. The repair node that precedes approval answers for the whole plan; the revision node, which also runs mid-flight, answers for the units it shapes, because already executed units stay at their positions as they were executed. The plan body stays in `plan.md`; the workflow receives only its bounded path and exact item count.
 
-An independent reviewer reads `task.md` and the current `plan.md` directly. It writes the complete reproducible blocking finding set to `review.md` and returns only the report path plus `issues_count`. A nonzero count routes to a separate repair node, which writes a new immutable plan iteration before returning to the same reviewer. Zero findings is valid and reaches the approval gate.
+An independent reviewer reads `task.md` and the current `plan.md` directly. It writes the complete reproducible blocking finding set to `review.md` and returns the report path and `issues_count` together with the bounded current planning-progress outcome required by the response schema. A nonzero count routes to a separate repair node, which writes a new immutable plan iteration before returning to the same reviewer. Zero findings is valid and reaches the approval gate.
 
 The user's exact decision and feedback are written to `decision.md`. Context receives only the decision-file path and `yes`/`no` routing value. Requested revisions read the exact feedback from disk, create a new plan iteration, and pass through independent review again.
 
@@ -80,6 +80,14 @@ The plan length becomes authoritative for execution only after the current plan 
 The first step resolves `operating_mode` as `autonomous` or `interactive`. The agent reuses a mode you already stated, infers an unambiguous one — including a run started by an already autonomous parent process — and asks once only when the mode is neither stated nor derivable.
 
 In `interactive` mode nothing changes. In `autonomous` mode the plan-approval gate is bypassed and the final step presents the result without asking for acceptance. Both independent reviews and their repair loops are identical in either mode, and the delivery stays honest: unfinished or unverified work is reported as such rather than silently accepted.
+
+## Execution progress
+
+The execution card and exported progress image use the same five-stage presentation: Scope → Plan → Execute → Verify → Result. The execution note remains the task title. Every user-visible waiting responsibility, including the jump-only replan entry, maps to one of these stages; the presentation does not add routes or change the executable graph.
+
+Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
+
+Active labels and summaries describe work currently in progress without hiding the last confirmed outcome. If plan repair or mid-execution replanning creates a new plan revision, its synopsis atomically replaces obsolete current and future plan meaning while retaining only still-valid completed outcomes. These progress values are render-only: conditions, connections, the plan cursor, approvals, and authority continue to come from the primary workflow state.
 
 ## Execution and evidence
 
@@ -101,7 +109,7 @@ The jump states why the plan no longer fits; the same plan revision responsibili
 
 ## Result review and acceptance
 
-After all approved units, an independent reviewer reads the task, approved plan, plan decision, execution evidence, and actual artifacts. Each result state receives an immutable numeric review record. The reviewer writes all current blocking defects to `review.md` and returns only its path and `issues_count`.
+After all approved units, an independent reviewer reads the task, approved plan, plan decision, execution evidence, and actual artifacts. Each result state receives an immutable numeric review record. The reviewer writes all current blocking defects to `review.md` and returns its path and `issues_count` together with the bounded current review-progress outcome required by the response schema.
 
 A nonzero count routes to a separate fix node. The fix reads the complete report, reproduces and corrects confirmed defects, and writes `change.md`; the changed result then returns through the same independent review. A clean review reaches user presentation.
 

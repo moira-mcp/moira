@@ -121,6 +121,9 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
   const [progress, setProgress] = useState<ExecutionProgress | null>(null);
   const [progressError, setProgressError] = useState(false);
   const [progressLoading, setProgressLoading] = useState(false);
+  const [editableVariableNames, setEditableVariableNames] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const progressRequestRef = useRef(0);
 
   // Context editing state (per-variable save is handled inside ContextVariableEditor)
@@ -192,8 +195,18 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         setExecution(execData);
 
         // Load workflow for visualization
-        const workflowData = await apiClient.getWorkflow(execData.workflowId);
+        const [workflowData, variableAccess] = await Promise.all([
+          apiClient.getWorkflow(execData.workflowId),
+          editable ? apiClient.getExecutionVariables(execData.executionId) : Promise.resolve(null),
+        ]);
         setWorkflow(workflowData);
+        setEditableVariableNames(
+          new Set(
+            variableAccess?.variables
+              .filter((variable) => variable.editable)
+              .map((variable) => variable.name) ?? [],
+          ),
+        );
         setError(null);
         void loadProgress(execData.executionId);
       } catch (err: unknown) {
@@ -204,7 +217,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
         setRefreshing(false);
       }
     },
-    [executionId, fetchExecution, loadProgress, t],
+    [editable, executionId, fetchExecution, loadProgress, t],
   );
 
   useEffect(() => {
@@ -636,6 +649,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
                   variables={execution?.context?.variables || {}}
                   workflow={workflow?.workflow}
                   onSavePath={canEdit ? handleSavePath : undefined}
+                  editableRootNames={editableVariableNames}
                 />
               </div>
             </TabsContent>
@@ -777,6 +791,7 @@ export const ExecutionInspector: React.FC<ExecutionInspectorProps> = ({
               variables={execution?.context?.variables || {}}
               workflow={workflow?.workflow}
               onSavePath={canEdit ? handleSavePath : undefined}
+              editableRootNames={editableVariableNames}
             />
           </div>
         </DialogContent>

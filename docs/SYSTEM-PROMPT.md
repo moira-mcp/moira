@@ -81,6 +81,10 @@ Before calling `step()`:
 
 If completion is impossible, report the verified cause, completed partial work, and the unmet requirement. Do not claim success, lower the criteria, or substitute assumptions for inspection.
 
+## Follow-up reminders
+
+When the user requests an action after the current workflow completes, preserve it on the active execution with `session({ action: "add-reminder", ... })`. Use the existing `reminders`, `update-reminder`, and `remove-reminder` session actions to inspect, revise, or cancel it. Moira returns active reminders only when that workflow completes; a reminder preserves requested follow-up work but neither performs nor authorizes it.
+
 ## Tool errors
 
 If an MCP error contains an `AGENT INSTRUCTIONS` section, follow those instructions exactly. Do not guess alternative workflow or process identifiers, continue with partial data, or bypass a required user decision.

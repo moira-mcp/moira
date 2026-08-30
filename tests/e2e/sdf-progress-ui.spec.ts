@@ -19,7 +19,8 @@ test("renders the actual SDF phase projection consistently in UI and PNG", async
   const workflow = structuredClone(
     findSystemCatalogEntry("software-development-flow", "public")!.graph,
   ) as WorkflowGraph;
-  expect(workflow.metadata.version).toBe("15.3.0");
+  const expectedWorkflowVersion = workflow.metadata.version;
+  expect(expectedWorkflowVersion).toMatch(/^\d+\.\d+\.\d+$/);
 
   const started = await callMCPToolRaw(authenticated.client, "start", {
     workflowId: "moira/software-development-flow",
@@ -39,7 +40,10 @@ test("renders the actual SDF phase projection consistently in UI and PNG", async
     theme: "light",
     viewportWidth: 960,
   });
-  expect(liveImage).toMatchObject({ mimeType: "image/png", workflowVersion: "15.3.0" });
+  expect(liveImage).toMatchObject({
+    mimeType: "image/png",
+    workflowVersion: expectedWorkflowVersion,
+  });
   const liveResponse = await fetch(`${BASE_URL}${new URL(liveImage.downloadUrl).pathname}`);
   expect(liveResponse.status).toBe(200);
   writeFileSync(
