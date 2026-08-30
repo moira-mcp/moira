@@ -81,6 +81,14 @@ The first step resolves `operating_mode` as `autonomous` or `interactive`. The a
 
 In `interactive` mode nothing changes. In `autonomous` mode the plan-approval gate is bypassed and the final step presents the result without asking for acceptance. Both independent reviews and their repair loops are identical in either mode, and the delivery stays honest: unfinished or unverified work is reported as such rather than silently accepted.
 
+## Execution progress
+
+The execution card and exported progress image use the same five-stage presentation: Scope → Plan → Execute → Verify → Result. The execution note remains the task title. Every user-visible waiting responsibility, including the jump-only replan entry, maps to one of these stages; the presentation does not add routes or change the executable graph.
+
+Each stage shows its stable purpose, the exact current role, the latest confirmed outcome, and the next meaningful action. The node that owns a semantic result writes one bounded outcome: intake summarizes the resolved contract, planning roles replace the current plan synopsis, execution replaces the latest completed-unit outcome, review roles replace the current review disposition, and presentation or rework replaces the result disposition. Writers replace the value instead of appending history.
+
+Active labels and summaries describe work currently in progress without hiding the last confirmed outcome. If plan repair or mid-execution replanning creates a new plan revision, its synopsis atomically replaces obsolete current and future plan meaning while retaining only still-valid completed outcomes. These progress values are render-only: conditions, connections, the plan cursor, approvals, and authority continue to come from the primary workflow state.
+
 ## Execution and evidence
 
 The engine owns a zero-based cursor. For each position, the agent reads the approved `plan.md`, executes only that work unit, applies technical judgment, and verifies the actual result. Before advancing, it writes exactly one concise evidence entry of at most 500 characters for that position to `execution.md`.

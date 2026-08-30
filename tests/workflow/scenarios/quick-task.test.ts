@@ -32,6 +32,13 @@ const resultReviewFile = (iteration: number) =>
   `${workspace}/result-reviews/${String(iteration).padStart(3, "0")}/review.md`;
 const resultDecisionFile = (iteration: number) =>
   `${workspace}/result-reviews/${String(iteration).padStart(3, "0")}/decision.md`;
+const progressOutcome = {
+  scope: "Task contract captured with interactive mode and bounded authority",
+  plan: "Current plan contains verified bounded work units",
+  execution: "Current approved unit completed with durable evidence",
+  review: "Independent result review is clean with zero blocking findings",
+  result: "Reviewed result presented and accepted",
+};
 
 function successfulInputs(stepCount = 1) {
   return {
@@ -39,13 +46,36 @@ function successfulInputs(stepCount = 1) {
       task_file: taskFile,
       execution_file: executionFile,
       operating_mode: "interactive",
+      progress_scope_outcome: progressOutcome.scope,
     },
-    "create-plan": { current_plan_file: planFile(1), total_steps: stepCount },
-    "plan-review": { review_file: planReviewFile(1), issues_count: 0 },
-    "present-plan": { approval: "yes", decision_file: planDecisionFile(1) },
-    "execute-step": Array.from({ length: stepCount }, () => ({})),
-    "final-review": { review_file: resultReviewFile(1), issues_count: 0 },
-    "present-to-user": { decision: "accept", decision_file: resultDecisionFile(1) },
+    "create-plan": {
+      current_plan_file: planFile(1),
+      total_steps: stepCount,
+      progress_plan_outcome: `${stepCount}-unit current plan ready for review`,
+    },
+    "plan-review": {
+      review_file: planReviewFile(1),
+      issues_count: 0,
+      progress_plan_outcome: `${stepCount}-unit current plan independently reviewed clean`,
+    },
+    "present-plan": {
+      approval: "yes",
+      decision_file: planDecisionFile(1),
+      progress_plan_outcome: `${stepCount}-unit current plan approved`,
+    },
+    "execute-step": Array.from({ length: stepCount }, () => ({
+      progress_execution_outcome: progressOutcome.execution,
+    })),
+    "final-review": {
+      review_file: resultReviewFile(1),
+      issues_count: 0,
+      progress_review_outcome: progressOutcome.review,
+    },
+    "present-to-user": {
+      decision: "accept",
+      decision_file: resultDecisionFile(1),
+      progress_result_outcome: progressOutcome.result,
+    },
   };
 }
 
@@ -67,12 +97,12 @@ describe("quick-task scenarios", () => {
     expect(validation.errors).toHaveLength(0);
     // Pinned so a directive change cannot ship without the version that publishes it, and without
     // this file being reopened alongside the flow.
-    expect(workflow.metadata.version).toBe("4.4.2");
+    expect(workflow.metadata.version).toBe("4.4.3");
     expect(workflow.metadata.description).toContain("bounded non-development task");
     expect(workflow.metadata.description).toContain("Todo List");
   });
 
-  it("keeps only the plan reference, approved length, execution cursor, and operating mode globals", () => {
+  it("keeps functional state separate from bounded render-only progress outcomes", () => {
     expect(workflow.variableRegistry).toEqual({
       current_plan_file: {
         type: "string",
@@ -102,6 +132,41 @@ describe("quick-task scenarios", () => {
           "How this run treats the user before the final result: autonomous skips the plan approval and the acceptance question, interactive keeps them",
         enum: ["autonomous", "interactive"],
       },
+      progress_scope_outcome: {
+        type: "string",
+        description: "Current bounded semantic outcome projected into Quick Task progress",
+        default: "Pending",
+        minLength: 1,
+        maxLength: 500,
+      },
+      progress_plan_outcome: {
+        type: "string",
+        description: "Current bounded semantic outcome projected into Quick Task progress",
+        default: "Pending",
+        minLength: 1,
+        maxLength: 500,
+      },
+      progress_execution_outcome: {
+        type: "string",
+        description: "Current bounded semantic outcome projected into Quick Task progress",
+        default: "Pending",
+        minLength: 1,
+        maxLength: 500,
+      },
+      progress_review_outcome: {
+        type: "string",
+        description: "Current bounded semantic outcome projected into Quick Task progress",
+        default: "Pending",
+        minLength: 1,
+        maxLength: 500,
+      },
+      progress_result_outcome: {
+        type: "string",
+        description: "Current bounded semantic outcome projected into Quick Task progress",
+        default: "Pending",
+        minLength: 1,
+        maxLength: 500,
+      },
     });
 
     const cycles = detectCycles(workflow);
@@ -109,6 +174,52 @@ describe("quick-task scenarios", () => {
     expect(workflow.nodes.some((node) => node.id === "project-current-step")).toBe(false);
     expect(workflow.nodes.some((node) => node.id.includes("limit"))).toBe(false);
     expect(workflow.nodes.some((node) => node.id.includes("recovery"))).toBe(false);
+  });
+
+  it("projects every waiting role without hiding the latest completed outcome", () => {
+    expect(workflow.progress?.nodes.map((node) => node.id)).toEqual([
+      "scope",
+      "plan",
+      "execute",
+      "verify",
+      "result",
+    ]);
+    expect(workflow.progress?.nodes.map((node) => node.connections?.default)).toEqual([
+      "plan",
+      "execute",
+      "verify",
+      "result",
+      undefined,
+    ]);
+
+    const waitingTypes = new Set([
+      "agent-directive",
+      "teleport",
+      "lock",
+      "materialize",
+      "subgraph",
+    ]);
+    const waitingNodes = workflow.nodes.filter((node) => waitingTypes.has(node.type));
+    expect(waitingNodes).toHaveLength(12);
+    expect(waitingNodes.every((node) => Boolean(node.progressNodeId))).toBe(true);
+    expect(
+      waitingNodes.every(
+        (node) =>
+          Boolean(node.progressActiveLabel) &&
+          Boolean(node.progressActiveContent?.summary) &&
+          Boolean(node.progressActiveContent?.next) &&
+          node.progressActiveContent?.outcome === undefined,
+      ),
+    ).toBe(true);
+
+    const routingText = JSON.stringify(
+      workflow.nodes.map((node) => ({
+        condition: node.type === "condition" ? node.condition : undefined,
+        expressions: node.type === "expression" ? node.expressions : undefined,
+        connections: node.connections,
+      })),
+    );
+    expect(routingText).not.toContain("progress_");
   });
 
   it("uses bounded typed paths and minimal routing outputs", () => {
@@ -138,6 +249,7 @@ describe("quick-task scenarios", () => {
         task_file: taskFile,
         execution_file: executionFile,
         operating_mode: "interactive",
+        progress_scope_outcome: progressOutcome.scope,
       }),
     ).toBe(true);
     expect(
@@ -145,37 +257,76 @@ describe("quick-task scenarios", () => {
         task_file: "../task.md",
         execution_file: executionFile,
         operating_mode: "interactive",
+        progress_scope_outcome: progressOutcome.scope,
       }),
     ).toBe(false);
     // The mode is a bounded routing value, not free text.
     expect(
-      validateIntake({ task_file: taskFile, execution_file: executionFile, operating_mode: "off" }),
+      validateIntake({
+        task_file: taskFile,
+        execution_file: executionFile,
+        operating_mode: "off",
+        progress_scope_outcome: progressOutcome.scope,
+      }),
     ).toBe(false);
 
     const validatePlanReview = ajv.compile(schema("plan-review"));
-    expect(validatePlanReview({ review_file: planReviewFile(1), issues_count: 0 })).toBe(true);
-    expect(validatePlanReview({ review_file: planReviewFile(1), issues_count: 0.5 })).toBe(false);
+    expect(
+      validatePlanReview({
+        review_file: planReviewFile(1),
+        issues_count: 0,
+        progress_plan_outcome: progressOutcome.plan,
+      }),
+    ).toBe(true);
+    expect(
+      validatePlanReview({
+        review_file: planReviewFile(1),
+        issues_count: 0.5,
+        progress_plan_outcome: progressOutcome.plan,
+      }),
+    ).toBe(false);
 
     const validatePlanDecision = ajv.compile(schema("present-plan"));
-    expect(validatePlanDecision({ approval: "no", decision_file: planDecisionFile(1) })).toBe(true);
     expect(
       validatePlanDecision({
         approval: "no",
         decision_file: planDecisionFile(1),
+        progress_plan_outcome: progressOutcome.plan,
+      }),
+    ).toBe(true);
+    expect(
+      validatePlanDecision({
+        approval: "no",
+        decision_file: planDecisionFile(1),
+        progress_plan_outcome: progressOutcome.plan,
         feedback: "must remain on disk",
       }),
     ).toBe(false);
 
     const validateResultReview = ajv.compile(schema("final-review"));
-    expect(validateResultReview({ review_file: resultReviewFile(1), issues_count: 0 })).toBe(true);
+    expect(
+      validateResultReview({
+        review_file: resultReviewFile(1),
+        issues_count: 0,
+        progress_review_outcome: progressOutcome.review,
+      }),
+    ).toBe(true);
 
     const validateResultDecision = ajv.compile(schema("present-to-user"));
     expect(
-      validateResultDecision({ decision: "rework", decision_file: resultDecisionFile(1) }),
+      validateResultDecision({
+        decision: "rework",
+        decision_file: resultDecisionFile(1),
+        progress_result_outcome: progressOutcome.result,
+      }),
     ).toBe(true);
-    expect(validateResultDecision({ decision: "accept", decision_file: "result-review.md" })).toBe(
-      false,
-    );
+    expect(
+      validateResultDecision({
+        decision: "accept",
+        decision_file: "result-review.md",
+        progress_result_outcome: progressOutcome.result,
+      }),
+    ).toBe(false);
 
     const outputKeys = new Set<string>();
     for (const node of workflow.nodes) {
@@ -360,6 +511,7 @@ describe("quick-task scenarios", () => {
             task_file: taskFile,
             execution_file: executionFile,
             operating_mode: "autonomous",
+            progress_scope_outcome: "Task contract captured with autonomous mode",
           },
         },
         expect: {
@@ -405,31 +557,91 @@ describe("quick-task scenarios", () => {
             task_file: taskFile,
             execution_file: executionFile,
             operating_mode: "interactive",
+            progress_scope_outcome: progressOutcome.scope,
           },
-          "create-plan": { current_plan_file: planFile(1), total_steps: 2 },
+          "create-plan": {
+            current_plan_file: planFile(1),
+            total_steps: 2,
+            progress_plan_outcome: "Initial two-unit plan ready for review",
+          },
           "plan-review": [
-            { review_file: planReviewFile(1), issues_count: 1 },
-            { review_file: planReviewFile(2), issues_count: 0 },
-            { review_file: planReviewFile(3), issues_count: 0 },
+            {
+              review_file: planReviewFile(1),
+              issues_count: 1,
+              progress_plan_outcome: "Initial plan review found one blocking issue",
+            },
+            {
+              review_file: planReviewFile(2),
+              issues_count: 0,
+              progress_plan_outcome: "Corrected two-unit plan independently reviewed clean",
+            },
+            {
+              review_file: planReviewFile(3),
+              issues_count: 0,
+              progress_plan_outcome: "Revised two-unit plan independently reviewed clean",
+            },
           ],
-          "repair-plan": { current_plan_file: planFile(2), total_steps: 2 },
+          "repair-plan": {
+            current_plan_file: planFile(2),
+            total_steps: 2,
+            progress_plan_outcome: "Corrected two-unit plan replaced the rejected revision",
+          },
           "present-plan": [
-            { approval: "no", decision_file: planDecisionFile(2) },
-            { approval: "yes", decision_file: planDecisionFile(3) },
+            {
+              approval: "no",
+              decision_file: planDecisionFile(2),
+              progress_plan_outcome: "Corrected two-unit plan rejected with exact feedback",
+            },
+            {
+              approval: "yes",
+              decision_file: planDecisionFile(3),
+              progress_plan_outcome: "Revised two-unit plan approved",
+            },
           ],
-          "revise-plan": { current_plan_file: planFile(3), total_steps: 2 },
-          "execute-step": [{}, {}],
+          "revise-plan": {
+            current_plan_file: planFile(3),
+            total_steps: 2,
+            progress_plan_outcome: "Revised two-unit plan incorporated exact user feedback",
+          },
+          "execute-step": [
+            { progress_execution_outcome: "First approved unit completed and verified" },
+            { progress_execution_outcome: "Second approved unit completed and verified" },
+          ],
           "final-review": [
-            { review_file: resultReviewFile(1), issues_count: 1 },
-            { review_file: resultReviewFile(2), issues_count: 0 },
-            { review_file: resultReviewFile(3), issues_count: 0 },
+            {
+              review_file: resultReviewFile(1),
+              issues_count: 1,
+              progress_review_outcome: "Independent result review found one blocking defect",
+            },
+            {
+              review_file: resultReviewFile(2),
+              issues_count: 0,
+              progress_review_outcome: "Corrected result independently reviewed clean",
+            },
+            {
+              review_file: resultReviewFile(3),
+              issues_count: 0,
+              progress_review_outcome: "Reworked result independently reviewed clean",
+            },
           ],
-          "fix-issues": {},
+          "fix-issues": {
+            progress_review_outcome: "Confirmed result defect corrected and verified",
+          },
           "present-to-user": [
-            { decision: "rework", decision_file: resultDecisionFile(2) },
-            { decision: "accept", decision_file: resultDecisionFile(3) },
+            {
+              decision: "rework",
+              decision_file: resultDecisionFile(2),
+              progress_result_outcome: "Reviewed result presented; exact rework requested",
+            },
+            {
+              decision: "accept",
+              decision_file: resultDecisionFile(3),
+              progress_result_outcome: "Reworked reviewed result presented and accepted",
+            },
           ],
-          rework: {},
+          rework: {
+            progress_result_outcome: "Requested result rework completed and verified",
+          },
         },
         expect: {
           status: "completed",
@@ -460,20 +672,61 @@ describe("quick-task scenarios", () => {
             task_file: taskFile,
             execution_file: executionFile,
             operating_mode: "interactive",
+            progress_scope_outcome: progressOutcome.scope,
           },
-          "create-plan": { current_plan_file: planFile(1), total_steps: 2 },
+          "create-plan": {
+            current_plan_file: planFile(1),
+            total_steps: 2,
+            progress_plan_outcome: "Initial two-unit plan ready for review",
+          },
           "plan-review": [
-            { review_file: planReviewFile(1), issues_count: 0 },
-            { review_file: planReviewFile(2), issues_count: 0 },
+            {
+              review_file: planReviewFile(1),
+              issues_count: 0,
+              progress_plan_outcome: "Initial two-unit plan independently reviewed clean",
+            },
+            {
+              review_file: planReviewFile(2),
+              issues_count: 0,
+              progress_plan_outcome: "Replacement two-unit plan independently reviewed clean",
+            },
           ],
           "present-plan": [
-            { approval: "yes", decision_file: planDecisionFile(1) },
-            { approval: "yes", decision_file: planDecisionFile(2) },
+            {
+              approval: "yes",
+              decision_file: planDecisionFile(1),
+              progress_plan_outcome: "Initial two-unit plan approved",
+            },
+            {
+              approval: "yes",
+              decision_file: planDecisionFile(2),
+              progress_plan_outcome: "Replacement two-unit plan approved",
+            },
           ],
-          "revise-plan": { current_plan_file: planFile(2), total_steps: 2 },
-          "execute-step": [{}, {}],
-          "final-review": { review_file: resultReviewFile(1), issues_count: 0 },
-          "present-to-user": { decision: "accept", decision_file: resultDecisionFile(1) },
+          "teleport-replan": {
+            progress_plan_outcome:
+              "Approved plan no longer fits; first completed unit remains valid",
+          },
+          "revise-plan": {
+            current_plan_file: planFile(2),
+            total_steps: 2,
+            progress_plan_outcome:
+              "Replacement two-unit plan preserves the completed prefix and revises the remainder",
+          },
+          "execute-step": [
+            { progress_execution_outcome: "First approved unit completed and verified" },
+            { progress_execution_outcome: "Replacement remaining unit completed and verified" },
+          ],
+          "final-review": {
+            review_file: resultReviewFile(1),
+            issues_count: 0,
+            progress_review_outcome: progressOutcome.review,
+          },
+          "present-to-user": {
+            decision: "accept",
+            decision_file: resultDecisionFile(1),
+            progress_result_outcome: progressOutcome.result,
+          },
         },
         teleportAfter: { afterNode: "execute-step", visitNumber: 2, teleportTo: "teleport-replan" },
         expect: {

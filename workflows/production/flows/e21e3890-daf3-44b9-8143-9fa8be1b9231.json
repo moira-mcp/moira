@@ -1,11 +1,8 @@
 {
-  "slug": "quick-task",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "e21e3890-daf3-44b9-8143-9fa8be1b9231",
   "metadata": {
     "name": "Quick Task",
-    "version": "4.4.2",
+    "version": "4.4.3",
     "description": "Executes one bounded non-development task of 1–10 work units in an execution-correlated filesystem workspace. It resolves the goal, observable result, scope, constraints, authority and autonomous or interactive mode; writes immutable versioned plan, decision and review records; requires independent plan review before execution; and runs approved work sequentially with durable per-step evidence. A guarded mid-run revision creates a new complete plan version while preserving the evidenced completed prefix, and final independent review checks the actual result before truthful reporting and interactive acceptance or rework. The originating request remains the authority ceiling; plan approval does not authorize unrelated external, destructive, publication, production or VCS effects. Choose Quick Task for bounded work outside a software-development lifecycle; use Todo List when the checklist is already known and minimal orchestration is enough, Robust Task for stronger retry/recovery and durable critical work, or Software Development Flow for repository implementation with tests and documentation."
   },
   "nodes": [
@@ -19,7 +16,7 @@
     {
       "id": "get-task",
       "type": "agent-directive",
-      "directive": "Establish the complete task contract from the triggering conversation. Reuse information already present and ask only for a material fact that cannot be discovered; do not ask the user to repeat a complete request. Create ./moira-ws/quick-task-{{executionId}}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for one concise evidence entry per approved plan position. Return the exact task and execution file paths. Do not plan or execute the task. If the complete files cannot be created and verified, report the blocker and do not call step().\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there is no plan approval and no acceptance question, only the delivered result, while `interactive` keeps both. The mode holds for the whole run and is never asked again.",
+      "directive": "Establish the complete task contract from the triggering conversation. Reuse information already present and ask only for a material fact that cannot be discovered; do not ask the user to repeat a complete request. Create ./moira-ws/quick-task-{{executionId}}/ and its required subdirectories, write {{executionId}} to process-id.txt, write the complete task contract once to task.md, and initialize execution.md for one concise evidence entry per approved plan position. Return the exact task and execution file paths. Do not plan or execute the task. If the complete files cannot be created and verified, report the blocker and do not call step().\n\nResolve `operating_mode` in this same turn: reuse a mode the user already stated; infer an unambiguous one, including a run started by an already autonomous parent process; otherwise ask once, naming the consequence — in `autonomous` there is no plan approval and no acceptance question, only the delivered result, while `interactive` keeps both. The mode holds for the whole run and is never asked again.\n\nProgress outcome ownership: Return progress_scope_outcome as a concise truthful synopsis of the resolved task contract, scope, authority, and operating mode. Replace the prior value; do not append history, predict later work, or duplicate the complete task file.",
       "completionCondition": "The execution workspace, process correlation, complete task contract, and execution evidence file exist at the returned bounded paths",
       "inputSchema": {
         "type": "object",
@@ -39,22 +36,30 @@
           }
         },
         "required": [
-          "task_file",
           "execution_file",
-          "operating_mode"
+          "operating_mode",
+          "progress_scope_outcome",
+          "task_file"
         ],
         "globalInputs": [
-          "operating_mode"
+          "operating_mode",
+          "progress_scope_outcome"
         ]
       },
       "connections": {
         "success": "create-plan"
+      },
+      "progressNodeId": "scope",
+      "progressActiveLabel": "Capture task contract",
+      "progressActiveContent": {
+        "summary": "Capture the task contract, authority, and operating mode",
+        "next": "Create the first immutable plan"
       }
     },
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work.\n\nA unit fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after this plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here.\n\nPrepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and exact item count; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().",
+      "directive": "Read the complete task contract from {{get-task.task_file}}. Create the first immutable plan record under ./moira-ws/quick-task-{{executionId}}/plans/ using a numeric iteration directory. The complete plan must contain 1..10 meaningful ordered work units; each unit states its action, expected result, and a verification method fitting the work.\n\nA unit fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after this plan is approved, work an intelligent executor still has to do remains, and a unit a later step could satisfy by copying text out of the plan is a unit whose result is already written here.\n\nPrepare under a non-numeric temporary name and publish the numeric record only when complete. Return its exact plan.md path and exact item count; do not return the plan body. If a complete useful plan cannot be created and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the current plan item count and a concise semantic synopsis of its unit outcomes. Replace the prior value atomically; do not append history, include obsolete future units, or return only a generic creation status.",
       "completionCondition": "A complete immutable initial plan covering the task contract is published at current_plan_file, total_steps exactly equals its 1..10 work units, and every unit fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -62,21 +67,29 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "plan-review"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Create plan",
+      "progressActiveContent": {
+        "summary": "Create the first complete immutable plan",
+        "next": "Independently review the current plan"
       }
     },
     {
       "id": "plan-review",
       "type": "agent-directive",
-      "directive": "Obtain an independent reviewer through an available subagent or child workflow. The reviewer must read the complete current plan {{current_plan_file}} and task contract {{get-task.task_file}} directly. Write the complete current reproducible blocking finding set to review.md beside that exact plan; every finding contains the problem, concrete evidence, and required correction. A clean review is an explicit zero-findings report. Never overwrite an existing review for another plan. On resume, verify and reuse the already complete review for the unchanged plan. Return only its exact bounded path and issues_count. Do not correct the plan. If a complete independent review file cannot be obtained and verified, report the blocker and do not call step().",
+      "directive": "Obtain an independent reviewer through an available subagent or child workflow. The reviewer must read the complete current plan {{current_plan_file}} and task contract {{get-task.task_file}} directly. Write the complete current reproducible blocking finding set to review.md beside that exact plan; every finding contains the problem, concrete evidence, and required correction. A clean review is an explicit zero-findings report. Never overwrite an existing review for another plan. On resume, verify and reuse the already complete review for the unchanged plan. Return only its exact bounded path and issues_count. Do not correct the plan. If a complete independent review file cannot be obtained and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the current plan item count and concise unit-outcome synopsis together with the current review disposition. Replace the prior value atomically; retain only still-true completed outcomes and do not append history or return only a generic review status.",
       "completionCondition": "An independent complete review associated with current_plan_file exists at review_file and issues_count exactly matches its findings, including zero",
       "inputSchema": {
         "type": "object",
@@ -97,12 +110,22 @@
           }
         },
         "required": [
-          "review_file",
-          "issues_count"
+          "issues_count",
+          "progress_plan_outcome",
+          "review_file"
+        ],
+        "globalInputs": [
+          "progress_plan_outcome"
         ]
       },
       "connections": {
         "success": "check-plan-review-clean"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Review plan",
+      "progressActiveContent": {
+        "summary": "Independently review the current complete plan",
+        "next": "Continue after a clean review, or repair the plan"
       }
     },
     {
@@ -123,7 +146,7 @@
     {
       "id": "repair-plan",
       "type": "agent-directive",
-      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md describing the review basis and a complete corrected plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The corrected plan keeps the altitude the initial plan is held to: the units it shapes fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().",
+      "directive": "Read the complete current plan {{current_plan_file}}, its independent report {{plan-review.review_file}}, and the task contract {{get-task.task_file}}. Reproduce every confirmed finding and create the next immutable plan iteration with change.md describing the review basis and a complete corrected plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The corrected plan keeps the altitude the initial plan is held to: the units it shapes fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return findings or plan content. If a finding cannot be reproduced or the plan cannot be materially corrected and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the corrected current plan item count and concise semantic synopsis of its unit outcomes. Replace the prior value atomically, retaining only still-true completed outcomes; do not append history or keep obsolete current or future units.",
       "completionCondition": "A new complete immutable plan iteration corrects every confirmed finding, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and total_steps identify that verified plan",
       "inputSchema": {
         "type": "object",
@@ -131,21 +154,29 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "plan-review"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Repair plan",
+      "progressActiveContent": {
+        "summary": "Replace the current plan with a corrected immutable revision",
+        "next": "Independently review the corrected plan"
       }
     },
     {
       "id": "present-plan",
       "type": "agent-directive",
-      "directive": "Read and present the complete independently reviewed plan {{current_plan_file}} with its clean review {{plan-review.review_file}} and ask for explicit approval. After the user responds, write the exact decision and any feedback to immutable decision.md beside the plan. Return approval=yes only for explicit approval, otherwise approval=no, plus the exact decision file path. Do not copy feedback into the response and do not revise or execute the plan here. If the decision file cannot be created and verified, do not call step().",
+      "directive": "Read and present the complete independently reviewed plan {{current_plan_file}} with its clean review {{plan-review.review_file}} and ask for explicit approval. After the user responds, write the exact decision and any feedback to immutable decision.md beside the plan. Return approval=yes only for explicit approval, otherwise approval=no, plus the exact decision file path. Do not copy feedback into the response and do not revise or execute the plan here. If the decision file cannot be created and verified, do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the current plan item count and concise unit-outcome synopsis together with the actual approval disposition. Replace the prior value atomically; do not append history, predict the next route, or return only a generic decision status.",
       "completionCondition": "The user explicitly decided on the reviewed plan and the complete exact decision is preserved at decision_file",
       "inputSchema": {
         "type": "object",
@@ -168,11 +199,21 @@
         },
         "required": [
           "approval",
-          "decision_file"
+          "decision_file",
+          "progress_plan_outcome"
+        ],
+        "globalInputs": [
+          "progress_plan_outcome"
         ]
       },
       "connections": {
         "success": "check-plan-approved"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Confirm plan",
+      "progressActiveContent": {
+        "summary": "Present the independently reviewed current plan for approval",
+        "next": "Execute an approved plan, or revise it from exact feedback"
       }
     },
     {
@@ -193,7 +234,7 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Publish the next immutable plan iteration from whichever basis applies to this run. Read the current plan {{current_plan_file}} and the task contract {{get-task.task_file}}. When the user rejected the plan at the approval gate, the basis is the exact decision record written beside that plan; when you arrived by a mid-execution replan, the basis is the reason you just stated. Create the next numeric iteration with change.md preserving that exact basis and a complete revised plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The units this revision shapes keep the altitude the initial plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return feedback, the replan reason, or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().",
+      "directive": "Publish the next immutable plan iteration from whichever basis applies to this run. Read the current plan {{current_plan_file}} and the task contract {{get-task.task_file}}. When the user rejected the plan at the approval gate, the basis is the exact decision record written beside that plan; when you arrived by a mid-execution replan, the basis is the reason you just stated. Create the next numeric iteration with change.md preserving that exact basis and a complete revised plan.md preserving unaffected obligations and every already executed unit at its position, without rewriting existing execution evidence. The units this revision shapes keep the altitude the initial plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Prepare under a non-numeric temporary name and publish only the complete numeric record. Return the new plan path and exact item count; do not return feedback, the replan reason, or plan content. If the revision cannot be completed and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_plan_outcome as the revised current plan item count and concise semantic synopsis of its unit outcomes. Replace the prior value atomically, retaining only still-true completed outcomes; do not append history or keep obsolete current or future units.",
       "completionCondition": "A new complete immutable plan iteration incorporates the exact basis of this revision, preserves already executed units at their positions without rewriting their recorded execution evidence, keeps every unit it shapes at the altitude the initial plan is held to rather than containing the deliverable, and current_plan_file and total_steps identify that verified plan",
       "inputSchema": {
         "type": "object",
@@ -201,15 +242,23 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "plan-review"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Revise plan",
+      "progressActiveContent": {
+        "summary": "Replace the current plan from exact feedback or replan rationale",
+        "next": "Independently review the revised plan"
       }
     },
     {
@@ -232,15 +281,27 @@
     {
       "id": "execute-step",
       "type": "agent-directive",
-      "directive": "Read the approved plan {{current_plan_file}} and execute only its work unit at zero-based position {{current_step}}. Follow that unit's action, expected result, and verification method. Use full technical judgment, inspect real dependencies, perform the work, and verify the actual result rather than relying only on mechanical checks. Before advancing, write or verify exactly one concise evidence entry of at most 500 characters for this plan position in {{get-task.execution_file}}; do not duplicate an existing entry on resume. If the work is incomplete or blocked, tell the user the verified reason and do not call step().",
+      "directive": "Read the approved plan {{current_plan_file}} and execute only its work unit at zero-based position {{current_step}}. Follow that unit's action, expected result, and verification method. Use full technical judgment, inspect real dependencies, perform the work, and verify the actual result rather than relying only on mechanical checks. Before advancing, write or verify exactly one concise evidence entry of at most 500 characters for this plan position in {{get-task.execution_file}}; do not duplicate an existing entry on resume. If the work is incomplete or blocked, tell the user the verified reason and do not call step().\n\nProgress outcome ownership: Return progress_execution_outcome as a concise truthful semantic outcome of the plan unit just completed and its actual verification. Replace the prior value; do not append history, predict later units, or claim incomplete work.",
       "completionCondition": "The current approved plan unit is completely implemented and verified and its single bounded durable evidence entry exists",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {},
+        "required": [
+          "progress_execution_outcome"
+        ],
+        "globalInputs": [
+          "progress_execution_outcome"
+        ]
       },
       "connections": {
         "success": "close-completed-step"
+      },
+      "progressNodeId": "execute",
+      "progressActiveLabel": "Execute current unit",
+      "progressActiveContent": {
+        "summary": "Execute and verify the current approved plan unit",
+        "next": "Continue with the next unit or independently review the complete result"
       }
     },
     {
@@ -256,7 +317,7 @@
     {
       "id": "final-review",
       "type": "agent-directive",
-      "directive": "Obtain an independent reviewer through an available subagent or child workflow. Review the actual result and real artifacts against the task {{get-task.task_file}}, approved plan {{current_plan_file}}, the plan decision record beside that plan when the run produced one, and accumulated execution evidence {{get-task.execution_file}}. Inspect ./moira-ws/quick-task-{{executionId}}/result-reviews/: create the first numeric review record when none exists; after a latest review with change.md, create the next numeric record; on resume with no intervening change, verify and reuse the existing current review. Write every current reproducible blocking defect to the immutable review.md with problem, evidence, and required correction; an explicit zero-findings report is valid. Return only its bounded path and exact issues_count. Do not fix the result. If a complete independent review cannot be produced and verified, report the blocker and do not call step().",
+      "directive": "Obtain an independent reviewer through an available subagent or child workflow. Review the actual result and real artifacts against the task {{get-task.task_file}}, approved plan {{current_plan_file}}, the plan decision record beside that plan when the run produced one, and accumulated execution evidence {{get-task.execution_file}}. Inspect ./moira-ws/quick-task-{{executionId}}/result-reviews/: create the first numeric review record when none exists; after a latest review with change.md, create the next numeric record; on resume with no intervening change, verify and reuse the existing current review. Write every current reproducible blocking defect to the immutable review.md with problem, evidence, and required correction; an explicit zero-findings report is valid. Return only its bounded path and exact issues_count. Do not fix the result. If a complete independent review cannot be produced and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_review_outcome as a concise truthful synopsis of the current independent result-review disposition and blocking finding count. Replace the prior value; do not append history, predict repair, or claim a clean result when findings remain.",
       "completionCondition": "A new or safely resumed independent immutable result review exists at review_file for the current result state and issues_count exactly matches its findings",
       "inputSchema": {
         "type": "object",
@@ -277,12 +338,22 @@
           }
         },
         "required": [
-          "review_file",
-          "issues_count"
+          "issues_count",
+          "progress_review_outcome",
+          "review_file"
+        ],
+        "globalInputs": [
+          "progress_review_outcome"
         ]
       },
       "connections": {
         "success": "check-review-clean"
+      },
+      "progressNodeId": "verify",
+      "progressActiveLabel": "Review result",
+      "progressActiveContent": {
+        "summary": "Independently review the actual complete result",
+        "next": "Present a clean result, or repair confirmed findings"
       }
     },
     {
@@ -303,21 +374,33 @@
     {
       "id": "fix-issues",
       "type": "agent-directive",
-      "directive": "Read the complete current result review {{final-review.review_file}}. Reproduce and correct the actual result by root cause for every confirmed finding while preserving unaffected approved work. Verify the changed result and write immutable change.md beside that exact review with a concise evidence record. Do not return findings, evidence, status, or a path already derivable from the supplied review. If a finding cannot be reproduced or corrected, or change.md cannot be completed and verified, report the blocker and do not call step().",
+      "directive": "Read the complete current result review {{final-review.review_file}}. Reproduce and correct the actual result by root cause for every confirmed finding while preserving unaffected approved work. Verify the changed result and write immutable change.md beside that exact review with a concise evidence record. Do not return findings, evidence, status, or a path already derivable from the supplied review. If a finding cannot be reproduced or corrected, or change.md cannot be completed and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_review_outcome as a concise truthful synopsis of the confirmed findings corrected in this changed result and current repair disposition. Replace the prior value; do not append history, predict the rereview outcome, or claim an unreproduced finding was fixed.",
       "completionCondition": "Every confirmed result defect is materially corrected and verified and the immutable change record beside the reviewed report is complete",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {},
+        "required": [
+          "progress_review_outcome"
+        ],
+        "globalInputs": [
+          "progress_review_outcome"
+        ]
       },
       "connections": {
         "success": "final-review"
+      },
+      "progressNodeId": "verify",
+      "progressActiveLabel": "Repair review findings",
+      "progressActiveContent": {
+        "summary": "Correct every confirmed current result finding by root cause",
+        "next": "Independently review the changed result again"
       }
     },
     {
       "id": "present-to-user",
       "type": "agent-directive",
-      "directive": "Read the task {{get-task.task_file}}, approved plan {{current_plan_file}}, the plan decision record beside that plan when the run produced one, accumulated evidence {{get-task.execution_file}}, latest clean result review {{final-review.review_file}}, and actual artifacts. Present the actual independently reviewed result with important outcomes, concrete verification, and artifact locations, then ask whether the user accepts it or requests rework. Write the complete exact decision and any feedback to immutable decision.md beside the result review. Return decision=accept only for explicit acceptance, otherwise decision=rework, plus the exact decision file path. Do not copy feedback into the response and do not rework here. If the decision file cannot be created and verified, do not call step().\n\nIn `autonomous` mode still present the result and how it was verified, then conclude without asking. Report honestly: anything unfinished, unverified, or excluded stays visible in what you present and is never silently treated as accepted.",
+      "directive": "Read the task {{get-task.task_file}}, approved plan {{current_plan_file}}, the plan decision record beside that plan when the run produced one, accumulated evidence {{get-task.execution_file}}, latest clean result review {{final-review.review_file}}, and actual artifacts. Present the actual independently reviewed result with important outcomes, concrete verification, and artifact locations, then ask whether the user accepts it or requests rework. Write the complete exact decision and any feedback to immutable decision.md beside the result review. Return decision=accept only for explicit acceptance, otherwise decision=rework, plus the exact decision file path. Do not copy feedback into the response and do not rework here. If the decision file cannot be created and verified, do not call step().\n\nIn `autonomous` mode still present the result and how it was verified, then conclude without asking. Report honestly: anything unfinished, unverified, or excluded stays visible in what you present and is never silently treated as accepted.\n\nProgress outcome ownership: Return progress_result_outcome as a concise truthful synopsis of the actual result presented and the acceptance disposition that applies in the current mode. Replace the prior value; do not append history, hide unfinished work, or claim acceptance that did not occur.",
       "completionCondition": "The user explicitly decided on the reviewed result and the complete exact decision is preserved at decision_file",
       "inputSchema": {
         "type": "object",
@@ -340,11 +423,21 @@
         },
         "required": [
           "decision",
-          "decision_file"
+          "decision_file",
+          "progress_result_outcome"
+        ],
+        "globalInputs": [
+          "progress_result_outcome"
         ]
       },
       "connections": {
         "success": "check-user-accepts"
+      },
+      "progressNodeId": "result",
+      "progressActiveLabel": "Present result",
+      "progressActiveContent": {
+        "summary": "Present the actual independently reviewed result",
+        "next": "Complete truthfully, or apply explicitly requested rework"
       }
     },
     {
@@ -365,15 +458,27 @@
     {
       "id": "rework",
       "type": "agent-directive",
-      "directive": "Read the exact user decision and feedback {{present-to-user.decision_file}}, task {{get-task.task_file}}, approved plan {{current_plan_file}}, and current clean review {{final-review.review_file}}. Apply the requested rework to the actual result while preserving unaffected approved work. Verify the change and write immutable change.md beside that exact review with the exact request basis and concise evidence. Do not return feedback, evidence, status, or a derivable path. If the rework or change record cannot be completed and verified, report the blocker and do not call step().",
+      "directive": "Read the exact user decision and feedback {{present-to-user.decision_file}}, task {{get-task.task_file}}, approved plan {{current_plan_file}}, and current clean review {{final-review.review_file}}. Apply the requested rework to the actual result while preserving unaffected approved work. Verify the change and write immutable change.md beside that exact review with the exact request basis and concise evidence. Do not return feedback, evidence, status, or a derivable path. If the rework or change record cannot be completed and verified, report the blocker and do not call step().\n\nProgress outcome ownership: Return progress_result_outcome as a concise truthful synopsis of the requested rework actually completed and verified. Replace the prior value; do not append history, predict acceptance, or claim incomplete rework.",
       "completionCondition": "The exact disk-backed rework request is completely implemented and verified and the immutable change record beside the reviewed report is complete",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {},
+        "required": [
+          "progress_result_outcome"
+        ],
+        "globalInputs": [
+          "progress_result_outcome"
+        ]
       },
       "connections": {
         "success": "final-review"
+      },
+      "progressNodeId": "result",
+      "progressActiveLabel": "Rework result",
+      "progressActiveContent": {
+        "summary": "Apply the exact requested rework to the actual result",
+        "next": "Independently review the changed result again"
       }
     },
     {
@@ -400,15 +505,27 @@
       "id": "teleport-replan",
       "type": "teleport",
       "hint": "Jump here during execution when the approved plan itself no longer fits reality: new facts, scope that was missed, or the outcome of an executed unit invalidates the remaining plan. Not for a blocking plan-review finding (that is repair-plan), not for a defect in the produced result (that is fix-issues), not for a plan the user rejected at the approval gate, and not for a unit that is merely hard or blocked — tell the user that and stay on the unit.",
-      "directive": "You jumped here because the approved plan no longer fits the real work. State plainly what changed or what was wrong, and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid.\n\nKeep every unit already executed at its position: the cursor is zero-based and unchanged, so preserved positions are what let the run continue instead of repeating finished work. Their evidence entries stay as written.\n\nDo not perform task work here and do not restate findings that belong to a repair owner. The next responsibility publishes the new immutable plan iteration from this reason, and that plan goes back through the ordinary independent review and, in interactive mode, the user's approval.",
+      "directive": "You jumped here because the approved plan no longer fits the real work. State plainly what changed or what was wrong, and what the plan must become: which units are obsolete, which must be added or reordered, and which completed outcomes stay valid.\n\nKeep every unit already executed at its position: the cursor is zero-based and unchanged, so preserved positions are what let the run continue instead of repeating finished work. Their evidence entries stay as written.\n\nDo not perform task work here and do not restate findings that belong to a repair owner. The next responsibility publishes the new immutable plan iteration from this reason, and that plan goes back through the ordinary independent review and, in interactive mode, the user's approval.\n\nProgress outcome ownership: Return progress_plan_outcome as a concise truthful current replan disposition naming what invalidated the plan and which completed outcomes remain valid. Replace the prior value atomically; do not append history, perform repair here, or claim the revised plan already exists.",
       "completionCondition": "The reason the plan no longer fits and the required plan change are stated, with executed units preserved at their positions and their recorded execution evidence left as written",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {},
+        "required": [
+          "progress_plan_outcome"
+        ],
+        "globalInputs": [
+          "progress_plan_outcome"
+        ]
       },
       "connections": {
         "success": "revise-plan"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan",
+      "progressActiveContent": {
+        "summary": "Explain why the approved plan no longer fits the real work",
+        "next": "Publish and independently review a complete revised plan"
       }
     }
   ],
@@ -441,6 +558,106 @@
         "interactive"
       ],
       "description": "How this run treats the user before the final result: autonomous skips the plan approval and the acceptance question, interactive keeps them"
+    },
+    "progress_scope_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Quick Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_plan_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Quick Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_execution_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Quick Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_review_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Quick Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_result_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Quick Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
     }
-  }
+  },
+  "progress": {
+    "title": "Quick Task",
+    "goal": "Complete one bounded task through a reviewed plan, sequential verified work, independent result review, and truthful delivery.",
+    "nodes": [
+      {
+        "id": "scope",
+        "label": "Scope",
+        "content": {
+          "summary": "Resolve the task contract, scope, constraints, authority, and operating mode",
+          "outcome": "{{progress_scope_outcome}}",
+          "next": "Create and independently review the plan"
+        },
+        "connections": {
+          "default": "plan"
+        }
+      },
+      {
+        "id": "plan",
+        "label": "Plan",
+        "content": {
+          "summary": "Create, independently review, approve, repair, or revise the current complete plan",
+          "outcome": "{{progress_plan_outcome}}",
+          "next": "Execute the approved plan one unit at a time"
+        },
+        "connections": {
+          "default": "execute"
+        }
+      },
+      {
+        "id": "execute",
+        "label": "Execute",
+        "content": {
+          "summary": "Execute and verify each current approved plan unit",
+          "outcome": "{{progress_execution_outcome}}",
+          "next": "Independently review the complete result"
+        },
+        "connections": {
+          "default": "verify"
+        }
+      },
+      {
+        "id": "verify",
+        "label": "Verify",
+        "content": {
+          "summary": "Independently review the complete result and repair confirmed findings",
+          "outcome": "{{progress_review_outcome}}",
+          "next": "Present the reviewed result"
+        },
+        "connections": {
+          "default": "result"
+        }
+      },
+      {
+        "id": "result",
+        "label": "Result",
+        "content": {
+          "summary": "Present the actual result and handle any requested rework",
+          "outcome": "{{progress_result_outcome}}"
+        }
+      }
+    ]
+  },
+  "slug": "quick-task",
+  "owner": "system-moira",
+  "visibility": "public"
 }
