@@ -1,9 +1,8 @@
 {
-  "slug": "robust-task",
   "id": "be95cedc-35ec-4314-87ce-331ac3d11579",
   "metadata": {
     "name": "Robust Task",
-    "version": "9.1.2",
+    "version": "9.1.3",
     "description": "Executes one complex authorized task through durable planning, checkpoints, recovery and independently reviewed delivery without imposing a software-specific lifecycle. It creates an execution-correlated workspace, captures the complete task and authority, produces and independently reviews a current plan, executes plan steps with durable evidence and materially changed retry attempts, and preserves restartable state across context loss. Cause-aware step and final reviews separate result defects from evidence/projection defects and upstream plan or criterion defects; result and evidence repair have bounded budgets, while spreading or invalid work enters material replanning instead of false success. Autonomous mode skips only human waits; interactive mode keeps plan, recovery and result decisions. Outcomes distinguish complete, truthfully incomplete, blocked and aborted work and expose stable artifacts rather than optimistic summaries. Choose Robust Task for critical or long-running general work that needs recovery; use Quick Task for a bounded non-development task, Todo List for a supplied checklist, or Software Development Flow for one complete repository implementation lifecycle."
   },
   "nodes": [
@@ -27,29 +26,37 @@
     {
       "id": "initialize-workspace",
       "type": "agent-directive",
-      "directive": "Establish or resume exactly one durable workspace for this Robust Task. Read the user's complete request and applicable local instructions; resolve only ambiguity that materially changes the result. Use ./moira-ws/robust-task-<task-name>-<YYYYMMDD>-<HHMM>/ and correlate it by process-id.txt containing {{executionId}}. Write the authoritative frozen active request to task-requirements.md and a concise workflow-guide.md that covers filesystem authority, recovery, plan quality, direct evidence, independent review, cause-owned repair/replan, and the fact that mechanical checks prove only what they measure. Read both files back and verify their completeness. Return only the trailing-slash workspace_path and operating_mode.\n\nResolve operating_mode once in this turn: reuse an explicit mode, infer an unambiguous mode including an autonomous parent execution, or ask once if neither is possible. Autonomous mode removes intermediate waits but never lowers review, recovery, disclosure, or side-effect authority. Interactive mode retains the workflow's decisions.",
+      "directive": "Establish or resume exactly one durable workspace for this Robust Task. Read the user's complete request and applicable local instructions; resolve only ambiguity that materially changes the result. Use ./moira-ws/robust-task-<task-name>-<YYYYMMDD>-<HHMM>/ and correlate it by process-id.txt containing {{executionId}}. Write the authoritative frozen active request to task-requirements.md and a concise workflow-guide.md that covers filesystem authority, recovery, plan quality, direct evidence, independent review, cause-owned repair/replan, and the fact that mechanical checks prove only what they measure. Read both files back and verify their completeness. Return the trailing-slash workspace_path and operating_mode as the functional intake response.\n\nResolve operating_mode once in this turn: reuse an explicit mode, infer an unambiguous mode including an autonomous parent execution, or ask once if neither is possible. Autonomous mode removes intermediate waits but never lowers review, recovery, disclosure, or side-effect authority. Interactive mode retains the workflow's decisions.\n\nProgress outcome ownership: Return progress_intake_outcome as a concise truthful synopsis of the established task, authority, workspace, and operating mode. Replace the prior value; do not append history or duplicate the durable requirements.",
       "completionCondition": "One recoverable execution-correlated workspace contains complete frozen requirements and concise authoritative guidance, and the returned path and mode are exact",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "workspace_path",
-          "operating_mode"
+          "operating_mode",
+          "progress_intake_outcome",
+          "workspace_path"
         ],
         "globalInputs": [
-          "workspace_path",
-          "operating_mode"
+          "operating_mode",
+          "progress_intake_outcome",
+          "workspace_path"
         ]
       },
       "connections": {
         "success": "create-plan"
+      },
+      "progressNodeId": "intake",
+      "progressActiveLabel": "Establish durable task context",
+      "progressActiveContent": {
+        "summary": "Establish the workspace, frozen requirements, authority, and mode",
+        "next": "Create the complete plan"
       }
     },
     {
       "id": "create-plan",
       "type": "agent-directive",
-      "directive": "Read {{workspace_path}}task-requirements.md, {{workspace_path}}workflow-guide.md, the real task/project context, and every primary source needed to understand the work. Create the next unused plans/NNN/plan.md as a complete goal-first plan with as many substantive steps as the task requires. Own the whole result before review: each step states its outcome, active obligations, dependencies, boundaries, material risks, foreseeable supporting work, and fitting acceptance evidence while preserving executor judgment about exploration, tools, edit order, and intellectual method.\n\nFor every contractual check, name the required state, a plausible wrong state that can look similar, and an observation that reliably differs. Use mechanical evidence for deterministic structure, real behavior for behavior, primary-source judgment for semantics and architecture, and explicit acceptance for user preference. Revise an indistinguishable criterion before implementation; do not invent a validator merely to make the plan look executable. Preserve every earlier plan version. Return only current_plan_file and exact total_steps.\n\nA step fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after the plan is approved, work an intelligent executor still has to do remains, and a step a later turn could satisfy by copying text out of the plan is a step whose result is already written here.",
+      "directive": "Read {{workspace_path}}task-requirements.md, {{workspace_path}}workflow-guide.md, the real task/project context, and every primary source needed to understand the work. Create the next unused plans/NNN/plan.md as a complete goal-first plan with as many substantive steps as the task requires. Own the whole result before review: each step states its outcome, active obligations, dependencies, boundaries, material risks, foreseeable supporting work, and fitting acceptance evidence while preserving executor judgment about exploration, tools, edit order, and intellectual method.\n\nFor every contractual check, name the required state, a plausible wrong state that can look similar, and an observation that reliably differs. Use mechanical evidence for deterministic structure, real behavior for behavior, primary-source judgment for semantics and architecture, and explicit acceptance for user preference. Revise an indistinguishable criterion before implementation; do not invent a validator merely to make the plan look executable. Preserve every earlier plan version. Return current_plan_file and exact total_steps as the functional plan response.\n\nA step fixes what must become true, the evidence that would accept it, and what it depends on; it does not carry the deliverable itself. Where the result is prose — a document, briefs for other agents, the answer of an investigation, a body of rules — plan and result share a medium and nothing separates them by construction, so this altitude is held deliberately: after the plan is approved, work an intelligent executor still has to do remains, and a step a later turn could satisfy by copying text out of the plan is a step whose result is already written here.\n\nProgress outcome ownership: Return progress_plan_outcome as the exact plan step count and a concise semantic synopsis of its step outcomes. Replace the prior value; do not append history or return only a generic creation status.",
       "completionCondition": "A complete plan owns every active outcome and uses discriminating fitting acceptance evidence in a new immutable plan version, and every step fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -57,15 +64,23 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_plan_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Create plan",
+      "progressActiveContent": {
+        "summary": "Create the first complete immutable plan",
+        "next": "Independently review the complete plan"
       }
     },
     {
@@ -82,7 +97,7 @@
     {
       "id": "review-plan",
       "type": "agent-directive",
-      "directive": "Delegate an independent review of the exact complete plan at {{workspace_path}}{{current_plan_file}}. Keep the same reviewer context for rereview of this plan chain where the host supports it. The reviewer reads the frozen requirements, workflow guide, real context, primary sources, and complete plan; it does not run linters or mechanical suites as a substitute for semantic and architectural judgment. Overwrite review.md beside this plan version with the complete current blocking finding set; zero findings is normal.\n\nCheck goal coverage, responsibilities, dependencies, authority, failure boundaries, writer/reader contracts, executable routes, evidence modality, and whether each contractual observation distinguishes its required state from a plausible wrong state. Classify every reproduced finding by earliest cause. Return review_outcome=pass only with no blocker; repair only when every blocker is a defect owned by this plan and the requirements, criterion, evidence model, and process remain sound; replan for an invalid requirements interpretation, criterion, evidence model, architecture/process contract, upstream or mixed cause. Do not return counts or mutate the plan.",
+      "directive": "Delegate an independent review of the exact complete plan at {{workspace_path}}{{current_plan_file}}. Keep the same reviewer context for rereview of this plan chain where the host supports it. The reviewer reads the frozen requirements, workflow guide, real context, primary sources, and complete plan; it does not run linters or mechanical suites as a substitute for semantic and architectural judgment. Overwrite review.md beside this plan version with the complete current blocking finding set; zero findings is normal.\n\nCheck goal coverage, responsibilities, dependencies, authority, failure boundaries, writer/reader contracts, executable routes, evidence modality, and whether each contractual observation distinguishes its required state from a plausible wrong state. Classify every reproduced finding by earliest cause. Return review_outcome=pass only with no blocker; repair only when every blocker is a defect owned by this plan and the requirements, criterion, evidence model, and process remain sound; replan for an invalid requirements interpretation, criterion, evidence model, architecture/process contract, upstream or mixed cause. Do not return counts or mutate the plan.\n\nProgress outcome ownership: Return progress_plan_outcome as the current plan synopsis together with the actual independent review disposition. Replace the prior value; retain only still-true completed outcomes and do not append history or return only a generic review status.",
       "completionCondition": "An independent complete cause-classified review exists beside the exact plan and review_outcome matches pass, owned repair, or replan",
       "inputSchema": {
         "type": "object",
@@ -98,11 +113,21 @@
           }
         },
         "required": [
+          "progress_plan_outcome",
           "review_outcome"
+        ],
+        "globalInputs": [
+          "progress_plan_outcome"
         ]
       },
       "connections": {
         "success": "route-plan-review-replan"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Review plan · {{plan_review_round}}/{{max_review_rounds}}",
+      "progressActiveContent": {
+        "summary": "Independently review the exact current complete plan",
+        "next": "Approve a clean plan, repair it, or replace it from an upstream cause"
       }
     },
     {
@@ -140,7 +165,7 @@
     {
       "id": "ask-plan-review-limit",
       "type": "agent-directive",
-      "directive": "Plan review reached its configured bound with unresolved blocking findings. Read and present the exact current plan and review.md. In interactive mode ask whether to authorize one more changed repair or finish truthfully incomplete; record decision=repair or finish_incomplete, exact unresolved scope, and reason in review-limit-decision.md beside the plan. In autonomous mode choose repair only when a reproducible plan-owned defect has genuinely changed relevant knowledge and can be corrected now; otherwise choose finish_incomplete. Never relabel a blocked plan as semantically ready or send it to approval.",
+      "directive": "Plan review reached its configured bound with unresolved blocking findings. Read and present the exact current plan at {{workspace_path}}{{current_plan_file}} and review.md beside that plan. In interactive mode ask whether to authorize one more changed repair or finish truthfully incomplete; record decision=repair or finish_incomplete, exact unresolved scope, and reason in review-limit-decision.md beside the plan. In autonomous mode choose repair only when a reproducible plan-owned defect has genuinely changed relevant knowledge and can be corrected now; otherwise choose finish_incomplete. Never relabel a blocked plan as semantically ready or send it to approval.\n\nProgress outcome ownership: Return progress_plan_outcome as the unchanged current plan synopsis together with the actual bounded decision and unresolved scope. Replace the prior value; do not reset downstream outcomes or claim the plan is ready.",
       "completionCondition": "The bounded decision is durable and unresolved blockers lead only to another justified repair or truthful incomplete delivery",
       "inputSchema": {
         "type": "object",
@@ -155,11 +180,21 @@
           }
         },
         "required": [
-          "decision"
+          "decision",
+          "progress_plan_outcome"
+        ],
+        "globalInputs": [
+          "progress_plan_outcome"
         ]
       },
       "connections": {
         "success": "route-plan-review-limit"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Resolve plan review bound",
+      "progressActiveContent": {
+        "summary": "Resolve the bounded plan-review decision from current evidence",
+        "next": "Perform one justified changed repair or deliver truthfully incomplete"
       }
     },
     {
@@ -190,7 +225,7 @@
     {
       "id": "fix-plan",
       "type": "agent-directive",
-      "directive": "Read the complete review.md beside {{workspace_path}}{{current_plan_file}}, the reviewed plan, frozen requirements, workflow guide, and primary sources. Before mutation reproduce and classify every finding and inspect the current plan chain for the same root. Return repair_outcome=changed only when every blocker is a confirmed plan-owned defect: create the next unused plans/NNN/plan.md as a coherent complete revision, preserve unaffected decisions and executor freedom, repair all real manifestations of the confirmed root inside the original task, and return its current_plan_file and exact total_steps.\n\nReturn repair_outcome=reassess without changing the reviewed plan when a finding is unreproduced, the observation is non-discriminating, ownership is upstream or mixed, validation-only drift is present, or the same root lacks a changed source of truth, external fact, distinguishing observation, or testable hypothesis. Write only the superseding cause and reproduced observation to repair.md beside the reviewed plan and return that exact reassessment_file. Do not copy findings or create a ledger, validator, or unchanged plan revision.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Read the complete review.md beside {{workspace_path}}{{current_plan_file}}, the reviewed plan, frozen requirements, workflow guide, and primary sources. Before mutation reproduce and classify every finding and inspect the current plan chain for the same root. Return repair_outcome=changed only when every blocker is a confirmed plan-owned defect: create the next unused plans/NNN/plan.md as a coherent complete revision, preserve unaffected decisions and executor freedom, repair all real manifestations of the confirmed root inside the original task, and return its current_plan_file and exact total_steps.\n\nReturn repair_outcome=reassess without changing the reviewed plan when a finding is unreproduced, the observation is non-discriminating, ownership is upstream or mixed, validation-only drift is present, or the same root lacks a changed source of truth, external fact, distinguishing observation, or testable hypothesis. Write only the superseding cause and reproduced observation to repair.md beside the reviewed plan and return that exact reassessment_file. Do not copy findings or create a ledger, validator, or unchanged plan revision.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Always return progress_plan_outcome as the current plan synopsis and actual changed or reassess disposition. Only when repair_outcome=changed, atomically return progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with an explicitly still-valid completed prefix or truthful pending state for the replacement plan. On reassess, do not return or reset those downstream outcomes. Never append history, preserve a superseded attempt or verdict, or claim an unchanged plan was replaced.",
       "completionCondition": "Every finding is reproduced and either a complete changed plan version exists or a durable reassessment reaches its planning owner without plan mutation, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -209,6 +244,7 @@
           }
         },
         "required": [
+          "progress_plan_outcome",
           "repair_outcome"
         ],
         "allOf": [
@@ -226,6 +262,9 @@
             "then": {
               "required": [
                 "current_plan_file",
+                "progress_execution_outcome",
+                "progress_final_review_outcome",
+                "progress_step_review_outcome",
                 "total_steps"
               ]
             }
@@ -244,17 +283,46 @@
             "then": {
               "required": [
                 "reassessment_file"
-              ]
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "progress_execution_outcome"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "progress_step_review_outcome"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "progress_final_review_outcome"
+                    ]
+                  }
+                ]
+              }
             }
           }
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "route-plan-repair-outcome"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Repair plan · {{plan_review_round}}/{{max_review_rounds}}",
+      "progressActiveContent": {
+        "summary": "Repair the current plan or return its cause to planning",
+        "next": "Repeat independent plan review or replace the plan from reassessment"
       }
     },
     {
@@ -280,7 +348,7 @@
     {
       "id": "approve-plan",
       "type": "agent-directive",
-      "directive": "Show the user the complete reviewed plan at {{workspace_path}}{{current_plan_file}} and the review and review-limit decision beside it when present. Ask for explicit approval or rejection. Record the exact response in decision.md beside this plan. Return decision=yes only for unqualified approval; any feedback or requested change is decision=no and remains in the durable decision file rather than workflow context.",
+      "directive": "Show the user the complete reviewed plan at {{workspace_path}}{{current_plan_file}} and the review and review-limit decision beside it when present. Ask for explicit approval or rejection. Record the exact response in decision.md beside this plan. Return decision=yes only for unqualified approval; any feedback or requested change is decision=no and remains in the durable decision file rather than workflow context.\n\nProgress outcome ownership: Return progress_plan_outcome as the unchanged current plan synopsis together with the actual approval disposition. Replace the prior value; do not reset downstream outcomes, predict the route, or claim approval that did not occur.",
       "completionCondition": "The user explicitly approved or rejected the exact current plan and the complete response is durable beside it.",
       "inputSchema": {
         "type": "object",
@@ -296,11 +364,21 @@
           }
         },
         "required": [
-          "decision"
+          "decision",
+          "progress_plan_outcome"
+        ],
+        "globalInputs": [
+          "progress_plan_outcome"
         ]
       },
       "connections": {
         "success": "route-plan-approval"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Confirm plan",
+      "progressActiveContent": {
+        "summary": "Present the independently reviewed current plan for approval",
+        "next": "Execute an approved plan or replace it from exact feedback"
       }
     },
     {
@@ -321,7 +399,7 @@
     {
       "id": "revise-plan",
       "type": "agent-directive",
-      "directive": "Read decision.md beside {{workspace_path}}{{current_plan_file}} and apply the user's exact feedback. If and only if that response explicitly changes the task contract, update task-requirements.md and record the authorization and reason in the new plan directory. Preserve completed steps 1 through {{current_step}} - 1 when execution has begun. Create a distinct new complete plan version and return only current_plan_file and exact total_steps.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Read decision.md beside {{workspace_path}}{{current_plan_file}} and apply the user's exact feedback. If and only if that response explicitly changes the task contract, update task-requirements.md and record the authorization and reason in the new plan directory. Preserve completed steps 1 through {{current_step}} - 1 when execution has begun. Create a distinct new complete plan version and return current_plan_file and exact total_steps as the functional plan response.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "The exact user feedback is reflected in a new complete plan, any requirements change is explicitly authorized and durable, and completed work remains preserved, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -329,15 +407,29 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Revise plan",
+      "progressActiveContent": {
+        "summary": "Replace the plan from exact user feedback",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
@@ -360,27 +452,35 @@
     {
       "id": "execute-step",
       "type": "agent-directive",
-      "directive": "Execute the complete current step {{current_step}} of {{total_steps}} from {{workspace_path}}{{current_plan_file}} against the real artifact and frozen requirements. Own its coherent outcome and foreseeable consequences before handoff, including affected dependencies, required supporting work, and sufficient direct evidence. Read the current plan, requirements, completed outcomes, latest applicable decision, and only earlier attempts whose result, hypothesis, or verdict can affect this execution; do not let superseded process files displace the real sources.\n\nDerive the three-digit plan version from current_plan_file, choose the next unused numeric attempt directory under steps/{{current_step}}/plans/<plan-version>/attempts/, preserve earlier evidence and verdicts, and write concise evidence.md that states the real result, relevant changes, direct observations, and unresolved scope. Validation machinery is supporting evidence unless the user requested it as the result and it has a real consumer and distinguishing output. Return only evidence_file.",
+      "directive": "Execute the complete current step {{current_step}} of {{total_steps}} from {{workspace_path}}{{current_plan_file}} against the real artifact and frozen requirements. Own its coherent outcome and foreseeable consequences before handoff, including affected dependencies, required supporting work, and sufficient direct evidence. Read the current plan, requirements, completed outcomes, latest applicable decision, and only earlier attempts whose result, hypothesis, or verdict can affect this execution; do not let superseded process files displace the real sources.\n\nDerive the three-digit plan version from current_plan_file, choose the next unused numeric attempt directory under steps/{{current_step}}/plans/<plan-version>/attempts/, preserve earlier evidence and verdicts, and write concise evidence.md that states the real result, relevant changes, direct observations, and unresolved scope. Validation machinery is supporting evidence unless the user requested it as the result and it has a real consumer and distinguishing output. Return evidence_file as the functional attempt reference.\n\nProgress outcome ownership: Return progress_execution_outcome as a concise truthful semantic outcome of the current plan-qualified step attempt and its direct evidence. Replace the prior value; do not append history, predict review, or claim incomplete work.",
       "completionCondition": "The current step outcome and foreseeable supporting work are complete enough for review, and a new immutable plan-qualified direct evidence file exists",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "evidence_file"
+          "evidence_file",
+          "progress_execution_outcome"
         ],
         "globalInputs": [
-          "evidence_file"
+          "evidence_file",
+          "progress_execution_outcome"
         ]
       },
       "connections": {
         "success": "review-step"
+      },
+      "progressNodeId": "execute",
+      "progressActiveLabel": "Execute step {{current_step}}/{{total_steps}}",
+      "progressActiveContent": {
+        "summary": "Produce and directly evidence the current plan-qualified step outcome",
+        "next": "Independently review the exact attempt"
       }
     },
     {
       "id": "review-step",
       "type": "agent-directive",
-      "directive": "Delegate independent review of the exact attempt at {{workspace_path}}{{evidence_file}} and keep the same reviewer context for rereview of this step repair chain where supported. The reviewer reads the frozen requirements, current plan, real result, relevant completed outcomes and earlier decisions, and direct evidence; it does not rerun unrelated mechanical suites. Write the complete current verdict beside evidence.md as verdict.md, with every blocker classified by earliest cause and with the required state, plausible similar wrong state, and differing observation for claimed proof mechanisms.\n\nReturn review_outcome=pass only when the complete step outcome satisfies its gate. Return repair only when every blocker has one local owner and the plan, criterion, evidence model, and process remain sound; then return repair_owner=result for a confirmed defect of the real step outcome, or evidence_projection for a correct result with a locally correctable supporting validation/test, insufficient-evidence, or stale-projection defect. A validation system requested as the task result is result-owned. Return replan for an invalid or undemonstrable criterion, upstream/mixed cause, repeated local root without changed knowledge, or any correction that would require proof machinery. Do not mutate the result or return counts.",
+      "directive": "Delegate independent review of the exact attempt at {{workspace_path}}{{evidence_file}} and keep the same reviewer context for rereview of this step repair chain where supported. The reviewer reads the frozen requirements, current plan at {{workspace_path}}{{current_plan_file}}, real result, relevant completed outcomes and earlier decisions, and direct evidence; it does not rerun unrelated mechanical suites. Write the complete current verdict beside evidence.md as verdict.md, with every blocker classified by earliest cause and with the required state, plausible similar wrong state, and differing observation for claimed proof mechanisms.\n\nReturn review_outcome=pass only when the complete step outcome satisfies its gate. Return repair only when every blocker has one local owner and the plan, criterion, evidence model, and process remain sound; then return repair_owner=result for a confirmed defect of the real step outcome, or evidence_projection for a correct result with a locally correctable supporting validation/test, insufficient-evidence, or stale-projection defect. A validation system requested as the task result is result-owned. Return replan for an invalid or undemonstrable criterion, upstream/mixed cause, repeated local root without changed knowledge, or any correction that would require proof machinery. Do not mutate the result or return counts.\n\nProgress outcome ownership: Return progress_step_review_outcome as a concise truthful synopsis of the current verdict, repair owner when applicable, and disposition. Replace the prior value; do not append history, predict repair, or claim pass with blockers.",
       "completionCondition": "The same independent reviewer has a complete cause-classified verdict for the exact attempt and returns pass, one locally owned repair scope, or replan",
       "inputSchema": {
         "type": "object",
@@ -409,8 +509,9 @@
           }
         },
         "required": [
-          "verdict_file",
-          "review_outcome"
+          "progress_step_review_outcome",
+          "review_outcome",
+          "verdict_file"
         ],
         "allOf": [
           {
@@ -430,10 +531,19 @@
               ]
             }
           }
+        ],
+        "globalInputs": [
+          "progress_step_review_outcome"
         ]
       },
       "connections": {
         "success": "route-verifier-replan"
+      },
+      "progressNodeId": "step-review",
+      "progressActiveLabel": "Review step {{current_step}}/{{total_steps}}",
+      "progressActiveContent": {
+        "summary": "Independently review the exact current step attempt",
+        "next": "Close, repair, recover, or replace the plan from the classified cause"
       }
     },
     {
@@ -517,7 +627,7 @@
     {
       "id": "ask-retry-decision",
       "type": "agent-directive",
-      "directive": "The result-owned repair budget for step {{current_step}} is exhausted. Read the current plan, frozen requirements, exact failed verdict, relevant plan-qualified attempts and repair records, and any earlier exhausted decision. In interactive mode ask for exactly retry, replan, or finish_incomplete and the information that route requires. In autonomous mode decide from the same evidence without asking.\n\nRetry is allowed only with changed relevant input, external state, distinguishing observation, or testable hypothesis and means another result-owned repair through the same reviewer. Replan is required when the failure invalidates the open plan, criterion, evidence model, architecture/process decision, or ownership. Finish_incomplete is required when neither route offers useful changed work and stops further task mutation. Write the exact decision, changed knowledge or unresolved scope, current plan reference, and reason to the next unused steps/{{current_step}}/decisions/NNN.md. Return only decision and decision_file. Changing the original task boundary still requires explicit user authorization.",
+      "directive": "The result-owned repair budget for step {{current_step}} is exhausted. Read the current plan at {{workspace_path}}{{current_plan_file}}, frozen requirements, exact failed verdict at {{workspace_path}}{{review-step.verdict_file}}, relevant plan-qualified attempts and repair records, and any earlier exhausted decision. In interactive mode ask for exactly retry, replan, or finish_incomplete and the information that route requires. In autonomous mode decide from the same evidence without asking.\n\nRetry is allowed only with changed relevant input, external state, distinguishing observation, or testable hypothesis and means another result-owned repair through the same reviewer. Replan is required when the failure invalidates the open plan, criterion, evidence model, architecture/process decision, or ownership. Finish_incomplete is required when neither route offers useful changed work and stops further task mutation. Write the exact decision, changed knowledge or unresolved scope, current plan reference, and reason to the next unused steps/{{current_step}}/decisions/NNN.md. Return decision and decision_file as the functional recovery response. Changing the original task boundary still requires explicit user authorization.\n\nProgress outcome ownership: Return progress_step_review_outcome as a concise truthful synopsis of the actual retry, replan, or incomplete recovery decision and its changed knowledge or unresolved scope. Replace the prior value; do not append history or predict the chosen route's result.",
       "completionCondition": "One bounded retry, replan, or finish-incomplete decision is durably grounded in changed knowledge or exact unresolved scope",
       "inputSchema": {
         "type": "object",
@@ -542,11 +652,21 @@
         },
         "required": [
           "decision",
-          "decision_file"
+          "decision_file",
+          "progress_step_review_outcome"
+        ],
+        "globalInputs": [
+          "progress_step_review_outcome"
         ]
       },
       "connections": {
         "success": "route-retry-choice"
+      },
+      "progressNodeId": "step-review",
+      "progressActiveLabel": "Recovery · step {{current_step}}/{{total_steps}}",
+      "progressActiveContent": {
+        "summary": "Resolve exhausted result-repair recovery from changed knowledge or exact unresolved scope",
+        "next": "Retry with changed knowledge, replace the plan, or deliver truthfully incomplete"
       }
     },
     {
@@ -562,7 +682,7 @@
     {
       "id": "replan-from-verdict",
       "type": "agent-directive",
-      "directive": "Replan the open step and unfinished tail from the current independent verdict without changing the original task boundary. Read the exact failed verdict at {{workspace_path}}{{review-step.verdict_file}}, frozen requirements, current plan, real result, direct evidence, and completed outcomes. Correct the current verdict's invalid criterion, evidence method, plan/process contract, architecture decision, or mixed ownership; preserve completed outcomes and consume no ordinary result retry. Create a distinct complete plan version and return only current_plan_file and exact total_steps. Historical repair reassessments are not sources for this direct-verdict transition.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Replan the open step and unfinished tail from the current independent verdict without changing the original task boundary. Read the exact failed verdict at {{workspace_path}}{{review-step.verdict_file}}, frozen requirements, current plan at {{workspace_path}}{{current_plan_file}}, real result, direct evidence, and completed outcomes. Correct the current verdict's invalid criterion, evidence method, plan/process contract, architecture decision, or mixed ownership; preserve completed outcomes and consume no ordinary result retry. Create a distinct complete plan version and return current_plan_file and exact total_steps as the functional plan response. Historical repair reassessments are not sources for this direct-verdict transition.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "A complete new plan resolves the current verifier verdict cause, preserves completed outcomes and the original task boundary, and consumes no ordinary result retry, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -570,21 +690,35 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from step verdict",
+      "progressActiveContent": {
+        "summary": "Replace the open plan from the exact independent step verdict",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
       "id": "replan-from-decision",
       "type": "agent-directive",
-      "directive": "Read the exact replan decision at {{workspace_path}}{{ask-retry-decision.decision_file}}, the current plan, frozen requirements, and completed outcomes. Preserve completed steps and reshape only the open step and unfinished tail. Keep requirements unchanged unless the same durable decision explicitly names and authorizes the exact requirement change and reason; when it does, update task-requirements.md and record that authorization in the new plan directory. Create a distinct complete plan version and return only current_plan_file and exact total_steps.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Read the exact replan decision at {{workspace_path}}{{ask-retry-decision.decision_file}}, the current plan at {{workspace_path}}{{current_plan_file}}, frozen requirements, and completed outcomes. Preserve completed steps and reshape only the open step and unfinished tail. Keep requirements unchanged unless the same durable decision explicitly names and authorizes the exact requirement change and reason; when it does, update task-requirements.md and record that authorization in the new plan directory. Create a distinct complete plan version and return current_plan_file and exact total_steps as the functional plan response.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "The durable replan decision is fully applied, completed work is preserved, requirements change only under exact explicit authorization, and a complete new plan is ready for review, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -592,22 +726,36 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from recovery decision",
+      "progressActiveContent": {
+        "summary": "Replace the open plan from the exact durable recovery decision",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
       "id": "teleport-replan",
       "type": "teleport",
       "hint": "Use during execution whenever new facts, missed scope, or the result of earlier work makes the unfinished plan inaccurate. Do not use it to reject a plan at the approval gate.",
-      "directive": "Reassess the current plan against the real work and frozen requirements. Record the concrete replan reason in the next plan-version directory, preserve completed steps before {{current_step}}, and reshape only the open step and unfinished tail. Create the complete new plan and return only current_plan_file and exact total_steps.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Reassess the current plan at {{workspace_path}}{{current_plan_file}} against the real work and frozen requirements. Record the concrete replan reason in the next plan-version directory, preserve completed steps before {{current_step}}, and reshape only the open step and unfinished tail. Create the complete new plan and return current_plan_file and exact total_steps as the functional plan response.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "A justified new complete plan preserves completed work and is ready for independent review and approval, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -615,21 +763,35 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from changed reality",
+      "progressActiveContent": {
+        "summary": "Replace the unfinished plan because new facts made it inaccurate",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
       "id": "final-review",
       "type": "agent-directive",
-      "directive": "Delegate one independent final semantic review and keep the same reviewer context for rereview after local change where supported. Read the frozen active requirements, approved current plan, real deliverable, completed outcomes, relevant direct attempt evidence and verdicts, requirement changes, exhausted-retry decisions, and accepted-incomplete records. Re-derive every active obligation once from primary artifacts rather than trusting executor summaries or creating a duplicate criteria projection. Write the complete current finding set to the next unused final/reviews/NNN-review.md; zero findings is normal.\n\nClassify every blocker by earliest cause and match evidence modality to the property. Return review_outcome=pass only when no active unaccepted blocker remains. Return repair only when every blocker has one local owner and upstream contracts remain sound; return repair_owner=deliverable for a confirmed defect of the real delivered result or evidence_projection for a correct deliverable with a locally correctable supporting evidence/projection defect. Return replan for an invalid criterion/evidence model, upstream or mixed cause, repeated local root without changed knowledge, or required proof machinery. Do not mutate or return counts.",
+      "directive": "Delegate one independent final semantic review and keep the same reviewer context for rereview after local change where supported. Read the frozen active requirements, approved current plan at {{workspace_path}}{{current_plan_file}}, real deliverable, completed outcomes, relevant direct attempt evidence and verdicts, requirement changes, exhausted-retry decisions, and accepted-incomplete records. Re-derive every active obligation once from primary artifacts rather than trusting executor summaries or creating a duplicate criteria projection. Write the complete current finding set to the next unused final/reviews/NNN-review.md; zero findings is normal.\n\nClassify every blocker by earliest cause and match evidence modality to the property. Return review_outcome=pass only when no active unaccepted blocker remains. Return repair only when every blocker has one local owner and upstream contracts remain sound; return repair_owner=deliverable for a confirmed defect of the real delivered result or evidence_projection for a correct deliverable with a locally correctable supporting evidence/projection defect. Return replan for an invalid criterion/evidence model, upstream or mixed cause, repeated local root without changed knowledge, or required proof machinery. Do not mutate or return counts.\n\nProgress outcome ownership: Return progress_final_review_outcome as a concise truthful synopsis of the current independent final-review disposition and repair owner when applicable. Replace the prior value; do not append history, predict repair, or claim pass with active blockers.",
       "completionCondition": "One independent cause-classified semantic review judges the real deliverable and every active obligation, and returns pass, one local repair owner, or replan",
       "inputSchema": {
         "type": "object",
@@ -658,6 +820,7 @@
           }
         },
         "required": [
+          "progress_final_review_outcome",
           "review_file",
           "review_outcome"
         ],
@@ -679,10 +842,19 @@
               ]
             }
           }
+        ],
+        "globalInputs": [
+          "progress_final_review_outcome"
         ]
       },
       "connections": {
         "success": "route-final-review"
+      },
+      "progressNodeId": "final-review",
+      "progressActiveLabel": "Final review · {{final_review_round}}/{{max_review_rounds}}",
+      "progressActiveContent": {
+        "summary": "Independently review the real deliverable and every active obligation",
+        "next": "Deliver, repair locally, or replace the plan from the classified cause"
       }
     },
     {
@@ -720,7 +892,7 @@
     {
       "id": "ask-final-review-limit",
       "type": "agent-directive",
-      "directive": "Independent final review reached the configured bound with unresolved findings. Read and present the complete exact report at {{workspace_path}}{{final-review.review_file}} and the real result. In interactive mode ask whether to authorize another changed repair or accept the exact remaining scope as incomplete. In autonomous mode choose repair only for a reproduced locally owned cause with genuinely changed knowledge that can be corrected now; otherwise accept_incomplete. Record the exact decision, scope, and reason in final/reviews/acceptance.md when accepting or beside the current review when continuing. A bound never converts unresolved findings into complete delivery.",
+      "directive": "Independent final review reached the configured bound with unresolved findings. Read and present the complete exact report at {{workspace_path}}{{final-review.review_file}} and the real result. In interactive mode ask whether to authorize another changed repair or accept the exact remaining scope as incomplete. In autonomous mode choose repair only for a reproduced locally owned cause with genuinely changed knowledge that can be corrected now; otherwise accept_incomplete. Record the exact decision, scope, and reason in final/reviews/acceptance.md when accepting or beside the current review when continuing. A bound never converts unresolved findings into complete delivery.\n\nProgress outcome ownership: Return progress_final_review_outcome as a concise truthful synopsis of the actual bounded decision and exact unresolved final scope. Replace the prior value; do not append history or convert unresolved findings into complete delivery.",
       "completionCondition": "The bounded decision is durable and unresolved findings lead only to changed repair or explicitly incomplete delivery",
       "inputSchema": {
         "type": "object",
@@ -736,11 +908,21 @@
           }
         },
         "required": [
-          "decision"
+          "decision",
+          "progress_final_review_outcome"
+        ],
+        "globalInputs": [
+          "progress_final_review_outcome"
         ]
       },
       "connections": {
         "success": "route-final-review-limit"
+      },
+      "progressNodeId": "final-review",
+      "progressActiveLabel": "Resolve final review bound",
+      "progressActiveContent": {
+        "summary": "Resolve the bounded final-review decision from the exact current report",
+        "next": "Perform one justified changed repair or deliver explicitly incomplete"
       }
     },
     {
@@ -771,7 +953,7 @@
     {
       "id": "fix-final-review",
       "type": "agent-directive",
-      "directive": "Read the complete independent report at {{workspace_path}}{{final-review.review_file}}, frozen requirements, current plan, real deliverable, and relevant direct evidence. Before mutation reproduce and classify every finding and inspect the current final repair chain for the same root.\n\nReturn repair_outcome=changed only after the selected {{final-review.repair_owner}} makes its permitted correction. For deliverable ownership, repair every real manifestation of the reproduced root inside original scope. For evidence_projection ownership, preserve and do not replay the correct deliverable and correct only the existing locally owned supporting source. Write concise changed-repair evidence to the next unused final/reviews/NNN-fix.md and return to the same reviewer. Do not add proof machinery or a duplicate completeness system.\n\nReturn repair_outcome=reassess without deliverable/supporting-evidence mutation when reproduction fails, evidence is non-discriminating, ownership is upstream or mixed, the root repeats without changed knowledge, or correction needs new proof machinery. Write only the superseding cause and reproduced observation to the next unused final/reviews/NNN-reassess.md and return that reassessment_file.",
+      "directive": "Read the complete independent report at {{workspace_path}}{{final-review.review_file}}, frozen requirements, current plan at {{workspace_path}}{{current_plan_file}}, real deliverable, and relevant direct evidence. Before mutation reproduce and classify every finding and inspect the current final repair chain for the same root.\n\nReturn repair_outcome=changed only after the selected {{final-review.repair_owner}} makes its permitted correction. For deliverable ownership, repair every real manifestation of the reproduced root inside original scope. For evidence_projection ownership, preserve and do not replay the correct deliverable and correct only the existing locally owned supporting source. Write concise changed-repair evidence to the next unused final/reviews/NNN-fix.md and return to the same reviewer. Do not add proof machinery or a duplicate completeness system.\n\nReturn repair_outcome=reassess without deliverable/supporting-evidence mutation when reproduction fails, evidence is non-discriminating, ownership is upstream or mixed, the root repeats without changed knowledge, or correction needs new proof machinery. Write only the superseding cause and reproduced observation to the next unused final/reviews/NNN-reassess.md and return that reassessment_file.\n\nProgress outcome ownership: Return progress_final_review_outcome as a concise truthful synopsis of the changed final repair or reassessment disposition. Replace the prior value; do not append history, predict rereview, or claim an unreproduced finding was fixed.",
       "completionCondition": "Every finding is reproduced and either its selected local owner changed the correct artifact or a durable reassessment reaches replan without result mutation",
       "inputSchema": {
         "type": "object",
@@ -792,6 +974,7 @@
           }
         },
         "required": [
+          "progress_final_review_outcome",
           "repair_outcome"
         ],
         "allOf": [
@@ -812,10 +995,19 @@
               ]
             }
           }
+        ],
+        "globalInputs": [
+          "progress_final_review_outcome"
         ]
       },
       "connections": {
         "success": "route-final-repair-outcome"
+      },
+      "progressNodeId": "final-review",
+      "progressActiveLabel": "Repair final result · {{final_review_round}}/{{max_review_rounds}}",
+      "progressActiveContent": {
+        "summary": "Repair the selected final owner or return its cause to planning",
+        "next": "Repeat independent final review or replace the plan from reassessment"
       }
     },
     {
@@ -831,7 +1023,7 @@
     {
       "id": "deliver-result",
       "type": "agent-directive",
-      "directive": "Derive the truthful final result from task-requirements.md, the approved current plan when one exists, durable plan/step/final decisions, completed outcomes, latest applicable evidence and verdicts, explicit requirement changes, final independent review, and incomplete-acceptance records. If execution stopped because plan review or step retry chose finish_incomplete, read that exact durable decision, stop without further execution or repair, force delivery_status=incomplete, and disclose every open obligation and reason. Otherwise use complete only when no active obligation remains unresolved; use incomplete for explicitly accepted or unresolved scope.\n\nWrite the complete bounded result once to final/delivery.md. Keep process history subordinate to the user result: state the delivered outcome, material evidence needed by its consumer, and every incomplete scope without duplicating reports. Return only delivery_file, delivery_status, and concise truthful summary.",
+      "directive": "Derive the truthful final result from task-requirements.md, the approved current plan at {{workspace_path}}{{current_plan_file}}, durable plan/step/final decisions, completed outcomes, latest applicable evidence and verdicts, explicit requirement changes, final independent review, and incomplete-acceptance records. If execution stopped because plan review or step retry chose finish_incomplete, read that exact durable decision, stop without further execution or repair, force delivery_status=incomplete, and disclose every open obligation and reason. Otherwise use complete only when no active obligation remains unresolved; use incomplete for explicitly accepted or unresolved scope.\n\nWrite the complete bounded result once to final/delivery.md. Keep process history subordinate to the user result: state the delivered outcome, material evidence needed by its consumer, and every incomplete scope without duplicating reports. Return delivery_file, delivery_status, and concise truthful summary as the functional delivery response.\n\nProgress outcome ownership: Return progress_delivery_outcome as a concise truthful synopsis of the actual complete or incomplete delivery and material unresolved scope. Replace the prior value; do not append history or hide an open obligation.",
       "completionCondition": "The single durable delivery accurately projects the latest real outcome and discloses every unresolved or accepted-incomplete obligation",
       "inputSchema": {
         "type": "object",
@@ -840,16 +1032,24 @@
         "required": [
           "delivery_file",
           "delivery_status",
+          "progress_delivery_outcome",
           "summary"
         ],
         "globalInputs": [
           "delivery_file",
           "delivery_status",
+          "progress_delivery_outcome",
           "summary"
         ]
       },
       "connections": {
         "success": "notify-completion"
+      },
+      "progressNodeId": "deliver",
+      "progressActiveLabel": "Deliver truthful result",
+      "progressActiveContent": {
+        "summary": "Project the latest real outcome and every unresolved obligation",
+        "next": "Send the existing completion notification and finish"
       }
     },
     {
@@ -925,7 +1125,7 @@
     {
       "id": "replan-from-plan-review",
       "type": "agent-directive",
-      "directive": "Replan from the current independent plan review without changing the user's original task boundary. Read the current plan, frozen requirements, completed outcomes, primary sources, and the exact current review.md that directly selected replan. Preserve valid requirements and completed outcomes; changing the original request still requires explicit user authorization. Create the next unused complete plans/NNN/plan.md that corrects the current review's invalid interpretation, criterion, evidence method, architecture/process contract, or mixed ownership, and return only current_plan_file and exact total_steps. Historical repair reassessments remain inspectable but are not sources for this direct-review transition.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Replan from the current independent plan review without changing the user's original task boundary. Read the current plan at {{workspace_path}}{{current_plan_file}}, frozen requirements, completed outcomes, primary sources, and the exact current review.md beside that plan that directly selected replan. Preserve valid requirements and completed outcomes; changing the original request still requires explicit user authorization. Create the next unused complete plans/NNN/plan.md that corrects the current review's invalid interpretation, criterion, evidence method, architecture/process contract, or mixed ownership, and return current_plan_file and exact total_steps as the functional plan response. Historical repair reassessments remain inspectable but are not sources for this direct-review transition.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "A complete new plan resolves the reproduced upstream planning cause, preserves valid requirements and completed outcomes, and returns through independent review, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -933,15 +1133,29 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from plan review",
+      "progressActiveContent": {
+        "summary": "Replace the plan from the exact independent plan-review cause",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
@@ -977,7 +1191,7 @@
     {
       "id": "repair-step",
       "type": "agent-directive",
-      "directive": "Read the exact failed verdict at {{workspace_path}}{{review-step.verdict_file}}, its evidence, the real result, current plan, frozen requirements, and relevant prior repair knowledge. Before any mutation or new attempt, reproduce and classify every current blocker and confirm the selected {{review-step.repair_owner}} ownership.\n\nReturn repair_outcome=changed only after the selected owner makes its permitted complete correction. For result ownership, repair all real in-scope manifestations of the reproduced root without expanding the task, then write the next unused plan-qualified attempt evidence.md for the changed substantive result. For evidence_projection ownership, preserve and do not replay the correct result; correct only the existing locally owned supporting source, write the next unused plan-qualified evidence.md with the reliable direct observation and an explicit reference to the unchanged result, and do not add a proof subsystem. In both cases return evidence_file.\n\nReturn repair_outcome=reassess without product/supporting-evidence mutation or a new attempt when reproduction fails, the observation is non-discriminating, ownership is upstream or mixed, the root repeats without changed knowledge, or correction would require new proof machinery. Write only the superseding cause and reproduced observation to repair.md beside the exact failed attempt and return that reassessment_file. Do not copy the verdict or create a ledger.",
+      "directive": "Read the exact failed verdict at {{workspace_path}}{{review-step.verdict_file}}, its evidence, the real result, current plan at {{workspace_path}}{{current_plan_file}}, frozen requirements, and relevant prior repair knowledge. Before any mutation or new attempt, reproduce and classify every current blocker and confirm the selected {{review-step.repair_owner}} ownership.\n\nReturn repair_outcome=changed only after the selected owner makes its permitted complete correction. For result ownership, repair all real in-scope manifestations of the reproduced root without expanding the task, then write the next unused plan-qualified attempt evidence.md for the changed substantive result. For evidence_projection ownership, preserve and do not replay the correct result; correct only the existing locally owned supporting source, write the next unused plan-qualified evidence.md with the reliable direct observation and an explicit reference to the unchanged result, and do not add a proof subsystem. In both cases return evidence_file.\n\nReturn repair_outcome=reassess without product/supporting-evidence mutation or a new attempt when reproduction fails, the observation is non-discriminating, ownership is upstream or mixed, the root repeats without changed knowledge, or correction would require new proof machinery. Write only the superseding cause and reproduced observation to repair.md beside the exact failed attempt and return that reassessment_file. Do not copy the verdict or create a ledger.\n\nProgress outcome ownership: Return progress_step_review_outcome as a concise truthful synopsis of the changed step repair or reassessment disposition. Replace the prior value; do not append history, predict rereview, or claim an unreproduced finding was fixed.",
       "completionCondition": "The finding is reproduced before mutation and either the selected owner made a complete changed repair with immutable evidence or a durable reassessment reaches replan without an attempt",
       "inputSchema": {
         "type": "object",
@@ -998,6 +1212,7 @@
           }
         },
         "required": [
+          "progress_step_review_outcome",
           "repair_outcome"
         ],
         "allOf": [
@@ -1037,11 +1252,18 @@
           }
         ],
         "globalInputs": [
-          "evidence_file"
+          "evidence_file",
+          "progress_step_review_outcome"
         ]
       },
       "connections": {
         "success": "route-step-repair-outcome"
+      },
+      "progressNodeId": "step-review",
+      "progressActiveLabel": "Repair step {{current_step}}/{{total_steps}}",
+      "progressActiveContent": {
+        "summary": "Repair the selected step owner or return its cause to planning",
+        "next": "Repeat independent step review or replace the plan from reassessment"
       }
     },
     {
@@ -1117,7 +1339,7 @@
     {
       "id": "replan-from-final-review",
       "type": "agent-directive",
-      "directive": "Return the unresolved obligation from the current independent final review to complete reviewed planning without changing the user's original task boundary. Read the current approved plan, frozen requirements, completed outcomes, real deliverable, primary artifacts, and the exact current report at {{workspace_path}}{{final-review.review_file}} that directly selected replan. Preserve completed outcomes and every still-valid requirement. Create the next unused complete plan version whose open step and unfinished tail correct the current report's cause; set total_steps so execution resumes at the current open cursor. Return only current_plan_file and exact total_steps. Historical final reassessments are not sources for this direct-review transition.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Return the unresolved obligation from the current independent final review to complete reviewed planning without changing the user's original task boundary. Read the current approved plan at {{workspace_path}}{{current_plan_file}}, frozen requirements, completed outcomes, real deliverable, primary artifacts, and the exact current report at {{workspace_path}}{{final-review.review_file}} that directly selected replan. Preserve completed outcomes and every still-valid requirement. Create the next unused complete plan version whose open step and unfinished tail correct the current report's cause; set total_steps so execution resumes at the current open cursor. Return current_plan_file and exact total_steps as the functional plan response. Historical final reassessments are not sources for this direct-review transition.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "The unresolved final cause is owned by a complete new reviewed plan that preserves completed outcomes and the original task boundary, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -1125,21 +1347,35 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from final review",
+      "progressActiveContent": {
+        "summary": "Replace the unfinished plan from the exact independent final-review cause",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
       "id": "replan-from-plan-reassess",
       "type": "agent-directive",
-      "directive": "Replan from the current plan repair owner's reassessment without changing the user's original task boundary. Read the exact current {{workspace_path}}{{fix-plan.reassessment_file}}, its superseded review.md and plan, frozen requirements, completed outcomes, and primary sources. Preserve valid requirements and completed outcomes; changing the original request still requires explicit user authorization. Create the next unused complete plans/NNN/plan.md that corrects the superseding current cause and return only current_plan_file and exact total_steps. This branch consumes only the reassessment that immediately routed here.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Replan from the current plan repair owner's reassessment without changing the user's original task boundary. Read the exact current {{workspace_path}}{{fix-plan.reassessment_file}}, its superseded review.md and plan, frozen requirements, completed outcomes, primary sources, and the current plan at {{workspace_path}}{{current_plan_file}}. Preserve valid requirements and completed outcomes; changing the original request still requires explicit user authorization. Create the next unused complete plans/NNN/plan.md that corrects the superseding current cause and return current_plan_file and exact total_steps as the functional plan response. This branch consumes only the reassessment that immediately routed here.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "The exact current plan repair reassessment owns a complete new reviewed plan without stale source selection, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -1147,21 +1383,35 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from plan reassessment",
+      "progressActiveContent": {
+        "summary": "Replace the plan from the exact current plan-repair reassessment",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
       "id": "replan-from-step-reassess",
       "type": "agent-directive",
-      "directive": "Replan the open step and unfinished tail from the current step repair owner's reassessment. Read the exact current {{workspace_path}}{{repair-step.reassessment_file}}, its superseded verdict and attempt evidence, frozen requirements, current plan, real result, and completed outcomes. Correct the superseding current criterion, evidence method, ownership, architecture, or process cause; preserve completed outcomes and the original task boundary and consume no ordinary result retry. Create a distinct complete plan version and return only current_plan_file and exact total_steps. This branch consumes only the reassessment that immediately routed here.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Replan the open step and unfinished tail from the current step repair owner's reassessment. Read the exact current {{workspace_path}}{{repair-step.reassessment_file}}, its superseded verdict and attempt evidence, frozen requirements, current plan at {{workspace_path}}{{current_plan_file}}, real result, and completed outcomes. Correct the superseding current criterion, evidence method, ownership, architecture, or process cause; preserve completed outcomes and the original task boundary and consume no ordinary result retry. Create a distinct complete plan version and return current_plan_file and exact total_steps as the functional plan response. This branch consumes only the reassessment that immediately routed here.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "The exact current step repair reassessment owns a complete new reviewed plan without stale source selection or retry consumption, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -1169,21 +1419,35 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from step reassessment",
+      "progressActiveContent": {
+        "summary": "Replace the open plan from the exact current step-repair reassessment",
+        "next": "Independently review the complete replacement plan"
       }
     },
     {
       "id": "replan-from-final-reassess",
       "type": "agent-directive",
-      "directive": "Return the unresolved obligation from the current final repair owner's reassessment to complete reviewed planning. Read the exact current {{workspace_path}}{{fix-final-review.reassessment_file}}, its superseded final review, current approved plan, frozen requirements, completed outcomes, real deliverable, and primary artifacts. Preserve completed outcomes, every still-valid requirement, and the original task boundary. Create the next unused complete plan version whose open step and unfinished tail correct the superseding current cause; set total_steps so execution resumes at the current open cursor. Return only current_plan_file and exact total_steps. This branch consumes only the reassessment that immediately routed here.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.",
+      "directive": "Return the unresolved obligation from the current final repair owner's reassessment to complete reviewed planning. Read the exact current {{workspace_path}}{{fix-final-review.reassessment_file}}, its superseded final review, current approved plan at {{workspace_path}}{{current_plan_file}}, frozen requirements, completed outcomes, real deliverable, and primary artifacts. Preserve completed outcomes, every still-valid requirement, and the original task boundary. Create the next unused complete plan version whose open step and unfinished tail correct the superseding current cause; set total_steps so execution resumes at the current open cursor. Return current_plan_file and exact total_steps as the functional plan response. This branch consumes only the reassessment that immediately routed here.\n\nThe steps this revision shapes keep the altitude the first plan is held to: they fix what must become true, the evidence that would accept it, and what it depends on, rather than carrying the deliverable. Steps already executed stay as they were executed.\n\nProgress outcome ownership: Return progress_plan_outcome as the replacement plan's bounded current synopsis and disposition. In the same response, atomically replace progress_execution_outcome, progress_step_review_outcome, and progress_final_review_outcome with only an explicitly still-valid completed prefix or a truthful pending state for this replacement plan. Do not append history, preserve a superseded attempt or verdict, predict unfinished work, or clear a still-valid completed outcome mechanically.",
       "completionCondition": "The exact current final repair reassessment owns a complete new reviewed plan without stale source selection, and every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
       "inputSchema": {
         "type": "object",
@@ -1191,15 +1455,29 @@
         "properties": {},
         "required": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ],
         "globalInputs": [
           "current_plan_file",
+          "progress_execution_outcome",
+          "progress_final_review_outcome",
+          "progress_plan_outcome",
+          "progress_step_review_outcome",
           "total_steps"
         ]
       },
       "connections": {
         "success": "reset-plan-review-round"
+      },
+      "progressNodeId": "plan",
+      "progressActiveLabel": "Replan from final reassessment",
+      "progressActiveContent": {
+        "summary": "Replace the unfinished plan from the exact current final-repair reassessment",
+        "next": "Independently review the complete replacement plan"
       }
     }
   ],
@@ -1295,8 +1573,125 @@
         "interactive"
       ],
       "description": "How this run treats the user before the delivery: autonomous skips intermediate approval and decision gates, interactive keeps them"
+    },
+    "progress_intake_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Robust Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_plan_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Robust Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_execution_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Robust Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_step_review_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Robust Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_final_review_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Robust Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_delivery_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Robust Task progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
     }
   },
+  "progress": {
+    "title": "Robust Task",
+    "goal": "Complete one complex authorized task through durable reviewed planning, plan-qualified execution, cause-owned recovery, independent final review, and truthful delivery.",
+    "nodes": [
+      {
+        "id": "intake",
+        "label": "Intake",
+        "content": {
+          "summary": "Establish the durable task workspace, frozen requirements, authority, and operating mode",
+          "outcome": "{{progress_intake_outcome}}",
+          "next": "Create and independently review the complete plan"
+        },
+        "connections": {
+          "default": "plan"
+        }
+      },
+      {
+        "id": "plan",
+        "label": "Plan",
+        "content": {
+          "summary": "Create, review, approve, repair, or replace the authoritative complete plan",
+          "outcome": "{{progress_plan_outcome}}",
+          "next": "Execute the current approved plan"
+        },
+        "connections": {
+          "default": "execute"
+        }
+      },
+      {
+        "id": "execute",
+        "label": "Execute",
+        "content": {
+          "summary": "Produce and directly evidence the current plan-qualified step outcome",
+          "outcome": "{{progress_execution_outcome}}",
+          "next": "Independently review the exact attempt"
+        },
+        "connections": {
+          "default": "step-review"
+        }
+      },
+      {
+        "id": "step-review",
+        "label": "Step Review",
+        "content": {
+          "summary": "Review, repair, recover, or replan the current step from cause-owned evidence",
+          "outcome": "{{progress_step_review_outcome}}",
+          "next": "Continue execution, return to planning, or enter final review"
+        },
+        "connections": {
+          "default": "final-review"
+        }
+      },
+      {
+        "id": "final-review",
+        "label": "Final Review",
+        "content": {
+          "summary": "Independently review the complete result and resolve current final findings",
+          "outcome": "{{progress_final_review_outcome}}",
+          "next": "Deliver truthfully or return an unresolved obligation to planning"
+        },
+        "connections": {
+          "default": "deliver"
+        }
+      },
+      {
+        "id": "deliver",
+        "label": "Deliver",
+        "content": {
+          "summary": "Project the latest real outcome and disclose every unresolved obligation",
+          "outcome": "{{progress_delivery_outcome}}"
+        }
+      }
+    ]
+  },
+  "slug": "robust-task",
   "owner": "system-moira",
   "visibility": "public"
 }
