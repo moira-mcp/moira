@@ -1,11 +1,8 @@
 {
-  "slug": "todo-list",
-  "owner": "system-moira",
-  "visibility": "public",
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.4.6",
+    "version": "3.4.7",
     "description": "Executes a finite checklist sequentially with minimal orchestration. It accepts an already supplied typed task list or gathers one bounded list, derives the total and one-based cursor in the engine, projects exactly the current task, requires one concise evidence acknowledgement after real completion, and advances without asking for approval between items. A guarded mid-run revision can replace the checklist while keeping completed positions unchanged and resuming from an explicit task number; engine-derived totals and cursors prevent contradictory state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation."
   },
   "nodes": [
@@ -19,21 +16,29 @@
     {
       "id": "obtain-tasks",
       "type": "agent-directive",
-      "directive": "Obtain the complete checklist for the user's current goal, ordered so that it can be worked through in that order.\n\nWhen the user or caller already supplied the tasks as a ready array matching the required schema, their content belongs to whoever wrote it: return every item they gave, with its wording and scope unchanged, drop nothing, and add no work they did not ask for. The order is yours to establish, because you are the one who can see which item cannot start until another has produced what it needs. A list written by a person records their thinking rather than a queue: the condition the first item depends on is often realised while writing the third and written down there, and a remark that governs the whole job can sit in the middle looking like another item. Place each item where its prerequisites already hold, and treat such a remark as a constraint on the items it governs rather than as a task of its own. Where the resulting order differs from the written one, the difference and the dependency that caused it are visible to the author before any work starts, so they can correct you rather than discover it afterwards. Where two supplied items each need the other's result, no order satisfies both: name that pair to the author instead of choosing silently.\n\nOtherwise plan the checklist once. Return 1 to 100 self-contained tasks. Each action must name the concrete work, relevant constraints, and verification. Each expected_result must describe an observable completion condition. Do not execute tasks in this step and do not add IDs, statuses, result codes, counters, or reporting fields.",
-      "completionCondition": "One bounded typed task array is returned: either unchanged in content from a supplied schema-valid list, or planned once from the current goal. In the supplied case, supplied items keep their content, none is lost, nothing unrequested is added, a remark that governs the whole job constrains the items it governs instead of becoming one, any difference from the written order is visible to the author before work starts, and every item stands where its prerequisites already hold, except a pair that each need the other's result, which is named to the author",
+      "directive": "Obtain the complete checklist for the user's current goal, ordered so that it can be worked through in that order.\n\nWhen the user or caller already supplied the tasks as a ready array matching the required schema, their content belongs to whoever wrote it: return every item they gave, with its wording and scope unchanged, drop nothing, and add no work they did not ask for. The order is yours to establish, because you are the one who can see which item cannot start until another has produced what it needs. A list written by a person records their thinking rather than a queue: the condition the first item depends on is often realised while writing the third and written down there, and a remark that governs the whole job can sit in the middle looking like another item. Place each item where its prerequisites already hold, and treat such a remark as a constraint on the items it governs rather than as a task of its own. Where the resulting order differs from the written one, the difference and the dependency that caused it are visible to the author before any work starts, so they can correct you rather than discover it afterwards. Where two supplied items each need the other's result, no order satisfies both: name that pair to the author instead of choosing silently.\n\nOtherwise plan the checklist once. Return 1 to 100 self-contained tasks. Each action must name the concrete work, relevant constraints, and verification. Each expected_result must describe an observable completion condition. Do not execute tasks in this step and do not add IDs, statuses, result codes, counters, or reporting fields.\n\nProgress outcome ownership: In the same response, return progress_checklist_outcome as a concise bounded synopsis of the authoritative ordered checklist without copying the whole list. Replace the prior value; do not append history, predict execution, or treat the synopsis as proof that a task is complete.",
+      "completionCondition": "One bounded typed task array and one bounded checklist synopsis are returned: either unchanged in content from a supplied schema-valid list, or planned once from the current goal. In the supplied case, supplied items keep their content, none is lost, nothing unrequested is added, a remark that governs the whole job constrains the items it governs instead of becoming one, any difference from the written order is visible to the author before work starts, and every item stands where its prerequisites already hold, except a pair that each need the result of the other, which is named to the author. The progress synopsis reflects the authoritative ordered checklist without claiming execution.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
+          "progress_checklist_outcome",
           "tasks"
         ],
         "globalInputs": [
+          "progress_checklist_outcome",
           "tasks"
         ]
       },
       "connections": {
         "success": "derive-plan-state"
+      },
+      "progressNodeId": "checklist",
+      "progressActiveLabel": "Build checklist",
+      "progressActiveContent": {
+        "summary": "Capture or order the complete bounded checklist",
+        "next": "Derive the first current task"
       }
     },
     {
@@ -79,25 +84,35 @@
     {
       "id": "execute-task",
       "type": "agent-directive",
-      "directive": "Execute task {{current_task}} of {{total_tasks}}. Action: {{current_task_action}}. Expected result: {{current_task_expected_result}}. Perform the real work and verify the expected result before calling step(). If the task is incomplete or blocked, do not call step(); report the verified blocker to the user. After successful completion, return only one concise evidence string describing the concrete check that passed. Do not ask the user to approve tasks between steps. After the last task, let the workflow end without inventing a separate summary or result report.",
-      "completionCondition": "The current task is completed, its expected result is verified, and one concise evidence string is returned",
+      "directive": "Execute task {{current_task}} of {{total_tasks}}. Action: {{current_task_action}}. Expected result: {{current_task_expected_result}}. Perform the real work and verify the expected result before calling step(). If the task is incomplete or blocked, do not call step(); report the verified blocker to the user. After successful completion, return one concise evidence string describing the concrete check that passed and progress_execution_outcome as a bounded synopsis of the task outcome in the same response. Replace the prior progress outcome; do not append history or use it as a substitute for the evidence. Do not ask the user to approve tasks between steps. After the last task, let the workflow end without inventing a separate summary or result report.",
+      "completionCondition": "The current task is completed, its expected result is verified, one concise evidence string is returned, and the bounded Work outcome truthfully replaces the latest completed-task synopsis without substituting for evidence",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "evidence": {
             "type": "string",
-            "description": "Concise evidence that the current task's expected result was verified",
+            "description": "Concise evidence that the current task expected result was verified",
             "minLength": 1,
             "maxLength": 500
           }
         },
         "required": [
-          "evidence"
+          "evidence",
+          "progress_execution_outcome"
+        ],
+        "globalInputs": [
+          "progress_execution_outcome"
         ]
       },
       "connections": {
         "success": "advance-task-cursor"
+      },
+      "progressNodeId": "work",
+      "progressActiveLabel": "Task {{current_task}}/{{total_tasks}}",
+      "progressActiveContent": {
+        "summary": "{{current_task_action}}",
+        "next": "Verify the expected result stated in the current directive"
       }
     },
     {
@@ -119,23 +134,33 @@
       "id": "teleport-revise-tasks",
       "type": "teleport",
       "hint": "Jump here when the checklist itself no longer describes the work that must happen: remaining tasks turned out wrong, obsolete, missing, or in the wrong order. Not for a task that is merely hard, blocked, or failing — report that blocker to the user and stay on the task.",
-      "directive": "You jumped here because the checklist no longer matches the work that must happen. Return the complete corrected checklist and the position to continue from.\n\nKeep every task you have already executed at its original position and unchanged in meaning: position is task identity, and the run resumes by position. Change only what is still ahead — rewrite, drop, add, or reorder it — and keep each task self-contained, naming the concrete work, its constraints, and how it is verified.\n\nReturn resume_from_task as the position of the first task to execute now. Everything before that position is treated as already done and will not be executed again. Do not add ids, statuses, result codes, counters, or reporting fields, and do not use this jump to escape a task that is simply hard or blocked.",
-      "completionCondition": "The complete corrected checklist preserves already executed tasks in their original positions, and the position to continue from is returned",
+      "directive": "You jumped here because the checklist no longer matches the work that must happen. Return the complete corrected checklist and the position to continue from.\n\nKeep every task you have already executed at its original position and unchanged in meaning: position is task identity, and the run resumes by position. Change only what is still ahead — rewrite, drop, add, or reorder it — and keep each task self-contained, naming the concrete work, its constraints, and how it is verified.\n\nReturn resume_from_task as the position of the first task to execute now. Everything before that position is treated as already done and will not be executed again. Do not add ids, statuses, result codes, counters, or reporting fields, and do not use this jump to escape a task that is simply hard or blocked.\n\nProgress outcome ownership: In the same response, replace progress_checklist_outcome with a concise bounded synopsis of the corrected authoritative checklist. Atomically replace progress_execution_outcome with only the latest completed-task outcome that remains true for the unchanged completed prefix, or Pending when no completed outcome remains. Do not append history, preserve a superseded task outcome, or predict unfinished work.",
+      "completionCondition": "The complete corrected checklist preserves already executed tasks in their original positions; the position to continue from is returned; the checklist synopsis reflects that replacement; and the Work outcome atomically retains only a still-true completed prefix result or Pending",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {},
         "required": [
-          "tasks",
-          "resume_from_task"
+          "progress_checklist_outcome",
+          "progress_execution_outcome",
+          "resume_from_task",
+          "tasks"
         ],
         "globalInputs": [
-          "tasks",
-          "resume_from_task"
+          "progress_checklist_outcome",
+          "progress_execution_outcome",
+          "resume_from_task",
+          "tasks"
         ]
       },
       "connections": {
         "success": "derive-revised-plan-state"
+      },
+      "progressNodeId": "work",
+      "progressActiveLabel": "Revise checklist",
+      "progressActiveContent": {
+        "summary": "Correct the remaining checklist while preserving completed positions",
+        "next": "Resume from the first task that still requires work, or finish if none remains"
       }
     },
     {
@@ -214,6 +239,61 @@
       "description": "Position to continue from after a checklist revision",
       "minimum": 1,
       "maximum": 101
+    },
+    "progress_checklist_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Todo List progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "progress_execution_outcome": {
+      "type": "string",
+      "description": "Current bounded semantic outcome projected into Todo List progress",
+      "default": "Pending",
+      "minLength": 1,
+      "maxLength": 500
     }
-  }
+  },
+  "progress": {
+    "title": "Todo List",
+    "goal": "Complete the authoritative checklist in order with visible current work and truthful revision handling.",
+    "nodes": [
+      {
+        "id": "checklist",
+        "label": "Checklist",
+        "content": {
+          "summary": "Establish the bounded ordered checklist and retain its latest confirmed synopsis",
+          "outcome": "{{progress_checklist_outcome}}",
+          "next": "Prepare and perform the current checklist"
+        },
+        "connections": {
+          "default": "prepare"
+        }
+      },
+      {
+        "id": "prepare",
+        "label": "Prepare",
+        "content": {
+          "summary": "Derive the current task position, action, and expected result from the authoritative checklist",
+          "next": "Perform and verify the projected work"
+        },
+        "connections": {
+          "default": "work"
+        }
+      },
+      {
+        "id": "work",
+        "label": "Work",
+        "content": {
+          "summary": "Perform or correct the remaining checklist work",
+          "outcome": "{{progress_execution_outcome}}",
+          "next": "Continue, revise the remaining checklist when necessary, or finish"
+        }
+      }
+    ]
+  },
+  "slug": "todo-list",
+  "owner": "system-moira",
+  "visibility": "public"
 }
