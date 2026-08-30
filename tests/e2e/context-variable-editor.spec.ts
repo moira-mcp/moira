@@ -20,7 +20,7 @@ const BASE_URL = getTestBaseUrl();
 const SEED_PREFIX = "e2e-ctxtree";
 
 test.describe("Context Variable Editor (tree)", () => {
-  const seededWorkflowId = `${SEED_PREFIX}-wf-${Date.now()}`;
+  const seededWorkflowId = `${SEED_PREFIX}-wf-${randomUUID()}`;
   const seededExecutionId = randomUUID();
 
   test.beforeAll(async () => {
@@ -33,6 +33,26 @@ test.describe("Context Variable Editor (tree)", () => {
           type: "string",
           description: "Alpha start description",
           default: "a-initial",
+        },
+        review_findings: {
+          type: "object",
+          description: "Structured review outcome",
+          properties: {
+            blocking: { type: "number" },
+            remarks: { type: "number" },
+          },
+          required: ["blocking", "remarks"],
+          additionalProperties: false,
+          default: { blocking: 0, remarks: 2 },
+        },
+        empty_value: { type: "string", description: "Empty value", default: "" },
+        long_text: { type: "string", description: "Long text", default: "L".repeat(120) },
+      },
+      runtimePolicy: {
+        externalVariableWrites: {
+          review_findings: { allowedNodeIds: ["ask"] },
+          empty_value: { allowedNodeIds: ["ask"] },
+          long_text: { allowedNodeIds: ["ask"] },
         },
       },
       nodes: [
@@ -56,20 +76,20 @@ test.describe("Context Variable Editor (tree)", () => {
 
     execSqliteInDocker(
       `INSERT INTO workflow (id, userId, slug, name, description, version, graph, visibility, createdAt, updatedAt) ` +
-        `VALUES ('${seededWorkflowId}', 'system-admin', '${SEED_PREFIX}-wf-${now}', '${SEED_PREFIX} WF', 'ctx tree e2e', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
+        `VALUES ('${seededWorkflowId}', 'system-admin', '${seededWorkflowId}-slug', '${SEED_PREFIX} WF', 'ctx tree e2e', '1.0.0', '${graph}', 'public', ${now}, ${now});`,
     );
 
     const context = JSON.stringify({
       variables: {
         alpha_start: "a-initial", // global (registry) — also written by 'ask' (see ask scope below)
-        // node-local scope (node id 'ask'): local outputs (review_findings, empty_value, long_text)
-        // PLUS the global the node wrote (alpha_start), which must be hidden here and shown once
-        // under Global. empty_value / long_text are node-local leaves used by the affordance tests.
+        review_findings: { blocking: 0, remarks: 2 },
+        empty_value: "",
+        long_text: "L".repeat(120),
+        // Node-local scope (node id 'ask') contains one read-only output plus the global the node
+        // wrote (alpha_start), which must be hidden here and shown once under Global.
         ask: {
-          review_findings: { blocking: 0, remarks: 2 },
           alpha_start: "a-initial",
-          empty_value: "",
-          long_text: "L".repeat(120),
+          local_result: "read-only node output",
         },
         // The start node's seeded scope contains only the global it wrote → empty after de-dup →
         // must NOT render as a node-output container.
@@ -82,8 +102,8 @@ test.describe("Context Variable Editor (tree)", () => {
     }).replace(/'/g, "''");
 
     execSqliteInDocker(
-      `INSERT INTO workflowExecution (executionId, workflowId, userId, state, currentNodeId, context, createdAt, updatedAt) ` +
-        `VALUES ('${seededExecutionId}', '${seededWorkflowId}', 'system-admin', 'running', 'ask', '${context}', ${now}, ${now});`,
+      `INSERT INTO workflowExecution (executionId, workflowId, userId, state, currentNodeId, waitingForInputNodeId, context, createdAt, updatedAt) ` +
+        `VALUES ('${seededExecutionId}', '${seededWorkflowId}', 'system-admin', 'running', 'ask', 'ask', '${context}', ${now}, ${now});`,
     );
   });
 
@@ -135,26 +155,22 @@ test.describe("Context Variable Editor (tree)", () => {
     // It also exists inside the 'ask' node scope, but must NOT be rendered there (no duplicate).
     await expect(page.getByTestId("context-var-ask.alpha_start")).toHaveCount(0);
     // The node's genuine local output is still shown inside its tree.
-    await expect(page.getByTestId("context-var-ask.review_findings")).toBeVisible();
+    await expect(page.getByTestId("context-var-ask.local_result")).toBeVisible();
+    await expect(page.getByTestId("context-var-input-ask.local_result")).toHaveCount(0);
     // A node scope whose only contents are globals it wrote (e.g. start) is empty after de-dup and
     // must NOT render as a node-output container.
     await expect(page.getByTestId("context-var-start")).toHaveCount(0);
   });
 
-  test("renders a node-local object as a tree and edits a nested value via per-path save", async ({
-    page,
-  }) => {
-    // The 'ask' node-local scope is a top-level object (expanded by default). Expand the nested
-    // 'review_findings' object inside it to reach the leaf.
-    const reviewToggle = page.getByTestId("context-node-toggle-ask.review_findings");
-    if (await reviewToggle.count()) {
-      await reviewToggle.click();
+  test("edits a policy-enabled global object via per-path save", async ({ page }) => {
+    // The policy-enabled global is an object. Expand it to reach the nested editable leaf.
+    const input = page.getByTestId("context-var-input-review_findings.blocking");
+    if (!(await input.isVisible())) {
+      await page.getByTestId("context-node-toggle-review_findings").click();
     }
-
-    const input = page.getByTestId("context-var-input-ask.review_findings.blocking");
     await expect(input).toBeVisible();
     await expect(input).toHaveValue("0");
-    await expect(page.getByTestId("context-var-save-ask.review_findings.blocking")).toBeDisabled();
+    await expect(page.getByTestId("context-var-save-review_findings.blocking")).toBeDisabled();
     await input.fill("5");
     // Wait for the PUT to actually complete before clicking — capture the network response so the
     // DB read below is gated on the server having persisted the write, not on the optimistic draft.
@@ -164,44 +180,42 @@ test.describe("Context Variable Editor (tree)", () => {
         r.request().method() === "PUT" &&
         r.status() === 200,
     );
-    await page.getByTestId("context-var-save-ask.review_findings.blocking").click();
+    await page.getByTestId("context-var-save-review_findings.blocking").click();
     await savePut;
 
     // After a successful save the row reloads from the server, so the save button returns to the
     // disabled (not-dirty) state — i.e. the input now reflects the PERSISTED value, not the draft.
     // Gating on this (instead of toHaveValue, which passes immediately off the optimistic draft)
     // guarantees the write is durable before we read it back from the DB.
-    await expect(page.getByTestId("context-var-save-ask.review_findings.blocking")).toBeDisabled({
+    await expect(page.getByTestId("context-var-save-review_findings.blocking")).toBeDisabled({
       timeout: 10000,
     });
-    await expect(page.getByTestId("context-var-input-ask.review_findings.blocking")).toHaveValue(
-      "5",
-    );
+    await expect(page.getByTestId("context-var-input-review_findings.blocking")).toHaveValue("5");
     const row = execSqliteInDocker(
       `SELECT context FROM workflowExecution WHERE executionId = '${seededExecutionId}';`,
     );
     const ctx = JSON.parse(row);
-    expect(ctx.variables.ask.review_findings).toEqual({ blocking: 5, remarks: 2 });
+    expect(ctx.variables.review_findings).toEqual({ blocking: 5, remarks: 2 });
     expect(ctx.variables.alpha_start).toBe("a-initial");
   });
 
   test("tree-aware filter shows a nested match with its ancestors", async ({ page }) => {
-    // "remarks" only exists nested under ask.review_findings.
+    // "remarks" only exists nested under the global review_findings object.
     await page.getByTestId("context-filter-input").fill("remarks");
-    await expect(page.getByTestId("context-var-ask")).toBeVisible();
-    await expect(page.getByTestId("context-var-ask.review_findings.remarks")).toBeVisible();
+    await expect(page.getByTestId("context-var-review_findings")).toBeVisible();
+    await expect(page.getByTestId("context-var-review_findings.remarks")).toBeVisible();
     // Unrelated top-level vars are filtered out.
     await expect(page.getByTestId("context-var-empty_value")).toHaveCount(0);
   });
 
   test("long text shows an expand button opening a modal editor", async ({ page }) => {
-    await expect(page.getByTestId("context-var-expand-ask.long_text")).toBeVisible();
-    await page.getByTestId("context-var-expand-ask.long_text").click();
-    await expect(page.getByTestId("context-var-modal-textarea-ask.long_text")).toBeVisible();
+    await expect(page.getByTestId("context-var-expand-long_text")).toBeVisible();
+    await page.getByTestId("context-var-expand-long_text").click();
+    await expect(page.getByTestId("context-var-modal-textarea-long_text")).toBeVisible();
   });
 
   test("empty value renders an editable field (not a sliver)", async ({ page }) => {
-    const input = page.getByTestId("context-var-input-ask.empty_value");
+    const input = page.getByTestId("context-var-input-empty_value");
     await expect(input).toBeVisible();
     // The input has a real height (normal field), not a ~2px sliver.
     const box = await input.boundingBox();

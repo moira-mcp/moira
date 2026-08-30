@@ -244,6 +244,19 @@ describe("runtime execution variables", () => {
     };
     expect(httpData.data).toMatchObject({ unknownNames: ["missing"] });
     expect(httpData.data.variables).toEqual([expect.objectContaining({ name: "editable_value" })]);
+    const unfilteredHttpQuery = await fetch(
+      `${getTestBaseUrl()}/api/executions/${executionId}/variables`,
+      { headers: { Cookie: `better-auth.session_token=${cookie}` } },
+    );
+    const unfilteredHttpData = (await unfilteredHttpQuery.json()) as {
+      data: { variables: Array<{ name: string }> };
+    };
+    expect(unfilteredHttpData.data.variables.map((variable) => variable.name)).toEqual([
+      "denied_value",
+      "editable_value",
+      "object_value",
+      "unset_value",
+    ]);
     const httpSet = await fetch(
       `${getTestBaseUrl()}/api/executions/${executionId}/variables/editable_value`,
       {

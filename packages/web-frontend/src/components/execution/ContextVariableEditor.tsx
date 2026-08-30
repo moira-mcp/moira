@@ -7,7 +7,8 @@
  * these two, so there is no undeclared/"appeared during execution" group. A global that a node wrote
  * also lives inside that node's local scope; it is shown once under Global and hidden from the node's
  * tree to avoid duplication. Objects/arrays render as an expandable tree with alphabetically-sorted
- * keys; leaf (primitive) values are editable at any nesting level.
+ * keys. Leaves under policy-enabled declared globals are editable at any nesting level; node
+ * outputs and other globals remain read-only.
  *
  * - Fields render in edit mode by default; Save/Cancel are enabled only after a change (dirty).
  * - Long / multiline string values show a "long" indicator and a button opening a modal editor.
@@ -51,6 +52,8 @@ interface ContextVariableEditorProps {
   workflow?: WorkflowGraph;
   /** When provided, the editor is editable and calls this with the full path + new value. */
   onSavePath?: (path: PathSeg[], value: unknown) => Promise<boolean>;
+  /** Declared global variables that the server currently permits the owner to edit. */
+  editableRootNames?: ReadonlySet<string>;
 }
 
 function isContainer(v: unknown): v is Record<string, unknown> | unknown[] {
@@ -114,6 +117,7 @@ export const ContextVariableEditor: React.FC<ContextVariableEditorProps> = ({
   variables,
   workflow,
   onSavePath,
+  editableRootNames,
 }) => {
   const { t } = useTranslation();
   const canEdit = Boolean(onSavePath);
@@ -210,7 +214,7 @@ export const ContextVariableEditor: React.FC<ContextVariableEditorProps> = ({
                 description={descriptions[name]}
                 query={q}
                 filterField={filterField}
-                canEdit={canEdit}
+                canEdit={canEdit && (editableRootNames?.has(name) ?? false)}
                 onSavePath={onSavePath}
               />
             ))}
@@ -229,7 +233,7 @@ export const ContextVariableEditor: React.FC<ContextVariableEditorProps> = ({
                 description={descriptions[name]}
                 query={q}
                 filterField={filterField}
-                canEdit={canEdit}
+                canEdit={false}
                 onSavePath={onSavePath}
                 // A global a node wrote also lives in the node scope; hide it here (shown under Global).
                 hiddenChildKeys={globalNames}

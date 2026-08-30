@@ -546,7 +546,10 @@ test.describe("Unlock Flow", () => {
     await unlockButton.click();
 
     // Lock status badge changes from "active" to "unlocked"
-    await expect(page.getByText("unlocked", { exact: true })).toBeVisible({ timeout: 5000 });
+    const unlockedCard = page.locator(".rounded-xl.border", { hasText: "E2E unlock test" });
+    await expect(unlockedCard.getByText("unlocked", { exact: true })).toBeVisible({
+      timeout: 5000,
+    });
   });
 
   test("Admin can force-unlock execution via admin inspector", async ({ page }) => {
@@ -580,7 +583,10 @@ test.describe("Unlock Flow", () => {
     await unlockButton.click();
 
     // Lock status badge changes from "active" to "unlocked"
-    await expect(page.getByText("unlocked", { exact: true })).toBeVisible({ timeout: 5000 });
+    const unlockedCard = page.locator(".rounded-xl.border", { hasText: "Admin unlock test" });
+    await expect(unlockedCard.getByText("unlocked", { exact: true })).toBeVisible({
+      timeout: 5000,
+    });
   });
 });
 

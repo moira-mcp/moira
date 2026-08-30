@@ -61,7 +61,7 @@ export function queryExecutionVariables(
         (!search ||
           item.name.toLowerCase().includes(search) ||
           item.description.toLowerCase().includes(search)) &&
-        (!filters.types || filters.types.includes(item.type)) &&
+        (!filters.types?.length || filters.types.includes(item.type)) &&
         (filters.editable === undefined || item.editable === filters.editable) &&
         (filters.hasValue === undefined || item.hasValue === filters.hasValue) &&
         (!filters.writePhase || item.writePhase === filters.writePhase),

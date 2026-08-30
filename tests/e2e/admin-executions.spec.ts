@@ -65,7 +65,7 @@ test.describe("Admin Executions Page", () => {
       executionId = match[1];
       console.log(`✓ Execution created: ${executionId}`);
     } else {
-      console.error("Failed to extract execution ID from:", result);
+      throw new Error(`Failed to extract execution ID from: ${result}`);
     }
   });
 
@@ -128,71 +128,29 @@ test.describe("Admin Executions Page", () => {
       `✓ Admin sees test user execution (name matches: ${testUserName}, email matches: ${testUserEmail})`,
     );
 
-    // Click on the test user's execution card to open details
-    if (executionId) {
-      // Find execution card by the specific executionId (not user name, which may match multiple cards)
-      const shortId = executionId.substring(0, 8);
-      const targetCard = page.getByTestId("execution-card").filter({ hasText: shortId }).first();
+    // Click the card for this exact execution, not an arbitrary card owned by the same user.
+    const shortId = executionId.substring(0, 8);
+    const targetCard = page.getByTestId("execution-card").filter({ hasText: shortId }).first();
+    await expect(targetCard).toBeVisible({ timeout: 10000 });
+    await targetCard.click();
+    await expect(page).toHaveURL(`/admin/executions/${executionId}`, { timeout: 10000 });
 
-      // If card with exact ID not found, fall back to user name filter
-      const cardCount = await targetCard.count();
-      if (cardCount > 0) {
-        await targetCard.click();
-      } else {
-        const fallbackCard = page
-          .getByTestId("execution-card")
-          .filter({ hasText: TEST_USER.name })
-          .first()
-          .or(page.getByTestId("execution-card").filter({ hasText: TEST_USER.email }).first());
-        await fallbackCard.click();
-      }
-      await page.waitForLoadState("domcontentloaded");
+    // Both identities arrive asynchronously. Locator assertions wait for the actual detail payload;
+    // `isVisible({ timeout })` is an immediate observation and previously made this test flaky.
+    await expect(
+      page
+        .getByText("Verified Research", { exact: true })
+        .or(page.getByText(TEST_WORKFLOW_ID, { exact: true }))
+        .first(),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page
+        .getByText(TEST_USER.name, { exact: true })
+        .or(page.getByText(TEST_USER.email, { exact: true }))
+        .first(),
+    ).toBeVisible({ timeout: 10000 });
 
-      // Verify we're on an execution detail page (may not be exact ID if fallback used)
-      await expect(page).toHaveURL(/\/admin\/executions\/[a-f0-9-]+/, { timeout: 10000 });
-
-      // Wait for the loading state to complete (page shows "Loading execution..." initially)
-      // Wait for page to fully load - ProtectedRoute shows "Loading...", ExecutionInspector shows "Loading execution..."
-      // Wait until neither loading message is visible
-      await page.waitForFunction(
-        () => {
-          const body = document.body.textContent || "";
-          return !body.includes("Loading...") && !body.includes("Loading execution");
-        },
-        { timeout: 30000 },
-      );
-
-      // Verify execution details are displayed (workflow ID or name)
-      // The page may show either the full workflow ID or just the workflow name
-      const workflowIdVisible = await page
-        .locator(`text=${TEST_WORKFLOW_ID}`)
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-      const workflowNameVisible = await page
-        .locator("text=Verified Research")
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-      const workflowSlugVisible = await page
-        .locator("text=research")
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-
-      expect(workflowIdVisible || workflowNameVisible || workflowSlugVisible).toBeTruthy();
-
-      // Verify owner info is shown (page shows user name, not email)
-      const ownerEmailVisible = await page
-        .locator(`text=${TEST_USER.email}`)
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-      const ownerNameVisible = await page
-        .locator(`text=${TEST_USER.name}`)
-        .isVisible({ timeout: 5000 })
-        .catch(() => false);
-
-      expect(ownerEmailVisible || ownerNameVisible).toBeTruthy();
-
-      console.log(`✓ Admin can view execution details for other user's execution`);
-    }
+    console.log(`✓ Admin can view execution details for other user's execution`);
   });
 
   test("Admin can filter executions by user", async ({ page }) => {
@@ -231,15 +189,22 @@ test.describe("Admin Executions Page", () => {
     await userFilter.click();
 
     // Look for test user in dropdown
-    const testUserOption = page.locator(`text=${TEST_USER.email}`);
-    if (await testUserOption.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await testUserOption.click();
-      await page.waitForLoadState("domcontentloaded");
+    const testUserOption = page.getByText(TEST_USER.email, { exact: true });
+    await expect(testUserOption).toBeVisible({ timeout: 10000 });
+    const filteredResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/admin/executions") && response.status() === 200,
+    );
+    await testUserOption.click();
+    await filteredResponse;
 
-      // After filtering, should only see test user's executions
-      const visibleEmails = await page.locator(`text=${TEST_USER.email}`).count();
-      expect(visibleEmails).toBeGreaterThan(0);
-    }
+    // After filtering, the selected user and their execution remain observable.
+    await expect(page.getByText(TEST_USER.email, { exact: true }).first()).toBeVisible();
+    await expect(
+      page
+        .getByTestId("execution-card")
+        .filter({ hasText: executionId.substring(0, 8) })
+        .first(),
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("Admin can search executions by ID", async ({ page }) => {

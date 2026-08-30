@@ -107,12 +107,13 @@ jobs:
           CI: true
           TEST_BASE_URL: http://localhost:${{ env.DOCKER_PORT }}
 
-      - name: Upload Playwright report
+      - name: Upload E2E diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report
-          path: playwright-report/
+          name: e2e-test-results
+          path: test-results/
+          if-no-files-found: error
           retention-days: 7
 
       - name: Show container logs on failure
