@@ -972,7 +972,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v15.4", () => {
+describe("software-development-flow v15.4.1", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -983,7 +983,7 @@ describe("software-development-flow v15.4", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("15.4.0");
+    expect(workflow.metadata.version).toBe("15.4.1");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -1447,6 +1447,79 @@ describe("software-development-flow v15.4", () => {
       "pending_stage",
     ]) {
       expect(serialized).not.toContain(removed);
+    }
+  });
+
+  test("binds current-unit work to the active plan revision", () => {
+    const currentPlanPath = "{{workspace_path}}/plans/{{plan_revision}}/plan.md";
+    const previousPlanPath = "{{workspace_path}}/plans/{{previous_plan_revision}}/plan.md";
+    const currentPlanConsumers = [
+      "validate-cheap",
+      "repair-cheap-validation",
+      "review-test-adequacy",
+      "repair-test-adequacy",
+      "review-architecture",
+      "repair-architecture",
+      "approve-current-unit-closure",
+      "validate-runtime",
+      "repair-runtime",
+      "validate-expensive",
+      "repair-expensive",
+      "review-plan-unit-with-user",
+      "repair-user-feedback",
+      "complete-plan-unit",
+      "repair-unit-completeness",
+      "checkpoint-plan-unit",
+      "repair-checkpoint-repository",
+      "create-and-upload-step-report",
+      "teleport-replan",
+    ];
+
+    for (const nodeId of currentPlanConsumers) {
+      const directive = (
+        workflow.nodes.find((node) => node.id === nodeId) as {
+          directive: string;
+        }
+      ).directive;
+      expect(directive).toContain(currentPlanPath);
+      expect(directive).not.toContain(previousPlanPath);
+    }
+
+    // Revision writers are the deliberate exception: they preserve the historical source while
+    // producing the already-advanced current revision. Ordinary unit work must never copy this
+    // contract, because it would silently execute stale acceptance criteria after a replan.
+    for (const nodeId of [
+      "revise-plan-after-rejection",
+      "revise-plan-for-replan",
+      "revise-plan-for-coverage",
+      "revise-plan-after-feedback",
+      "revise-plan-for-teleport",
+    ]) {
+      const directive = (
+        workflow.nodes.find((node) => node.id === nodeId) as {
+          directive: string;
+        }
+      ).directive;
+      expect(directive).toContain(previousPlanPath);
+      expect(directive).toContain(currentPlanPath);
+    }
+
+    for (const [nodeId, functionalOutput, progressOutput] of [
+      ["validate-cheap", "issues_count", "progress_tests_outcome"],
+      ["review-test-adequacy", "review_outcome", "progress_tests_outcome"],
+      ["review-architecture", "review_outcome", "progress_review_outcome"],
+      ["teleport-replan", "replan_rationale", "progress_plan_outcome"],
+      ["complete-plan-unit", "completion_outcome", "progress_implementation_outcome"],
+    ] as const) {
+      const node = workflow.nodes.find((candidate) => candidate.id === nodeId) as {
+        directive: string;
+        inputSchema: { required: string[] };
+      };
+      expect(node.directive).not.toMatch(/Return only\b/);
+      expect(node.directive).toContain("same response as the required progress output");
+      expect(node.inputSchema.required).toEqual(
+        expect.arrayContaining([functionalOutput, progressOutput]),
+      );
     }
   });
 
