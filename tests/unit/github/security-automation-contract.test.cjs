@@ -82,6 +82,9 @@ describe("security automation contract", () => {
         "update-types": ["version-update:semver-minor"],
       },
       { "dependency-name": "@xyflow/react", versions: ["12.11.4"] },
+      { "dependency-name": "@jest/globals", versions: ["30.5.0"] },
+      { "dependency-name": "jest", versions: ["30.5.0"] },
+      { "dependency-name": "jest-environment-jsdom", versions: ["30.5.0"] },
     ]);
     expect(npm.groups).toEqual({
       "production-dependencies": {
