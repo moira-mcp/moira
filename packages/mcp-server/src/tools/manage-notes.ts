@@ -12,6 +12,8 @@
  */
 
 import { z } from "zod";
+import { manageNotesSchema } from "./tool-schemas.js";
+export { manageNotesSchema };
 import { ToolResult, WorkflowSpecificParams } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import { ERRORS, formatDomainError } from "../messages/index.js";
@@ -41,25 +43,6 @@ export interface ManageNotesParams extends WorkflowSpecificParams {
 }
 
 // Schema for MCP tool registration
-export const manageNotesSchema = z.object({
-  action: z
-    .enum(["list", "get", "save", "delete", "history", "stats"])
-    .describe("Action to perform on notes"),
-  tag: z.string().optional().describe("Filter notes by tag (for list action)"),
-  keySearch: z.string().optional().describe("Search notes by key pattern (for list action)"),
-  limit: z
-    .number()
-    .min(1)
-    .max(100)
-    .optional()
-    .describe("Maximum notes to return (1-100, default 50)"),
-  offset: z.number().min(0).optional().describe("Pagination offset (default 0)"),
-  key: z.string().optional().describe("Note key (required for get, save, delete, history actions)"),
-  version: z.number().optional().describe("Specific version number to retrieve (for get action)"),
-  value: z.string().optional().describe("Note content (required for save action)"),
-  tags: z.array(z.string()).optional().describe("Tags for the note (for save action, max 10 tags)"),
-});
-
 export type ManageNotesSchemaType = z.infer<typeof manageNotesSchema>;
 
 // Response types for different actions

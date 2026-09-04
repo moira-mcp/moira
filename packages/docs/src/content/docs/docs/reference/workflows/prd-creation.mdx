@@ -41,7 +41,7 @@ Creation as an upstream workflow only when a reviewed PRD is itself a required d
 Use the qualified public workflow identity:
 
 ```bash
-mcp__moira__start({ workflowId: "moira/prd-creation" })
+mcp__moira__start({ workflowId: "moira/prd-creation", parentExecutionId: "none" })
 ```
 
 When an orchestration workflow starts PRD Creation as a child, it should also pass its own

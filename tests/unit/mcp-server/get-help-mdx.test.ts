@@ -2,161 +2,36 @@
  * Unit tests for get-help MDX processing functions
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import { _testing } from "../../../packages/mcp-server/src/tools/get-help.js";
+import { renderToolReference } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
+import {
+  deeplinkGenerators,
+  mcpClients,
+  type McpClient,
+} from "../../../packages/shared/src/mcp-clients/index.js";
+import { renderPortableHelpTokens } from "../../../packages/shared/src/utils/portable-help.js";
+import { createT } from "../../../packages/docs/src/i18n-server.js";
+import { renderClientSetupMarkdown } from "../../../packages/docs/src/utils/client-setup-markdown.js";
 
 const {
-  stripJsx,
+  readPortableHelpFile,
+  scanMdxFiles,
   extractFrontmatter,
   filePathToTopicId,
   resolveTopicId,
   getTopicList,
+  generateHelpContent,
   resetCache,
 } = _testing;
 
+const publicDocsDirectory = path.resolve("packages/docs/src/content/docs/docs");
+const portableHelpDirectory = path.resolve("packages/docs/src/fragments/help");
+
 describe("MDX Processing", () => {
-  describe("stripFrontmatter", () => {
-    const stripFrontmatter = (content: string): string => {
-      const frontmatterRegex = /^---\s*\n[\s\S]*?\n---\s*\n/;
-      return content.replace(frontmatterRegex, "");
-    };
-
-    it("should remove YAML frontmatter from start of content", () => {
-      const input = `---
-title: Test Title
-description: Test description
----
-
-# Heading
-
-Content here.`;
-
-      const result = stripFrontmatter(input);
-      expect(result).toBe(`# Heading
-
-Content here.`);
-    });
-
-    it("should not affect content without frontmatter", () => {
-      const input = `# Heading
-
-Content without frontmatter.`;
-
-      const result = stripFrontmatter(input);
-      expect(result).toBe(input);
-    });
-
-    it("should handle multiline frontmatter", () => {
-      const input = `---
-title: Complex Title
-description: |
-  This is a multiline
-  description field
-tags:
-  - one
-  - two
----
-
-# Content`;
-
-      const result = stripFrontmatter(input);
-      expect(result).toBe("# Content");
-    });
-  });
-
-  describe("stripJsx", () => {
-    it("should remove import statements", () => {
-      const input = `import { Aside, Card } from '@astrojs/starlight/components';
-
-# Content`;
-
-      const result = stripJsx(input);
-      expect(result).toBe("# Content");
-    });
-
-    it("should remove self-closing JSX tags", () => {
-      const input = `# Title
-
-<MyComponent prop="value" />
-
-More content.`;
-
-      const result = stripJsx(input);
-      expect(result).toBe(`# Title
-
-More content.`);
-    });
-
-    it("should extract text content from JSX blocks", () => {
-      const input = `<Card title="Test">
-  This is card content.
-</Card>`;
-
-      const result = stripJsx(input);
-      expect(result).toBe("This is card content.");
-    });
-
-    it("should handle nested JSX components", () => {
-      const input = `<CardGrid>
-  <Card title="One">
-    First card content
-  </Card>
-  <Card title="Two">
-    Second card content
-  </Card>
-</CardGrid>`;
-
-      const result = stripJsx(input);
-      // Should extract text content from nested components
-      expect(result).toContain("First card content");
-      expect(result).toContain("Second card content");
-    });
-
-    it("should preserve markdown content", () => {
-      const input = `import { Aside } from '@astrojs/starlight/components';
-
-# Main Title
-
-Regular markdown **bold** and *italic*.
-
-## Code Example
-
-\`\`\`json
-{
-  "key": "value"
-}
-\`\`\`
-
-<Aside type="tip">
-  This is a tip.
-</Aside>
-
-More markdown content.`;
-
-      const result = stripJsx(input);
-      expect(result).toContain("# Main Title");
-      expect(result).toContain("Regular markdown **bold** and *italic*.");
-      expect(result).toContain("```json");
-      expect(result).toContain('"key": "value"');
-      expect(result).toContain("More markdown content.");
-    });
-
-    it("should not affect lowercase HTML tags", () => {
-      const input = `# Title
-
-<div class="test">
-  <p>Paragraph</p>
-</div>
-
-Content.`;
-
-      const result = stripJsx(input);
-      // Lowercase tags should be preserved (they're HTML, not JSX components)
-      expect(result).toContain("<div");
-      expect(result).toContain("<p>");
-    });
-  });
-
   describe("extractFrontmatter", () => {
     it("should extract title and description from frontmatter", () => {
       const input = `---
@@ -369,6 +244,180 @@ tags:
       // Verify correct start command format for non-Claude agents
       expect(result).toContain("mcp__moira__start({ workflowId:");
       expect(result).toContain('parentExecutionId: "none"');
+    });
+  });
+
+  describe("portable runtime topics", () => {
+    it("uses the matching portable source from both public language shells", () => {
+      const discovered = scanMdxFiles(publicDocsDirectory, publicDocsDirectory).filter(
+        (file) => file !== "index.mdx" && file !== "reference/tools.mdx",
+      );
+
+      for (const file of discovered) {
+        const portablePath = file.replace(/\.mdx$/, ".md");
+        const englishShell = fs.readFileSync(path.join(publicDocsDirectory, file), "utf8");
+        const russianShell = fs.readFileSync(
+          path.resolve("packages/docs/src/content/docs/ru/docs", file),
+          "utf8",
+        );
+        const splitPublicContent = [
+          "getting-started/quickstart.mdx",
+          "integration/mcp-clients.mdx",
+          "integration/agent-instructions.mdx",
+        ].includes(file);
+        if (splitPublicContent) {
+          const prefix = portablePath.replace(/\.md$/, "");
+          expect(englishShell).toContain(`fragments/help/${prefix}.public-before.md`);
+          expect(englishShell).toContain(`fragments/help/${prefix}.public-after.md`);
+          expect(russianShell).toContain(`fragments/help/ru/${prefix}.public-before.md`);
+          expect(russianShell).toContain(`fragments/help/ru/${prefix}.public-after.md`);
+        } else {
+          expect(englishShell).toContain(`fragments/help/${portablePath}`);
+          expect(russianShell).toContain(`fragments/help/ru/${portablePath}`);
+        }
+      }
+    });
+
+    it("keeps generated client setup synchronized with registry and localization", () => {
+      for (const language of ["en", "ru"] as const) {
+        const generated = fs.readFileSync(
+          path.join(portableHelpDirectory, "generated", `client-setup.${language}.md`),
+          "utf8",
+        );
+        expect(generated).toBe(renderClientSetupMarkdown(language, "{MCP_URL}"));
+        const t = createT(language);
+        for (const client of mcpClients) {
+          const sectionStart = `### ${t(`quickStart.tabs.${client.id}.label`)}`;
+          const section = generated.split(sectionStart)[1]?.split("\n### ")[0];
+          expect(section).toBeDefined();
+          const titles = [
+            client.setup.primaryTitle,
+            client.setup.auth?.title,
+            client.setup.alternative?.title,
+            client.setup.tokenAuth?.title,
+          ].filter((title): title is string => Boolean(title));
+          for (const title of titles) expect(section).toContain(`**${title}**`);
+        }
+      }
+    });
+
+    it("propagates an injected registry deeplink generator without a parser key inventory", () => {
+      const cursor = mcpClients.find((client) => client.id === "cursor")!;
+      const fixtureClient: McpClient = {
+        ...cursor,
+        deeplinkGenerator: "fixture-client" as McpClient["deeplinkGenerator"],
+      };
+      const generated = renderClientSetupMarkdown("en", "{MCP_URL}", [fixtureClient]);
+      expect(generated).toContain("{{MCP_DEEPLINK:fixture-client}}");
+
+      const rendered = renderPortableHelpTokens(generated, {
+        mcpUrl: "https://fixture.example/mcp",
+        moiraUrl: "https://fixture.example",
+        staticDomain: "static.fixture.example",
+        deeplinkGenerators: {
+          ...deeplinkGenerators,
+          "fixture-client": (mcpUrl) => `fixture:mcp?url=${encodeURIComponent(mcpUrl)}`,
+        },
+      });
+      expect(rendered).toContain("fixture:mcp?url=https%3A%2F%2Ffixture.example%2Fmcp");
+      expect(rendered).not.toContain("{{MCP_DEEPLINK:fixture-client}}");
+      for (const unsupportedId of ["unknown", "toString", "constructor"]) {
+        const token = `{{MCP_DEEPLINK:${unsupportedId}}}`;
+        expect(
+          renderPortableHelpTokens(token, {
+            mcpUrl: "https://fixture.example/mcp",
+            moiraUrl: "https://fixture.example",
+            staticDomain: "static.fixture.example",
+            deeplinkGenerators,
+          }),
+        ).toBe(token);
+      }
+    });
+
+    it("resolves every discovered non-tools topic to its complete portable source", async () => {
+      const discovered = scanMdxFiles(publicDocsDirectory, publicDocsDirectory).filter(
+        (file) => file !== "index.mdx" && file !== "reference/tools.mdx",
+      );
+
+      expect(discovered.length).toBeGreaterThan(0);
+      for (const file of discovered) {
+        const portableFile = path.join(portableHelpDirectory, file.replace(/\.mdx$/, ".md"));
+        expect(fs.existsSync(portableFile)).toBe(true);
+        const rendered = readPortableHelpFile(file, { portableHelpDirectory });
+        expect(rendered).not.toBeNull();
+        const topic = filePathToTopicId(file);
+        const resolved = await generateHelpContent(topic, undefined, undefined, {
+          docsDirectory: publicDocsDirectory,
+          portableHelpDirectory,
+        });
+        expect(resolved).toBe(rendered);
+        expect(rendered).not.toMatch(
+          /<(?:Aside|Card|CardGrid|ClientSetupTabs|FileTree|McpUrl|MoiraUrl|StaticUrl|Steps|SystemPromptContent|TabItem|Tabs)\b/,
+        );
+        expect(rendered).not.toMatch(/^import\s/m);
+        expect(rendered).not.toMatch(
+          /\{\{(?:CLIENT_SETUP|SYSTEM_PROMPT_CONTENT)|\{(?:MCP_URL|MOIRA_URL|STATIC_DOMAIN)\}/,
+        );
+      }
+    });
+
+    it("preserves configured URLs, registry-owned clients, imported content, and component labels", async () => {
+      const previousHost = process.env.MOIRA_HOST;
+      const previousStaticDomain = process.env.STATIC_ARTIFACTS_DOMAIN;
+      process.env.MOIRA_HOST = "help.example.test";
+      process.env.STATIC_ARTIFACTS_DOMAIN = "artifacts.example.test";
+
+      try {
+        const read = (file: string): string =>
+          readPortableHelpFile(file, { portableHelpDirectory })!;
+        const paths = { docsDirectory: publicDocsDirectory, portableHelpDirectory };
+        const clients = await generateHelpContent("mcp-clients", undefined, undefined, paths);
+        const quickstart = await generateHelpContent("quickstart", undefined, undefined, paths);
+
+        expect(clients).toContain("https://help.example.test/mcp");
+        expect(quickstart).toContain("https://help.example.test");
+        expect(quickstart).toContain("https://help.example.test/mcp");
+        const t = createT("en");
+        for (const client of mcpClients) {
+          const sectionStart = `### ${t(`quickStart.tabs.${client.id}.label`)}`;
+          expect(clients).toContain(sectionStart);
+          const section = clients.split(sectionStart)[1]?.split("\n### ")[0];
+          const titles = [
+            client.setup.primaryTitle,
+            client.setup.auth?.title,
+            client.setup.alternative?.title,
+            client.setup.tokenAuth?.title,
+          ].filter((title): title is string => Boolean(title));
+          for (const title of titles) expect(section).toContain(`**${title}**`);
+        }
+        expect(clients).toContain("Authorization");
+        expect(read("integration/claude-code.mdx")).toContain("https://help.example.test/mcp");
+        expect(read("concepts/artifacts.mdx")).toContain("artifacts.example.test");
+        expect(read("integration/agent-instructions.mdx")).toContain("## Purpose");
+        expect(read("concepts/nodes.mdx")).toContain("### Telegram Notification");
+        expect(read("guides/workflow-creation.mdx")).toContain("### File Upload");
+      } finally {
+        if (previousHost === undefined) delete process.env.MOIRA_HOST;
+        else process.env.MOIRA_HOST = previousHost;
+        if (previousStaticDomain === undefined) delete process.env.STATIC_ARTIFACTS_DOMAIN;
+        else process.env.STATIC_ARTIFACTS_DOMAIN = previousStaticDomain;
+      }
+    });
+  });
+
+  describe("generated tool reference", () => {
+    it("serves the registry directly for the tools topic and its alias", async () => {
+      const direct = await generateHelpContent("tools", undefined, () => renderToolReference("en"));
+      const alias = await generateHelpContent("tool", undefined, () => renderToolReference("en"));
+
+      expect(direct).toBe(alias);
+      expect(direct).toContain("# MCP tools");
+      expect(direct).toContain("## `reconciliation`");
+      expect(direct).toContain("`set-visibility`");
+      expect(direct).toContain("### Input schema");
+      expect(direct).toContain('"parentExecutionId"');
+      expect(direct).toContain("nextOffset");
+      expect(direct).not.toContain("import {");
     });
   });
 });

@@ -72,7 +72,7 @@ For any code change that alters user-facing behavior (the variable model —
 workflow-definition schema; MCP tools — names/parameters/actions/descriptions; template
 syntax, magic variables, condition operators; workflow authoring rules):
 
-- [ ] The matching public documentation (`packages/docs/src/content/docs/`) is updated in the SAME change
+- [ ] The matching public MDX shells and portable sources (`packages/docs/src/content/docs/` and `packages/docs/src/fragments/help/`) are updated in the SAME change
 - [ ] BOTH versions are updated — English (`docs/...`) and Russian (`ru/docs/...`), in parity
 - [ ] All examples match current behavior (`variableRegistry`/`globalInputs` shapes, valid JSON, current command syntax)
 - [ ] Searching the public docs does not surface removed concepts (e.g. `initialData`) except as explicit negations
@@ -84,7 +84,7 @@ Details and criteria: `docs/DOCUMENTATION-STYLE-GUIDE.md`, section "Mandatory Sy
 - [ ] Pattern added to `docs/WORKFLOW.md`, section "Workflow Patterns"
 - [ ] Page created under `packages/docs/src/content/docs/docs/patterns/`
 - [ ] `packages/docs/astro.config.ts` updated (sidebar navigation)
-- [ ] Topic available via the MDX file (auto-discovered)
+- [ ] Topic metadata is available via the MDX shell and its matching portable EN/RU sources exist
 - [ ] `workflow-management-flow` updated with the pattern description in onboarding
 
 ### When adding a new node type:
@@ -108,16 +108,19 @@ Details and criteria: `docs/DOCUMENTATION-STYLE-GUIDE.md`, section "Mandatory Sy
 
 ### When changing MCP tools:
 
-- [ ] Tool descriptions updated in `packages/mcp-server/src/tools/`
-- [ ] Documentation updated in `packages/docs/src/content/docs/docs/reference/tools.mdx`
+- [ ] Canonical schema, adapter, examples, and localized facts updated in `packages/mcp-server/src/tools/tool-definitions.ts` and `tool-schemas.ts`
+- [ ] Run `npm run generate:mcp-contracts` to update the shared cache revision and EN/RU reference fragments
+- [ ] Run `npm run check:mcp-contracts` to verify all generated outputs are current
+- [ ] Action-specific behavioral guidance updated in both localized public tool-reference pages when behavior changed
 - [ ] Topics added to the help tool if needed
-- [ ] **MANDATORY: bump the version** in the root `package.json` and `packages/mcp-server/package.json` if:
-  - The set of MCP tools changed (a tool added/removed)
-  - A tool description changed (TOOL_DESCRIPTIONS in messages/)
-  - The system prompt changed (in the help tool or instructions)
-  - Tool parameters changed (schema)
+- [ ] Runtime-visible non-`tools` topics use matching portable EN/RU sources; generated sources pass `npm run check:portable-help`
 
-  **Reason:** Clients cache tools at authorization time. A version bump triggers HTTP 426 and a reconnect that refreshes the cache.
+  The generated `MCP_TOOLS_REVISION` invalidates OAuth and persistent-token catalogs when stable
+  client-visible tool facts, including static default and agent/model description variants, change.
+  Both credential kinds accept the revision through successful MCP initialization, not token
+  issuance. Package versions describe the application release and are not manually bumped only to
+  refresh the MCP tool cache. Tool descriptions are declared in the typed registry and are not
+  database settings.
 
 ## 11. Design System Compliance
 
@@ -136,5 +139,5 @@ Details and criteria: `docs/DOCUMENTATION-STYLE-GUIDE.md`, section "Mandatory Sy
 - [ ] All URLs are computed via `getBaseUrl()`, `getMcpUrl()`, `getApiUrl()` from `@mcp-moira/shared`
 - [ ] Astro components use `getMcpUrl()` at build time
 - [ ] React components use `process.env.MCP_URL` (injected via webpack DefinePlugin)
-- [ ] MDX documentation uses the `<McpUrl />` component
+- [ ] Portable documentation uses `{MCP_URL}`, `{MOIRA_URL}`, or `{STATIC_DOMAIN}` tokens resolved by the shared renderer; presentation-only MDX may use URL components
 - [ ] **Exception:** Only the example comment in urls.ts is allowed

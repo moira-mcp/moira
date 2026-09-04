@@ -1,0 +1,184 @@
+## Purpose
+
+Ensure each workflow step is truly complete before moving to the next. Prevents skipping incomplete work and requires evidence of completion.
+
+## Structure
+
+```
+[execute-step] → [verify-step] → verified=yes → [next-step]
+                              → verified=no  → [retry-or-escalate]
+```
+
+## Implementation
+
+### Execute Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "execute-step",
+  "directive": "Implement {{current_step_name}}:\n{{current_step_action}}",
+  "completionCondition": "Step implementation complete",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "implementation_summary": { "type": "string" }
+    },
+    "required": ["implementation_summary"]
+  },
+  "connections": { "success": "verify-step" }
+}
+```
+
+### Verify Node
+
+```json
+{
+  "type": "agent-directive",
+  "id": "verify-step",
+  "directive": "Verify step {{current_step_name}} completed:\n- Expected: {{expected_output}}\n- Check actual result matches expected\n- Provide evidence",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "step_verified": { "type": "string", "enum": ["yes", "no"] },
+      "verification_evidence": { "type": "string" }
+    },
+    "required": ["step_verified", "verification_evidence"]
+  },
+  "connections": { "success": "check-verification" }
+}
+```
+
+:::caution
+Require `verification_evidence` to prevent agents from claiming completion without proof.
+:::
+
+### Check Node
+
+```json
+{
+  "type": "condition",
+  "id": "check-verification",
+  "condition": {
+    "operator": "eq",
+    "left": { "contextPath": "step_verified" },
+    "right": "yes"
+  },
+  "connections": {
+    "true": "proceed-to-next",
+    "false": "handle-failure"
+  }
+}
+```
+
+## Evidence Requirements
+
+Specify what counts as evidence:
+
+```json
+{
+  "directive": "Verify implementation. Evidence must include:\n- Test command output (npm test results)\n- API response (curl output)\n- File diff (git diff)\n- Screenshot (for UI changes)"
+}
+```
+
+### Evidence Matches the Kind of Claim
+
+A claim of fact — a command ran, a test passed, a link resolves, a file contains this text — is
+settled by a tool result or by the artifact itself. A claim of judgement — the structure is
+coherent, the argument holds, the result is fit for its reader — is settled by the reasoned
+argument, and nothing else available settles it.
+
+Mixing the two fails in both directions. A coordinate offered for a judgement — a line number, a
+coverage grid, a proof-of-read, a score out of ten — is an address, not an assessment: it says where
+to look, never whether what is there is sound, and it passes while the work is bad. A judgement
+offered for a fact is an opinion where a check exists.
+
+So a step demands a tool result where one is possible, demands prose where one is not, and never
+lets a count stand in for the reading nobody did.
+
+:::caution
+A step whose gate can only be met by a number will get a number. If the property that matters is
+qualitative, say how it is judged instead of what it must exceed — see [Fixed Semantic Quality
+Score](/docs/patterns/anti-patterns/).
+:::
+
+## Step Context Variables
+
+Store step metadata in context:
+
+```json
+{
+  "variableRegistry": {
+    "current_step_index": { "type": "number", "description": "Current step number", "default": 1 },
+    "current_step_name": {
+      "type": "string",
+      "description": "Current step name",
+      "default": "Step 1"
+    },
+    "current_step_action": {
+      "type": "string",
+      "description": "What the current step does",
+      "default": "Implement feature X"
+    },
+    "expected_output": {
+      "type": "string",
+      "description": "Expected result of the current step",
+      "default": "Feature X works with tests passing"
+    }
+  }
+}
+```
+
+Use expression nodes to update:
+
+```json
+{
+  "type": "expression",
+  "id": "increment-step",
+  "expressions": ["current_step_index = current_step_index + 1"]
+}
+```
+
+## Real Example
+
+From `development-flow.json`:
+
+```json
+{
+  "id": "verify-step-implementation",
+  "directive": "Verify step {{current_step_index}} ({{current_step_name}}) implementation.\n\nExpected outcome: {{expected_outcome}}\n\nVerification checklist:\n- Functionality works as expected\n- Tests pass (if applicable)\n- No regressions introduced\n\nProvide concrete evidence for each claim.",
+  "inputSchema": {
+    "properties": {
+      "step_verified": { "type": "string", "enum": ["yes", "no"] },
+      "verification_evidence": { "type": "string" },
+      "issues_found": { "type": "string" }
+    },
+    "required": ["step_verified", "verification_evidence"]
+  }
+}
+```
+
+## Handling Verification Failure
+
+On failure, either retry or escalate:
+
+```json
+{
+  "type": "condition",
+  "id": "check-retry-limit",
+  "condition": {
+    "operator": "lt",
+    "left": { "contextPath": "current_iteration" },
+    "right": 3
+  },
+  "connections": {
+    "true": "fix-and-retry",
+    "false": "escalate-to-user"
+  }
+}
+```
+
+## Related Patterns
+
+- [Validation Loop](/docs/patterns/validation-loop/) - Retry failed verifications
+- [Escalation](/docs/patterns/escalation/) - Handle repeated failures

@@ -22,4 +22,4 @@ Teleport (jump to a different workflow branch):
 
 Related: Use session({ action: "current_step", executionId }) to resume interrupted workflow
 
-VERY IMPORTANT: YOU MUST PASS INPUT SCHEMA AS JSON, NOT AS [Object object]. OBJECT OBJECT WOULD NEVER WORK!!!
+Cursor input note: send structured `input` as JSON. Do not send JavaScript's stringified `[object Object]` value.

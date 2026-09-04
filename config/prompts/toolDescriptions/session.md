@@ -1,9 +1,9 @@
-Get current user info, active executions, or execution context
+Inspect and update current-user and execution-scoped state
 
 Actions:
 
 - user: Get current user information
-- executions: List workflow executions (with filters)
+- executions: List workflow executions, including active or completed states, with filters
 - execution_context: Get full context of specific execution
 - current_step: Get current step directive (for resuming after interruption)
 - progress: Get the current read-only user-facing progress graph projection
@@ -24,8 +24,8 @@ content. The URL is revision/version-bound and single-use after a successful res
 
 execution_context vs current_step:
 
-- execution_context: FULL execution history - all steps, inputs, outputs (for analysis, debugging)
-- current_step: ONLY current directive and inputSchema (for resuming workflow after interruption)
+- execution_context: Current execution metadata, variables, node states, errors, and active-lock context for inspection and debugging; it is not a complete step input/output transcript
+- current_step: Resume a running workflow from its current agent-facing step presentation. The response includes the Process ID, directive, success criteria, and input schema when present, plus applicable active-child, system-reminder, and teleport context.
 
 Examples:
 

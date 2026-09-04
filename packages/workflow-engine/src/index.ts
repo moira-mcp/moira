@@ -24,6 +24,17 @@ export {
   setTestClientFactory,
   resetClientFactory,
 } from "./services/telegram-client-factory.js";
+export {
+  checkTrustedLockDeliveryConfiguration,
+  createTrustedExecutionLock,
+  TrustedLockDeliveryError,
+} from "./services/trusted-lock-delivery.js";
+export type {
+  CreateTrustedExecutionLockOptions,
+  TrustedLockConfigurationFailure,
+  TrustedLockConfigurationResult,
+  TrustedLockDeliveryDependencies,
+} from "./services/trusted-lock-delivery.js";
 
 // Template processing
 export { GraphTemplateProcessor } from "./templates/graph-template-processor.js";

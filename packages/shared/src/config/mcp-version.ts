@@ -1,8 +1,9 @@
 /**
- * MCP Server Version Management (#196)
+ * MCP Server Release Version
  *
- * Provides access to monorepo version for OAuth token creation and version checks.
- * Reads from root package.json - single source of truth for all processes.
+ * Provides the diagnostic application release version advertised by the MCP server and returned
+ * alongside catalog upgrade guidance. Catalog invalidation uses MCP_TOOLS_REVISION instead.
+ * Reads from root package.json, the single release-version source for all processes.
  */
 
 import { readFileSync } from "fs";

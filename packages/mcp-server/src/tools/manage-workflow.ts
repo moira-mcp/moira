@@ -22,6 +22,8 @@
  */
 
 import { z } from "zod";
+import { manageWorkflowHandlerSchema, manageWorkflowSchema } from "./tool-schemas.js";
+export { manageWorkflowSchema };
 import { MCPEngine } from "../core/mcp-engine.js";
 import { WorkflowGraph, GraphValidator } from "@mcp-moira/workflow-engine";
 import { randomUUID } from "crypto";
@@ -50,123 +52,7 @@ import { ERRORS, SUCCESS, formatDomainError } from "../messages/index.js";
 
 const logger = createLogger({ component: "ManageWorkflow" });
 
-const ManageWorkflowParamsSchema = z.object({
-  action: z
-    .enum([
-      "create",
-      "edit",
-      "get",
-      "get-structure",
-      "get-node",
-      "search-nodes",
-      "validate",
-      "get-variable",
-      "set-variable",
-      "list-variables",
-      "delete-variable",
-      "diff",
-      "copy",
-      "clone-node",
-      "move-node",
-      // New actions for CLI/MCP parity
-      "list-nodes",
-      "get-nodes",
-      "analyze-variables",
-      "set-visibility",
-      // Sharing actions (Issue #433)
-      "create-invite",
-      "list-access",
-      "list-invites",
-      "revoke-access",
-      "revoke-invite",
-    ])
-    .describe("Action to perform"),
-  workflowId: z.string().optional().describe("Workflow ID (required for most actions)"),
-  workflow: z.any().optional().describe("Workflow object (required for create and validate)"),
-  overwrite: z.boolean().optional().describe("Overwrite existing workflow (create only)"),
-  changes: z.any().optional().describe("Changes to apply (edit only)"),
-  includeNodes: z.boolean().optional().describe("Include nodes in response (get only)"),
-  includeValidation: z.boolean().optional().describe("Include validation info (get only)"),
-  offset: z.number().optional().describe("Pagination offset (get only)"),
-  limit: z.number().optional().describe("Pagination limit (get only)"),
-  nodeId: z.string().optional().describe("Node ID (required for get-node, clone-node)"),
-  query: z
-    .string()
-    .optional()
-    .describe("Search text or bounded RE2-compatible regex (required for search-nodes)"),
-  // Variable management parameters
-  variableName: z
-    .string()
-    .optional()
-    .describe("Variable name (required for get-variable, set-variable, delete-variable)"),
-  variableValue: z.any().optional().describe("Variable value (required for set-variable)"),
-  variableNames: z.array(z.string()).optional(),
-  variableTypes: z.array(z.string()).optional(),
-  hasDefault: z.boolean().optional(),
-  externallyWritable: z.boolean().optional(),
-  // Diff parameters
-  compareWorkflowId: z
-    .string()
-    .optional()
-    .describe("Workflow ID to compare against (required for diff)"),
-  // Copy parameters
-  newName: z.string().optional().describe("New name for copied workflow (copy only)"),
-  newId: z.string().optional().describe("New ID for cloned node (clone-node only)"),
-  // Move parameters
-  targetIndex: z.number().optional().describe("Target position for node (move-node only)"),
-  afterNodeId: z
-    .string()
-    .optional()
-    .describe("Place node after this node ID (move-node only, alternative to targetIndex)"),
-  // List-nodes parameters
-  typeFilter: z.string().optional().describe("Filter nodes by type (list-nodes only)"),
-  includePreview: z.boolean().optional().describe("Include directive preview (list-nodes only)"),
-  previewLength: z
-    .number()
-    .optional()
-    .describe("Length of directive preview (list-nodes only, default 100)"),
-  // Get-nodes parameters
-  nodeIds: z
-    .array(z.string())
-    .optional()
-    .describe("Array of node IDs to retrieve (get-nodes only)"),
-  // Search-nodes enhancements
-  includeVariables: z
-    .boolean()
-    .optional()
-    .describe("Include variables in search (search-nodes only)"),
-  snippetMode: z
-    .boolean()
-    .optional()
-    .describe("Return only snippets, not full nodes (search-nodes only)"),
-  // Get-structure enhancements
-  graph: z.boolean().optional().describe("Return ASCII flow graph (get-structure only)"),
-  detailed: z
-    .boolean()
-    .optional()
-    .describe("Include directive preview in structure (get-structure only)"),
-  // Set-visibility parameters
-  visibility: z
-    .enum(["public", "private"])
-    .optional()
-    .describe("New visibility setting (set-visibility only)"),
-  // Sharing parameters (Issue #433)
-  inviteId: z.string().optional().describe("Invite ID (required for revoke-invite)"),
-  targetUserId: z
-    .string()
-    .optional()
-    .describe("User ID to revoke access from (revoke-access only)"),
-  ttlMs: z
-    .number()
-    .optional()
-    .describe("Invite expiration time in milliseconds (create-invite only, default 7 days)"),
-  activeOnly: z
-    .boolean()
-    .optional()
-    .describe("Filter to active (unused) invites only (list-invites only, default true)"),
-});
-
-type ManageWorkflowParams = z.infer<typeof ManageWorkflowParamsSchema>;
+type ManageWorkflowParams = z.infer<typeof manageWorkflowHandlerSchema>;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type WorkflowData = any;
@@ -473,14 +359,15 @@ export async function manageWorkflow(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const response: any = {
           success: true,
-          workflowId: workflow.id,
+          workflowId: resolved.workflowId,
           visibility: workflowInfo.visibility,
-          metadata: {
-            name: workflow.metadata.name,
-            version: workflow.metadata.version,
-            description: workflow.metadata.description,
-          },
-          systemReminder: workflow.systemReminder || null,
+          metadata: workflow.metadata,
+          systemReminder: workflow.systemReminder ?? null,
+          ...(workflow.variableRegistry !== undefined
+            ? { variableRegistry: workflow.variableRegistry }
+            : {}),
+          ...(workflow.runtimePolicy !== undefined ? { runtimePolicy: workflow.runtimePolicy } : {}),
+          ...(workflow.progress !== undefined ? { progress: workflow.progress } : {}),
           structure: {
             nodeCount: workflow.nodes.length,
             connectionCount: nodeConnections,
@@ -1662,5 +1549,3 @@ export async function manageWorkflow(
     };
   }
 }
-
-export const manageWorkflowSchema = ManageWorkflowParamsSchema;

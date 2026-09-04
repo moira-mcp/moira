@@ -11,22 +11,16 @@ Actions:
 
 Usage:
 
-- Each artifact is served on its OWN origin: {uuid}.{{ARTIFACTS_DOMAIN}}/
-  (per-artifact subdomain — browser-isolated storage/cookies/ServiceWorker).
+- Use the returned `url`; its host/path is determined by deployment configuration.
 - Content is HTML and MAY contain JavaScript. It runs inside a sandboxed iframe
   with NO network access (no fetch/XHR/WebSocket) and no form submission — use
   for self-contained interactive content (dashboards, calculators,
   visualizations with data embedded in the HTML), not anything that calls a server.
 - A "Created with Moira" footer and a Report control are shown around the
   artifact; viewers see a first-visit "user-generated content" warning.
-- Default TTL is 30 days
 - Tokens enable CI/CD integration via HTTP API
-
-Quotas:
-
-- Max file size: 5MB
-- Max total storage: 100MB per user
-- Max artifacts: 50 per user
+- Use `stats` for the current storage and artifact-count limits.
+- File-size and retention policy are enforced by the server and may be administrator-configured. Upload and list responses include effective expiry metadata.
 
 Examples:
 

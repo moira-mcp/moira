@@ -1,6 +1,10 @@
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
+  AgentMessageQueue,
+  GraphExecutionEngine,
   GraphValidator,
+  InMemoryRepository,
+  MaterializeHandler,
   projectExecutionProgress,
   type WorkflowExecution,
   type WorkflowGraph,
@@ -15,10 +19,22 @@ import {
 const coverageResults: ScenarioResult[] = [];
 
 async function runScenario(workflow: WorkflowGraph, scenario: TestScenario) {
-  const result = await executeScenario(workflow, scenario);
+  const result = await executeScenario(workflow, scenario, { engineSetup: configureMaterialize });
   coverageResults.push(result);
   if (!result.passed) throw new Error(JSON.stringify(result, null, 2));
   return result;
+}
+
+function configureMaterialize(engine: GraphExecutionEngine): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> })
+    .nodeHandlers;
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "materialize-token" },
+      () => "https://moira.example",
+    ),
+  );
 }
 
 function loadProductionWorkflow(): WorkflowGraph {
@@ -84,13 +100,15 @@ describe("todo-list minimal sequential checklist", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("3.4.7");
+    expect(workflow.metadata.version).toBe("3.5.0");
     expect(workflow.metadata.description).toContain("minimal orchestration");
+    expect(workflow.metadata.description).toContain("canonical domain-neutral guide");
     expect(workflow.metadata.description).toContain("no plan-design review");
 
     expect(new Set(workflow.nodes.map((node) => node.id))).toEqual(
       new Set([
         "start",
+        "materialize-workflow-guide",
         "obtain-tasks",
         "derive-plan-state",
         "check-tasks-remaining",
@@ -112,6 +130,7 @@ describe("todo-list minimal sequential checklist", () => {
       "resume_from_task",
       "progress_checklist_outcome",
       "progress_execution_outcome",
+      "workflow_guide",
     ]);
 
     expect(workflow.variableRegistry?.tasks).toMatchObject({
@@ -129,35 +148,42 @@ describe("todo-list minimal sequential checklist", () => {
     const obtain = workflow.nodes.find((node) => node.id === "obtain-tasks");
     expect(obtain?.type).toBe("agent-directive");
     if (obtain?.type !== "agent-directive") throw new Error("obtain-tasks missing");
-    // Supplied content stays the author's; the order is the executor's. Both halves are pinned,
-    // because a directive that keeps only the first one is the defect this rule was written for.
-    // The two meanings this node lost once already: completeness of the checklist, and the branch
-    // condition that sends a draft to planning instead of to the "content is the author's" branch.
-    expect(obtain.directive).toContain("Obtain the complete checklist");
-    expect(obtain.directive).toContain("ready array matching the required schema");
-    expect(obtain.directive).toContain("with its wording and scope unchanged");
-    expect(obtain.directive).toContain("The order is yours to establish");
-    expect(obtain.directive).toContain("Place each item where its prerequisites already hold");
-    expect(obtain.directive).not.toContain("renumber");
-    // The gate is what the agent measures itself against, so every protection the directive states
-    // is pinned here separately: an unpinned clause is exactly how one of them disappeared before.
-    expect(obtain.completionCondition).toContain("supplied items keep their content");
-    expect(obtain.completionCondition).toContain("none is lost");
-    expect(obtain.completionCondition).toContain("nothing unrequested is added");
-    expect(obtain.completionCondition).toContain(
-      "every item stands where its prerequisites already hold",
+    const guide = workflow.variableRegistry?.workflow_guide?.default;
+    expect(typeof guide).toBe("string");
+    expect(guide).toContain("A rule that does not apply");
+    expect(guide).toContain("keeps every item, its wording, and its scope");
+    expect(guide).toContain("Content and order are separate responsibilities");
+    expect(guide).toContain("must expose that reordering before work starts");
+    expect(guide).toContain("report a real dependency cycle");
+    expect(guide).toContain("An inventory, metric, test count, log analysis");
+    expect(guide).toContain("requested domain result");
+    expect(guide).toContain("Position is task identity");
+
+    const materialize = workflow.nodes.find(
+      (node) => node.id === "materialize-workflow-guide",
     );
-    // The one case where no such order exists stays passable, and the exception stays attached to
-    // that pair: naming one pair must not excuse leaving every other item unordered.
-    expect(obtain.completionCondition).toContain(
-      "except a pair that each need the result of the other, which is named to the author",
-    );
-    // Clauses the gate must not lose: the planning branch it carried in 3.3.0, and the two
-    // obligations the directive states about a governing remark and about visible reordering.
-    expect(obtain.completionCondition).toContain("planned once from the current goal");
-    expect(obtain.completionCondition).toContain("constrains the items it governs");
-    expect(obtain.completionCondition).toContain("visible to the author before work starts");
-    expect(obtain.directive).toContain("Otherwise plan the checklist once");
+    expect(workflow.nodes.find((node) => node.id === "start")?.connections).toEqual({
+      default: "materialize-workflow-guide",
+    });
+    expect(materialize).toMatchObject({
+      type: "materialize",
+      basePath: "./moira-ws/todo-list-{{executionId}}/",
+      files: [{ path: "workflow-guide.md", from: "workflow_guide" }],
+      connections: { success: "obtain-tasks" },
+      progressNodeId: "checklist",
+    });
+
+    const guideReaders = workflow.nodes
+      .filter((candidate) => ["agent-directive", "teleport"].includes(candidate.type))
+      .filter((candidate: any) =>
+        candidate.directive.includes("./moira-ws/todo-list-{{executionId}}/workflow-guide.md"),
+      )
+      .map((candidate) => candidate.id);
+    expect(guideReaders).toEqual(["obtain-tasks", "execute-task", "teleport-revise-tasks"]);
+    expect(obtain.directive).toContain("caller-supplied schema-valid task array");
+    expect(obtain.directive).toContain("otherwise plan the checklist once");
+    expect(obtain.directive).not.toContain("Content and order are separate responsibilities");
+    expect(obtain.completionCondition).toContain("guide-compliant");
 
     const execute = workflow.nodes.find((node) => node.id === "execute-task");
     expect(execute?.type).toBe("agent-directive");
@@ -176,7 +202,7 @@ describe("todo-list minimal sequential checklist", () => {
       required: ["evidence", "progress_execution_outcome"],
       globalInputs: ["progress_execution_outcome"],
     });
-    expect(execute.directive).toContain("If the task is incomplete or blocked, do not call step()");
+    expect(execute.directive).toContain("If the task is incomplete or blocked, do not call `step()`");
 
     // The checklist may be replaced mid-run, but only through a jump target: no node routes into
     // it, so a revision is always a deliberate agent decision, never a step the flow walks into.
@@ -191,7 +217,7 @@ describe("todo-list minimal sequential checklist", () => {
       ),
     ).toBe(false);
     expect(revise.hint).toContain("Not for a task that is merely hard, blocked, or failing");
-    expect(revise.directive).toContain("original position");
+    expect(revise.directive).toContain("completed positional prefix unchanged in meaning");
     expect(revise.inputSchema).toEqual({
       type: "object",
       additionalProperties: false,
@@ -235,8 +261,8 @@ describe("todo-list minimal sequential checklist", () => {
     // (model, agent, global) instead of adding to it, so the two rules that used to live only there
     // now belong to the node that owns per-task behaviour.
     expect(workflow.systemReminder).toBeUndefined();
-    expect(execute.directive).toContain("Do not ask the user to approve tasks between steps");
-    expect(execute.directive).toContain("without inventing a separate summary or result report");
+    expect(execute.directive).toContain("do not ask for approval between tasks");
+    expect(execute.directive).toContain("or add an aggregate result report");
 
     const serialized = JSON.stringify(workflow);
     for (const removedContract of [
@@ -254,6 +280,85 @@ describe("todo-list minimal sequential checklist", () => {
     }
   });
 
+  test("materialization stays paused until the canonical guide is delivered", async () => {
+    const materialize = workflow.nodes.find(
+      (candidate) => candidate.id === "materialize-workflow-guide",
+    );
+    if (!materialize || materialize.type !== "materialize") {
+      throw new Error("materialize-workflow-guide missing");
+    }
+
+    const repository = new InMemoryRepository();
+    const engine = new GraphExecutionEngine(repository);
+    const context = {
+      variables: {},
+      nodeStates: {},
+      executionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      workflowId: workflow.id,
+      userId: "workflow-test-user",
+    };
+    const handler = new MaterializeHandler(
+      { createMaterializeToken: () => "materialize-token" },
+      () => "https://moira.example",
+    );
+
+    const firstQueue = new AgentMessageQueue();
+    const firstPresentation = await handler.execute(
+      materialize,
+      context,
+      firstQueue,
+      repository,
+      engine,
+      undefined,
+      workflow.variableRegistry,
+    );
+    expect(firstPresentation.action).toBe("pause");
+    expect(firstPresentation.nextNodeId).toBeUndefined();
+    expect(firstQueue.peekNext()).toMatchObject({
+      nodeId: "materialize-workflow-guide",
+      completionCondition: "Run the command successfully, then complete this step with null or {}.",
+    });
+    expect((firstQueue.peekNext() as { directive: string }).directive).toContain(
+      "workflow-guide.md",
+    );
+
+    // A client download/extraction failure submits no completion. Re-presenting the same current
+    // node must remain paused and issue a fresh command rather than advance into checklist intake.
+    const retryQueue = new AgentMessageQueue();
+    const secondPresentation = await handler.execute(
+      materialize,
+      context,
+      retryQueue,
+      repository,
+      engine,
+      undefined,
+      workflow.variableRegistry,
+    );
+    expect(secondPresentation.action).toBe("pause");
+    expect(secondPresentation.nextNodeId).toBeUndefined();
+    expect((retryQueue.peekNext() as { directive: string }).directive).toContain(
+      "workflow-guide.md",
+    );
+
+    const failingHandler = new MaterializeHandler({
+      createMaterializeToken: () => {
+        throw new Error("materialize grant unavailable");
+      },
+    });
+    await expect(
+      failingHandler.execute(
+        materialize,
+        context,
+        new AgentMessageQueue(),
+        repository,
+        engine,
+        undefined,
+        workflow.variableRegistry,
+      ),
+    ).rejects.toThrow("materialize grant unavailable");
+    expect(materialize.connections).toEqual({ success: "obtain-tasks" });
+  });
+
   test("projects truthful progress for ordinary and empty-tail revision completion", () => {
     expect(workflow.progress?.nodes.map(({ id }) => id)).toEqual(["checklist", "prepare", "work"]);
     expect(workflow.progress?.nodes.map((candidate) => candidate.connections?.default)).toEqual([
@@ -266,6 +371,7 @@ describe("todo-list minimal sequential checklist", () => {
       .filter((candidate) => candidate.progressNodeId)
       .map((candidate) => [candidate.id, candidate.progressNodeId, candidate.progressActiveLabel]);
     expect(mapped).toEqual([
+      ["materialize-workflow-guide", "checklist", "Materialize checklist guide"],
       ["obtain-tasks", "checklist", "Build checklist"],
       ["execute-task", "work", "Task {{current_task}}/{{total_tasks}}"],
       ["teleport-revise-tasks", "work", "Revise checklist"],

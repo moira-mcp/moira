@@ -7,6 +7,8 @@ import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
 import { MCP_TEST_DATA } from "../fixtures/mcp-test-data.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { mcpClients } from "../../packages/shared/src/mcp-clients/index.js";
+import { createT } from "../../packages/docs/src/i18n-server.js";
 
 const { DOCUMENTATION } = MCP_TEST_DATA;
 
@@ -119,17 +121,49 @@ describe("MCP Help System E2E", () => {
   });
 
   test("help tools topic contains step details", async () => {
-    // Tool-specific help is now part of 'tools' topic (MDX is single source of truth)
     const result = await callMCPTool<string>(client, "help", {
       topic: "tools",
     });
 
     expect(typeof result).toBe("string");
-    expect(result).toContain("step");
-    expect(result).toContain("Parameters");
-    expect(result).toContain("Example");
+    expect(result).toContain("## `step`");
+    expect(result).toContain("Continue an existing workflow execution.");
+    expect(result).toContain("### Input schema");
+    expect(result).toContain('"processId"');
+    expect(result).toContain('"input"');
 
     console.log("✓ Tool-specific documentation in tools topic");
+  });
+
+  test("runtime client help preserves portable component-owned content", async () => {
+    const clients = await callMCPTool<string>(client, "help", { topic: "mcp-clients" });
+    const quickstart = await callMCPTool<string>(client, "help", { topic: "quickstart" });
+    const instructions = await callMCPTool<string>(client, "help", {
+      topic: "agent-instructions",
+    });
+    const t = createT("en");
+
+    expect(clients).toMatch(/https?:\/\/[^\s`]+\/mcp/);
+    expect(quickstart).toMatch(/https?:\/\/[^\s`]+\/mcp/);
+    for (const configuredClient of mcpClients) {
+      const sectionStart = `### ${t(`quickStart.tabs.${configuredClient.id}.label`)}`;
+      expect(clients).toContain(sectionStart);
+      const section = clients.split(sectionStart)[1]?.split("\n### ")[0];
+      const titles = [
+        configuredClient.setup.primaryTitle,
+        configuredClient.setup.auth?.title,
+        configuredClient.setup.alternative?.title,
+        configuredClient.setup.tokenAuth?.title,
+      ].filter((title): title is string => Boolean(title));
+      for (const title of titles) expect(section).toContain(`**${title}**`);
+    }
+    expect(clients).toContain("Authorization");
+    expect(instructions).toContain("## Purpose");
+    for (const result of [clients, quickstart, instructions]) {
+      expect(result).not.toMatch(/^import\s/m);
+      expect(result).not.toMatch(/<(?:ClientSetupTabs|McpUrl|SystemPromptContent)\b/);
+      expect(result).not.toMatch(/\{\{(?:CLIENT_SETUP|SYSTEM_PROMPT_CONTENT)/);
+    }
   });
 
   test("get_help with templates topic", async () => {

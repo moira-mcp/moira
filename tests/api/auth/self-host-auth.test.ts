@@ -204,7 +204,16 @@ describe("deployment-mode auth behavior", () => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${pendingMcpToken}`,
       },
-      body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "initialize",
+        id: 1,
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "pending-admission-test", version: "1.0.0" },
+        },
+      }),
     });
     expect(mcpBefore.status).toBe(403);
     expect((await mcpBefore.json()) as { error_code?: string }).toMatchObject({
@@ -234,6 +243,28 @@ describe("deployment-mode auth behavior", () => {
     execSqliteInDocker(
       `INSERT INTO oauthAccessToken (id, accessToken, refreshToken, accessTokenExpiresAt, refreshTokenExpiresAt, clientId, userId, scopes, createdAt, updatedAt) VALUES ('${randomUUID()}', '${pendingAccessToken}', '${pendingRefreshToken}', '${new Date(Date.now() + 300_000).toISOString()}', '${new Date(Date.now() + 600_000).toISOString()}', '${client.client_id}', '${userId}', 'openid email profile', '${oauthCreatedAt}', '${oauthCreatedAt}')`,
     );
+    const pendingOAuthMcp = await fetch(`${BASE_URL}/mcp`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        Authorization: `Bearer ${pendingAccessToken}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "initialize",
+        id: 2,
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "pending-oauth-admission-test", version: "1.0.0" },
+        },
+      }),
+    });
+    expect(pendingOAuthMcp.status).toBe(403);
+    expect(await pendingOAuthMcp.json()).toMatchObject({
+      error_code: "ACCOUNT_APPROVAL_REQUIRED",
+    });
     const introspectionBefore = await fetch(`${BASE_URL}/api/auth/mcp/get-session`, {
       headers: { Authorization: `Bearer ${pendingAccessToken}` },
     });

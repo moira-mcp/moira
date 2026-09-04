@@ -178,9 +178,10 @@ COPY config/favicon/ /var/www/html/favicon/
 # pattern), so its dist contains a `docs/` dir served by nginx at /docs.
 COPY --from=docs-build /app/packages/docs/dist/ /var/www/html/
 
-# Copy MDX docs for get_help MCP tool (raw source — get_help reads MDX via fs, no astro build needed)
-# Note: docs are nested in src/content/docs/docs/ due to Starlight nested folder pattern for /docs/ URL prefix
+# Copy public topic metadata and portable Markdown for the get_help MCP tool.
+# MDX remains the website presentation shell; runtime help never strips it.
 COPY packages/docs/src/content/docs/docs ./docs
+COPY packages/docs/src/fragments/help ./docs/.portable
 ENV DOCS_DIR=/app/docs
 
 # Create required directories

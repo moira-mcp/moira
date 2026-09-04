@@ -29,8 +29,22 @@ describe("MCP Workflow Search E2E", () => {
           version: "1.0.0",
           description: "Test workflow for hyphen search functionality",
         },
+        variableRegistry: {
+          topic: {
+            type: "string",
+            description: "Topic used by the registered manage action test",
+            default: "contracts",
+          },
+        },
         nodes: [
-          { type: "start", id: "start", connections: { default: "end" } },
+          { type: "start", id: "start", connections: { default: "analysis" } },
+          {
+            type: "agent-directive",
+            id: "analysis",
+            directive: "Analyze the {{topic}} contract.",
+            completionCondition: "The contract is analyzed.",
+            connections: { success: "end" },
+          },
           { type: "end", id: "end" },
         ],
       },
@@ -67,6 +81,15 @@ describe("MCP Workflow Search E2E", () => {
 
     expect(result).toHaveProperty("workflows");
     expect(result.workflows.length).toBeGreaterThanOrEqual(1);
+    expect(result).toEqual(
+      expect.objectContaining({
+        offset: 0,
+        limit: 20,
+        returnedCount: result.workflows.length,
+        hasMore: false,
+        nextOffset: null,
+      }),
+    );
 
     // Match by slug since list id is now "handle/slug" format, not UUID
     const found = result.workflows.find((w: { slug: string }) => w.slug === testWorkflowSlug);
@@ -134,5 +157,92 @@ describe("MCP Workflow Search E2E", () => {
     expect(result).toHaveProperty("workflows");
     expect(result.workflows.length).toBe(0);
     expect(result.total).toBe(0);
+    expect(result).toEqual(
+      expect.objectContaining({
+        offset: 0,
+        limit: 20,
+        returnedCount: 0,
+        hasMore: false,
+        nextOffset: null,
+      }),
+    );
+  });
+
+  test("registered manage calls expose node discovery, variable analysis, and visibility state", async () => {
+    const listed = await callMCPTool(client, "manage", {
+      action: "list-nodes",
+      workflowId: testWorkflowId,
+      typeFilter: "agent-directive",
+      includePreview: true,
+      previewLength: 12,
+    });
+    expect(listed).toEqual(
+      expect.objectContaining({
+        success: true,
+        nodeCount: 1,
+        nodes: [
+          expect.objectContaining({
+            id: "analysis",
+            type: "agent-directive",
+            directivePreview: expect.stringContaining("Analyze"),
+          }),
+        ],
+      }),
+    );
+
+    const selected = await callMCPTool(client, "manage", {
+      action: "get-nodes",
+      workflowId: testWorkflowId,
+      nodeIds: ["start", "analysis"],
+    });
+    expect(selected).toEqual(
+      expect.objectContaining({
+        success: true,
+        requestedCount: 2,
+        foundCount: 2,
+      }),
+    );
+    expect(selected.nodes.map((node: { id: string }) => node.id)).toEqual(["start", "analysis"]);
+
+    const variables = await callMCPTool(client, "manage", {
+      action: "analyze-variables",
+      workflowId: testWorkflowId,
+    });
+    expect(variables).toEqual(
+      expect.objectContaining({
+        success: true,
+        analysis: expect.objectContaining({
+          topic: expect.objectContaining({
+            sources: [expect.objectContaining({ type: "registry" })],
+          }),
+        }),
+      }),
+    );
+
+    const madePublic = await callMCPTool(client, "manage", {
+      action: "set-visibility",
+      workflowId: testWorkflowId,
+      visibility: "public",
+    });
+    expect(madePublic).toEqual(
+      expect.objectContaining({ previousVisibility: "private", newVisibility: "public" }),
+    );
+
+    const publicWorkflow = await callMCPTool(client, "manage", {
+      action: "get",
+      workflowId: testWorkflowId,
+      includeNodes: false,
+      includeValidation: false,
+    });
+    expect(publicWorkflow.visibility).toBe("public");
+
+    const madePrivate = await callMCPTool(client, "manage", {
+      action: "set-visibility",
+      workflowId: testWorkflowId,
+      visibility: "private",
+    });
+    expect(madePrivate).toEqual(
+      expect.objectContaining({ previousVisibility: "public", newVisibility: "private" }),
+    );
   });
 });

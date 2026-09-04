@@ -436,13 +436,13 @@ class MCPEngineClass {
     };
   }
 
-  async listWorkflows(params?: {
+  async listWorkflows(params: {
     search?: string;
     visibility?: "public" | "private" | "all";
     sort?: "createdAt" | "name";
     sortOrder?: "asc" | "desc";
-    limit?: number;
-    offset?: number;
+    limit: number;
+    offset: number;
   }): Promise<{
     workflows: Array<{
       id: string;
@@ -460,12 +460,12 @@ class MCPEngineClass {
     // NO try/catch - errors bubble up to boundary
     const result = await this.repository.listWorkflowsWithFilters({
       userId,
-      search: params?.search,
-      visibility: params?.visibility,
-      sort: params?.sort ?? "createdAt",
-      sortOrder: params?.sortOrder ?? "desc",
-      limit: params?.limit ?? 20,
-      offset: params?.offset ?? 0,
+      search: params.search,
+      visibility: params.visibility,
+      sort: params.sort ?? "createdAt",
+      sortOrder: params.sortOrder ?? "desc",
+      limit: params.limit,
+      offset: params.offset,
     });
 
     return {

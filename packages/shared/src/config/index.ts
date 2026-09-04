@@ -28,6 +28,12 @@ export { getBrowserOriginAllowlist, isBrowserOriginAllowed } from "./origins.js"
 
 // MCP Server Version (#196)
 export { setMcpServerVersion, getMcpServerVersion } from "./mcp-version.js";
+export { MCP_TOOLS_REVISION } from "./mcp-tools-revision.generated.js";
+export {
+  evaluateMcpToolsRevision,
+  type McpToolsRevisionErrorBody,
+  type McpToolsRevisionGate,
+} from "./mcp-tools-revision.js";
 
 // Environment variables
 export {

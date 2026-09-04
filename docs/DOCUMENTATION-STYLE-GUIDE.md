@@ -20,7 +20,8 @@ standards are merged here.
 
 ### Public Documentation (`packages/docs/`)
 
-**Location**: `packages/docs/src/content/docs/docs/` (EN) + `packages/docs/src/content/docs/ru/docs/` (RU)
+**Location**: localized MDX shells under `packages/docs/src/content/docs/` plus shared semantic
+Markdown under `packages/docs/src/fragments/help/`
 **Audience**: Users creating and using workflows — including AI agents that follow workflow instructions (docs must be machine-readable)
 **Purpose**: Guide for workflow creation and MCP tool usage
 **Content**: Workflow patterns, node specifications, MCP tool reference
@@ -283,7 +284,29 @@ These prove functionality works.
 # Public Documentation (`packages/docs/`)
 
 Standards for user-facing documentation at
-`packages/docs/src/content/docs/docs/` (EN) and `…/ru/docs/` (RU).
+`packages/docs/src/content/docs/docs/` (EN) and `…/ru/docs/` (RU), with runtime-visible semantic
+content under `packages/docs/src/fragments/help/` and `…/help/ru/`.
+
+## Portable Runtime Help Sources
+
+The English MDX tree defines the runtime topic catalog and frontmatter metadata. For every
+runtime-discovered topic other than `reference/tools.mdx`, place the page's semantic Markdown at the
+same relative path under `packages/docs/src/fragments/help/`; place the Russian public counterpart
+under `packages/docs/src/fragments/help/ru/`. The localized MDX files import these fragments and own
+only frontmatter and presentation composition. The MCP `help` tool reads the English fragment
+directly and never derives Markdown by stripping JSX.
+
+Use `{MCP_URL}`, `{MOIRA_URL}`, `{STATIC_DOMAIN}`, and supported `{{MCP_DEEPLINK:…}}` tokens where a
+portable source needs configured addresses. Both public and runtime consumers resolve them through
+the shared portable-token renderer. Do not place Astro imports or components in portable `.md`
+sources.
+
+Client setup and imported system-instruction bodies are projections of executable owners. Edit their
+`.md.in` templates or canonical registry/localization/source data, run
+`npm run generate:portable-help`, and verify with `npm run check:portable-help`. Do not hand-edit the
+generated full or `.public-before.md`/`.public-after.md` fragments. The `tools` topic is the exception:
+its runtime and localized reference facts come directly from the typed MCP registry and
+`generate:mcp-contracts`.
 
 ## Mandatory Sync With Code Changes
 
@@ -318,7 +341,9 @@ Treat a public-docs update as part of the definition of done for the code change
 
 ## Page Structure
 
-Every documentation page MUST follow this structure:
+Every rendered documentation page MUST follow this structure. For runtime-visible pages, frontmatter
+and imports live in the localized MDX shell while the intro, sections, examples, and related links
+live in its portable fragment.
 
 ```markdown
 ---
@@ -369,7 +394,7 @@ Every claim must be verifiable from code or system behavior:
 
 Workflows execute through MCP tools:
 
-- `mcp__moira__start` - begins execution, returns processId
+- `mcp__moira__start` - returns setup guidance when required; otherwise begins execution and returns processId
 - `mcp__moira__step` - advances to next node, returns directive
 
 Each step returns:
@@ -389,7 +414,7 @@ Show the exact syntax the user will type:
 Start a workflow by ID:
 
 ```bash
-mcp__moira__start({ workflowId: "test-planning" })
+mcp__moira__start({ workflowId: "test-planning", parentExecutionId: "none" })
 ```
 
 With an execution note:
@@ -397,7 +422,8 @@ With an execution note:
 ```bash
 mcp__moira__start({
   workflowId: "development-flow",
-  note: "Feature: auth system"
+  note: "Feature: auth system",
+  parentExecutionId: "none"
 })
 ```
 ````
@@ -605,6 +631,8 @@ Use for explaining how something works (descriptions), vs `<Steps>` for user act
 - Mermaid diagram + numbered list = visual overview + detailed explanation.
 - CardGrid + Aside = feature list + important note.
 - Table + code example = reference data + practical usage.
+- Presentation-only components belong in the MDX shell. Any text, label, URL, or code needed by
+  runtime help must remain in the portable semantic source or a canonical generated projection.
 
 ## Page Patterns
 
@@ -639,6 +667,8 @@ Structure: Intro → Start Command → Process Flow → Features → Related.
 - [ ] All paths exist in the codebase
 - [ ] All interfaces match source code
 - [ ] Examples actually work when tested
+- [ ] Every runtime-discovered non-`tools` MDX shell imports its matching portable EN/RU source
+- [ ] `npm run check:portable-help` passes when generated portable content is involved
 
 ### Visual Elements
 

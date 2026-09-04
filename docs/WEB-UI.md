@@ -764,8 +764,7 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 
 **Categories:**
 
-- MCP Tool Descriptions (tool descriptions for MCP clients)
-- System Configuration (system prompt, system reminder)
+- MCP prompts (system prompt and system reminder, including agent/model overrides)
 - Messages & Validation (error messages, validation help)
 
 **Features:**
@@ -777,8 +776,9 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 - Character count display for text areas
 - Error state with retry functionality
 - History panel: view audit log of all setting changes with rollback capability
-- MCP prompts: master-detail layout with left nav panel (System Prompts + Tool Descriptions groups) and right full-height editor (McpPromptsEditor → PromptDetailEditor)
+- MCP prompts: master-detail layout with System Prompt and System Reminder entries in the left panel and a full-height editor on the right (McpPromptsEditor → PromptDetailEditor)
 - MCP prompts: per-prompt inline version history with diff highlighting panel, version dropdown, and Apply button for rollback
+- MCP tool descriptions are static application contract data and are not exposed as global settings.
 - Export: download all setting values as JSON file
 - Import: upload JSON file with preview of changes before applying
 

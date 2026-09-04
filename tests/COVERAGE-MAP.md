@@ -69,7 +69,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
-- `tests/mcp-tools/persistent-token-auth.test.ts`
+- `tests/mcp-tools/persistent-token-auth.test.ts` — deployment-aware admitted-user setup plus valid, revoked, expired, missing, and blocked persistent-token behavior; OAuth coexistence; null/stale 426 without mutation; exact same-token initialize; sibling isolation; invalid shapes; and concurrent catalog acceptance without rotation
 
 **e2e**
 
@@ -210,8 +210,8 @@ level headings classify the tracked test paths listed beneath them.
 
 **api**
 
-- `tests/api/auth/self-host-auth.test.ts` — complete self-host HTTP/MCP lifecycle from pending registration through concurrent admin approval, one audit transition, and Better Auth/product/token/OAuth unlock; pending OAuth code, refresh-token, and bearer-introspection denial with admitted introspection success; explicit unavailable delivery from both Better Auth reset aliases, verification, profile resend, and admin APIs without false success, email-log creation, or target-account recovery/verification-row side effects measured before every affected call under parallel API workers; independent manual email verification/forced-reset actions; admin authorization, audit actor identity, self-block rejection, and missing-user contracts; blocked/approval/email independence; pending status/sign-out; bootstrap-admin token issuance
-- `tests/api/auth/saas-auth-invariants.test.ts` — explicit SaaS real-delivery mode, consent enforcement, verification email, profile resend/cooldown, logged-only administrator delivery results and observable test-sink messages for suppressed test recipients, no account-approval gate including profile mutation, blocked-first/email-verification gates for persistent tokens, OAuth code/refresh exchange, direct MCP bearer access, and bearer introspection, plus successful verified/unblocked code, refresh, MCP, and introspection paths
+- `tests/api/auth/self-host-auth.test.ts` — complete self-host HTTP/MCP lifecycle from pending registration through concurrent admin approval, one audit transition, and Better Auth/product/token/OAuth unlock; valid initialize denial for pending persistent and OAuth credentials; pending OAuth code, refresh-token, and bearer-introspection denial with admitted introspection success; explicit unavailable delivery from both Better Auth reset aliases, verification, profile resend, and admin APIs without false success, email-log creation, or target-account recovery/verification-row side effects measured before every affected call under parallel API workers; independent manual email verification/forced-reset actions; admin authorization, audit actor identity, self-block rejection, and missing-user contracts; blocked/approval/email independence; pending status/sign-out; bootstrap-admin token issuance
+- `tests/api/auth/saas-auth-invariants.test.ts` — explicit SaaS real-delivery mode, consent enforcement, verification email, profile resend/cooldown, logged-only administrator delivery results and observable test-sink messages for suppressed test recipients, no account-approval gate including profile mutation, blocked-first/email-verification gates for persistent tokens, OAuth code/refresh exchange, valid MCP initialize denial for blocked/unverified bearer credentials, bearer introspection, and successful verified/unblocked code, refresh, MCP, and introspection paths
 - `tests/api/features-api.test.ts` — public GET /api/features contract: no-auth envelope, exact authorization-capability keys, runtime MCP URL, sanitized delivery state/provider/reason, and `available` true only for real delivery
 
 **e2e**
@@ -293,7 +293,7 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/mcp-tools/execution-audit.test.ts`
 - `tests/mcp-tools/execution-errors.test.ts`
-- `tests/mcp-tools/workflow-execution.test.ts`
+- `tests/mcp-tools/workflow-execution.test.ts` — public start/step/session execution, context and branching behavior, intentional validation pause, and `isError` preservation for a genuine failed step
 
 **e2e**
 
@@ -345,7 +345,11 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/get-help-mdx.test.ts`
+- `tests/unit/mcp-server/get-help-mdx.test.ts` — production-discovered non-tools corpus resolves through real topic IDs to matching portable sources; shared EN/RU shell ownership, configured URL/deeplink replacement, registry-driven client setup, imported instructions, meaningful component labels, unresolved presentation syntax, aliases, errors, and direct typed tools rendering
+
+**integration**
+
+- `tests/integration/docs-client-registry-propagation.test.ts` — one added registry-shaped client reaches both the real Starlight `ClientSetupTabs` build and portable runtime Markdown with its label, setup title, and deeplink semantics
 
 ### http-infrastructure
 
@@ -413,6 +417,12 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, exact normalized protocol schemas through real registration including projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, and EN/RU renderer parity
+- `tests/unit/mcp-server/tool-examples.test.ts` — exact-key, current notification-category, and all-settings registry examples reach the masked read projection
+- `tests/unit/mcp-server/mcp-catalog-lifecycle.test.ts` — SDK-valid singleton initialize classification, exact successful-result stamp ordering, error/other-result non-stamping, and successful-result suppression when the credential cannot be stamped
+- `tests/unit/shared/mcp-tools-revision.test.ts` — deterministic matching, null, and stale catalog-revision decisions with package version retained only as diagnostic response data
+- `tests/unit/scripts/generate-mcp-contracts.test.ts` — isolated exact generation and freshness rejection for the shared revision and both localized public fragments
+- `tests/unit/scripts/static-tool-description-migration.test.ts` — exact retirement of database-backed default/agent/model descriptions plus nullable persistent-token revision migration with existing identity/hash preservation
 - `tests/unit/mcp-server/progress-authoring-schema.test.ts` — MCP manage rich-progress goal/facts/content acceptance plus strict unknown-field and bound rejection
 
 - `tests/unit/workflow-cli/workflow-schema.test.ts` — deterministic complete workflow control-flow schemas: locale-independent canonical edge/mapping order, basic blocks, conditions, many independent cycles, separate start/teleport/disconnected reachability, dangling edges, current node data-flow declarations including batch write-note and materialize registry reads, complete ordered progress topology and structured content with backward display edges and many-to-one primary mappings, context references, deep iterative traversal, terminal-control-safe structural tokens, non-mutation, and duplicate-ID rejection
@@ -426,6 +436,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
+- `tests/integration/mcp-contract-completeness.test.ts` — complete authored workflow retrieval and independent inclusion flags; presence-based exact/category/all settings selectors including empty and ambiguous rejection, masking, not-found, and both admin access directions; default, continuing, and terminal workflow-list page metadata through the real repository
 - `tests/integration/cli-mcp-parity.test.ts`
 - `tests/integration/workflow-schema-cli.test.ts` — public schema command output, shared `structure --graph` rendering, canonical equivalence across permuted JSON object keys, terminal-control-safe decoded JSON, source-byte preservation, and non-zero ambiguous-graph failure
 - `tests/integration/essential-cases-split.test.ts`
@@ -436,8 +447,8 @@ level headings classify the tracked test paths listed beneath them.
 **api**
 
 - `tests/api/auth/mcp-blocked-user.test.ts`
-- `tests/api/auth/mcp-protection.test.ts`
-- `tests/api/auth/mcp-version-check.test.ts`
+- `tests/api/auth/mcp-protection.test.ts` — unauthenticated ordinary-request rejection and invalid-bearer rejection before a valid initialize can reach catalog acceptance
+- `tests/api/auth/mcp-version-check.test.ts` — real OAuth issuance leaves credentials uninitialized; null/stale ordinary requests return 426 without mutation; successful same-token initialize stamps only the exact row; concurrent recovery converges; and refresh issuance starts uninitialized
 - `tests/api/mcp-spec.test.ts`
 
 **mcp-tools**
@@ -495,7 +506,12 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/shared/lock-service.test.ts`
+- `tests/unit/shared/lock-service.test.ts` — human one-time PIN creation plus agent-path pending/activate/failure lifecycle, hashed storage, exact-attempt isolation, validation, approval, and audit behavior
+- `tests/unit/workflow-engine/trusted-lock-delivery.test.ts` — configuration-before-generation, configured-chat delivery, non-secret result, and sender-error/PIN-safe projection at the trusted Telegram boundary
+
+**integration**
+
+- `tests/integration/trusted-lock-delivery-lifecycle.test.ts` — production LockHandler with database-persisted same-node re-entry across missing, malformed, send-failure, fresh-success, exact earlier-context isolation, and MCP create success/failure without real Telegram
 - `tests/unit/web-backend/telegram-webhook.test.ts`
 
 **workflow**
@@ -504,13 +520,13 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
-- `tests/mcp-tools/lock-tool.test.ts`
-- `tests/mcp-tools/lock-step-integration.test.ts` — incl. malformed-Telegram-token resilience: lock step still pauses, start() does not crash
+- `tests/mcp-tools/lock-tool.test.ts` — status/list/unlock/session and active-step behavior seeded through the authenticated human path, plus agent lock fail-closed behavior without trusted delivery
+- `tests/mcp-tools/lock-step-integration.test.ts` — public mandatory lock-delivery preflight, including skipTelegramCheck denial without execution creation
 
 **api**
 
 - `tests/api/admin-lock-management.test.ts`
-- `tests/api/user-lock-management.test.ts`
+- `tests/api/user-lock-management.test.ts` — owner/foreign lock access and PIN validation boundaries plus owner-only one-time human PIN creation compatibility
 
 **e2e**
 
@@ -567,7 +583,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
-- `tests/mcp-tools/user-settings.test.ts`
+- `tests/mcp-tools/user-settings.test.ts` — registered MCP settings list/get/set behavior, exact and category retrieval, encrypted masking, and rejection of empty or ambiguous selectors
 
 **e2e**
 
@@ -619,11 +635,11 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/telegram-preflight.test.ts`
+- `tests/unit/mcp-server/telegram-preflight.test.ts` — independent notification/lock detection and optional versus mandatory Telegram setup responses
 
 **integration**
 
-- `tests/integration/start-workflow-telegram-preflight.test.ts`
+- `tests/integration/start-workflow-telegram-preflight.test.ts` — repository-backed optional notification bypass and mandatory lock-only/combined/malformed trusted-delivery preflight without execution creation
 
 ### template-engine
 
@@ -640,7 +656,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
-- `tests/mcp-tools/workflow-tokens.test.ts`
+- `tests/mcp-tools/workflow-tokens.test.ts` — formatted upload/download MCP results, one-use HTTP lifecycle, force-new/update behavior, and deployment-aware cross-user ownership/admin-override authorization
 
 ### url-routing
 
@@ -812,10 +828,10 @@ level headings classify the tracked test paths listed beneath them.
 **mcp-tools**
 
 - `tests/mcp-tools/workflow-crud.test.ts`
-- `tests/mcp-tools/workflow-documentation.test.ts`
+- `tests/mcp-tools/workflow-documentation.test.ts` — live authenticated help catalog and topic behavior, complete portable client/quickstart/agent-instruction content, configured endpoint and authentication guidance, ordinary topic semantics, Markdown shape, unknown-topic guidance, and direct typed tools detail
 - `tests/mcp-tools/workflow-ownership.test.ts`
 - `tests/mcp-tools/workflow-pagination.test.ts`
-- `tests/mcp-tools/workflow-search.test.ts`
+- `tests/mcp-tools/workflow-search.test.ts` — public workflow search and page metadata plus state-based registered MCP calls for list-nodes, get-nodes, analyze-variables, and set-visibility
 
 **e2e**
 
@@ -861,7 +877,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/scenarios/test-planning.test.ts` — catalog identity and selection description; clean-or-repair graph; traversal-safe workspace; producer/repair schema identity; runtime contract rejection; zero-finding delivery; mismatch repair with re-review; complete node and branch coverage; no test-execution authority
 - `tests/workflow/scenarios/test-suite-audit.test.ts` — public identity and selection description; immutable audit standard; execution-bound workspace; strict correction and delivery schemas; scope and taxonomy correction routes; complete terminal outcomes; targeted checks; independent review and repair; complete node and branch coverage
 - `tests/workflow/scenarios/todo-list.test.ts` — v3.4.7 Checklist → Prepare → Work content-rich progress with complete 3-role mapping, distinct task/revision active content, bounded producer-owned outcomes, render-only state, and all-completed ordinary and empty-tail teleport frontiers; minimal registry and graph contract; unified planning/supplied-task intake; one-based projection; local evidence bounds and malformed-input retry; empty End output; jump-only checklist revision with atomic progress replacement, engine-derived total/cursor, and completed-prefix preservation; complete reachable node/branch coverage
-- `tests/workflow/scenarios/user-onboarding.test.ts` — public identity/version and authority description; minimal selection/handoff graph; complete catalog pagination; identity bounds; create-own binding; start/defer consent; parent-linked execution evidence; bounded terminal projection; complete ordinary node and branch coverage
+- `tests/workflow/scenarios/user-onboarding.test.ts` — public identity/version and authority description; minimal selection/handoff graph; complete catalog pagination; identity bounds; create-own binding; start/defer consent; parent-linked execution evidence; optional notification bypass versus mandatory current-user trusted PIN delivery; setup-without-Process-ID incomplete handling without settings or target substitution; bounded terminal projection; complete ordinary node and branch coverage
 - `tests/workflow/scenarios/universal-research-workflow.test.ts` — public identity/version and neighboring-flow selection description; filesystem and bounded-memory state; execution-bound workspace; authority and evidence-truth boundaries; independent reviews and repair reaches; publication and notification authority; correction, process revision, abort, and materialization fallback
 - `tests/workflow/scenarios/ux-design.test.ts` — public identity/version and neighboring-flow selection description; execution workspace; correlated intake, artifact-path, reviewer, repair, feedback, and authority contracts; foreign-path rejection; accepted, limited, blocked, aborted, repair, feedback, and process-revision outcomes
 - `tests/workflow/scenarios/verified-research.test.ts` — v3 public identity and neighboring-tier selection; execution-correlated evidence package; canonical ready/limited/replan/blocked evidence class; strict autonomous clarification and terminal schemas; deterministic versus independent semantic judgment; answer/evidence repair stale cones; corrected-contract findings; complete, limited, blocked, aborted, materialize-error, interactive rework, and guarded process-revision routes; complete ordinary node and branch coverage

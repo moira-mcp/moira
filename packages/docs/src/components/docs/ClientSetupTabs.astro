@@ -9,7 +9,7 @@ import CodeBlock from "~/components/ui/CodeBlock.astro";
 import { createT, type Language } from "~/i18n-server";
 import { getMcpUrl } from "@mcp-moira/shared/urls";
 import {
-  mcpClients,
+  mcpClients as canonicalMcpClients,
   deeplinkGenerators,
   tokenConfigGenerators,
 } from "@mcp-moira/shared/mcp-clients";
@@ -17,9 +17,10 @@ import type { McpClient } from "@mcp-moira/shared/mcp-clients";
 
 interface Props {
   lang?: Language;
+  clients?: readonly McpClient[];
 }
 
-const { lang = "en" } = Astro.props;
+const { lang = "en", clients = canonicalMcpClients } = Astro.props;
 const t = createT(lang);
 const mcpUrl = getMcpUrl();
 
@@ -48,7 +49,7 @@ function tt(field: string): string {
 
 <Tabs>
   {
-    mcpClients.map((client) => (
+    clients.map((client) => (
       <TabItem label={ct(client.id, "label")}>
         <div class="space-y-4">
           {/* GUI / Config: description + code block */}

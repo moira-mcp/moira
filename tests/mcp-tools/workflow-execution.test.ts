@@ -167,8 +167,20 @@ describe("MCP Workflow Execution Tools E2E", () => {
       input: EXECUTION_INPUTS.INVALID_MISSING_REQUIRED,
     });
 
-    // Should return error message about validation
+    // Invalid node input intentionally pauses with repair guidance.
     expect(result.toLowerCase()).toMatch(/validation|required|schema|invalid/);
+  });
+
+  test("execute_step marks missing-execution failures as MCP errors", async () => {
+    const result = await client.callTool({
+      name: "step",
+      arguments: { processId: "00000000-0000-4000-8000-000000000000" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ type: "text" });
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text.toLowerCase()).toMatch(/not found|expired|process/);
   });
 
   test("workflow execution preserves context variables", async () => {

@@ -15,7 +15,7 @@ import {
   readingTimeRemarkPlugin,
   responsiveTablesRehypePlugin,
   lazyImagesRehypePlugin,
-  staticDomainRemarkPlugin,
+  portableHelpRemarkPlugin,
 } from "./src/utils/frontmatter";
 import {
   getMcpUrl,
@@ -352,7 +352,7 @@ export default defineConfig({
   ],
 
   markdown: {
-    remarkPlugins: [readingTimeRemarkPlugin, staticDomainRemarkPlugin],
+    remarkPlugins: [readingTimeRemarkPlugin, portableHelpRemarkPlugin],
     rehypePlugins: [responsiveTablesRehypePlugin, lazyImagesRehypePlugin],
   },
 

@@ -17,13 +17,13 @@ test.describe("Admin Settings - Prompt Editor Master-Detail", () => {
     const promptList = page.locator('[data-testid="prompt-list"]');
     await expect(promptList).toBeVisible();
 
-    // All 10 prompt items
+    // Only the two database-backed prompt items remain editable.
     const items = page.locator('[data-testid^="prompt-item-"]');
-    await expect(items).toHaveCount(10);
+    await expect(items).toHaveCount(2);
 
     // Section headers
     await expect(promptList.getByText("System Prompts")).toBeVisible();
-    await expect(promptList.getByText("Tool Descriptions")).toBeVisible();
+    await expect(promptList.getByText("Tool Descriptions")).toHaveCount(0);
 
     // Default editor (systemPrompt) visible in right panel
     const defaultEditor = page.locator('[data-testid="mcp-prompt-systemPrompt"]');
@@ -43,12 +43,8 @@ test.describe("Admin Settings - Prompt Editor Master-Detail", () => {
       timeout: 5000,
     });
 
-    // Click tool description
-    await page.locator('[data-testid="prompt-item-toolDescription-list"]').click();
-    await expect(page.locator('[data-testid="mcp-prompt-toolDescription-list"]')).toBeVisible();
-    await expect(page.locator('[data-testid="mcp-prompt-toolDescription-list-input"]')).toBeVisible(
-      { timeout: 5000 },
-    );
+    await page.locator('[data-testid="prompt-item-systemPrompt"]').click();
+    await expect(page.locator('[data-testid="mcp-prompt-systemPrompt"]')).toBeVisible();
   });
 
   test("editor shows scope selector and save button", async ({ page }) => {
@@ -70,11 +66,7 @@ test.describe("Admin Settings - Prompt Editor Master-Detail", () => {
   });
 
   test("apply from history sets textarea value and enables save", async ({ page }) => {
-    const promptType = "toolDescription-manage";
-
-    // Navigate to a prompt that we can modify without conflicting with other tests
-    await page.locator('[data-testid="prompt-item-toolDescription-manage"]').click();
-    await page.waitForTimeout(500);
+    const promptType = "systemPrompt";
 
     const textarea = page.locator(`[data-testid="mcp-prompt-${promptType}-input"]`);
     const saveBtn = page.locator(`[data-testid="mcp-prompt-${promptType}-save"]`);
@@ -163,9 +155,9 @@ test.describe("Admin Settings - Prompt Editor Master-Detail", () => {
   });
 
   test("diff mode toggle switches between 'vs current' and 'changes' views", async ({ page }) => {
-    const promptType = "toolDescription-manage";
+    const promptType = "systemReminder";
 
-    await page.locator('[data-testid="prompt-item-toolDescription-manage"]').click();
+    await page.locator('[data-testid="prompt-item-systemReminder"]').click();
     await page.waitForTimeout(500);
 
     const textarea = page.locator(`[data-testid="mcp-prompt-${promptType}-input"]`);
