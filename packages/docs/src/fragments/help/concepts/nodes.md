@@ -5,24 +5,43 @@ Nodes are the building blocks of Moira workflows. Each node represents a step in
 Moira supports interactive node types and automatic node types:
 
 ### Start
+
 Entry point for workflow execution.
+
 ### End
+
 Terminal node marking workflow completion.
+
 ### Agent Directive
+
 Agent task with directive and completion condition.
+
 ### Condition
+
 Branch execution based on structured conditions.
+
 ### Expression
+
 Compute values using arithmetic expressions.
+
 ### Subgraph
+
 Delegate to another workflow.
+
 ### Telegram Notification
+
 Send notifications via Telegram.
+
 ### Teleport
+
 Jump target reachable only via explicit teleport.
+
 ### Lock
+
 PIN-based execution gate with Telegram approval.
+
 ### Materialize
+
 Deliver registry-backed files as a one-use tar archive.
 
 ## Start Node

@@ -408,9 +408,7 @@ describe("quick-task scenarios", () => {
     expect(directive("execute-step")).toContain(
       "When an inventory, metric, log analysis, or similar artifact is the requested result",
     );
-    expect(directive("execute-step")).toContain(
-      "exclude only process noise about producing it",
-    );
+    expect(directive("execute-step")).toContain("exclude only process noise about producing it");
     expect(directive("fix-issues")).toContain("{{final-review.review_file}}");
     expect(directive("rework")).toContain("{{present-to-user.decision_file}}");
     expect(directive("present-autonomous-result")).not.toContain("decision file path");
@@ -511,9 +509,7 @@ describe("quick-task scenarios", () => {
     expect(connection("route-operating-mode-result-presentation", "true")).toBe(
       "present-autonomous-result",
     );
-    expect(connection("route-operating-mode-result-presentation", "false")).toBe(
-      "present-to-user",
-    );
+    expect(connection("route-operating-mode-result-presentation", "false")).toBe("present-to-user");
     expect(connection("present-autonomous-result")).toBe("end");
     expect(connection("fix-issues")).toBe("final-review");
     expect(connection("rework")).toBe("final-review");

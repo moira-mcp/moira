@@ -294,7 +294,9 @@ describe("MCP tool definitions", () => {
     expect(description("list")).not.toContain("list all accessible workflows");
     expect(description("list")).not.toMatch(/stable ordering/i);
 
-    expect(description("start")).toContain("without creating an execution or returning a processId");
+    expect(description("start")).toContain(
+      "without creating an execution or returning a processId",
+    );
     expect(description("start")).toContain("Otherwise, returns a processId");
 
     const manage = TOOL_DEFINITIONS.find((definition) => definition.name === "manage")!;

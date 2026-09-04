@@ -2,9 +2,9 @@
 
 ## Быстрый старт
 
-  1. Определите цель workflow и основные этапы 2. Спроектируйте структуру графа узлов 3. Создайте
-  JSON с правильными определениями узлов 4. Проверьте связи и достижимость 5. Сохраните через MCP
-  tools
+1. Определите цель workflow и основные этапы 2. Спроектируйте структуру графа узлов 3. Создайте
+   JSON с правильными определениями узлов 4. Проверьте связи и достижимость 5. Сохраните через MCP
+   tools
 
 ## Структура Workflow
 
@@ -344,6 +344,7 @@ flowchart LR
 ## Сохранение Workflows
 
 ### Создать новый
+
 ```typescript
 mcp__moira__manage({
   action: "create",
@@ -354,20 +355,22 @@ mcp__moira__manage({
   }
 })
 ```
+
 ### Редактировать
+
 ```typescript
 mcp__moira__manage({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
     metadata: { version: "1.1.0" },
-    updateNodes: [
-      { nodeId: "step-1", changes: { directive: "Новый текст" } }
-    ]
-  }
-})
+    updateNodes: [{ nodeId: "step-1", changes: { directive: "Новый текст" } }],
+  },
+});
 ```
+
 ### Загрузить файл
+
 ```typescript
 // Для агентов с доступом к файловой системе
 const { uploadUrl } = await mcp__moira__token({ action: "upload" });

@@ -214,11 +214,12 @@ mcp__moira__manage({
 ## Безопасный процесс редактирования
 
 1. **Получите текущую структуру**
+
    ```typescript
    mcp__moira__manage({
      action: "get-structure",
-     workflowId: "my-workflow"
-   })
+     workflowId: "my-workflow",
+   });
    ```
 
 2. **Найдите узлы для редактирования**

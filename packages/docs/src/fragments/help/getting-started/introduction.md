@@ -19,12 +19,19 @@ execution and verifiable results.
 Moira provides a node-graph workflow system where each step has:
 
 ### Directive
+
 Clear instruction on what needs to be done
+
 ### Completion Condition
+
 Success criteria that must be met
+
 ### Input Schema
+
 Expected structure of the response (optional)
+
 ### Connections
+
 Links to next steps in the workflow
 
 The agent executes each step, validates completion, and moves to the next node based on the workflow graph.
@@ -142,11 +149,14 @@ others.
 Moira is open source (Apache-2.0). The engine, node types, and MCP tools are identical whether you host it yourself or use the managed cloud:
 
 ### Self-host
+
 Run the full engine, Web UI, and MCP server in a single Docker container on your own
 infrastructure — free, single-tenant, your data stays with you. Private-team accounts register
 behind administrator approval. This is the default (`DEPLOYMENT_MODE=self-host`). See the
 [Self-hosting guide](/docs/getting-started/self-hosting/).
+
 ### Moira Cloud
+
 A managed instance with nothing to operate, at [moira-mcp.com](https://moira-mcp.com). Adds
 SaaS-only social login, legal-consent and email-verification policy, and the broader multi-user
 administration surface.

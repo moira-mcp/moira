@@ -20,14 +20,14 @@ notes({ action: "delete", key: "commit-style" })
 notes({ action: "stats" })
 ```
 
-| Action    | Purpose                         |
-| --------- | ------------------------------- |
-| `save`    | Create or update a note         |
-| `get`     | Read note content by key        |
+| Action    | Purpose                                   |
+| --------- | ----------------------------------------- |
+| `save`    | Create or update a note                   |
+| `get`     | Read note content by key                  |
 | `list`    | List a page of notes with tag/key filters |
-| `history` | View version history of a note  |
-| `delete`  | Soft delete a note              |
-| `stats`   | Usage statistics and quota info |
+| `history` | View version history of a note            |
+| `delete`  | Soft delete a note                        |
+| `stats`   | Usage statistics and quota info           |
 
 ### Key Format
 
@@ -246,10 +246,10 @@ All collected metrics:
 
 ### Running the Pipeline
 
-  1. Start the Metrics Collector workflow and provide project metrics 2. Notes are saved
-  automatically via write-note and upsert-note nodes 3. Start the Metrics Reporter workflow for the
-  same project 4. read-note loads all metrics, `{{ note: KEY }}` injects the latest snapshot 5.
-  Agent generates a report comparing data across collection dates
+1. Start the Metrics Collector workflow and provide project metrics 2. Notes are saved
+   automatically via write-note and upsert-note nodes 3. Start the Metrics Reporter workflow for the
+   same project 4. read-note loads all metrics, `{{ note: KEY }}` injects the latest snapshot 5.
+   Agent generates a report comparing data across collection dates
 
 The Collector can run multiple times — each run adds a new timestamped note while upsert-note keeps the "latest" reference current.
 

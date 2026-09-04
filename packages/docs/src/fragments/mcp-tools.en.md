@@ -18,27 +18,17 @@ Discover workflows available to the current user.
     },
     "visibility": {
       "type": "string",
-      "enum": [
-        "public",
-        "private",
-        "all"
-      ],
+      "enum": ["public", "private", "all"],
       "description": "Filter by visibility (default: all accessible)"
     },
     "sort": {
       "type": "string",
-      "enum": [
-        "createdAt",
-        "name"
-      ],
+      "enum": ["createdAt", "name"],
       "description": "Sort field (default: createdAt)"
     },
     "sortOrder": {
       "type": "string",
-      "enum": [
-        "asc",
-        "desc"
-      ],
+      "enum": ["asc", "desc"],
       "description": "Sort order (default: desc)"
     },
     "limit": {
@@ -88,22 +78,14 @@ Actions: `status`, `get`, `resolve`.
   "properties": {
     "action": {
       "type": "string",
-      "enum": [
-        "status",
-        "get",
-        "resolve"
-      ]
+      "enum": ["status", "get", "resolve"]
     },
     "reference": {
       "type": "string"
     },
     "selection": {
       "type": "string",
-      "enum": [
-        "current",
-        "incoming",
-        "previous"
-      ]
+      "enum": ["current", "incoming", "previous"]
     },
     "revision": {
       "type": "string",
@@ -120,15 +102,10 @@ Actions: `status`, `get`, `resolve`.
     },
     "visibility": {
       "type": "string",
-      "enum": [
-        "public",
-        "private"
-      ]
+      "enum": ["public", "private"]
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -170,10 +147,7 @@ Start a workflow execution.
       "description": "Skip the optional Telegram notification pre-flight check. Lock nodes still require trusted Telegram PIN delivery."
     }
   },
-  "required": [
-    "workflowId",
-    "parentExecutionId"
-  ],
+  "required": ["workflowId", "parentExecutionId"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -232,9 +206,7 @@ Continue an existing workflow execution.
       "description": "Optional teleport node ID to jump execution to. Only teleport-type nodes can be targets. When provided, execution jumps to the teleport node instead of following normal flow. Do NOT provide input when teleporting."
     }
   },
-  "required": [
-    "processId"
-  ],
+  "required": ["processId"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -331,11 +303,7 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
               "description": "Workflow tags"
             }
           },
-          "required": [
-            "name",
-            "version",
-            "description"
-          ],
+          "required": ["name", "version", "description"],
           "additionalProperties": false
         },
         "nodes": {
@@ -402,18 +370,10 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
                   },
                   "tone": {
                     "type": "string",
-                    "enum": [
-                      "neutral",
-                      "positive",
-                      "warning",
-                      "critical"
-                    ]
+                    "enum": ["neutral", "positive", "warning", "critical"]
                   }
                 },
-                "required": [
-                  "label",
-                  "value"
-                ],
+                "required": ["label", "value"],
                 "additionalProperties": false
               },
               "maxItems": 8
@@ -473,27 +433,19 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
                     "additionalProperties": false
                   }
                 },
-                "required": [
-                  "id",
-                  "label"
-                ],
+                "required": ["id", "label"],
                 "additionalProperties": false
               },
               "minItems": 1,
               "maxItems": 18
             }
           },
-          "required": [
-            "nodes"
-          ],
+          "required": ["nodes"],
           "additionalProperties": false
         },
         "visibility": {
           "type": "string",
-          "enum": [
-            "public",
-            "private"
-          ],
+          "enum": ["public", "private"],
           "description": "Workflow visibility (default: private)"
         },
         "systemReminder": {
@@ -501,10 +453,7 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
           "description": "System reminder shown to agent on each step"
         }
       },
-      "required": [
-        "metadata",
-        "nodes"
-      ],
+      "required": ["metadata", "nodes"],
       "additionalProperties": false,
       "description": "Full workflow object for create action"
     },
@@ -596,18 +545,10 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
                   },
                   "tone": {
                     "type": "string",
-                    "enum": [
-                      "neutral",
-                      "positive",
-                      "warning",
-                      "critical"
-                    ]
+                    "enum": ["neutral", "positive", "warning", "critical"]
                   }
                 },
-                "required": [
-                  "label",
-                  "value"
-                ],
+                "required": ["label", "value"],
                 "additionalProperties": false
               },
               "maxItems": 8
@@ -667,19 +608,14 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
                     "additionalProperties": false
                   }
                 },
-                "required": [
-                  "id",
-                  "label"
-                ],
+                "required": ["id", "label"],
                 "additionalProperties": false
               },
               "minItems": 1,
               "maxItems": 18
             }
           },
-          "required": [
-            "nodes"
-          ],
+          "required": ["nodes"],
           "additionalProperties": false
         },
         "addNodes": {
@@ -710,9 +646,7 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
                 "description": "Fields to update on the node"
               }
             },
-            "required": [
-              "nodeId"
-            ],
+            "required": ["nodeId"],
             "additionalProperties": false
           },
           "description": "Nodes to update with specific changes"
@@ -731,10 +665,7 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
                 "description": "Connection key to remove (e.g., 'default', 'true', 'false')"
               }
             },
-            "required": [
-              "nodeId",
-              "connectionKey"
-            ],
+            "required": ["nodeId", "connectionKey"],
             "additionalProperties": false
           },
           "description": "Connections to remove from nodes"
@@ -853,10 +784,7 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
     },
     "visibility": {
       "type": "string",
-      "enum": [
-        "public",
-        "private"
-      ],
+      "enum": ["public", "private"],
       "description": "New visibility setting (set-visibility only)"
     },
     "inviteId": {
@@ -876,9 +804,7 @@ Actions: `create`, `edit`, `get`, `get-structure`, `get-node`, `search-nodes`, `
       "description": "Filter to active (unused) invites only (list-invites only, default true)"
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -907,10 +833,7 @@ Result: Action-specific workflow data.
 {
   "action": "get-nodes",
   "workflowId": "moira/quick-task",
-  "nodeIds": [
-    "start",
-    "end"
-  ]
+  "nodeIds": ["start", "end"]
 }
 ```
 
@@ -981,11 +904,7 @@ Actions: `get`, `set`, `list`.
   "properties": {
     "action": {
       "type": "string",
-      "enum": [
-        "get",
-        "set",
-        "list"
-      ],
+      "enum": ["get", "set", "list"],
       "description": "Action: get (one key, one category, or all values), set (update one value), list (definitions by category or all)"
     },
     "category": {
@@ -1004,9 +923,7 @@ Actions: `get`, `set`, `list`.
       "description": "New value for set action"
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -1048,10 +965,7 @@ Actions: `upload`, `download`.
   "properties": {
     "action": {
       "type": "string",
-      "enum": [
-        "upload",
-        "download"
-      ],
+      "enum": ["upload", "download"],
       "description": "Token type: upload (for creating workflows), download (for retrieving)"
     },
     "workflowId": {
@@ -1064,9 +978,7 @@ Actions: `upload`, `download`.
       "description": "Token expiration time in minutes (default: 60)"
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -1121,13 +1033,7 @@ Actions: `user`, `executions`, `execution_context`, `current_step`, `update-note
       "type": "array",
       "items": {
         "type": "string",
-        "enum": [
-          "running",
-          "waiting",
-          "completed",
-          "failed",
-          "locked"
-        ]
+        "enum": ["running", "waiting", "completed", "failed", "locked"]
       },
       "description": "Filter executions by status (array of statuses)"
     },
@@ -1141,18 +1047,12 @@ Actions: `user`, `executions`, `execution_context`, `current_step`, `update-note
     },
     "sort": {
       "type": "string",
-      "enum": [
-        "createdAt",
-        "updatedAt"
-      ],
+      "enum": ["createdAt", "updatedAt"],
       "description": "Sort field for executions list"
     },
     "sortOrder": {
       "type": "string",
-      "enum": [
-        "asc",
-        "desc"
-      ],
+      "enum": ["asc", "desc"],
       "description": "Sort order (ascending or descending)"
     },
     "limit": {
@@ -1194,10 +1094,7 @@ Actions: `user`, `executions`, `execution_context`, `current_step`, `update-note
     },
     "reminderStatus": {
       "type": "string",
-      "enum": [
-        "active",
-        "cancelled"
-      ],
+      "enum": ["active", "cancelled"],
       "description": "Reminder status filter"
     },
     "names": {
@@ -1220,10 +1117,7 @@ Actions: `user`, `executions`, `execution_context`, `current_step`, `update-note
     },
     "writePhase": {
       "type": "string",
-      "enum": [
-        "current",
-        "other"
-      ]
+      "enum": ["current", "other"]
     },
     "variableName": {
       "type": "string"
@@ -1231,10 +1125,7 @@ Actions: `user`, `executions`, `execution_context`, `current_step`, `update-note
     "variableValue": {},
     "theme": {
       "type": "string",
-      "enum": [
-        "light",
-        "dark"
-      ]
+      "enum": ["light", "dark"]
     },
     "viewportWidth": {
       "type": "integer",
@@ -1242,9 +1133,7 @@ Actions: `user`, `executions`, `execution_context`, `current_step`, `update-note
       "maximum": 4096
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -1274,14 +1163,7 @@ Actions: `list`, `get`, `save`, `delete`, `history`, `stats`.
   "properties": {
     "action": {
       "type": "string",
-      "enum": [
-        "list",
-        "get",
-        "save",
-        "delete",
-        "history",
-        "stats"
-      ],
+      "enum": ["list", "get", "save", "delete", "history", "stats"],
       "description": "Action to perform on notes"
     },
     "tag": {
@@ -1323,9 +1205,7 @@ Actions: `list`, `get`, `save`, `delete`, `history`, `stats`.
       "description": "Tags for the note (for save action, max 10 tags)"
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -1355,14 +1235,7 @@ Actions: `upload`, `update`, `delete`, `list`, `stats`, `token`.
   "properties": {
     "action": {
       "type": "string",
-      "enum": [
-        "upload",
-        "update",
-        "delete",
-        "list",
-        "stats",
-        "token"
-      ],
+      "enum": ["upload", "update", "delete", "list", "stats", "token"],
       "description": "Action to perform on artifacts"
     },
     "name": {
@@ -1399,9 +1272,7 @@ Actions: `upload`, `update`, `delete`, `list`, `stats`, `token`.
       "description": "Token expiration in minutes (1-1440, default 60)"
     }
   },
-  "required": [
-    "action"
-  ],
+  "required": ["action"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }
@@ -1431,12 +1302,7 @@ Actions: `status`, `list`, `unlock`, `lock`.
   "properties": {
     "action": {
       "type": "string",
-      "enum": [
-        "status",
-        "list",
-        "unlock",
-        "lock"
-      ],
+      "enum": ["status", "list", "unlock", "lock"],
       "description": "Action to perform on locks"
     },
     "executionId": {
@@ -1452,10 +1318,7 @@ Actions: `status`, `list`, `unlock`, `lock`.
       "description": "Reason for locking the execution (required for lock action)"
     }
   },
-  "required": [
-    "action",
-    "executionId"
-  ],
+  "required": ["action", "executionId"],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#"
 }

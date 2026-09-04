@@ -19,8 +19,9 @@ Claude Code is Anthropic's official CLI and VS Code extension for Claude. This g
    Or edit directly:
 
    {/* prettier-ignore */}
- - ~/.claude/
-   - settings.json
+
+- ~/.claude/
+  - settings.json
 
 2. **Add Moira MCP server**
 

@@ -364,7 +364,7 @@ For CI/CD, Docker, or environments without a browser — use an API token instea
 ```yaml
 mcpServers:
   - name: moira
-    url: {MCP_URL}
+    url: "{MCP_URL}"
     headers:
       Authorization: "Bearer moira_YOUR_TOKEN"
 ```

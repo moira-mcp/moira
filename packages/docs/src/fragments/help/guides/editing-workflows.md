@@ -208,11 +208,12 @@ When removing nodes, update connections in other nodes that referenced the remov
 ## Safe Editing Process
 
 1. **Get current structure**
+
    ```typescript
    mcp__moira__manage({
      action: "get-structure",
-     workflowId: "my-workflow"
-   })
+     workflowId: "my-workflow",
+   });
    ```
 
 2. **Find nodes to edit**

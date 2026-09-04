@@ -22,9 +22,10 @@ describe("MCP registry examples", () => {
       success: true,
       data: { "ui.theme": "dark" },
     });
-    await expect(
-      readSettingsForMcp(repository, "user-1", category.category),
-    ).resolves.toEqual({ success: true, data: { "telegram.chat_id": "123" } });
+    await expect(readSettingsForMcp(repository, "user-1", category.category)).resolves.toEqual({
+      success: true,
+      data: { "telegram.chat_id": "123" },
+    });
     await expect(readSettingsForMcp(repository, "user-1", all.category)).resolves.toEqual({
       success: true,
       data: { "telegram.chat_id": "123" },

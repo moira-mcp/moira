@@ -366,7 +366,9 @@ export async function manageWorkflow(
           ...(workflow.variableRegistry !== undefined
             ? { variableRegistry: workflow.variableRegistry }
             : {}),
-          ...(workflow.runtimePolicy !== undefined ? { runtimePolicy: workflow.runtimePolicy } : {}),
+          ...(workflow.runtimePolicy !== undefined
+            ? { runtimePolicy: workflow.runtimePolicy }
+            : {}),
           ...(workflow.progress !== undefined ? { progress: workflow.progress } : {}),
           structure: {
             nodeCount: workflow.nodes.length,

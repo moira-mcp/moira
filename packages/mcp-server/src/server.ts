@@ -242,7 +242,6 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
 
     // Extract tool info for logging (context update happens inside runWithMCPContext)
     const toolName = mcpMethod === "tools/call" && mcpParams?.name ? mcpParams.name : undefined;
-    const toolArgs = toolName ? mcpParams.arguments || {} : undefined;
 
     logger.info("MCP request received", {
       method: mcpMethod,

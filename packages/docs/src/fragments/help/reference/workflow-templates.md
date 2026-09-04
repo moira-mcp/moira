@@ -16,14 +16,14 @@ The [Ready Workflows catalog](/docs/reference/workflows/) provides detailed EN r
 
 Compare every accessible candidate that could fit the request:
 
-| Decision boundary | What to compare |
-| --- | --- |
-| Deliverable | Code, plan, report, research evidence, design, test code, workflow definition, or another concrete result |
-| Evidence | Mechanical checks, primary-source review, independent semantic review, user judgment, or a combination |
+| Decision boundary   | What to compare                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Deliverable         | Code, plan, report, research evidence, design, test code, workflow definition, or another concrete result          |
+| Evidence            | Mechanical checks, primary-source review, independent semantic review, user judgment, or a combination             |
 | Durability and cost | Inline versus filesystem state, restartability, retries, review cycles, and explicitly expensive whole-corpus work |
-| Authority | Local-only work, VCS effects, artifact publication, notification, settings, or production mutation |
-| Failure model | Limited result, blocked prerequisite, handoff, recovery, replan, abort, or transport failure |
-| Neighbors | The closest workflow whose different result, risk boundary, or recovery contract could change the choice |
+| Authority           | Local-only work, VCS effects, artifact publication, notification, settings, or production mutation                 |
+| Failure model       | Limited result, blocked prerequisite, handoff, recovery, replan, abort, or transport failure                       |
+| Neighbors           | The closest workflow whose different result, risk boundary, or recovery contract could change the choice           |
 
 Do not infer behavior from an old table, a familiar category, or a similar slug. Do not split one software implementation lifecycle across several general task workflows: choose one development workflow that owns the complete requested implementation, tests, documentation, review, and its explicitly supported local/VCS closure. Release and deployment remain separate caller or parent-process work unless the selected workflow's current definition explicitly says otherwise.
 

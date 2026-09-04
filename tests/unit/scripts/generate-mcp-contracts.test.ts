@@ -18,15 +18,15 @@ describe("MCP contract generation", () => {
     rmSync(projectRoot, { recursive: true, force: true });
   });
 
-  it("writes every declared target and accepts the fresh result", () => {
-    generateMcpContracts(projectRoot, false);
+  it("writes every declared target and accepts the fresh result", async () => {
+    await generateMcpContracts(projectRoot, false);
 
-    const generated = getGeneratedMcpContractFiles(projectRoot);
+    const generated = await getGeneratedMcpContractFiles(projectRoot);
     expect([...generated.keys()]).toHaveLength(3);
     for (const [filePath, expected] of generated) {
       expect(readFileSync(filePath, "utf8")).toBe(expected);
     }
-    expect(() => generateMcpContracts(projectRoot, true)).not.toThrow();
+    await expect(generateMcpContracts(projectRoot, true)).resolves.toBeUndefined();
 
     const english = readFileSync(
       join(projectRoot, "packages/docs/src/fragments/mcp-tools.en.md"),
@@ -42,15 +42,15 @@ describe("MCP contract generation", () => {
     expect(russian).not.toMatch(/^# /m);
   });
 
-  it("rejects changed and missing generated targets", () => {
-    generateMcpContracts(projectRoot, false);
+  it("rejects changed and missing generated targets", async () => {
+    await generateMcpContracts(projectRoot, false);
     const englishPath = join(projectRoot, "packages/docs/src/fragments/mcp-tools.en.md");
     writeFileSync(englishPath, "stale", "utf8");
-    expect(() => generateMcpContracts(projectRoot, true)).toThrow(englishPath);
+    await expect(generateMcpContracts(projectRoot, true)).rejects.toThrow(englishPath);
 
-    generateMcpContracts(projectRoot, false);
+    await generateMcpContracts(projectRoot, false);
     const russianPath = join(projectRoot, "packages/docs/src/fragments/mcp-tools.ru.md");
     unlinkSync(russianPath);
-    expect(() => generateMcpContracts(projectRoot, true)).toThrow(russianPath);
+    await expect(generateMcpContracts(projectRoot, true)).rejects.toThrow(russianPath);
   });
 });

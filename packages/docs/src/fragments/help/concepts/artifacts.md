@@ -145,7 +145,7 @@ Artifacts may contain JavaScript, so each one is sandboxed at multiple layers:
 | Frame CSP              | scripts allowed; `connect-src 'none'`, `form-action 'none'`, `base-uri 'none'` |
 | Frame sandbox          | `allow-scripts` only                                                           |
 | X-Content-Type-Options | `nosniff`                                                                      |
-| Origin isolation       | deployment-configured artifact URL                                              |
+| Origin isolation       | deployment-configured artifact URL                                             |
 
 :::caution
 JavaScript runs but has **no network access** — `fetch`, `XHR`, and `WebSocket` are blocked. Use

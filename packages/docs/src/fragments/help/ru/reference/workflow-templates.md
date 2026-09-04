@@ -16,14 +16,14 @@ mcp__moira__list({ visibility: "public", limit: 100, offset: 0 })
 
 Сравните все доступные candidates, которые могут соответствовать запросу:
 
-| Граница решения | Что сравнить |
-| --- | --- |
-| Результат | Код, план, отчёт, research evidence, дизайн, test code, workflow definition или другой конкретный deliverable |
-| Evidence | Mechanical checks, review первичных источников, independent semantic review, user judgment или их сочетание |
-| Долговечность и стоимость | Inline или filesystem state, restartability, retry, review cycles и явно дорогая whole-corpus работа |
-| Полномочия | Local-only работа, VCS effects, artifact publication, notification, settings или production mutation |
-| Failure model | Limited result, blocked prerequisite, handoff, recovery, replan, abort или transport failure |
-| Соседи | Ближайший workflow, чей другой результат, risk boundary или recovery contract может изменить выбор |
+| Граница решения           | Что сравнить                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Результат                 | Код, план, отчёт, research evidence, дизайн, test code, workflow definition или другой конкретный deliverable |
+| Evidence                  | Mechanical checks, review первичных источников, independent semantic review, user judgment или их сочетание   |
+| Долговечность и стоимость | Inline или filesystem state, restartability, retry, review cycles и явно дорогая whole-corpus работа          |
+| Полномочия                | Local-only работа, VCS effects, artifact publication, notification, settings или production mutation          |
+| Failure model             | Limited result, blocked prerequisite, handoff, recovery, replan, abort или transport failure                  |
+| Соседи                    | Ближайший workflow, чей другой результат, risk boundary или recovery contract может изменить выбор            |
 
 Не выводите поведение из старой таблицы, знакомой категории или похожего slug. Не разделяйте один software implementation lifecycle между несколькими общими task workflows: выберите один development workflow, который владеет всей запрошенной реализацией, тестами, документацией, review и явно поддерживаемым local/VCS closure. Release и deployment остаются отдельной работой caller или parent process, если актуальная definition выбранного workflow прямо не говорит обратного.
 

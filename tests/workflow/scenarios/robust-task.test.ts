@@ -610,9 +610,7 @@ describe("Robust Task cause-aware contract", () => {
       nodeId: "materialize-workflow-guide",
       completionCondition: "Run the command successfully, then complete this step with null or {}.",
     });
-    expect((queue.peekNext() as { directive: string }).directive).toContain(
-      "workflow-guide.md",
-    );
+    expect((queue.peekNext() as { directive: string }).directive).toContain("workflow-guide.md");
 
     // A failed client download or extraction is represented by withholding the empty completion
     // submission. Re-presenting that same current node must issue a fresh command and remain

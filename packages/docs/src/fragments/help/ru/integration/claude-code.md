@@ -19,8 +19,9 @@ Claude Code — официальный CLI и расширение VS Code дл�
    Или отредактируйте напрямую:
 
    {/* prettier-ignore */}
- - ~/.claude/
-   - settings.json
+
+- ~/.claude/
+  - settings.json
 
 2. **Добавьте MCP сервер Moira**
 

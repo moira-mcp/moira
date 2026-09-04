@@ -15,9 +15,9 @@ Moira supports two authentication methods:
 
 ### OAuth 2.1 (Default)
 
-  1. Client initiates connection to MCP endpoint 2. Server returns authentication required response
-  3. Client opens browser for OAuth flow 4. User authenticates with Moira 5. Client receives access
-  token 6. Subsequent requests include token
+1. Client initiates connection to MCP endpoint 2. Server returns authentication required response
+2. Client opens browser for OAuth flow 4. User authenticates with Moira 5. Client receives access
+   token 6. Subsequent requests include token
 
 :::note
 OAuth token refresh is handled automatically. Catalog refresh is a separate MCP initialization
@@ -28,9 +28,9 @@ step described below. If the credential expires, re-authentication may be requir
 
 For MCP clients that do not support OAuth (custom scripts, CI/CD pipelines, headless environments), use API tokens:
 
-  1. Log in to Moira web UI 2. Go to **Settings → API Tokens** 3. Click **Create Token**, enter a
-  name and expiration 4. Copy the token (shown once, starts with `moira_`) 5. Configure your client
-  with the token as Bearer authorization
+1. Log in to Moira web UI 2. Go to **Settings → API Tokens** 3. Click **Create Token**, enter a
+   name and expiration 4. Copy the token (shown once, starts with `moira_`) 5. Configure your client
+   with the token as Bearer authorization
 
 Example configuration for a custom MCP client:
 

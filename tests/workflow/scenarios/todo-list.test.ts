@@ -159,9 +159,7 @@ describe("todo-list minimal sequential checklist", () => {
     expect(guide).toContain("requested domain result");
     expect(guide).toContain("Position is task identity");
 
-    const materialize = workflow.nodes.find(
-      (node) => node.id === "materialize-workflow-guide",
-    );
+    const materialize = workflow.nodes.find((node) => node.id === "materialize-workflow-guide");
     expect(workflow.nodes.find((node) => node.id === "start")?.connections).toEqual({
       default: "materialize-workflow-guide",
     });
@@ -202,7 +200,9 @@ describe("todo-list minimal sequential checklist", () => {
       required: ["evidence", "progress_execution_outcome"],
       globalInputs: ["progress_execution_outcome"],
     });
-    expect(execute.directive).toContain("If the task is incomplete or blocked, do not call `step()`");
+    expect(execute.directive).toContain(
+      "If the task is incomplete or blocked, do not call `step()`",
+    );
 
     // The checklist may be replaced mid-run, but only through a jump target: no node routes into
     // it, so a revision is always a deliberate agent decision, never a step the flow walks into.

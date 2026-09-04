@@ -2,8 +2,8 @@ This guide covers workflow creation from scratch, including common patterns, val
 
 ## Quick Start
 
-  1. Define the workflow goal and main stages 2. Design the node graph structure 3. Create JSON with
-  proper node definitions 4. Validate connections and reachability 5. Save via MCP tools
+1. Define the workflow goal and main stages 2. Design the node graph structure 3. Create JSON with
+   proper node definitions 4. Validate connections and reachability 5. Save via MCP tools
 
 ## Workflow Structure
 
@@ -343,6 +343,7 @@ Before saving, verify:
 ## Saving Workflows
 
 ### Create New
+
 ```typescript
 mcp__moira__manage({
   action: "create",
@@ -353,20 +354,22 @@ mcp__moira__manage({
   }
 })
 ```
+
 ### Edit Existing
+
 ```typescript
 mcp__moira__manage({
   action: "edit",
   workflowId: "my-workflow",
   changes: {
     metadata: { version: "1.1.0" },
-    updateNodes: [
-      { nodeId: "step-1", changes: { directive: "New text" } }
-    ]
-  }
-})
+    updateNodes: [{ nodeId: "step-1", changes: { directive: "New text" } }],
+  },
+});
 ```
+
 ### File Upload
+
 ```typescript
 // For agents with file system access
 const { uploadUrl } = await mcp__moira__token({ action: "upload" });

@@ -381,7 +381,7 @@ Mac-приложение: с хелпером
 ```yaml
 mcpServers:
   - name: moira
-    url: {MCP_URL}
+    url: "{MCP_URL}"
     headers:
       Authorization: "Bearer moira_YOUR_TOKEN"
 ```

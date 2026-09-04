@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { format } from "prettier";
 
 import { renderClientSetupMarkdown } from "../packages/docs/src/utils/client-setup-markdown.js";
 
@@ -14,6 +15,8 @@ const clientSetup = {
 };
 const stripFrontmatter = (content: string): string =>
   content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "").trim();
+const formatMarkdown = (content: string): Promise<string> =>
+  format(content, { parser: "markdown" });
 const systemPrompt = {
   en: stripFrontmatter(
     fs.readFileSync(
@@ -29,8 +32,8 @@ const systemPrompt = {
   ),
 };
 const expected = new Map<string, string>([
-  [path.join(outputDirectory, "client-setup.en.md"), clientSetup.en],
-  [path.join(outputDirectory, "client-setup.ru.md"), clientSetup.ru],
+  [path.join(outputDirectory, "client-setup.en.md"), await formatMarkdown(clientSetup.en)],
+  [path.join(outputDirectory, "client-setup.ru.md"), await formatMarkdown(clientSetup.ru)],
 ]);
 const normalizeSplitFragment = (content: string): string => `${content.trim()}\n`;
 
@@ -42,12 +45,18 @@ for (const language of ["en", "ru"] as const) {
     const marker = `{{CLIENT_SETUP:${language}}}`;
     const parts = template.split(marker);
     if (parts.length !== 2) throw new Error(`Expected one ${marker} in ${outputPath}.in`);
-    expected.set(outputPath, template.replace(marker, clientSetup[language].trim()));
+    expected.set(
+      outputPath,
+      await formatMarkdown(template.replace(marker, clientSetup[language].trim())),
+    );
     expected.set(
       outputPath.replace(/\.md$/, ".public-before.md"),
-      normalizeSplitFragment(parts[0]),
+      await formatMarkdown(normalizeSplitFragment(parts[0])),
     );
-    expected.set(outputPath.replace(/\.md$/, ".public-after.md"), normalizeSplitFragment(parts[1]));
+    expected.set(
+      outputPath.replace(/\.md$/, ".public-after.md"),
+      await formatMarkdown(normalizeSplitFragment(parts[1])),
+    );
   }
   const agentInstructions = path.join(helpDirectory, prefix, "integration/agent-instructions.md");
   const agentTemplate = fs.readFileSync(`${agentInstructions}.in`, "utf8");
@@ -56,14 +65,17 @@ for (const language of ["en", "ru"] as const) {
   if (agentParts.length !== 2) {
     throw new Error(`Expected one ${agentMarker} in ${agentInstructions}.in`);
   }
-  expected.set(agentInstructions, agentTemplate.replace(agentMarker, systemPrompt[language]));
+  expected.set(
+    agentInstructions,
+    await formatMarkdown(agentTemplate.replace(agentMarker, systemPrompt[language])),
+  );
   expected.set(
     agentInstructions.replace(/\.md$/, ".public-before.md"),
-    normalizeSplitFragment(agentParts[0]),
+    await formatMarkdown(normalizeSplitFragment(agentParts[0])),
   );
   expected.set(
     agentInstructions.replace(/\.md$/, ".public-after.md"),
-    normalizeSplitFragment(agentParts[1]),
+    await formatMarkdown(normalizeSplitFragment(agentParts[1])),
   );
 }
 const check = process.argv.includes("--check");
