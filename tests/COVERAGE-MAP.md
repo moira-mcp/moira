@@ -420,8 +420,8 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, exact normalized protocol schemas through real registration including projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, and EN/RU renderer parity
 - `tests/unit/mcp-server/tool-examples.test.ts` — exact-key, current notification-category, and all-settings registry examples reach the masked read projection
 - `tests/unit/mcp-server/mcp-catalog-lifecycle.test.ts` — SDK-valid singleton initialize classification, exact successful-result stamp ordering, error/other-result non-stamping, and successful-result suppression when the credential cannot be stamped
-- `tests/unit/shared/mcp-tools-revision.test.ts` — deterministic matching, null, and stale catalog-revision decisions with package version retained only as diagnostic response data
-- `tests/unit/scripts/generate-mcp-contracts.test.ts` — isolated exact generation and freshness rejection for the shared revision and both localized public fragments
+- `tests/unit/mcp-server/mcp-tools-revision.test.ts` — deterministic matching, null, and stale catalog-revision decisions with package version retained only as diagnostic response data
+- `tests/integration/docs-tool-contract-rendering.test.ts` — actual EN/RU public routes render every identity, localized fact, action, schema, result, example, and CodeBlock directly from the MCP contract model
 - `tests/unit/scripts/static-tool-description-migration.test.ts` — exact retirement of database-backed default/agent/model descriptions plus nullable persistent-token revision migration with existing identity/hash preservation
 - `tests/unit/mcp-server/progress-authoring-schema.test.ts` — MCP manage rich-progress goal/facts/content acceptance plus strict unknown-field and bound rejection
 

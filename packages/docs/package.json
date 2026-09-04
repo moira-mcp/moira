@@ -9,6 +9,7 @@
   },
   "scripts": {},
   "dependencies": {
+    "@mcp-moira/mcp-server": "*",
     "@astrojs/sitemap": "^3.6.0",
     "@astrojs/starlight": "^0.41.9",
     "@fontsource-variable/inter": "^5.3.0",

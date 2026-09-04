@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { z, type ZodRawShape, type ZodTypeAny } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { McpPromptContext } from "@mcp-moira/shared";
+import { toolDescriptions } from "./tool-descriptions.js";
 import {
   getSessionInfoSchema,
   helpSchema,
@@ -44,7 +43,6 @@ export interface ToolDefinition<
   descriptions: ToolDescriptions;
   schema: Schema;
   responsePolicy: ToolResponsePolicy;
-  invoke: (params: z.infer<Schema>) => Promise<ToolInvocationResult>;
   examples: readonly Readonly<Record<string, unknown>>[];
   documentation: {
     en: ToolDocumentation;
@@ -52,46 +50,20 @@ export interface ToolDefinition<
   };
 }
 
-export interface ToolCallResult {
-  [key: string]: unknown;
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-}
-
-interface ToolResultLike {
-  success: boolean;
-  data?: unknown;
-  error?: string;
-}
-
-type ToolInvocationResult = ToolCallResult | ToolResultLike;
-
-function isToolResultLike(result: ToolInvocationResult): result is ToolResultLike {
-  return typeof (result as ToolResultLike).success === "boolean";
-}
-
-function renderToolResult(result: ToolResultLike, policy: ToolResponsePolicy): ToolCallResult {
-  if (!result.success) {
-    return { content: [{ type: "text", text: `Error: ${result.error ?? "Unknown error"}` }] };
-  }
-  const text =
-    policy === "json"
-      ? (JSON.stringify(result.data, null, 2) ?? "No result")
-      : typeof result.data === "string"
-        ? result.data
-        : result.data === undefined
-          ? "No result"
-          : JSON.stringify(result.data, null, 2);
-  return { content: [{ type: "text", text }] };
-}
-
 type ToolDefinitionInput<Name extends string, Schema extends z.AnyZodObject> = Omit<
   ToolDefinition<Name, Schema>,
   "descriptions"
 >;
 
-function readStaticToolDescription(relativePath: string): string {
-  return readFileSync(resolve(process.cwd(), "config/prompts", relativePath), "utf8");
+const staticDescriptions = toolDescriptions as {
+  default: Readonly<Record<string, string>>;
+  agents: Readonly<Record<string, Readonly<Record<string, string>>>>;
+};
+
+function getStaticDescription(name: string): string {
+  const description = staticDescriptions.default[name];
+  if (!description) throw new Error(`Missing static MCP tool description: ${name}`);
+  return description;
 }
 
 function defineTool<const Name extends string, Schema extends z.AnyZodObject>(
@@ -101,7 +73,7 @@ function defineTool<const Name extends string, Schema extends z.AnyZodObject>(
   return {
     ...definition,
     descriptions: {
-      default: readStaticToolDescription(`toolDescriptions/${definition.name}.md`),
+      default: getStaticDescription(definition.name),
       ...(agents && { agents }),
     },
   };
@@ -112,7 +84,6 @@ export const TOOL_DEFINITIONS = [
     name: "list",
     schema: listWorkflowsSchema,
     responsePolicy: "json",
-    invoke: async (params) => (await import("./list-workflows.js")).listWorkflows(params),
     examples: [
       { limit: 20, offset: 0 },
       { limit: 20, offset: 20 },
@@ -134,8 +105,6 @@ export const TOOL_DEFINITIONS = [
     name: "reconciliation",
     schema: manageReconciliationSchema,
     responsePolicy: "json",
-    invoke: async (params) =>
-      (await import("./manage-reconciliation.js")).manageReconciliation(params),
     examples: [{ action: "status" }],
     documentation: {
       en: {
@@ -153,7 +122,6 @@ export const TOOL_DEFINITIONS = [
     name: "start",
     schema: startSchema,
     responsePolicy: "text",
-    invoke: async (params) => (await import("./start-workflow.js")).startWorkflow(params),
     examples: [{ workflowId: "moira/quick-task", parentExecutionId: "none" }],
     documentation: {
       en: {
@@ -171,16 +139,6 @@ export const TOOL_DEFINITIONS = [
       name: "step",
       schema: stepSchema,
       responsePolicy: "text",
-      invoke: async (params) => {
-        const result = await (await import("./execute-step.js")).executeStep(params);
-        if (!result.success) {
-          return {
-            content: [{ type: "text", text: result.error ?? "No result" }],
-            isError: true,
-          };
-        }
-        return renderToolResult(result, "text");
-      },
       examples: [
         { processId: "00000000-0000-4000-8000-000000000000", input: { outcome: "completed" } },
       ],
@@ -197,7 +155,7 @@ export const TOOL_DEFINITIONS = [
     },
     {
       cursor: {
-        description: readStaticToolDescription("agents/cursor/toolDescriptions/step.md"),
+        description: staticDescriptions.agents.cursor.step,
       },
     },
   ),
@@ -205,7 +163,6 @@ export const TOOL_DEFINITIONS = [
     name: "manage",
     schema: manageWorkflowSchema,
     responsePolicy: "json",
-    invoke: async (params) => (await import("./manage-workflow.js")).manageWorkflow(params),
     examples: [
       {
         action: "get",
@@ -233,8 +190,6 @@ export const TOOL_DEFINITIONS = [
     name: "help",
     schema: helpSchema,
     responsePolicy: "text",
-    invoke: async (params) =>
-      (await import("./get-help.js")).getHelp(params, () => renderToolReference("en")),
     examples: [{ topic: "tools" }],
     documentation: {
       en: {
@@ -251,7 +206,6 @@ export const TOOL_DEFINITIONS = [
     name: "settings",
     schema: settingsSchema,
     responsePolicy: "json",
-    invoke: async (params) => (await import("./manage-settings.js")).manageSettings(params),
     examples: [
       { action: "get", key: "ui.theme" },
       { action: "get", category: "notifications" },
@@ -272,16 +226,6 @@ export const TOOL_DEFINITIONS = [
     name: "token",
     schema: tokenSchema,
     responsePolicy: "formatted-text",
-    invoke: async (params) => {
-      const result = await (await import("./create-workflow-token.js")).createWorkflowToken(params);
-      if (!result.success) return renderToolResult(result, "formatted-text");
-      const { formatUploadToken, formatDownloadToken } = await import("../messages/index.js");
-      const text =
-        params.action === "upload"
-          ? formatUploadToken(result.data as Parameters<typeof formatUploadToken>[0])
-          : formatDownloadToken(result.data as Parameters<typeof formatDownloadToken>[0]);
-      return { content: [{ type: "text", text }] };
-    },
     examples: [{ action: "upload", ttlMinutes: 60 }],
     documentation: {
       en: {
@@ -298,7 +242,6 @@ export const TOOL_DEFINITIONS = [
     name: "session",
     schema: getSessionInfoSchema,
     responsePolicy: "json-or-text",
-    invoke: async (params) => (await import("./get-session-info.js")).getSessionInfo(params),
     examples: [{ action: "executions", limit: 20, offset: 0 }],
     documentation: {
       en: {
@@ -315,7 +258,6 @@ export const TOOL_DEFINITIONS = [
     name: "notes",
     schema: manageNotesSchema,
     responsePolicy: "json",
-    invoke: async (params) => (await import("./manage-notes.js")).manageNotes(params),
     examples: [{ action: "list", limit: 20, offset: 0 }],
     documentation: {
       en: { summary: "Store and retrieve versioned notes.", result: "Action-specific note data." },
@@ -329,7 +271,6 @@ export const TOOL_DEFINITIONS = [
     name: "artifacts",
     schema: manageArtifactsSchema,
     responsePolicy: "json",
-    invoke: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
     examples: [{ action: "list", limit: 20, offset: 0 }],
     documentation: {
       en: {
@@ -346,7 +287,6 @@ export const TOOL_DEFINITIONS = [
     name: "lock",
     schema: manageLocksSchema,
     responsePolicy: "json",
-    invoke: async (params) => (await import("./manage-locks.js")).manageLocks(params),
     examples: [{ action: "status", executionId: "00000000-0000-4000-8000-000000000000" }],
     documentation: {
       en: {
@@ -363,16 +303,6 @@ export const TOOL_DEFINITIONS = [
 
 export type McpToolName = (typeof TOOL_DEFINITIONS)[number]["name"];
 export type AnyToolDefinition = (typeof TOOL_DEFINITIONS)[number];
-
-export async function invokeToolDefinition(
-  definition: AnyToolDefinition,
-  params: unknown,
-): Promise<ToolCallResult> {
-  const parsed = definition.schema.parse(params);
-  const invoke = definition.invoke as (validated: unknown) => Promise<ToolInvocationResult>;
-  const result = await invoke(parsed);
-  return isToolResultLike(result) ? renderToolResult(result, definition.responsePolicy) : result;
-}
 export const MCP_TOOL_NAMES = TOOL_DEFINITIONS.map(
   (definition) => definition.name,
 ) as readonly McpToolName[];
@@ -423,10 +353,19 @@ export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema">) {
   });
 }
 
-type ToolContractSource = Pick<
+export type ToolContractSource = Pick<
   ToolDefinition,
   "name" | "descriptions" | "schema" | "responsePolicy" | "examples" | "documentation"
 >;
+
+export interface ToolReferenceEntry {
+  name: string;
+  summary: string;
+  result: string;
+  operations: readonly string[];
+  inputSchema: unknown;
+  examples: readonly Readonly<Record<string, unknown>>[];
+}
 
 export function getToolContractProjection(
   definitions: readonly ToolContractSource[] = TOOL_DEFINITIONS,
@@ -451,6 +390,8 @@ export function computeToolContractRevision(): string {
   return computeContractRevision(getToolContractProjection());
 }
 
+export const MCP_TOOLS_REVISION = computeToolContractRevision();
+
 export function getToolOperations(definition: AnyToolDefinition): readonly string[] {
   const schema = getToolJsonSchema(definition) as {
     properties?: { action?: { enum?: string[] } };
@@ -458,33 +399,48 @@ export function getToolOperations(definition: AnyToolDefinition): readonly strin
   return schema.properties?.action?.enum ?? [];
 }
 
-export function renderToolReference(locale: "en" | "ru" = "en", headingLevel: 1 | 2 = 1): string {
+export function getToolReferenceModel(
+  locale: "en" | "ru" = "en",
+  definitions: readonly ToolContractSource[] = TOOL_DEFINITIONS,
+): readonly ToolReferenceEntry[] {
+  return definitions.map((definition) => ({
+    name: definition.name,
+    summary: definition.documentation[locale].summary,
+    result: definition.documentation[locale].result,
+    operations: getToolOperations(definition as AnyToolDefinition),
+    inputSchema: getToolJsonSchema(definition),
+    examples: definition.examples,
+  }));
+}
+
+export function renderToolReference(
+  locale: "en" | "ru" = "en",
+  headingLevel: 1 | 2 = 1,
+  definitions: readonly ToolContractSource[] = TOOL_DEFINITIONS,
+): string {
   const headingPrefix = "#".repeat(headingLevel);
   const toolHeadingPrefix = "#".repeat(headingLevel + 1);
   const detailHeadingPrefix = "#".repeat(headingLevel + 2);
   const heading =
     locale === "ru" ? `${headingPrefix} Инструменты MCP` : `${headingPrefix} MCP tools`;
   const lines = [heading, ""];
-  for (const definition of TOOL_DEFINITIONS) {
-    const docs = definition.documentation[locale];
-    const operations = getToolOperations(definition);
-    lines.push(`${toolHeadingPrefix} \`${definition.name}\``, "", docs.summary, "");
-    if (operations.length > 0) {
+  for (const entry of getToolReferenceModel(locale, definitions)) {
+    lines.push(`${toolHeadingPrefix} \`${entry.name}\``, "", entry.summary, "");
+    if (entry.operations.length > 0) {
       lines.push(
-        `${locale === "ru" ? "Операции" : "Actions"}: ${operations.map((action) => `\`${action}\``).join(", ")}.`,
+        `${locale === "ru" ? "Операции" : "Actions"}: ${entry.operations.map((action) => `\`${action}\``).join(", ")}.`,
         "",
       );
     }
-    const inputSchema = getToolJsonSchema(definition);
     lines.push(
       locale === "ru"
         ? `${detailHeadingPrefix} Схема входа`
         : `${detailHeadingPrefix} Input schema`,
       "",
     );
-    lines.push("```json", JSON.stringify(inputSchema, null, 2), "```", "");
-    lines.push(`${locale === "ru" ? "Результат" : "Result"}: ${docs.result}`, "");
-    for (const example of definition.examples) {
+    lines.push("```json", JSON.stringify(entry.inputSchema, null, 2), "```", "");
+    lines.push(`${locale === "ru" ? "Результат" : "Result"}: ${entry.result}`, "");
+    for (const example of entry.examples) {
       lines.push("```json", JSON.stringify(example, null, 2), "```", "");
     }
   }

@@ -3,11 +3,8 @@ import { createReconciliationAwareRegisterTool } from "../reconciliation-aware-s
 import { sanitizeMcpError } from "../utils/error-sanitizer.js";
 import { wrapSchemaWithAutoparse } from "../utils/flexible-json-parser.js";
 import type { McpPromptContext } from "@mcp-moira/shared";
-import {
-  TOOL_DEFINITIONS,
-  invokeToolDefinition,
-  resolveToolDescription,
-} from "./tool-definitions.js";
+import { invokeToolDefinition } from "./tool-bindings.js";
+import { TOOL_DEFINITIONS, resolveToolDescription } from "./tool-definitions.js";
 
 export function registerTools(mcpServer: McpServer, context?: McpPromptContext): void {
   const registerTool = createReconciliationAwareRegisterTool(mcpServer);

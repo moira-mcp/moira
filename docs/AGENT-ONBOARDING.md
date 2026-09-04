@@ -158,9 +158,11 @@ Automatic node types (execute without agent interaction):
 
 ### MCP Protocol Integration
 
-- The typed definitions catalog is the source for MCP tool names, schemas, adapters, examples, runtime help, and generated public references
-- Reconciliation-aware registration invokes direct handlers in the MCP process; handlers are loaded lazily from their definitions
-- `MCP_TOOLS_REVISION` is generated from stable client-visible facts and invalidates stale OAuth and persistent-token catalogs independently of the application version
+- `tool-descriptions.ts` owns typed static default and agent/model descriptions; they are not database settings
+- `tool-definitions.ts` is the side-effect-free source for MCP tool names, schemas, examples, runtime reference facts, public reference data, and `MCP_TOOLS_REVISION`
+- `tool-bindings.ts` exhaustively maps those tool identities to lazy executable handlers and response adapters in the MCP process
+- The public English and Russian tool references consume the pure contract directly during the documentation build
+- `MCP_TOOLS_REVISION` is computed from stable client-visible facts and invalidates stale OAuth and persistent-token catalogs independently of the application version
 - A stale credential can run a valid singleton MCP `initialize` with the same token; only a successful result stamps that exact credential, while ordinary stale requests receive HTTP 426
 - System reminder integration in all responses
 

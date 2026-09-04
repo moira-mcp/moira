@@ -3,19 +3,19 @@ title: MCP Tools Reference
 description: Complete reference for all MCP tools available in Moira
 ---
 
-import { Content as GeneratedMcpTools } from "../../../../fragments/mcp-tools.en.md";
+import McpToolsReference from "../../../../components/docs/McpToolsReference.astro";
 
-Moira exposes workflow execution capabilities through MCP tools. The generated catalog below is the authoritative reference for tool names, actions, input schemas, and valid example inputs. It is produced from the same typed definitions used by MCP registration and runtime help.
+Moira exposes workflow execution capabilities through MCP tools. The catalog below is the authoritative reference for tool names, actions, input schemas, and valid example inputs. The documentation build reads the same pure typed contract used by MCP registration and runtime help directly.
 
 Tool descriptions and their supported agent/model variants are static parts of this catalog and
 cannot be overridden through database settings. Runtime system instructions are delivered separately
 through MCP initialization and never alter a tool description.
 
-<GeneratedMcpTools />
+<McpToolsReference locale="en" />
 
 ## Behavioral guidance
 
-The generated catalog defines what clients can send. The following notes describe authorization, state changes, and operational behavior that is not encoded in JSON Schema.
+The typed catalog defines what clients can send. The following notes describe authorization, state changes, and operational behavior that is not encoded in JSON Schema.
 
 ### Workflow discovery and execution
 

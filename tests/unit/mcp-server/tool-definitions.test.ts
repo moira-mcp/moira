@@ -4,8 +4,8 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { MCP_TOOLS_REVISION } from "../../../packages/shared/src/config/mcp-tools-revision.generated.js";
 import {
+  MCP_TOOLS_REVISION,
   MCP_TOOL_NAMES,
   TOOL_DEFINITIONS,
   computeContractRevision,
@@ -13,10 +13,12 @@ import {
   getToolContractProjection,
   getToolJsonSchema,
   getToolOperations,
+  getToolReferenceModel,
   resolveToolDescription,
   renderToolReference,
 } from "../../../packages/mcp-server/src/tools/tool-definitions.js";
 import { registerTools } from "../../../packages/mcp-server/src/tools/register-tools.js";
+import { TOOL_BINDINGS } from "../../../packages/mcp-server/src/tools/tool-bindings.js";
 
 function dereferenceLocalJsonSchema(schema: unknown): unknown {
   const root = structuredClone(schema) as Record<string, unknown>;
@@ -169,9 +171,34 @@ describe("MCP tool definitions", () => {
     );
   });
 
-  it("keeps the generated client cache revision current", () => {
+  it("computes the current client cache revision directly from the contract", () => {
     expect(MCP_TOOLS_REVISION).toBe(computeToolContractRevision());
     expect(MCP_TOOLS_REVISION).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("keeps executable bindings exhaustive without duplicating contract order", () => {
+    expect(Object.keys(TOOL_BINDINGS).sort()).toEqual([...MCP_TOOL_NAMES].sort());
+  });
+
+  it("projects one contract change into the revision, runtime reference, and public model", () => {
+    const marker = "Direct contract projection marker";
+    const changed = TOOL_DEFINITIONS.map((definition, index) =>
+      index === 0
+        ? {
+            ...definition,
+            documentation: {
+              ...definition.documentation,
+              en: { ...definition.documentation.en, summary: marker },
+            },
+          }
+        : definition,
+    );
+
+    expect(computeContractRevision(getToolContractProjection(changed))).not.toBe(
+      MCP_TOOLS_REVISION,
+    );
+    expect(renderToolReference("en", 1, changed)).toContain(marker);
+    expect(getToolReferenceModel("en", changed)[0].summary).toBe(marker);
   });
 
   it("keeps revisions stable for key ordering and changes them for client-visible facts", () => {

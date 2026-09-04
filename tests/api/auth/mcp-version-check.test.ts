@@ -7,7 +7,7 @@
  */
 
 import { beforeAll, describe, expect, test } from "@jest/globals";
-import { MCP_TOOLS_REVISION } from "@mcp-moira/shared";
+import { MCP_TOOLS_REVISION } from "@mcp-moira/mcp-server/tool-contract";
 import { getAdminCredentials, getTestBaseUrl } from "../../utils/test-config.js";
 import { signInUser } from "../../utils/mcp-auth.js";
 import { execSqliteInDocker } from "../../utils/docker-command.js";

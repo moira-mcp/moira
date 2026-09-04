@@ -108,14 +108,14 @@ Details and criteria: `docs/DOCUMENTATION-STYLE-GUIDE.md`, section "Mandatory Sy
 
 ### When changing MCP tools:
 
-- [ ] Canonical schema, adapter, examples, and localized facts updated in `packages/mcp-server/src/tools/tool-definitions.ts` and `tool-schemas.ts`
-- [ ] Run `npm run generate:mcp-contracts` to update the shared cache revision and EN/RU reference fragments
-- [ ] Run `npm run check:mcp-contracts` to verify all generated outputs are current
+- [ ] Canonical schemas are updated in `tool-schemas.ts`; contract examples and localized facts are updated in `tool-definitions.ts`; static description variants are updated in `tool-descriptions.ts`
+- [ ] Executable handler mappings or response adapters are updated in `tool-bindings.ts` when runtime behavior changes
+- [ ] Verify the pure MCP contract changes its deterministic revision and both runtime and EN/RU public references consume the same current model directly
 - [ ] Action-specific behavioral guidance updated in both localized public tool-reference pages when behavior changed
 - [ ] Topics added to the help tool if needed
 - [ ] Runtime-visible non-`tools` topics use matching portable EN/RU sources; generated sources pass `npm run check:portable-help`
 
-  The generated `MCP_TOOLS_REVISION` invalidates OAuth and persistent-token catalogs when stable
+  `MCP_TOOLS_REVISION` is computed directly from the pure MCP contract and invalidates OAuth and persistent-token catalogs when stable
   client-visible tool facts, including static default and agent/model description variants, change.
   Both credential kinds accept the revision through successful MCP initialization, not token
   issuance. Package versions describe the application release and are not manually bumped only to

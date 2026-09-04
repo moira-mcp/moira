@@ -84,6 +84,7 @@ ENV CONTACT_EMAIL=${CONTACT_EMAIL}
 ENV STATIC_ARTIFACTS_DOMAIN=${STATIC_ARTIFACTS_DOMAIN}
 # astro.config reads these explicit, non-secret build values to resolve the
 # MCP/static URLs baked into documentation pages.
+COPY packages/mcp-server/ ./packages/mcp-server/
 COPY packages/docs/ ./packages/docs/
 RUN --mount=type=cache,id=astro-docs-${BUILD_ID},target=/app/packages/docs/node_modules/.astro \
     cd packages/docs && npx astro build

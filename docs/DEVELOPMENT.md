@@ -24,9 +24,6 @@ npm run test:e2e          # E2E tests (Docker required)
 # Code Quality
 npm run fix               # ESLint + Prettier fix all files
 
-# MCP generated contracts
-npm run generate:mcp-contracts
-npm run check:mcp-contracts
 ```
 
 **All development happens through Docker containers.**
@@ -174,9 +171,9 @@ and validation files from `config/prompts/` into the `globalSetting` table:
 - **Fresh key:** Inserts the file value when the DB key does not exist. If a DB value predates the manifest, records its hash as the baseline without overwriting it.
 - **Subsequent deploys:** Compares the DB value with the last deployed manifest hash. An unchanged DB value is updated from the file; a manually edited DB value is preserved and reported as a conflict.
 - **Removed agent/model override:** Deletes its DB row only when the value still matches the last deployed hash. A manually edited override remains in the DB and is reported as a conflict.
-- **Static tool descriptions:** `toolDescriptions/` files are consumed by the typed MCP registry and
-  are never inserted into the database. Legacy default, agent, and model description rows and their
-  manifest entries are removed.
+- **Static tool descriptions:** Typed default and agent/model variants live in
+  `packages/mcp-server/src/tools/tool-descriptions.ts` and are outside prompt migration. Legacy
+  description rows and their manifest entries are removed from the database.
 - **Null safety:** Treats a null `globalSetting.value` as an empty string for hashing.
 - **Atomicity:** All DB writes wrapped in `db.transaction()`.
 
@@ -221,7 +218,9 @@ src/graph/storage/  # DatabaseRepository, InMemoryRepository (IDataRepository im
 src/graph/types/    # TypeScript definitions
 packages/mcp-server/src/tools/     # MCP tool implementations
 packages/mcp-server/src/tools/tool-schemas.ts      # Canonical side-effect-free input schemas
-packages/mcp-server/src/tools/tool-definitions.ts  # Typed executable MCP catalog and projections
+packages/mcp-server/src/tools/tool-descriptions.ts # Typed static description data and variants
+packages/mcp-server/src/tools/tool-definitions.ts  # Pure MCP contract, reference model, and revision
+packages/mcp-server/src/tools/tool-bindings.ts     # Exhaustive lazy executable bindings and adapters
 packages/mcp-server/src/messages/  # Centralized English messages (i18n ready)
 src/server.ts       # StreamableHTTPServerTransport (stateless mode)
 packages/web-backend/           # Express API server (internal port 4201)
@@ -233,17 +232,15 @@ config/             # Docker deployment configuration
 ├── nginx.conf          # Reverse proxy configuration
 ├── environment.env     # Environment variables template
 ├── docker-deploy.sh    # Deployment automation script
-└── prompts/            # Runtime prompts plus static MCP description inputs
+└── prompts/            # Runtime-configurable prompts and messages
     ├── systemPrompt.md
     ├── systemReminder.md
-    ├── toolDescriptions/*.md  # Static MCP descriptions consumed by the typed registry
     ├── errorMessages.json
     ├── validationHelp.json
     └── agents/           # Agent-specific prompt overrides
         └── {agent}/      # e.g., chatgpt/, cursor/
             ├── systemPrompt.md
             ├── systemReminder.md
-            ├── toolDescriptions/*.md  # Static agent variants; never migrated to DB
             └── models/{model}/  # Model-level overrides
                 └── *.md
 tests/unit/         # Component tests
@@ -278,7 +275,7 @@ const transport = new StreamableHTTPServerTransport({
 ### Tool Execution Flow
 
 ```
-HTTP POST /mcp → JSON-RPC → Typed Definition Adapter → Direct Tool Logic → JSON Response
+HTTP POST /mcp → JSON-RPC → Pure Tool Contract → Executable Binding → Direct Tool Logic → JSON Response
 ```
 
 ### Environment Variables Pattern
@@ -674,7 +671,7 @@ Docker commands route through configured context: `tests/utils/docker-command.ts
 
 ### MCP Version Check
 
-Server validates the generated MCP tool-contract revision after authentication and account admission
+Server validates the computed MCP tool-contract revision after authentication and account admission
 for both OAuth access tokens and persistent API tokens. Token issuance leaves `toolsVersion` null;
 successful MCP initialization records acceptance.
 
@@ -687,7 +684,7 @@ successful MCP initialization records acceptance.
 - Invalid, revoked, expired, blocked, pending, or applicable unverified credentials fail before the
   revision gate
 
-**After a generated contract revision changes:**
+**After the contract revision changes:**
 
 ```bash
 # Client receives HTTP 426 error with message:
@@ -701,11 +698,11 @@ Reconnect reuses the existing still-valid OAuth or persistent credential. Catalo
 rotate a token. Notifications, malformed requests, batches, and initialize errors do not stamp the
 credential.
 
-**Revision source:** deterministic projection in `tool-definitions.ts`, including every static
-default and agent/model description variant, written to
-`packages/shared/src/config/mcp-tools-revision.generated.ts` by
-`npm run generate:mcp-contracts`. Tool descriptions are not database settings. The root package
-version remains the server release identity.
+**Revision source:** the deterministic pure contract in `tool-definitions.ts`, including every
+static default and agent/model description variant. `MCP_TOOLS_REVISION` is computed once when the
+MCP contract loads; `shared` persists only the revision accepted by each credential. Tool
+descriptions are not database settings. The root package version remains the server release
+identity.
 
 SQLite migration `0021_static_tool_descriptions` removes retired database-backed description rows
 and adds nullable `apiToken.toolsVersion`. Existing persistent-token IDs, hashes, ownership,

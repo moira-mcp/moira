@@ -1,0 +1,50 @@
+---
+import { getToolReferenceModel } from "@mcp-moira/mcp-server/tool-contract";
+import CodeBlock from "../ui/CodeBlock.astro";
+
+interface Props {
+  locale?: "en" | "ru";
+}
+
+const { locale = "en" } = Astro.props;
+const labels =
+  locale === "ru"
+    ? { heading: "Инструменты MCP", actions: "Операции", input: "Схема входа", result: "Результат" }
+    : { heading: "MCP tools", actions: "Actions", input: "Input schema", result: "Result" };
+const entries = getToolReferenceModel(locale);
+---
+
+<h2>{labels.heading}</h2>
+
+{
+  entries.map((entry) => {
+    return (
+      <section>
+        <h3>
+          <code>{entry.name}</code>
+        </h3>
+        <p>{entry.summary}</p>
+        {entry.operations.length > 0 && (
+          <p>
+            {labels.actions}:{" "}
+            {entry.operations.map((operation, index) => (
+              <>
+                {index > 0 && ", "}
+                <code>{operation}</code>
+              </>
+            ))}
+            .
+          </p>
+        )}
+        <h4>{labels.input}</h4>
+        <CodeBlock code={JSON.stringify(entry.inputSchema, null, 2)} language="json" />
+        <p>
+          <strong>{labels.result}:</strong> {entry.result}
+        </p>
+        {entry.examples.map((example) => (
+          <CodeBlock code={JSON.stringify(example, null, 2)} language="json" />
+        ))}
+      </section>
+    );
+  })
+}

@@ -31,8 +31,6 @@
     "docker:stop": ". ./.env.local && docker stop ${DOCKER_CONTAINER_NAME} || true",
     "prepare:account-approval-downgrade": "tsx scripts/prepare-account-approval-downgrade.ts",
     "reconcile": "tsx scripts/reconcile-workflows.ts",
-    "generate:mcp-contracts": "tsx scripts/generate-mcp-contracts.ts",
-    "check:mcp-contracts": "tsx scripts/generate-mcp-contracts.ts --check",
     "generate:portable-help": "tsx scripts/generate-portable-help.ts",
     "check:portable-help": "tsx scripts/generate-portable-help.ts --check",
     "fix": "eslint . --fix && prettier --write ."

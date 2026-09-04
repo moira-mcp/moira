@@ -9,7 +9,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { MCP_TOOLS_REVISION } from "@mcp-moira/shared";
+import { MCP_TOOLS_REVISION } from "@mcp-moira/mcp-server/tool-contract";
 import { createAuthenticatedMCPClient, callMCPTool, verifyUserEmail } from "../utils/mcp-auth.js";
 import {
   getTestFetchUrl,

@@ -29,8 +29,6 @@ import {
   metricsMiddleware,
   setLogLevel,
   getMcpServerVersion,
-  MCP_TOOLS_REVISION,
-  evaluateMcpToolsRevision,
   updateContext,
   sanitizeInput,
   getMcpTextService,
@@ -57,11 +55,12 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
-import { TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
 import {
   getCatalogInitializeRequest,
   requireRevisionStampBeforeInitializeResult,
 } from "./auth/mcp-catalog-lifecycle.js";
+import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
+import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });

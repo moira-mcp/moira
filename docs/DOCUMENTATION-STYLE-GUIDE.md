@@ -305,8 +305,7 @@ Client setup and imported system-instruction bodies are projections of executabl
 `.md.in` templates or canonical registry/localization/source data, run
 `npm run generate:portable-help`, and verify with `npm run check:portable-help`. Do not hand-edit the
 generated full or `.public-before.md`/`.public-after.md` fragments. The `tools` topic is the exception:
-its runtime and localized reference facts come directly from the typed MCP registry and
-`generate:mcp-contracts`.
+its runtime and localized reference facts are rendered directly from the pure typed MCP contract.
 
 ## Mandatory Sync With Code Changes
 

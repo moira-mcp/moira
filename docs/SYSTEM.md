@@ -105,26 +105,28 @@ const transport = new StreamableHTTPServerTransport({
 // the successful initialize result is emitted
 ```
 
-`tool-schemas.ts` owns side-effect-free canonical Zod schemas. `tool-definitions.ts` is the single
+`tool-schemas.ts` owns side-effect-free canonical Zod schemas. `tool-definitions.ts` is the pure
 catalog that associates each public name with its static default and agent/model description
-variants, schema, lazy invocation adapter, response policy, validated examples, and localized factual metadata. `register-tools.ts` iterates that catalog through
-the reconciliation-aware SDK wrapper; server bootstrap does not repeat names, schemas, actions, or
-handler routing. Tool descriptions are not stored or overridden in `globalSetting`; database-backed
-system prompts remain a separate MCP `instructions` channel.
+variants, schema, response policy, validated examples, localized factual metadata, reference model,
+and deterministic revision. `tool-bindings.ts` separately binds every catalog identity to its lazy
+runtime handler. `register-tools.ts` combines them through the reconciliation-aware SDK wrapper;
+server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions are
+not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
+`instructions` channel.
 
-The same catalog renders `help({ topic: "tools" })` directly and generates the English and Russian
-public reference fragments. `scripts/generate-mcp-contracts.ts` also derives a deterministic
-`MCP_TOOLS_REVISION` from stable client-visible facts. New OAuth access tokens and persistent API
+The same structured reference model renders `help({ topic: "tools" })` and the English and Russian
+public reference pages directly. `MCP_TOOLS_REVISION` is computed once from stable client-visible
+contract facts in the MCP package. New OAuth access tokens and persistent API
 tokens begin without an accepted catalog revision. After authentication and account admission, the
 MCP server permits a missing/stale credential to run one SDK-valid singleton `initialize` request
 and conditionally stamps only that credential immediately before forwarding its successful result.
 Errors, notifications, malformed requests, batches, revoked/expired credentials, and denied accounts
 cannot stamp acceptance. Ordinary missing/stale requests receive HTTP 426; matching credentials
 proceed without token rotation. Package version remains diagnostic release identity and is not the
-catalog invalidation input. Run `npm run generate:mcp-contracts` after changing a definition and
-`npm run check:mcp-contracts` to detect stale generated output. See the
-[public MCP tools reference](../packages/docs/src/content/docs/docs/reference/tools.mdx) for the
-generated catalog and action-specific behavior.
+catalog invalidation input. The public docs package consumes the pure MCP contract through its
+`tool-contract` export during Astro build; no generated revision or tool-reference copy must be
+refreshed. See the [public MCP tools reference](../packages/docs/src/content/docs/docs/reference/tools.mdx)
+for the direct catalog and action-specific behavior.
 
 Non-`tools` runtime help topics use a separate portable documentation layer. Topic IDs and
 frontmatter metadata are discovered from the English MDX shells under

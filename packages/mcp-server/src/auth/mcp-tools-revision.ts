@@ -1,4 +1,4 @@
-import { MCP_TOOLS_REVISION } from "./mcp-tools-revision.generated.js";
+import { MCP_TOOLS_REVISION } from "../tools/tool-definitions.js";
 
 export interface McpToolsRevisionErrorBody {
   error: "upgrade_required";
