@@ -144,6 +144,7 @@
     "mini-css-extract-plugin": "^2.10.2",
     "node-fetch": "^3.3.0",
     "open": "^10.2.0",
+    "parse5": "^8.0.1",
     "postcss-loader": "^8.2.1",
     "prettier": "^3.7.4",
     "prettier-plugin-astro": "^0.14.1",

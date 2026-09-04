@@ -5,17 +5,23 @@ import path from "node:path";
 
 import { describe, expect, test } from "@jest/globals";
 import { getToolReferenceModel } from "@mcp-moira/mcp-server/tool-contract";
+import { defaultTreeAdapter, parse, type DefaultTreeAdapterMap } from "parse5";
 
-const decodeHtml = (value: string): string =>
-  value
-    .replace(/<[^>]+>/g, "")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#x27;", "'")
-    .replaceAll("&amp;", "&")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replace(/\s+/g, " ")
-    .trim();
+const normalizeText = (value: string): string => value.replace(/\s+/g, " ").trim();
+
+const getTextContent = (node: DefaultTreeAdapterMap["node"]): string => {
+  if (defaultTreeAdapter.isTextNode(node)) {
+    return defaultTreeAdapter.getTextNodeContent(node);
+  }
+  if ("childNodes" in node) {
+    return node.childNodes.map(getTextContent).join("");
+  }
+  return "";
+};
+
+const renderedText = (html: string): string => {
+  return normalizeText(getTextContent(parse(html)));
+};
 
 describe("public MCP tool contract rendering", () => {
   test("real EN and RU routes render every fact from the direct contract model", () => {
@@ -41,15 +47,15 @@ describe("public MCP tool contract rendering", () => {
         ["ru", "ru/docs/reference/tools/index.html"],
       ] as const) {
         const html = readFileSync(path.join(outputRoot, relativePath), "utf8");
-        const rendered = decodeHtml(html);
+        const rendered = renderedText(html);
         for (const entry of getToolReferenceModel(locale)) {
           expect(rendered).toContain(entry.name);
           expect(rendered).toContain(entry.summary);
           expect(rendered).toContain(entry.result);
           for (const operation of entry.operations) expect(rendered).toContain(operation);
-          expect(rendered).toContain(decodeHtml(JSON.stringify(entry.inputSchema, null, 2)));
+          expect(rendered).toContain(normalizeText(JSON.stringify(entry.inputSchema, null, 2)));
           for (const example of entry.examples) {
-            expect(rendered).toContain(decodeHtml(JSON.stringify(example, null, 2)));
+            expect(rendered).toContain(normalizeText(JSON.stringify(example, null, 2)));
           }
         }
         expect(html).toContain("code-block-wrapper");
