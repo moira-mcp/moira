@@ -179,10 +179,9 @@ COPY config/favicon/ /var/www/html/favicon/
 # pattern), so its dist contains a `docs/` dir served by nginx at /docs.
 COPY --from=docs-build /app/packages/docs/dist/ /var/www/html/
 
-# Copy public topic metadata and portable Markdown for the get_help MCP tool.
-# MDX remains the website presentation shell; runtime help never strips it.
-COPY packages/docs/src/content/docs/docs ./docs
-COPY packages/docs/src/fragments/help ./docs/.portable
+# Copy the checked-in default system prompt read by runtime initialization and
+# help composition. Portable help ships with its owning MCP package.
+COPY packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md ./docs/SYSTEM-PROMPT.md
 ENV DOCS_DIR=/app/docs
 
 # Create required directories

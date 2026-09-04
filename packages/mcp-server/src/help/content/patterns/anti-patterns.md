@@ -1,0 +1,597 @@
+---
+title: Anti-Patterns
+description: Common workflow design mistakes to avoid
+---
+
+## Overview
+
+Anti-patterns are recurring workflow design mistakes that lead to broken, inefficient, or unmaintainable workflows. Before planning an edit, the Workflow Management Flow (WMF) offers a full audit of the source workflow against this catalog; it runs that audit with your consent and lets you choose which confirmed repairs join the edit scope.
+
+:::tip
+Reference `moira/software-development-flow` as a canonical example of correct workflow patterns.
+:::
+
+## State and Outputs
+
+### Data Roundtrip
+
+Directive tells agent to collect data, then `inputSchema` asks agent to return that same data as structured output. The agent acts as a data-entry clerk copying from tool output to schema fields.
+
+**Detection:** `inputSchema` mirrors the structure of data the agent was told to collect.
+
+```
+❌ Directive: "Get project info from package.json"
+   inputSchema: { project_name: string, version: string, description: string }
+   // Agent copies data from file to schema fields — pointless roundtrip
+
+✅ Use expression node to extract data, or capture agent's ANALYSIS in inputSchema
+   inputSchema: { architecture_assessment: string, risks_identified: string[] }
+```
+
+### Decorative Outputs
+
+An `inputSchema` asks for `done`, `success`, `status`, `result_code`, pass numbers, or evidence that
+no downstream node reads. A successful node transition already means that its completion condition
+was met; JSON Schema does not make redundant confirmation useful.
+
+**Detection:** An output has no reader, does not affect a condition, and is not part of the required
+user-facing result.
+
+```
+❌ inputSchema: { done: boolean, status: string, result_code: string }
+   // All routes continue on the node's success connection
+
+✅ inputSchema: {}
+   // The node verifies its completion condition before advancing
+
+✅ inputSchema: { issues_count: integer }
+   // A condition node uses the count to select review or repair
+```
+
+### State Without a Consumer
+
+Every output and global variable needs a writer, a named reader, and an observable effect on a
+route, rendered instruction, or required result. State nobody reads still has to be produced and kept
+true by everyone who touches it, and the first time it goes stale nothing catches it. Remove values
+that fail any part of that trace.
+
+### Duplicate Source of Truth
+
+The same detailed content lives in a file, in a node output, in a second field, and in a rendered
+directive at once. Each copy can drift from the others, and a reader has no way to tell which one is
+current.
+
+**Detection:** A value that a downstream node could obtain by reading a stable path is also carried
+through workflow context or repeated inside another artifact.
+
+```
+❌ review.md holds the findings, review_summary carries them again,
+   and the repair directive interpolates both
+
+✅ review.md holds the findings; the reviewer returns issues_count for routing;
+   the repair owner reads the file
+```
+
+### Context Duplication
+
+Copying information already in agent's context into workflow variables. Redundant and bloats context.
+
+**Detection:** `inputSchema` that captures data the agent already has in conversation context (e.g., directory listings, project info from prior analysis).
+
+```
+❌ variable: project_structure = "<output of tree command>"
+   // Agent already has this in context; storing it again wastes tokens
+
+✅ Let agent re-read current data when needed. Store only stable references (paths, IDs).
+```
+
+### Dynamic Data in Workflow Variables
+
+Storing **dynamic data generated during workflow execution** (file contents, API responses, HTML output, extraction results) in workflow variables. These variables get injected into every directive via templates, bloating context with potentially unbounded content.
+
+**Detection:** Variables that receive dynamic content through `inputSchema` during execution, especially content >1KB or content that grows unboundedly.
+
+**Scope:** This anti-pattern applies to **data flowing between workflow steps** — NOT to static configuration stored as a `variableRegistry` default. See the [Static Workflow Configuration](/docs/patterns/static-configuration/) pattern for the distinction.
+
+```
+❌ inputSchema: { html_content: string }
+   Next directive: "Publish {{step.html_content}}"
+   // Entire HTML page stored in variable, injected into every subsequent directive
+
+❌ inputSchema: { extraction_results: object }
+   Next directive: "Analyze {{extraction_results}}"
+   // Potentially large extraction data round-tripped through variables
+
+✅ Directive: "Save HTML to {{workspace_path}}/report.html"
+   inputSchema: { file_path: string }
+   Next directive: "Publish file at {{step.file_path}}"
+   // Only the path stored in variable, agent reads file when needed
+```
+
+**Exception:** Static instructional content stored as a `variableRegistry` default (rules, standards, checklists) is a **correct pattern**, not variable abuse. These are deliberately placed to ensure the agent sees them on every relevant step. See [Static Workflow Configuration](/docs/patterns/static-configuration/).
+
+### Duplicate Aliases
+
+Two names carry one canonical value — `mode` beside `operating_mode`, `plan_path` beside
+`current_plan_file` — so every writer must remember to update both, and a reader cannot tell which
+one the routes actually use. An alias needs a proven external compatibility contract, not a
+preference for a shorter name.
+
+### Premature Authoritative Derived Data
+
+A count or summary derived from something that can still change is used for routing or shown to the
+user as final. The plan length before the plan is approved, the issue count before the review file is
+complete, and the item total before the list is confirmed are all provisional.
+
+```
+❌ present the step count to the user while the plan can still be revised
+✅ derive and present the count after the source it summarizes is fixed
+```
+
+## Engine and Variables
+
+### Reimplementing the Workflow Engine
+
+The workflow builds its own runtime with step run IDs, phases, handoff protocols, locks, hashes,
+manifests, ledgers, or transaction and deduplication layers without a demonstrated requirement.
+Moira already persists the current node, node completion, and graph transition.
+
+**Detection:** A new control value duplicates execution state already owned by the engine and has no
+independent observable purpose.
+
+```
+❌ create pass IDs and phase state to remember which graph node is active
+✅ rely on the execution record and graph connections
+```
+
+Add a control mechanism only after showing that the engine's model cannot satisfy a concrete
+requirement. The `lock` node is a legitimate exception when real concurrency or ownership requires
+it; a decorative locking protocol is not.
+
+### Mechanical Validation State Machine
+
+A workflow recreates the official validator using `validation_passed`, error arrays, counters,
+reset expressions, and limit branches. This duplicates platform behavior and can drift from it.
+
+```
+❌ change → validation node → validation flags/counters → repair → reset → validation
+✅ change and run the official validator in the same node; complete only after it succeeds
+```
+
+Use a separate validation node only when validation is itself an observable workflow stage required
+by the user, not merely an implementation detail of creating a valid artifact.
+
+### Undeclared Variable / Implicit Promotion
+
+Referencing a bare-name variable that is not declared in the workflow `variableRegistry`, or expecting a node's local output to become a global variable through name matching. Globals must be declared explicitly; a node writes a global only when it lists that name in `inputSchema.globalInputs`.
+
+**Detection:** A bare-name template reference (not a `node-id.name` local and not a system variable like `executionId`) that has no matching entry in `variableRegistry`. Or a workflow that relies on a node's returned key being promoted to a global by name match.
+
+```
+❌ Directive references a bare-name variable that is not declared in variableRegistry
+   // No registry entry → value is undefined at runtime
+
+❌ Node returns a key and expects it to become global because the name matches
+   // No implicit promotion — the value stays a node-local output
+
+✅ Declare every global in variableRegistry
+   A node writes a global only via inputSchema.globalInputs (list the name)
+   Reference node-local outputs as node-id.name
+```
+
+### Declared-But-No-Default Variable
+
+`{{var}}` renders `[[UNDEFINED_VARIABLE]]` at runtime even though `var` is declared in `variableRegistry`; an expression like `var = var + 1` yields `NaN`.
+
+**Detection:** A `variableRegistry` declaration with no `default`, where the variable is not seeded in start `initialData` and not written by any upstream node's `globalInputs`.
+
+```
+❌ variableRegistry: { validation_round: { type: "number" } }   // no default
+   Directive: "Pass {{validation_round}} ..."  // renders [[UNDEFINED_VARIABLE]]
+   Expression: validation_round = validation_round + 1  // NaN
+
+✅ variableRegistry: { validation_round: { type: "number", default: 0 } }
+   // Counter starts at a real value; increments and templates resolve
+```
+
+Give every counter and flag a `default`. The validator emits a declared-but-no-default warning when a referenced variable has no `default` and is never written upstream.
+
+### Manual Index Management by Agent
+
+Agent manually tracks array indices, counters, or pagination through `inputSchema`. Error-prone and breaks on retry.
+
+**Detection:** `inputSchema` with fields like `current_index`, `next_item_number`, or counter values that agent must calculate.
+
+```
+❌ inputSchema: { current_index: number, next_item: string }
+   // Agent calculates arithmetic, prone to errors
+
+✅ Expression node: current_index = current_index + 1
+   Directive: "Process {{items[current_index]}}"
+   // Workflow engine handles arithmetic deterministically
+```
+
+### Template-in-Data
+
+A `{{name}}` the agent writes into data returned via `step()` renders `[[UNDEFINED_VARIABLE]]` when that value is later interpolated into a directive.
+
+**Detection:** Returned `inputSchema` values that contain bare `{{...}}` template syntax.
+
+```
+❌ step() returns: { summary: "Report for {{project_name}}" }
+   Next directive: "Publish {{summary}}"  // {{project_name}} renders [[UNDEFINED_VARIABLE]]
+
+✅ step() returns: { summary: "Report for acme-api" }
+   // Substituted data values are treated as literal text, never re-parsed as templates
+```
+
+Never write bare `{{...}}` into `step()` data; templates belong only in static node fields (directive, completionCondition, message). The engine treats substituted data values as literal.
+
+### Template Injection (SSTI)
+
+Untrusted input containing template syntax interpolated into a directive could attempt to dump the variable bag (`{{context.variables}}`), run an `each`/`if` helper, or traverse another node's scope via `node-id.field`.
+
+**Detection:** A directive interpolates a variable whose value comes from untrusted input that may contain `{{...}}` syntax.
+
+```
+❌ Directive: "Summarize the user's note: {{user_note}}"
+   where user_note = "{{context.variables}}"   // attempt to dump all variables
+
+✅ Interpolated VALUES are literal — the engine neutralizes brace syntax originating from
+   substituted data, so {{context.variables}} in user_note renders as plain text.
+   Don't echo untrusted template syntax into directives; prefer explicit named vars
+   over {{context.variables}} full-dumps.
+```
+
+Interpolated values are never re-parsed as templates. Author-controlled static fields are where templates live.
+
+### SystemReminder Modification
+
+System-level consideration. `systemReminder` is static and applied to ALL steps. Step-specific instructions belong in node directives, not in `systemReminder`.
+
+### File Upload via Content
+
+Passing entire workflow JSON through MCP tool parameters for large workflows. Hits size limits.
+
+**Detection:** `manage({ action: "create", workflow: <large JSON> })` with workflow >50KB.
+
+```
+❌ manage({ action: "create", workflow: <50KB JSON> })
+   // May hit parameter size limits
+
+✅ token({ action: "upload" }) → HTTP PUT with file content
+   // Token-based upload handles any size
+```
+
+### Hidden Runtime in Temporary Tools
+
+A one-off script, generator, or intermediate format written to make one edit becomes an undeclared
+dependency: the workflow only works where that tool exists, and nothing in the definition says so.
+Perform the edit with the official CLI or API, and keep the workflow JSON the artifact of record.
+
+## Graph Shape and Routing
+
+### Implicit Fix Loops
+
+Directive says "fix until done" without explicit loop structure in the graph. Agent retries internally without workflow control.
+
+**Detection:** Words like "retry", "keep trying", "fix until" in directive without corresponding condition node creating a graph loop.
+
+```
+❌ Directive: "Keep fixing tests until they all pass"
+   // No graph structure, agent loops internally without workflow control
+
+✅ [fix] → [run-tests] → condition(passed?) → [fix] / [next]
+   // Explicit graph loop with workflow visibility into each iteration
+```
+
+### False Variation
+
+The user is asked to choose between options that reach the same behaviour: two answers routed to the
+same node, or a value nothing reads. A choice must have an observable consequence — a different
+route, a different request, a different artifact.
+
+```
+❌ ask "quick or thorough?" and continue to the same node either way
+✅ route the two answers to responsibilities that differ, or do not ask
+```
+
+### Declaration/Route Mismatch
+
+The schema allows an answer the graph cannot act on: an enum value with no matching route, feedback
+that a rejection route reads but the schema leaves optional, or a failure field no node consumes.
+
+**Detection:** An `inputSchema` value or enum member whose outcome is missing, or a conditional field
+required by a route yet not required by the schema on that branch.
+
+```
+❌ enum ["yes", "no", "later"] with connections for true/false only
+✅ every allowed answer has a reachable outcome, and a route that consumes feedback
+   requires that feedback on the branch that produces it
+```
+
+### Procedural Fragmentation
+
+Creating a separate agent turn to make a directory, copy a known value, rename a report, assemble
+a prompt from known files, or record the previous step adds coordination without new reasoning. Every
+relay turn is also a place where the work can be misreported while nobody adds judgement, and the
+owner's own account of it becomes second-hand. The owner of a substantive operation should create its
+own artifacts.
+
+### Abstraction Without Reuse
+
+A subgraph, child workflow, adapter, or protocol is introduced to hide local complexity rather than
+to serve an independent reusable contract. The complexity stays, and now it is split across two
+definitions with a mapping between them.
+
+### Lost Conditionality
+
+Consolidating nodes makes work unconditional that used to be skipped: a browser check that only ran
+for UI changes, an integration suite that only ran when the touched area required it, a step that a
+user could skip. Consolidation must preserve applicability, order, and failure and skip semantics.
+
+## Review and Repair
+
+### Review Loop via InputSchema Instead of Files
+
+Review feedback passed through `inputSchema` text fields instead of persistent files. Agent loses context between iterations.
+
+**Detection:** Review/fix cycle where fix node receives feedback only via `inputSchema` text, not via persistent file.
+
+```
+❌ Review node → inputSchema: { feedback: string } → Fix node reads feedback from input
+   // Feedback is ephemeral, lost on retry
+
+✅ Review node writes review.md → Fix node reads review.md
+   // Results persist across iterations and retries
+```
+
+The positive contract is described in [Subagent Review](/docs/patterns/subagent-review/).
+
+### Review-Loop Control Algebra
+
+An ordinary review loop is expanded into a second state machine with pass IDs, counters, frozen
+finding sets, status codes, reset branches, and limit escalation even though none of these values
+serve a separate product requirement.
+
+**Detection:** More state is used to control review bookkeeping than to produce and check the
+artifact itself.
+
+```
+❌ review → pass-id/counter/frozen-findings/status/limit machinery → fix → review
+
+✅ change → review { issues_count } → issues_count == 0 ? next : fix → review
+```
+
+:::note
+Add retry limits and escalation only when the workflow has a real retry policy that requires them.
+Do not add them mechanically to every review loop.
+:::
+
+### Unchanged or Unbounded Repetition
+
+A loop repeats with nothing new: the same artifact, the same input, the same external state, and no
+new diagnostic hypothesis. If repair cannot change or reproduce the finding, the correct behaviour is
+to report that fact to its owner or the user. Counters added merely to make an ordinary review loop
+look bounded do not solve this — they only cap the number of identical attempts.
+
+### Mixed Validation and Repair
+
+One node both diagnoses and fixes, so nothing independent confirms that the fix worked and the
+report describes the state before the change. Keep the validator separate, let a repair owner mutate
+the artifact, and return the changed artifact to the same validator.
+
+### Repeating Irrelevant Checks
+
+A failure is answered by rerunning broad validation that cannot diagnose or change it — a full test
+suite after a rejected publication request, a complete re-review after an unrelated external error.
+Route the failure to the closest owner of its cause.
+
+### Reviewer Designing Machinery
+
+A reviewer, instead of proving a defect, proposes new fields, protocols, loops, or abstraction layers
+for robustness that no requirement asks for. A reviewer's output is reproducible findings about the
+agreed artifact.
+
+### Reviewer Required to Find an Issue
+
+Zero blocking findings is a valid review. A reviewer that must return something searches until it
+finds a naming preference or a hypothetical future need, and the repair loop then churns on
+non-defects.
+
+### Reviewer Without the Engine Model
+
+Coordination machinery is proposed without checking how the engine actually executes: execution
+order, output scopes, transition rules, persistence, and whether any concurrency exists at all.
+Verify the engine's behaviour before blocking on a race that cannot happen.
+
+## Validation and Cost
+
+### Wrong Cost Order and Validation Amplification
+
+Expensive or environment-dependent checks run before cheap deterministic ones, so a missing
+prerequisite is discovered after a long suite; or a full suite is repeated for a small later change
+whose evidence targeted checks already cover.
+
+```
+❌ full browser + integration run → then discover the artifact fails schema validation
+✅ identity and access → cheap structural checks → runtime checks → expensive checks → review
+```
+
+### Mutation After a Final Gate
+
+The final artifact changes after the gate whose evidence it invalidates — a fix applied after the
+approving review, a plan edited after acceptance. Every mutation happens before the gates that
+depend on it, or the run returns through the earliest gate whose evidence became stale.
+
+### Fixed Semantic Quality Score
+
+Architecture, completeness, testability, or semantic retention is reduced to a threshold number, and
+a passing score is treated as permission to accept a regression elsewhere. Required guarantees are
+hard gates; cost diagnostics stay separate and cannot compensate for lost behaviour.
+
+The same defect arrives as a minimum: a count of sources, of alternatives, of decision records, of
+test cases. What separates a requirement from a fabricated threshold is where the number comes from.
+A bound an external contract imposes states an obligation, and its violation is observable outside
+the run. A bound invented inside the workflow does not distinguish two states of the result: the
+difference between seven sources and eight says nothing about whether the research answers its
+question, and it is met by adding the eighth.
+
+**Detection:** ask what the neighbouring value would mean. If nothing, the number stands in for the
+reading nobody did.
+
+## Scope and Authority
+
+### Unauthorized Side Effects
+
+Publishing, deleting, overwriting, switching external context, or any other external mutation
+performed because a tool permits it. Tool availability is not authorization: the user's task or an
+explicit approval is. Different user choices must produce observably different routes or request
+semantics.
+
+### Bulk Change Without Responsibility Tracing
+
+A concept is removed or renamed across a workflow after reading a plan rather than the graph. It
+takes its routes, artifacts and skip conditions with it silently, and the loss surfaces later as a run
+that ends in the wrong place. Before the change, inspect its definitions, all uses, incoming and
+outgoing edges, artifacts, failure and skip routes, and any external contract that depends on it.
+
+### Project-Specific Policy Made Universal
+
+One project's VCS, CI, directory layout, command names, UI, test framework, or documentation policy
+is embedded in a general workflow, which then misfires everywhere else. A general workflow discovers
+the applicable local rules instead of asserting them.
+
+### Planning an Edit Blind to the Source's Own Defects
+
+An edit is planned against the requested change alone while the source already carries defects nobody
+looked for. The plan repairs one thing correctly and the workflow keeps failing for reasons that were
+visible all along, usually surfacing on a later run as unrelated breakage.
+
+Auditing the complete source against this catalog is what makes those defects visible. Whether that
+audit runs, and which of its findings join the scope, is the user's decision — it is their time and
+their scope — not a step the workflow takes on its own.
+
+### Mechanical Implementation Plan
+
+A plan becomes an exhaustive script of microsteps, exact commands, file allowlists, local rewrite
+order, or implementation pseudocode. This prematurely chooses tactics and prevents the executor
+from following dependencies discovered during implementation.
+
+A useful plan fixes the outcome, scope, contracts, invariants, dependencies, acceptance criteria,
+behavioral checks, and material risks. Known nodes and files are entry points, not an exhaustive
+allowlist, unless an external contract explicitly makes them one.
+
+### Plan That Carries the Deliverable
+
+The mirror image of the previous entry. A plan unit contains the result instead of describing it:
+the paragraphs the task is meant to produce, the full text of a brief for another agent, the answer
+of an investigation.
+
+Where the deliverable is code, plan and result live in different media and the altitude holds by
+itself. Where the deliverable is prose — documentation, briefs, a body of rules, an analysis — they
+share a medium and nothing separates them by construction. The plan review then reviews the result,
+the result review reads the same text a second time, and no gate has judged the step that was
+supposed to produce it.
+
+**Detection:** after the plan is approved, is there work an intelligent executor still has to do? A
+unit a later step could satisfy by copying text out of the plan is a unit whose result is already
+written there.
+
+### Order of Telling Taken for Order of Work
+
+A checklist supplied by a person is treated as a queue, and the workflow forbids the executor to
+reorder it. A list written by a human records their thinking: the condition the first item depends
+on is often realised while writing the third and written down there, and a remark that governs the
+whole job lands in the middle looking like another item.
+
+Content and completeness belong to whoever wrote the list — rewriting an item, dropping one or
+adding unrequested work stays forbidden. The order belongs to the executor, who is the one that can
+see item two cannot start until item three exists.
+
+**Detection:** one prohibition covering both, usually through the word `renumber`, which reads
+equally as "do not restate the items" and as "do not work out which runs first".
+
+### Redundancy Required in Every Plan Item
+
+A rule demands that every plan item repeat every nuance and duplicate every cross-cutting action,
+unconditionally, because an executor may receive one item alone.
+
+The problem is real; the unconditional answer is not. The item grows until it carries the
+deliverable — the entry above — and the repeated text becomes a duplicate source of truth that
+drifts. State what the executor needs when it is alone, and let duplication be judged item by item.
+
+## Instructions and Context
+
+### Externalizing Critical Instructions to Files
+
+Moving essential agent instructions and standards from a `variableRegistry` default to external files, expecting the agent to read them each time. This creates risk of hallucination and adds unnecessary I/O.
+
+**Detection:** Directive says "read rules from file X" for content that should be consistently available. Instructions that are critical for agent behavior stored outside the workflow.
+
+```
+❌ Directive: "Read planning standards from ./standards.md before creating plan"
+   // Agent may skip reading, recall from training data, or read selectively
+   // Extra I/O operation on every step that needs these rules
+
+✅ Declare as a variableRegistry default: planning_standards = "1. Each step must... 2. Tests built-in..."
+   Directive: "Create plan following {{planning_standards}}"
+   // Workflow engine guarantees delivery; no I/O; no hallucination risk
+```
+
+:::caution
+This anti-pattern applies to instructions the agent MUST follow consistently. Externalization is
+fine for large reference data the agent only needs occasionally (e.g., a 100KB dataset).
+:::
+
+### A Reference With No Address
+
+A body of criteria that outlives the step — planning rules, engineering principles, a review contract
+— is carried only as text rendered into node directives, so it has no address anywhere.
+
+A reader that needs one section receives the whole body, again on every visit, although nothing in it
+changed since the run began. Worse, a reader outside the run's context cannot be given the text at
+all: a subagent never sees the parent's directive, so the parent starts copying the body into a
+prompt and the same criteria end up in two places that drift apart.
+
+The defect is the missing address; repeated delivery is only its symptom. The fix is the
+[run-owned reference](/docs/patterns/static-configuration/#when-the-text-needs-an-address): keep the
+registry default as the source, write it into the workspace once, and let every reader consult the
+path.
+
+### Context-Blind Forced Reread
+
+A directive orders the same agent to reopen a file it just wrote and still holds in context, or
+tracks `file_loaded` style state to guess what the agent remembers. Name the canonical path and let
+the agent read when the content is absent, uncertain, changed, or needed verbatim. An independent
+reviewer is different: it inspects its primary sources itself.
+
+### Legacy Capability Scaffolding
+
+Ceremony kept only because earlier models needed it — fixed search counts, filename recipes,
+prescribed plan templates, mandatory tool sequences, and microsteps split across turns. Each of these
+needs a current contract or a reproduced failure to justify it.
+
+### Directive as a Drill Order
+
+A directive spells out the sequence of moves an executor would derive from the goal on its own, or
+raises its voice to make a rule stick — capitals, warning signs, MANDATORY, NEVER, CRITICAL, FIX IT,
+NO REPORTS — and usually does both.
+
+Volume adds no executability. There is no state of the world in which "do this ACTUALLY critically"
+holds or fails, so nothing can accept or refuse it, and the executor performs the form instead of
+judging the work. The steps fail from the other side: they are right only for the case the author
+pictured, and an executor meeting a different one either follows them into the wrong result or
+ignores the directive, having learned that its words are decoration.
+
+**Detection, two signs.** Remove the capitals and the signs: if the rule stops requiring anything,
+there was no requirement, only tone. Or read the steps and ask whether an executor holding the goal
+would have arrived at them anyway — a directive built as "STEP 1 … STEP 2 …" can be quiet and still
+be a drill order.
+
+## Related
+
+- [Minimal Graph](/docs/patterns/minimal-graph/) - the shape these mistakes distort
+- [Subagent Review](/docs/patterns/subagent-review/) - the review and repair contract
+- [Validation Loop](/docs/patterns/validation-loop/) - bounded verification around a node
+- [Static Workflow Configuration](/docs/patterns/static-configuration/) - when a registry default is correct

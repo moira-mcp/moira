@@ -20,8 +20,8 @@ standards are merged here.
 
 ### Public Documentation (`packages/docs/`)
 
-**Location**: localized MDX shells under `packages/docs/src/content/docs/` plus shared semantic
-Markdown under `packages/docs/src/fragments/help/`
+**Location**: localized MDX shells under `packages/docs/src/content/docs/` plus MCP-owned semantic
+Markdown under `packages/mcp-server/src/help/content/`
 **Audience**: Users creating and using workflows — including AI agents that follow workflow instructions (docs must be machine-readable)
 **Purpose**: Guide for workflow creation and MCP tool usage
 **Content**: Workflow patterns, node specifications, MCP tool reference
@@ -285,27 +285,28 @@ These prove functionality works.
 
 Standards for user-facing documentation at
 `packages/docs/src/content/docs/docs/` (EN) and `…/ru/docs/` (RU), with runtime-visible semantic
-content under `packages/docs/src/fragments/help/` and `…/help/ru/`.
+content under `packages/mcp-server/src/help/content/` and `…/content/ru/`.
 
 ## Portable Runtime Help Sources
 
-The English MDX tree defines the runtime topic catalog and frontmatter metadata. For every
-runtime-discovered topic other than `reference/tools.mdx`, place the page's semantic Markdown at the
-same relative path under `packages/docs/src/fragments/help/`; place the Russian public counterpart
-under `packages/docs/src/fragments/help/ru/`. The localized MDX files import these fragments and own
-only frontmatter and presentation composition. The MCP `help` tool reads the English fragment
-directly and never derives Markdown by stripping JSX.
+For every runtime-discovered topic other than `reference/tools.mdx`, place the English semantic
+Markdown under `packages/mcp-server/src/help/content/` and its Russian counterpart under
+`packages/mcp-server/src/help/content/ru/`. These sources carry the topic metadata used by runtime.
+The localized MDX shells keep matching Starlight frontmatter and import the content through the
+`@mcp-moira/mcp-server/help-content/*` export. The MCP `help` tool discovers and reads the English
+source directly and never derives Markdown by stripping JSX.
 
 Use `{MCP_URL}`, `{MOIRA_URL}`, `{STATIC_DOMAIN}`, and supported `{{MCP_DEEPLINK:…}}` tokens where a
 portable source needs configured addresses. Both public and runtime consumers resolve them through
 the shared portable-token renderer. Do not place Astro imports or components in portable `.md`
 sources.
 
-Client setup and imported system-instruction bodies are projections of executable owners. Edit their
-`.md.in` templates or canonical registry/localization/source data, run
-`npm run generate:portable-help`, and verify with `npm run check:portable-help`. Do not hand-edit the
-generated full or `.public-before.md`/`.public-after.md` fragments. The `tools` topic is the exception:
-its runtime and localized reference facts are rendered directly from the pure typed MCP contract.
+Quick start and MCP clients use explicit `.before.md` and `.after.md` sources around the client setup
+insertion. Agent instructions use one `.before.md` source followed by the existing system prompt.
+Runtime composes those sources with the pure presentation model; public MDX composes them with the
+interactive Astro component or system-prompt content. Client text lives in the MCP help contract,
+while client identities, code configuration, tokens and deeplinks come from the shared registry and
+generators. The `tools` topic is rendered directly from the pure typed MCP contract.
 
 ## Mandatory Sync With Code Changes
 
@@ -340,9 +341,9 @@ Treat a public-docs update as part of the definition of done for the code change
 
 ## Page Structure
 
-Every rendered documentation page MUST follow this structure. For runtime-visible pages, frontmatter
-and imports live in the localized MDX shell while the intro, sections, examples, and related links
-live in its portable fragment.
+Every rendered documentation page MUST follow this structure. For runtime-visible pages, matching
+frontmatter and imports live in the localized MDX shell while the intro, sections, examples, and
+related links live in its MCP-owned semantic source.
 
 ```markdown
 ---
@@ -631,7 +632,7 @@ Use for explaining how something works (descriptions), vs `<Steps>` for user act
 - CardGrid + Aside = feature list + important note.
 - Table + code example = reference data + practical usage.
 - Presentation-only components belong in the MDX shell. Any text, label, URL, or code needed by
-  runtime help must remain in the portable semantic source or a canonical generated projection.
+  runtime help must remain in the MCP-owned semantic source or shared typed presentation projection.
 
 ## Page Patterns
 
@@ -666,8 +667,8 @@ Structure: Intro → Start Command → Process Flow → Features → Related.
 - [ ] All paths exist in the codebase
 - [ ] All interfaces match source code
 - [ ] Examples actually work when tested
-- [ ] Every runtime-discovered non-`tools` MDX shell imports its matching portable EN/RU source
-- [ ] `npm run check:portable-help` passes when generated portable content is involved
+- [ ] Every runtime-discovered non-`tools` MDX shell imports its matching MCP-owned EN/RU source
+- [ ] Client setup uses the shared registry/config generators and MCP-owned localized presentation
 
 ### Visual Elements
 

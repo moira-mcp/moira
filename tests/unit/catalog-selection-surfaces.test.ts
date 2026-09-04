@@ -10,6 +10,7 @@ const russianDocsDir = path.join(
   root,
   "packages/docs/src/content/docs/ru/docs/reference/workflows",
 );
+const helpContentDir = path.join(root, "packages/mcp-server/src/help/content");
 
 const expectedPublicSlugs = [
   "architecture-design-flow",
@@ -137,11 +138,16 @@ describe("public workflow selection surfaces", () => {
 
   it("keeps the workflow-template guide dynamic and its examples qualified", () => {
     const guides = [
-      read("packages/docs/src/content/docs/docs/reference/workflow-templates.mdx"),
-      read("packages/docs/src/content/docs/ru/docs/reference/workflow-templates.mdx"),
+      helpTesting.composePortableHelpFile("reference/workflow-templates.md", {
+        helpDirectory: helpContentDir,
+      }),
+      helpTesting.composePortableHelpFile("ru/reference/workflow-templates.md", {
+        helpDirectory: helpContentDir,
+      }),
     ];
 
     for (const guide of guides) {
+      expect(guide).not.toBeNull();
       expect(guide).toContain("mcp__moira__list");
       expect(guide).toContain('workflowId: "moira/quick-task"');
       expect(guide).toContain('workflowId: "moira/smart-purchase-assistant"');

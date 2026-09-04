@@ -20,7 +20,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/scripts/sqlite-online-backup.test.ts` — coherent SQLite online backup under concurrent WAL writes, integrity verification, and missing-source fail-closed behavior
 - `tests/unit/scripts/self-host-startup-guard.test.ts` — pre-Supervisor generation reset, real SQLite success, stale/ordered terminal sentinels, partial-init restore with persistent reconciliation-bundle retention and hard-failure guidance, interrupted existing/first-start recovery, removal/marker/sentinel faults, staging/restore symlink rejection, SIGTERM/SIGKILL recovery, prompt-manifest integrity, and bounded rotation including WAL sidecars
 - `tests/unit/scripts/self-host-upgrade-contract.test.ts` — latest-image quickstart, image-owned startup-guard wiring, plus optional pinned-image isolated preflight, health check, and rollback
-- `tests/unit/docs/self-host-upgrade-docs.test.ts` — executable EN/RU `pull`/`up` parity, automatic recovery location and semantics, latest consistency across Compose/env, optional advanced preflight guidance, and internal revision/rationale-bound local Compose recovery without obsolete migration/WMF commands
+- `tests/unit/docs/self-host-upgrade-docs.test.ts` — executable EN/RU MCP-owned semantic-source parity for `pull`/`up`, automatic recovery location and semantics, latest consistency across Compose/env, optional advanced preflight guidance, and internal revision/rationale-bound local Compose recovery without obsolete migration/WMF commands
 - `tests/unit/scripts/test-email.test.ts` — explicit-recipient refusal and validation plus captured
   provider-boundary request for an IANA-reserved recipient
 
@@ -345,11 +345,11 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/get-help-mdx.test.ts` — production-discovered non-tools corpus resolves through real topic IDs to matching portable sources; shared EN/RU shell ownership, configured URL/deeplink replacement, registry-driven client setup, imported instructions, meaningful component labels, unresolved presentation syntax, aliases, errors, and direct typed tools rendering
+- `tests/unit/mcp-server/get-help-mdx.test.ts` — MCP-owned non-tools corpus matches public topic identities and EN/RU metadata/imports, resolves every real topic composition, advertises the special typed `tools` topic and alias in the shared catalog, uses canonical registry-selected client configuration/token/deeplink generation, imports system instructions, removes presentation syntax, preserves aliases/errors, and renders direct typed tools
 
 **integration**
 
-- `tests/integration/docs-client-registry-propagation.test.ts` — one added registry-shaped client reaches both the real Starlight `ClientSetupTabs` build and portable runtime Markdown with its label, setup title, and deeplink semantics
+- `tests/integration/docs-client-registry-propagation.test.ts` — one added registry-shaped client reaches both the real Starlight `ClientSetupTabs` build and MCP-owned runtime Markdown directly with its label, setup title, and deeplink semantics
 
 ### http-infrastructure
 
@@ -828,7 +828,7 @@ level headings classify the tracked test paths listed beneath them.
 **mcp-tools**
 
 - `tests/mcp-tools/workflow-crud.test.ts`
-- `tests/mcp-tools/workflow-documentation.test.ts` — live authenticated help catalog and topic behavior, complete portable client/quickstart/agent-instruction content, configured endpoint and authentication guidance, ordinary topic semantics, Markdown shape, unknown-topic guidance, and direct typed tools detail
+- `tests/mcp-tools/workflow-documentation.test.ts` — live authenticated MCP-owned help catalog with canonical special-`tools` discoverability, presentation-model-derived client/quickstart/agent-instruction content, configured endpoint and authentication guidance, ordinary topic semantics, Markdown shape, unknown-topic guidance, and direct typed tools detail
 - `tests/mcp-tools/workflow-ownership.test.ts`
 - `tests/mcp-tools/workflow-pagination.test.ts`
 - `tests/mcp-tools/workflow-search.test.ts` — public workflow search and page metadata plus state-based registered MCP calls for list-nodes, get-nodes, analyze-variables, and set-visibility

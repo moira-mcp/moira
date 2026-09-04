@@ -162,6 +162,8 @@ Automatic node types (execute without agent interaction):
 - `tool-definitions.ts` is the side-effect-free source for MCP tool names, schemas, examples, runtime reference facts, public reference data, and `MCP_TOOLS_REVISION`
 - `tool-bindings.ts` exhaustively maps those tool identities to lazy executable handlers and response adapters in the MCP process
 - The public English and Russian tool references consume the pure contract directly during the documentation build
+- Non-`tools` help topics are MCP-owned semantic Markdown; runtime discovers the English corpus and public EN/RU shells import the same sources directly
+- Client setup text is projected once by the MCP help contract from the shared client registry and configuration/deeplink generators
 - `MCP_TOOLS_REVISION` is computed from stable client-visible facts and invalidates stale OAuth and persistent-token catalogs independently of the application version
 - A stale credential can run a valid singleton MCP `initialize` with the same token; only a successful result stamps that exact credential, while ordinary stale requests receive HTTP 426
 - System reminder integration in all responses

@@ -128,19 +128,23 @@ catalog invalidation input. The public docs package consumes the pure MCP contra
 refreshed. See the [public MCP tools reference](../packages/docs/src/content/docs/docs/reference/tools.mdx)
 for the direct catalog and action-specific behavior.
 
-Non-`tools` runtime help topics use a separate portable documentation layer. Topic IDs and
-frontmatter metadata are discovered from the English MDX shells under
-`packages/docs/src/content/docs/docs/`, while semantic Markdown is read from the matching path under
-`packages/docs/src/fragments/help/`. English and Russian public shells import the corresponding
-portable fragments; presentation-only Astro components remain in those shells. Runtime help never
-parses or removes MDX/JSX.
+Non-`tools` runtime help topics are owned by the MCP package under
+`packages/mcp-server/src/help/content/`. Runtime discovers topic IDs and metadata from the English
+semantic Markdown and reads the same sources that the English and Russian public MDX shells import
+through the `help-content` package export. Quick start and MCP clients compose authored before/after
+sections with client setup; agent instructions compose its authored section with the existing system
+prompt. The no-argument topic catalog adds the special `tools` entry from MCP-owned contract metadata,
+and that topic renders directly from the typed tool contract rather than a Markdown copy.
+Presentation-only Astro components remain in the shells, and runtime never parses or removes MDX/JSX.
 
 `renderPortableHelpTokens()` in `packages/shared/src/utils/portable-help.ts` is the shared resolver
 for configured MCP, Moira and static-artifact URLs and MCP client deeplinks. The MCP runtime applies
 it to complete Markdown, and the Astro remark adapter applies the same function to Markdown values
-and links. Registry-driven client setup and imported system instructions are generated with
-`npm run generate:portable-help`; `npm run check:portable-help` rejects stale generated fragments.
-The Docker runtime carries both the MDX metadata tree and the portable source tree.
+and links. `packages/mcp-server/src/help/client-presentation.ts` derives localized setup from the
+canonical shared client registry and its configuration, token and deeplink generators; runtime
+Markdown and `ClientSetupTabs.astro` consume that projection directly. The Docker runtime carries the
+MCP-owned help corpus and the existing checked-in default system prompt; public MDX is compiled only
+into the static documentation site.
 
 ### Enhanced Input Parsing
 

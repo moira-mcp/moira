@@ -5,7 +5,9 @@
   "main": "./src/server.ts",
   "exports": {
     ".": "./src/server.ts",
-    "./tool-contract": "./src/tools/tool-definitions.ts"
+    "./tool-contract": "./src/tools/tool-definitions.ts",
+    "./help-contract": "./src/help/help-contract.ts",
+    "./help-content/*": "./src/help/content/*"
   },
   "type": "module",
   "bin": {

@@ -7,8 +7,7 @@ import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
 import { MCP_TEST_DATA } from "../fixtures/mcp-test-data.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { mcpClients } from "../../packages/shared/src/mcp-clients/index.js";
-import { createT } from "../../packages/docs/src/i18n-server.js";
+import { getClientSetupPresentation } from "../../packages/mcp-server/src/help/client-presentation.js";
 
 const { DOCUMENTATION } = MCP_TEST_DATA;
 
@@ -33,7 +32,7 @@ describe("MCP Help System E2E", () => {
     expect(result).toContain("Available Help Topics");
     expect(result).toContain("overview");
     expect(result).toContain("nodes");
-    expect(result).toContain("tools");
+    expect(result).toContain("- `tools` - Complete reference for all MCP tools available in Moira");
 
     console.log(`✓ Topic list returned: ${result.length} characters`);
   });
@@ -141,19 +140,19 @@ describe("MCP Help System E2E", () => {
     const instructions = await callMCPTool<string>(client, "help", {
       topic: "agent-instructions",
     });
-    const t = createT("en");
+    const presentations = getClientSetupPresentation("en", "{MCP_URL}");
 
     expect(clients).toMatch(/https?:\/\/[^\s`]+\/mcp/);
     expect(quickstart).toMatch(/https?:\/\/[^\s`]+\/mcp/);
-    for (const configuredClient of mcpClients) {
-      const sectionStart = `### ${t(`quickStart.tabs.${configuredClient.id}.label`)}`;
+    for (const presentation of presentations) {
+      const sectionStart = `### ${presentation.label}`;
       expect(clients).toContain(sectionStart);
       const section = clients.split(sectionStart)[1]?.split("\n### ")[0];
       const titles = [
-        configuredClient.setup.primaryTitle,
-        configuredClient.setup.auth?.title,
-        configuredClient.setup.alternative?.title,
-        configuredClient.setup.tokenAuth?.title,
+        presentation.primary?.title,
+        presentation.auth?.title,
+        presentation.alternative?.title,
+        presentation.tokenAuth?.code.title,
       ].filter((title): title is string => Boolean(title));
       for (const title of titles) expect(section).toContain(`**${title}**`);
     }

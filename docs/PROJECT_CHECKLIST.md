@@ -72,7 +72,7 @@ For any code change that alters user-facing behavior (the variable model —
 workflow-definition schema; MCP tools — names/parameters/actions/descriptions; template
 syntax, magic variables, condition operators; workflow authoring rules):
 
-- [ ] The matching public MDX shells and portable sources (`packages/docs/src/content/docs/` and `packages/docs/src/fragments/help/`) are updated in the SAME change
+- [ ] The matching public MDX shells and semantic sources (`packages/docs/src/content/docs/` and `packages/mcp-server/src/help/content/`) are updated in the SAME change
 - [ ] BOTH versions are updated — English (`docs/...`) and Russian (`ru/docs/...`), in parity
 - [ ] All examples match current behavior (`variableRegistry`/`globalInputs` shapes, valid JSON, current command syntax)
 - [ ] Searching the public docs does not surface removed concepts (e.g. `initialData`) except as explicit negations
@@ -84,7 +84,7 @@ Details and criteria: `docs/DOCUMENTATION-STYLE-GUIDE.md`, section "Mandatory Sy
 - [ ] Pattern added to `docs/WORKFLOW.md`, section "Workflow Patterns"
 - [ ] Page created under `packages/docs/src/content/docs/docs/patterns/`
 - [ ] `packages/docs/astro.config.ts` updated (sidebar navigation)
-- [ ] Topic metadata is available via the MDX shell and its matching portable EN/RU sources exist
+- [ ] Topic metadata matches between the MDX shell and its MCP-owned semantic source, with both EN/RU sources present
 - [ ] `workflow-management-flow` updated with the pattern description in onboarding
 
 ### When adding a new node type:
@@ -113,7 +113,7 @@ Details and criteria: `docs/DOCUMENTATION-STYLE-GUIDE.md`, section "Mandatory Sy
 - [ ] Verify the pure MCP contract changes its deterministic revision and both runtime and EN/RU public references consume the same current model directly
 - [ ] Action-specific behavioral guidance updated in both localized public tool-reference pages when behavior changed
 - [ ] Topics added to the help tool if needed
-- [ ] Runtime-visible non-`tools` topics use matching portable EN/RU sources; generated sources pass `npm run check:portable-help`
+- [ ] Runtime-visible non-`tools` topics use matching MCP-owned EN/RU sources and direct composition; client setup uses the shared registry/config generators and MCP-owned localized presentation
 
   `MCP_TOOLS_REVISION` is computed directly from the pure MCP contract and invalidates OAuth and persistent-token catalogs when stable
   client-visible tool facts, including static default and agent/model description variants, change.

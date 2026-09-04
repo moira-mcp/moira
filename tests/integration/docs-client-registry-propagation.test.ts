@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, test } from "@jest/globals";
-import { renderClientSetupMarkdown } from "../../packages/docs/src/utils/client-setup-markdown.js";
+import { renderClientSetupMarkdown } from "../../packages/mcp-server/src/help/client-presentation.js";
 import { mcpClients } from "../../packages/shared/src/mcp-clients/index.js";
 import { renderPortableHelpTokens } from "../../packages/shared/src/utils/portable-help.js";
 import {
@@ -45,7 +45,7 @@ describe("client registry presentation propagation", () => {
 
       expect(registryWithAddedClient).toHaveLength(mcpClients.length + 1);
       for (const presentation of [publicHtml, portableMarkdown]) {
-        expect(presentation).toContain("quickStart.tabs.fixture-client.label");
+        expect(presentation).toContain("Fixture Client");
         expect(presentation).toContain("Fixture Registry Addition");
         expect(presentation).toContain("cursor://anysphere.cursor-deeplink/mcp/install");
       }

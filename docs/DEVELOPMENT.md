@@ -221,6 +221,7 @@ packages/mcp-server/src/tools/tool-schemas.ts      # Canonical side-effect-free 
 packages/mcp-server/src/tools/tool-descriptions.ts # Typed static description data and variants
 packages/mcp-server/src/tools/tool-definitions.ts  # Pure MCP contract, reference model, and revision
 packages/mcp-server/src/tools/tool-bindings.ts     # Exhaustive lazy executable bindings and adapters
+packages/mcp-server/src/help/      # Portable EN/RU help sources and client presentation contract
 packages/mcp-server/src/messages/  # Centralized English messages (i18n ready)
 src/server.ts       # StreamableHTTPServerTransport (stateless mode)
 packages/web-backend/           # Express API server (internal port 4201)
