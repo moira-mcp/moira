@@ -81,7 +81,7 @@ export function generateCopilotCliConfig(mcpUrl: string): string {
 export function generateContinueConfig(mcpUrl: string): string {
   return `mcpServers:
   - name: moira
-    url: ${mcpUrl}`;
+    url: ${JSON.stringify(mcpUrl)}`;
 }
 
 /**
@@ -190,7 +190,7 @@ export function generateCopilotCliConfigWithToken(mcpUrl: string): string {
 export function generateContinueConfigWithToken(mcpUrl: string): string {
   return `mcpServers:
   - name: moira
-    url: ${mcpUrl}
+    url: ${JSON.stringify(mcpUrl)}
     headers:
       Authorization: "Bearer ${TOKEN_PLACEHOLDER}"`;
 }

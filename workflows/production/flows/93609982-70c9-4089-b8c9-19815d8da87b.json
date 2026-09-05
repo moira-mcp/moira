@@ -2,22 +2,42 @@
   "id": "93609982-70c9-4089-b8c9-19815d8da87b",
   "metadata": {
     "name": "Todo List",
-    "version": "3.4.7",
-    "description": "Executes a finite checklist sequentially with minimal orchestration. It accepts an already supplied typed task list or gathers one bounded list, derives the total and one-based cursor in the engine, projects exactly the current task, requires one concise evidence acknowledgement after real completion, and advances without asking for approval between items. A guarded mid-run revision can replace the checklist while keeping completed positions unchanged and resuming from an explicit task number; engine-derived totals and cursors prevent contradictory state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation."
+    "version": "3.5.0",
+    "description": "Executes a finite caller-owned checklist sequentially with minimal orchestration. It materializes one canonical domain-neutral guide before intake, requires every substantive agent responsibility to read it, and keeps checklist, evidence, progress, revision and authority rules in one source without suppressing requested inventories, metrics or log analysis. It accepts an already supplied typed task list or gathers one bounded list, separates content ownership from dependency ordering, derives total and one-based cursor in the engine, projects exactly the current task, advances only after concise verified evidence, and asks for no approval between items. A guarded mid-run revision preserves completed positions and resumes from an explicit task number while the engine recomputes derived state. Todo List intentionally has no plan-design review, per-item retry budget, recovery protocol, aggregate result report or final semantic reviewer. Choose it when the caller already knows the checklist and needs durable cursor progress; use Quick Task when a bounded task needs planning and independent review, Robust Task for retry/recovery and critical work, or Software Development Flow for repository implementation."
   },
   "nodes": [
     {
       "id": "start",
       "type": "start",
       "connections": {
-        "default": "obtain-tasks"
+        "default": "materialize-workflow-guide"
+      }
+    },
+    {
+      "id": "materialize-workflow-guide",
+      "type": "materialize",
+      "basePath": "./moira-ws/todo-list-{{executionId}}/",
+      "files": [
+        {
+          "path": "workflow-guide.md",
+          "from": "workflow_guide"
+        }
+      ],
+      "connections": {
+        "success": "obtain-tasks"
+      },
+      "progressNodeId": "checklist",
+      "progressActiveLabel": "Materialize checklist guide",
+      "progressActiveContent": {
+        "summary": "Materialize the canonical Todo List guide for this execution",
+        "next": "Read the guide and establish the authoritative checklist"
       }
     },
     {
       "id": "obtain-tasks",
       "type": "agent-directive",
-      "directive": "Obtain the complete checklist for the user's current goal, ordered so that it can be worked through in that order.\n\nWhen the user or caller already supplied the tasks as a ready array matching the required schema, their content belongs to whoever wrote it: return every item they gave, with its wording and scope unchanged, drop nothing, and add no work they did not ask for. The order is yours to establish, because you are the one who can see which item cannot start until another has produced what it needs. A list written by a person records their thinking rather than a queue: the condition the first item depends on is often realised while writing the third and written down there, and a remark that governs the whole job can sit in the middle looking like another item. Place each item where its prerequisites already hold, and treat such a remark as a constraint on the items it governs rather than as a task of its own. Where the resulting order differs from the written one, the difference and the dependency that caused it are visible to the author before any work starts, so they can correct you rather than discover it afterwards. Where two supplied items each need the other's result, no order satisfies both: name that pair to the author instead of choosing silently.\n\nOtherwise plan the checklist once. Return 1 to 100 self-contained tasks. Each action must name the concrete work, relevant constraints, and verification. Each expected_result must describe an observable completion condition. Do not execute tasks in this step and do not add IDs, statuses, result codes, counters, or reporting fields.\n\nProgress outcome ownership: In the same response, return progress_checklist_outcome as a concise bounded synopsis of the authoritative ordered checklist without copying the whole list. Replace the prior value; do not append history, predict execution, or treat the synopsis as proof that a task is complete.",
-      "completionCondition": "One bounded typed task array and one bounded checklist synopsis are returned: either unchanged in content from a supplied schema-valid list, or planned once from the current goal. In the supplied case, supplied items keep their content, none is lost, nothing unrequested is added, a remark that governs the whole job constrains the items it governs instead of becoming one, any difference from the written order is visible to the author before work starts, and every item stands where its prerequisites already hold, except a pair that each need the result of the other, which is named to the author. The progress synopsis reflects the authoritative ordered checklist without claiming execution.",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`, the user's complete request, and applicable primary sources. Obtain the complete authoritative ordered checklist under that guide.\n\nReuse a caller-supplied schema-valid task array when one is already present; otherwise plan the checklist once. If no valid dependency order exists, report the exact cycle to the author and do not submit an invalid checklist. Do not execute any task in this step.\n\nReturn `tasks` and replace `progress_checklist_outcome` with a concise bounded synopsis of the authoritative checklist. Do not predict execution or treat the synopsis as proof that work is complete.",
+      "completionCondition": "One guide-compliant bounded typed task array and one bounded checklist synopsis are returned without executing tasks; an unsatisfiable dependency cycle is reported instead of submitted.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -84,8 +104,8 @@
     {
       "id": "execute-task",
       "type": "agent-directive",
-      "directive": "Execute task {{current_task}} of {{total_tasks}}. Action: {{current_task_action}}. Expected result: {{current_task_expected_result}}. Perform the real work and verify the expected result before calling step(). If the task is incomplete or blocked, do not call step(); report the verified blocker to the user. After successful completion, return one concise evidence string describing the concrete check that passed and progress_execution_outcome as a bounded synopsis of the task outcome in the same response. Replace the prior progress outcome; do not append history or use it as a substitute for the evidence. Do not ask the user to approve tasks between steps. After the last task, let the workflow end without inventing a separate summary or result report.",
-      "completionCondition": "The current task is completed, its expected result is verified, one concise evidence string is returned, and the bounded Work outcome truthfully replaces the latest completed-task synopsis without substituting for evidence",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`. Execute task {{current_task}} of {{total_tasks}} under its actual authority.\n\nAction: {{current_task_action}}\n\nExpected result: {{current_task_expected_result}}\n\nPerform the real work and verify the expected result before calling `step()`. If the task is incomplete or blocked, do not call `step()`; report the verified blocker to the user and keep this task current.\n\nAfter successful completion, return one concise `evidence` string naming the concrete observation that passed and replace `progress_execution_outcome` with a bounded synopsis of the task outcome. After the last task, let the workflow end; do not ask for approval between tasks or add an aggregate result report.",
+      "completionCondition": "The guide-compliant current task is complete, its expected result is verified, and one bounded evidence acknowledgement plus the current Work outcome are returned before cursor advancement.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -134,8 +154,8 @@
       "id": "teleport-revise-tasks",
       "type": "teleport",
       "hint": "Jump here when the checklist itself no longer describes the work that must happen: remaining tasks turned out wrong, obsolete, missing, or in the wrong order. Not for a task that is merely hard, blocked, or failing — report that blocker to the user and stay on the task.",
-      "directive": "You jumped here because the checklist no longer matches the work that must happen. Return the complete corrected checklist and the position to continue from.\n\nKeep every task you have already executed at its original position and unchanged in meaning: position is task identity, and the run resumes by position. Change only what is still ahead — rewrite, drop, add, or reorder it — and keep each task self-contained, naming the concrete work, its constraints, and how it is verified.\n\nReturn resume_from_task as the position of the first task to execute now. Everything before that position is treated as already done and will not be executed again. Do not add ids, statuses, result codes, counters, or reporting fields, and do not use this jump to escape a task that is simply hard or blocked.\n\nProgress outcome ownership: In the same response, replace progress_checklist_outcome with a concise bounded synopsis of the corrected authoritative checklist. Atomically replace progress_execution_outcome with only the latest completed-task outcome that remains true for the unchanged completed prefix, or Pending when no completed outcome remains. Do not append history, preserve a superseded task outcome, or predict unfinished work.",
-      "completionCondition": "The complete corrected checklist preserves already executed tasks in their original positions; the position to continue from is returned; the checklist synopsis reflects that replacement; and the Work outcome atomically retains only a still-true completed prefix result or Pending",
+      "directive": "Read `./moira-ws/todo-list-{{executionId}}/workflow-guide.md`. You jumped here because the authoritative checklist no longer matches the work that must happen. Return the complete corrected `tasks` array and `resume_from_task`, the first position that still requires execution.\n\nKeep the completed positional prefix unchanged in meaning and change only unfinished work. Do not use this jump to escape a task that is merely hard, blocked, or failing.\n\nAtomically replace `progress_checklist_outcome` with a bounded synopsis of the corrected checklist and replace `progress_execution_outcome` with only the latest completed-task outcome that remains true for the preserved prefix, or `Pending` when none remains. Do not predict unfinished work.",
+      "completionCondition": "A guide-compliant corrected checklist preserves the completed positional prefix, returns the explicit resume position, and atomically replaces both bounded progress outcomes with only current truth.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -253,6 +273,12 @@
       "default": "Pending",
       "minLength": 1,
       "maxLength": 500
+    },
+    "workflow_guide": {
+      "type": "string",
+      "description": "Canonical domain-neutral Todo List checklist, evidence, revision, record-boundary, and authority guide.",
+      "minLength": 1,
+      "default": "# Todo List guide\n\nThese rules define outcomes for a general Todo List run. A rule that does not apply to the current task is already satisfied and requires no artifact or evidence of inapplicability.\n\n## Preserve content while ordering work\n\nA caller-supplied schema-valid checklist keeps every item, its wording, and its scope; nothing is dropped or added. The executor may reorder unfinished items so each prerequisite exists before its consumer, must expose that reordering before work starts, and must report a real dependency cycle instead of silently choosing an invalid order. Content and order are separate responsibilities: freezing written order can execute work before its prerequisites, while rewriting content silently changes the caller's request.\n\nA remark that governs several items remains a constraint on those items rather than becoming decorative work of its own. When no ready checklist exists, create the complete bounded checklist once without executing it. Each item carries enough goal, applicable constraint, and observable expected result to be executable on its own, but does not repeat unrelated shared doctrine; unconditional redundancy creates drifting copies and turns the checklist into the deliverable.\n\n## Complete and evidence the real task\n\nPerform the projected task under its actual requirements and verify the expected result before reporting success. Evidence names the concrete observation that distinguishes completion from a plausible incomplete state; a success-shaped acknowledgement without that observation can advance the cursor while the work remains undone. A blocked or incomplete task remains current and is reported truthfully rather than submitted as success.\n\n## Keep process records useful\n\nChecklist items contain the work, its applicable constraints, and its expected result. Evidence contains the result and distinguishing observation. Progress contains only the bounded current synopsis needed by the user. Exclude tool transcripts, copied raw output, search history, timings, hashes, decorative command/file/action inventories, activity diaries, and nonfunctional volume counts because they do not help a later reader execute, route, or judge the task.\n\nAn inventory, metric, test count, log analysis, or similar material remains valid when it is the requested domain result. Only incidental process narration about producing it is excluded; otherwise an anti-noise rule would silently narrow the caller's task.\n\n## Revise by positional identity\n\nUse checklist revision only when the checklist itself no longer describes the required remaining work, never to escape a task that is merely hard, blocked, or failing. Preserve completed items at their original positions and unchanged in meaning, change only the unfinished tail, and return the first position that still requires execution. Position is task identity; changing the completed prefix or restarting it loses reliable knowledge of what has already happened.\n\nReplace checklist and progress state atomically with the new truth, retaining only a latest completed outcome that remains true. The engine derives totals, projection indices, and cursors from the checklist and resume position; parallel IDs, counts, statuses, result codes, or histories can disagree with the route and make resumption ambiguous.\n\n## Preserve authority\n\nThe originating request is the authority ceiling. Checklist acquisition, autonomous execution, or tool availability does not authorize unrelated publication, destructive action, environment change, deployment, or version-control work. This prevents a convenient tool or a broad task description from becoming permission for a different external effect."
     }
   },
   "progress": {

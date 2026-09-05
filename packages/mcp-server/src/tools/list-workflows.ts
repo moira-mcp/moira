@@ -3,7 +3,8 @@
  * Pure library function - no CLI behavior
  */
 
-import { z } from "zod";
+import { listWorkflowsSchema } from "./tool-schemas.js";
+export { listWorkflowsSchema };
 import { MCPEngine } from "../core/mcp-engine.js";
 import {
   ToolResult,
@@ -23,23 +24,6 @@ import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "ListWorkflows" });
 
-export const listWorkflowsSchema = z.object({
-  search: z.string().optional().describe("Search in workflow name and description"),
-  visibility: z
-    .enum(["public", "private", "all"])
-    .optional()
-    .describe("Filter by visibility (default: all accessible)"),
-  sort: z.enum(["createdAt", "name"]).optional().describe("Sort field (default: createdAt)"),
-  sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort order (default: desc)"),
-  limit: z
-    .number()
-    .min(1)
-    .max(100)
-    .optional()
-    .describe("Number of results (default: 20, max: 100)"),
-  offset: z.number().min(0).optional().describe("Offset for pagination (default: 0)"),
-});
-
 export async function listWorkflows(
   params: ListWorkflowsParams = {},
 ): Promise<ToolResult<ListWorkflowsResult>> {
@@ -47,6 +31,8 @@ export async function listWorkflows(
     // Get authenticated user context
     const { userId } = getUserContext();
     const engine = MCPEngine.getInstance();
+    const offset = params.offset ?? 0;
+    const limit = params.limit ?? 20;
 
     // Use singleton MCPEngine for shared state management
     const result = await engine.listWorkflows({
@@ -54,9 +40,19 @@ export async function listWorkflows(
       visibility: params.visibility,
       sort: params.sort,
       sortOrder: params.sortOrder,
-      limit: params.limit,
-      offset: params.offset,
+      limit,
+      offset,
     });
+    const returnedCount = result.workflows.length;
+    const hasMore = offset + limit < result.total;
+    const response: ListWorkflowsResult = {
+      ...result,
+      offset,
+      limit,
+      returnedCount,
+      hasMore,
+      nextOffset: hasMore ? offset + limit : null,
+    };
 
     // Audit log for workflow list
     await logAuditEventDirect(engine.repository as DatabaseRepository, {
@@ -68,20 +64,20 @@ export async function listWorkflows(
       metadata: {
         search: params.search,
         visibility: params.visibility,
-        resultCount: result.workflows.length,
+        resultCount: returnedCount,
       },
     });
 
     // Add hint if no workflows found
-    if (result.workflows.length === 0 && (params.search || params.visibility)) {
+    if (returnedCount === 0 && (params.search || params.visibility)) {
       return {
         success: true,
-        data: result,
+        data: response,
         // Add contextual hint for empty results
       };
     }
 
-    return { success: true, data: result };
+    return { success: true, data: response };
   } catch (error) {
     // Normalize to AppError for consistent handling
     const appError = normalizeError(error);

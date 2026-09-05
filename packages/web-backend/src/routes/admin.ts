@@ -1302,7 +1302,7 @@ router.delete(
  * Used by MCP Prompts Editor to load values for editing
  *
  * Body: { promptType: string, vendor: "default"|"claude"|"chatgpt"|"gemini"|"cursor", model?: string }
- * promptType: "systemPrompt" | "systemReminder" | "toolDescription.{toolName}"
+ * promptType: "systemPrompt" | "systemReminder"
  */
 router.post(
   "/global-settings/get-scope-value",
@@ -1338,18 +1338,9 @@ router.post(
       } else {
         settingKey = MCP_TEXT_KEYS.agentSystemReminder(vendor);
       }
-    } else if (promptType.startsWith("toolDescription.")) {
-      const toolName = promptType.replace("toolDescription.", "");
-      if (isDefault) {
-        settingKey = MCP_TEXT_KEYS.toolDescription(toolName);
-      } else if (model) {
-        settingKey = MCP_TEXT_KEYS.modelToolDescription(vendor, model, toolName);
-      } else {
-        settingKey = MCP_TEXT_KEYS.agentToolDescription(vendor, toolName);
-      }
     } else {
       throw createApiError.validationFailed(
-        "Invalid promptType. Must be systemPrompt, systemReminder, or toolDescription.{toolName}",
+        "Invalid promptType. Must be systemPrompt or systemReminder",
       );
     }
 
@@ -1398,28 +1389,9 @@ router.post(
 
     // Validate promptType format
     const VALID_PROMPT_TYPES = ["systemPrompt", "systemReminder"] as const;
-    const VALID_TOOL_NAMES = [
-      "list",
-      "start",
-      "step",
-      "manage",
-      "help",
-      "settings",
-      "token",
-      "session",
-    ] as const;
-
-    let validatedToolName: string | undefined;
-    if (promptType.startsWith("toolDescription.")) {
-      validatedToolName = promptType.replace("toolDescription.", "");
-      if (!VALID_TOOL_NAMES.includes(validatedToolName as (typeof VALID_TOOL_NAMES)[number])) {
-        throw createApiError.validationFailed(
-          `Invalid tool name: ${validatedToolName}. Must be one of: ${VALID_TOOL_NAMES.join(", ")}`,
-        );
-      }
-    } else if (!VALID_PROMPT_TYPES.includes(promptType as (typeof VALID_PROMPT_TYPES)[number])) {
+    if (!VALID_PROMPT_TYPES.includes(promptType as (typeof VALID_PROMPT_TYPES)[number])) {
       throw createApiError.validationFailed(
-        `Invalid promptType: ${promptType}. Must be systemPrompt, systemReminder, or toolDescription.{toolName}`,
+        `Invalid promptType: ${promptType}. Must be systemPrompt or systemReminder`,
       );
     }
 
@@ -1448,15 +1420,9 @@ router.post(
         settingKey = MCP_TEXT_KEYS.agentSystemReminder(vendor);
       }
     } else {
-      // toolDescription.{toolName} - already validated above
-      const toolName = validatedToolName!;
-      if (isDefault) {
-        settingKey = MCP_TEXT_KEYS.toolDescription(toolName);
-      } else if (model) {
-        settingKey = MCP_TEXT_KEYS.modelToolDescription(vendor, model, toolName);
-      } else {
-        settingKey = MCP_TEXT_KEYS.agentToolDescription(vendor, toolName);
-      }
+      throw createApiError.validationFailed(
+        "Invalid promptType. Must be systemPrompt or systemReminder",
+      );
     }
 
     // Check if setting exists
@@ -1483,8 +1449,9 @@ router.post(
         } else if (promptType === "systemReminder") {
           label = model ? `${modelLabel} - System Reminder` : `${vendorLabel} - System Reminder`;
         } else {
-          const toolName = promptType.replace("toolDescription.", "");
-          label = model ? `${modelLabel} - ${toolName}` : `${vendorLabel} - ${toolName}`;
+          throw createApiError.validationFailed(
+            "Invalid promptType. Must be systemPrompt or systemReminder",
+          );
         }
 
         // Create the override setting
@@ -1538,21 +1505,19 @@ router.post(
  * Returns the resolved prompt after applying override hierarchy (model → agent → default)
  * Useful for admin testing prompt overrides before publishing
  *
- * Body: { agent?: string, model?: string, type: "toolDescription" | "systemPrompt" | "systemReminder", toolName?: string }
+ * Body: { agent?: string, model?: string, type: "systemPrompt" | "systemReminder" }
  */
 router.post(
   "/global-settings/preview-prompt",
   asyncHandler(async (req: Request, res: Response) => {
-    const { agent, model, type, toolName } = req.body;
+    const { agent, model, type } = req.body;
 
     if (!type) {
-      throw createApiError.validationFailed(
-        "type is required (toolDescription, systemPrompt, or systemReminder)",
-      );
+      throw createApiError.validationFailed("type is required (systemPrompt or systemReminder)");
     }
 
-    if (type === "toolDescription" && !toolName) {
-      throw createApiError.validationFailed("toolName is required for toolDescription type");
+    if (type !== "systemPrompt" && type !== "systemReminder") {
+      throw createApiError.validationFailed("Invalid type. Must be systemPrompt or systemReminder");
     }
 
     const mcpTextService = getMcpTextService();
@@ -1569,36 +1534,7 @@ router.post(
       return setting !== null && setting.value !== null;
     };
 
-    if (type === "toolDescription") {
-      value = await mcpTextService.getToolDescriptionWithOverride(toolName, context);
-
-      // Determine which level the value came from
-      if (model && agent) {
-        const modelKey = MCP_TEXT_KEYS.modelToolDescription(agent, model, toolName);
-        if (await hasValue(modelKey)) {
-          resolvedFrom = "model";
-          resolvedKey = modelKey;
-        } else {
-          const agentKey = MCP_TEXT_KEYS.agentToolDescription(agent, toolName);
-          if (await hasValue(agentKey)) {
-            resolvedFrom = "agent";
-            resolvedKey = agentKey;
-          } else {
-            resolvedKey = MCP_TEXT_KEYS.toolDescription(toolName);
-          }
-        }
-      } else if (agent) {
-        const agentKey = MCP_TEXT_KEYS.agentToolDescription(agent, toolName);
-        if (await hasValue(agentKey)) {
-          resolvedFrom = "agent";
-          resolvedKey = agentKey;
-        } else {
-          resolvedKey = MCP_TEXT_KEYS.toolDescription(toolName);
-        }
-      } else {
-        resolvedKey = MCP_TEXT_KEYS.toolDescription(toolName);
-      }
-    } else if (type === "systemPrompt") {
+    if (type === "systemPrompt") {
       value = await mcpTextService.getSystemPromptWithOverride(context);
 
       // Determine which level the value came from
@@ -1657,9 +1593,7 @@ router.post(
         resolvedKey = MCP_TEXT_KEYS.systemReminder;
       }
     } else {
-      throw createApiError.validationFailed(
-        "Invalid type. Must be toolDescription, systemPrompt, or systemReminder",
-      );
+      throw createApiError.validationFailed("Invalid type. Must be systemPrompt or systemReminder");
     }
 
     res.json({
@@ -1672,7 +1606,6 @@ router.post(
           agent: agent || null,
           model: model || null,
           type,
-          ...(toolName && { toolName }),
         },
       },
       timestamp: new Date().toISOString(),

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { manageReconciliationSchema } from "./tool-schemas.js";
+export { manageReconciliationSchema };
 import { eq } from "drizzle-orm";
 import {
   getDatabase,
@@ -13,19 +15,6 @@ import {
 } from "@mcp-moira/shared";
 import { getUserContext } from "../core/request-context.js";
 import { sanitizeMcpError } from "../utils/error-sanitizer.js";
-
-export const manageReconciliationSchema = z.object({
-  action: z.enum(["status", "get", "resolve"]),
-  reference: z.string().optional(),
-  selection: z.enum(["current", "incoming", "previous"]).optional(),
-  revision: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .optional(),
-  rationale: z.string().trim().min(1).max(2000).optional(),
-  mergedGraph: z.record(z.unknown()).optional(),
-  visibility: z.enum(["public", "private"]).optional(),
-});
 
 export async function manageReconciliation(params: z.infer<typeof manageReconciliationSchema>) {
   try {

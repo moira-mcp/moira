@@ -100,8 +100,9 @@ describe("quick-task scenarios", () => {
     expect(validation.errors).toHaveLength(0);
     // Pinned so a directive change cannot ship without the version that publishes it, and without
     // this file being reopened alongside the flow.
-    expect(workflow.metadata.version).toBe("4.4.4");
+    expect(workflow.metadata.version).toBe("4.5.0");
     expect(workflow.metadata.description).toContain("bounded non-development task");
+    expect(workflow.metadata.description).toContain("autonomous runs present the result and end");
     expect(workflow.metadata.description).toContain("Todo List");
   });
 
@@ -112,7 +113,7 @@ describe("quick-task scenarios", () => {
         node.inputSchema?.required?.some((field) => field.startsWith("progress_")),
     );
 
-    expect(progressResponseNodes).toHaveLength(12);
+    expect(progressResponseNodes).toHaveLength(13);
     for (const node of progressResponseNodes) {
       expect(node.directive).not.toMatch(exclusiveResponseShape);
     }
@@ -216,7 +217,7 @@ describe("quick-task scenarios", () => {
       "subgraph",
     ]);
     const waitingNodes = workflow.nodes.filter((node) => waitingTypes.has(node.type));
-    expect(waitingNodes).toHaveLength(12);
+    expect(waitingNodes).toHaveLength(13);
     expect(waitingNodes.every((node) => Boolean(node.progressNodeId))).toBe(true);
     expect(
       waitingNodes.every(
@@ -343,6 +344,25 @@ describe("quick-task scenarios", () => {
         progress_result_outcome: progressOutcome.result,
       }),
     ).toBe(false);
+    expect(
+      validateResultDecision({
+        progress_result_outcome: progressOutcome.result,
+      }),
+    ).toBe(false);
+
+    const validateAutonomousResult = ajv.compile(schema("present-autonomous-result"));
+    expect(
+      validateAutonomousResult({
+        progress_result_outcome: "Reviewed result presented without invented acceptance",
+      }),
+    ).toBe(true);
+    expect(
+      validateAutonomousResult({
+        decision: "accept",
+        decision_file: resultDecisionFile(1),
+        progress_result_outcome: progressOutcome.result,
+      }),
+    ).toBe(false);
 
     const outputKeys = new Set<string>();
     for (const node of workflow.nodes) {
@@ -385,8 +405,13 @@ describe("quick-task scenarios", () => {
     expect(directive("revise-plan")).toContain("decision record");
     expect(directive("revise-plan")).toContain("mid-execution replan");
     expect(directive("execute-step")).toContain("{{get-task.execution_file}}");
+    expect(directive("execute-step")).toContain(
+      "When an inventory, metric, log analysis, or similar artifact is the requested result",
+    );
+    expect(directive("execute-step")).toContain("exclude only process noise about producing it");
     expect(directive("fix-issues")).toContain("{{final-review.review_file}}");
     expect(directive("rework")).toContain("{{present-to-user.decision_file}}");
+    expect(directive("present-autonomous-result")).not.toContain("decision file path");
 
     // A plan unit fixes what must become true, the evidence that would accept it, and what it
     // depends on; it does not carry the deliverable. The rule
@@ -478,6 +503,14 @@ describe("quick-task scenarios", () => {
     expect(connection("revise-plan")).toBe("plan-review");
     expect(connection("final-review")).toBe("check-review-clean");
     expect(connection("check-review-clean", "false")).toBe("fix-issues");
+    expect(connection("check-review-clean", "true")).toBe(
+      "route-operating-mode-result-presentation",
+    );
+    expect(connection("route-operating-mode-result-presentation", "true")).toBe(
+      "present-autonomous-result",
+    );
+    expect(connection("route-operating-mode-result-presentation", "false")).toBe("present-to-user");
+    expect(connection("present-autonomous-result")).toBe("end");
     expect(connection("fix-issues")).toBe("final-review");
     expect(connection("rework")).toBe("final-review");
 
@@ -529,6 +562,10 @@ describe("quick-task scenarios", () => {
             operating_mode: "autonomous",
             progress_scope_outcome: "Task contract captured with autonomous mode",
           },
+          "present-autonomous-result": {
+            progress_result_outcome:
+              "Reviewed autonomous result presented without invented acceptance",
+          },
         },
         expect: {
           status: "completed",
@@ -536,10 +573,11 @@ describe("quick-task scenarios", () => {
             "route-operating-mode-plan-approval",
             "execute-step",
             "final-review",
-            "present-to-user",
+            "route-operating-mode-result-presentation",
+            "present-autonomous-result",
             "end",
           ],
-          avoids: ["present-plan", "revise-plan"],
+          avoids: ["present-plan", "revise-plan", "present-to-user", "check-user-accepts"],
         },
       },
       {
@@ -555,6 +593,7 @@ describe("quick-task scenarios", () => {
             "execute-step",
             "close-completed-step",
             "final-review",
+            "route-operating-mode-result-presentation",
             "present-to-user",
             "end",
           ],

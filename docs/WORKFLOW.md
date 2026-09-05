@@ -22,12 +22,13 @@
 
 ```typescript
 // MCP tool
-mcp__moira__start({ workflowId: "workflow-id" });
+mcp__moira__start({ workflowId: "workflow-id", parentExecutionId: "none" });
 
 // With note for identification
 mcp__moira__start({
   workflowId: "workflow-id",
   note: "Task: implement feature X",
+  parentExecutionId: "none",
 });
 
 // With parent linking
@@ -633,7 +634,7 @@ step({ processId: "abc123", teleportTo: "teleport-replan" })
 
 ### Lock Node
 
-PIN-based execution gate. Creates an execution lock, sends PIN via Telegram with Approve inline keyboard, and pauses workflow until unlocked.
+PIN-based execution gate. It delivers a generated PIN to the current user's configured Telegram chat with an Approve inline keyboard and pauses only after delivery succeeds.
 
 ```json
 {
@@ -653,12 +654,14 @@ PIN-based execution gate. Creates an execution lock, sends PIN via Telegram with
 
 **Behavior:**
 
-1. First visit: creates lock via LockService, sends PIN via Telegram, pauses execution
-2. Subsequent visits: checks lock status or validates PIN from input
-3. Routes to `unlocked` connection when lock is resolved
-4. Stores `_lockId` in context variables for lock lookup on re-entry
+1. `start()` requires a valid-shaped Telegram bot token and chat ID for the current user before creating an execution whose graph contains a lock node. `skipTelegramCheck` cannot bypass this check.
+2. On first visit, `LockHandler` asks the trusted-delivery service to create a hashed pending PIN, send the plaintext PIN to that configured chat, and activate the exact lock. It stores `_lockId` and pauses only after the service succeeds.
+3. Missing or malformed settings fail before PIN generation. Send or activation failure publishes no `_lockId`; pending and `delivery_failed` records are not active or public and re-entry starts a fresh delivery attempt.
+4. Subsequent visits check the referenced lock or validate a user-supplied PIN and route through `connections.unlocked` after resolution.
 
-**Unlock methods:** PIN validation via MCP step input, Telegram approve button, admin override unlock.
+MCP and workflow responses contain only non-secret lock metadata. The authenticated Web creation route separately returns a one-time PIN to the human execution owner.
+
+**Unlock methods:** PIN validation via workflow step or MCP lock input, Telegram Approve button, Web owner unlock, or admin override unlock.
 
 ### Materialize Node
 

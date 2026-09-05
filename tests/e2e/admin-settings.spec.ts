@@ -5,7 +5,6 @@
  *
  * The new UI uses McpPromptsEditor with:
  * - System Prompts section (systemPrompt, systemReminder)
- * - Tool Descriptions section (list, start, step, manage, help, settings, session, token)
  * - Each prompt has Scope dropdown (Default, Claude, ChatGPT, Gemini, Cursor)
  * - Each prompt has Model dropdown (when non-default scope)
  * - Export/Import functionality for settings
@@ -20,17 +19,6 @@ const BASE_URL = getTestBaseUrl();
 // Test IDs from McpPromptsEditor component
 const MCP_PROMPT_PREFIX = "mcp-prompt";
 const SYSTEM_PROMPTS = ["systemPrompt", "systemReminder"] as const;
-const TOOL_DESCRIPTIONS = [
-  "toolDescription-list",
-  "toolDescription-start",
-  "toolDescription-step",
-  "toolDescription-manage",
-  "toolDescription-help",
-  "toolDescription-settings",
-  "toolDescription-session",
-  "toolDescription-token",
-] as const;
-
 /**
  * Wait for MCP Prompts Editor to load
  */
@@ -95,19 +83,12 @@ test.describe("Global Settings Page - MCP Prompts Editor", () => {
     await expect(systemReminderCard).toBeVisible();
   });
 
-  test("should display tool description editors", async ({ page }) => {
+  test("should not display retired tool description editors", async ({ page }) => {
     await waitForMcpPromptsEditor(page);
 
-    // Check for Tool Descriptions section in nav
     const toolDescHeading = page.getByRole("heading", { name: "Tool Descriptions" });
-    await expect(toolDescHeading).toBeVisible();
-
-    // Click each tool description nav item and verify the editor appears
-    const toolsToCheck = ["toolDescription-list", "toolDescription-start", "toolDescription-step"];
-    for (const tool of toolsToCheck) {
-      await selectPromptInNav(page, tool);
-      await expect(page.getByTestId(getPromptTestId(tool))).toBeVisible();
-    }
+    await expect(toolDescHeading).toHaveCount(0);
+    await expect(page.locator('[data-testid^="prompt-item-toolDescription-"]')).toHaveCount(0);
   });
 
   test("should display scope dropdown for each prompt", async ({ page }) => {
@@ -218,48 +199,13 @@ test.describe("Global Settings Page - MCP Prompts Editor", () => {
     await expect(saveBtn).toBeDisabled();
   });
 
-  test("should save prompt changes and persist after reload", async ({ page }) => {
+  test("should keep the retired tool-description editor absent after reload", async ({ page }) => {
     await waitForMcpPromptsEditor(page);
-
-    // Select toolDescription-list in nav (master-detail layout)
-    await selectPromptInNav(page, "toolDescription-list");
-
-    // Use toolDescription-list to avoid conflict with mcp-prompts.spec.ts which uses systemPrompt/systemReminder
-    const textarea = page.getByTestId(getPromptTestId("toolDescription-list", "input"));
-    const saveBtn = page.getByTestId(getPromptTestId("toolDescription-list", "save"));
-
-    // Get original value
-    const originalValue = await textarea.inputValue();
-    const testMarker = ` E2E_SAVE_TEST_${Date.now()}`;
-
-    // Make a change
-    await textarea.fill(originalValue + testMarker);
-    await expect(saveBtn).toBeEnabled();
-
-    // Save and wait for button to become disabled (indicates save completed)
-    await saveBtn.click();
-    await expect(saveBtn).toBeDisabled({ timeout: 10000 });
-    // Additional wait for DB persistence
-    await page.waitForTimeout(500);
-
-    // Reload page
+    await expect(page.locator('[data-testid^="prompt-item-toolDescription-"]')).toHaveCount(0);
     await page.reload();
     await page.waitForLoadState("domcontentloaded");
     await waitForMcpPromptsEditor(page);
-
-    // Re-select toolDescription-list in nav after reload
-    await selectPromptInNav(page, "toolDescription-list");
-
-    // Verify change persisted
-    const reloadedTextarea = page.getByTestId(getPromptTestId("toolDescription-list", "input"));
-    const savedValue = await reloadedTextarea.inputValue();
-    expect(savedValue).toContain("E2E_SAVE_TEST_");
-
-    // Clean up: restore original value
-    await reloadedTextarea.fill(originalValue);
-    const cleanupSaveBtn = page.getByTestId(getPromptTestId("toolDescription-list", "save"));
-    await cleanupSaveBtn.click();
-    await expect(cleanupSaveBtn).toBeDisabled({ timeout: 10000 });
+    await expect(page.locator('[data-testid^="prompt-item-toolDescription-"]')).toHaveCount(0);
   });
 
   test("should display character count", async ({ page }) => {
@@ -734,13 +680,8 @@ test.describe("Global Settings - MCP Prompts History", () => {
     await expect(historyBtn).toContainText(/History|История/i);
   });
 
-  test("should display history button for tool descriptions", async ({ page }) => {
-    // Click on toolDescription-list in the left panel first
-    await page.getByTestId("prompt-item-toolDescription-list").click();
-    await page.waitForTimeout(500);
-    // History button should be visible for tool descriptions
-    const historyBtn = page.getByTestId(getPromptTestId("toolDescription-list", "history"));
-    await expect(historyBtn).toBeVisible();
+  test("should not display history controls for retired tool descriptions", async ({ page }) => {
+    await expect(page.locator('[data-testid^="mcp-prompt-toolDescription-"]')).toHaveCount(0);
   });
 
   test("should open inline version history when clicking history button", async ({ page }) => {
@@ -762,12 +703,7 @@ test.describe("Global Settings - MCP Prompts History", () => {
   });
 
   test("should show version entries after making changes", async ({ page }) => {
-    // Use toolDescription-start to avoid race condition with Import tests that use systemReminder
-    const promptType = "toolDescription-start";
-
-    // Click on the prompt in left panel
-    await page.getByTestId("prompt-item-toolDescription-start").click();
-    await page.waitForTimeout(500);
+    const promptType = "systemPrompt";
 
     const textarea = page.getByTestId(getPromptTestId(promptType, "input"));
     const saveBtn = page.getByTestId(getPromptTestId(promptType, "save"));
@@ -804,11 +740,9 @@ test.describe("Global Settings - MCP Prompts History", () => {
   });
 
   test("should apply historical version via inline diff panel", async ({ page }) => {
-    // Use toolDescription-step to avoid race condition with Import tests that use systemReminder
-    const promptType = "toolDescription-step";
+    const promptType = "systemReminder";
 
-    // Click on the prompt in left panel
-    await page.getByTestId("prompt-item-toolDescription-step").click();
+    await page.getByTestId("prompt-item-systemReminder").click();
     await page.waitForTimeout(500);
 
     const textarea = page.getByTestId(getPromptTestId(promptType, "input"));

@@ -1,9 +1,13 @@
 ---
 import { Code } from "astro:components";
+import type { ComponentProps } from "astro/types";
+
+type CodeLanguage = NonNullable<ComponentProps<typeof Code>["lang"]>;
+type StringCodeLanguage = Extract<CodeLanguage, string>;
 
 interface Props {
   code: string;
-  language?: string;
+  language?: StringCodeLanguage;
   title?: string;
   class?: string;
 }
@@ -11,7 +15,7 @@ interface Props {
 const { code, language = "json", title, class: className = "" } = Astro.props;
 const uniqueId = `codeblock-${Math.random().toString(36).substring(2, 9)}`;
 
-const langMap: Record<string, string> = {
+const langMap: Partial<Record<StringCodeLanguage, StringCodeLanguage>> = {
   bash: "bash",
   shell: "bash",
   sh: "bash",

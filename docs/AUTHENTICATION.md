@@ -328,15 +328,34 @@ Bearer token received
   → user blocked check
   → account approval check when accountApproval is enabled
   → fire-and-forget lastUsedAt update
+  → catalog revision gate
   → build userContext
   → MCP execution
 ```
 
 **Differences from OAuth:**
 
-- No version check (HTTP 426) — persistent tokens have no `toolsVersion`
 - No session/consent management
 - Token revocation is immediate (DB lookup on each request)
+
+### MCP Catalog Initialization
+
+OAuth access tokens and persistent API tokens use the same catalog lifecycle after their existing
+credential-validity and account-admission checks:
+
+- New and migrated credentials may have a null `toolsVersion`; token issuance does not mark the
+  catalog initialized.
+- A matching `toolsVersion` permits ordinary MCP requests.
+- A null or stale `toolsVersion` returns HTTP 426 for ordinary requests.
+- An SDK-valid singleton JSON-RPC `initialize` request may proceed with a null or stale revision. The
+  server conditionally writes `MCP_TOOLS_REVISION` to that exact credential before forwarding the
+  successful initialize result.
+- Error responses, notification-shaped input, malformed JSON-RPC, and batches do not write the
+  revision. The conditional update also rechecks credential identity, revocation, and expiry.
+
+Reconnect uses the same still-valid OAuth or persistent token. Catalog refresh neither creates nor
+rotates a credential. Authentication failures and blocked, pending, or otherwise denied accounts
+retain their normal 401/403 responses and cannot use initialize to bypass admission.
 
 **Client setup instructions:**
 

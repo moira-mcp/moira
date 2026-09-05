@@ -8,21 +8,81 @@
  * - unlock: validate PIN and unlock
  *
  * Also tests:
- * - step() blocked when agent-created lock is active
+ * - step() blocked when an owner-created lock is active
  * - MCP session tool lock enrichment (executions + execution_context)
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool, callMCPToolRaw } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  callMCPToolRaw,
+  createTestUserViaApi,
+  signInUser,
+} from "../utils/mcp-auth.js";
+import { getTestFetchUrl } from "../utils/test-config.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+
+const LOCK_TOOL_USER_EMAIL = `lock-tool-${Date.now()}@test.local`;
+const LOCK_TOOL_USER_PASSWORD = "LockToolTest123!";
+let lockToolUserSetup: Promise<void> | undefined;
+
+function ensureLockToolUser(baseUrl: string): Promise<void> {
+  lockToolUserSetup ??= createTestUserViaApi(
+    baseUrl,
+    LOCK_TOOL_USER_EMAIL,
+    LOCK_TOOL_USER_PASSWORD,
+    "Lock Tool Test User",
+  ).then(() => undefined);
+  return lockToolUserSetup;
+}
+
+function sessionCookieHeader(baseUrl: string, sessionCookie: string): string {
+  const cookieName = baseUrl.startsWith("https://")
+    ? "__Secure-better-auth.session_token"
+    : "better-auth.session_token";
+  return `${cookieName}=${sessionCookie}`;
+}
+
+async function deleteOwnedWorkflows(workflowIds: string[], sessionCookie: string): Promise<void> {
+  const baseUrl = getTestFetchUrl();
+  for (const workflowId of workflowIds) {
+    const response = await fetch(`${baseUrl}/api/workflows/${workflowId}`, {
+      method: "DELETE",
+      headers: { Cookie: sessionCookieHeader(baseUrl, sessionCookie) },
+    });
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Failed to clean workflow ${workflowId}: ${response.status}`);
+    }
+  }
+}
+
+async function unlockOwnedLocks(
+  locks: Array<{ executionId: string; lockId: string }>,
+  sessionCookie: string,
+): Promise<void> {
+  const baseUrl = getTestFetchUrl();
+  for (const lock of locks) {
+    const response = await fetch(
+      `${baseUrl}/api/executions/${lock.executionId}/locks/${lock.lockId}/unlock`,
+      {
+        method: "POST",
+        headers: { Cookie: sessionCookieHeader(baseUrl, sessionCookie) },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to clean lock ${lock.lockId}: ${response.status}`);
+    }
+  }
+}
 
 /**
  * Build a workflow with a lock node for testing.
  */
-function buildLockWorkflow() {
+function buildWaitingWorkflow() {
   return {
     metadata: {
-      name: "Lock Tool Test Workflow",
+      name: `Lock Tool Test Workflow ${Date.now()}`,
       version: "1.0.0",
       description: "Tests MCP lock tool actions",
     },
@@ -30,15 +90,14 @@ function buildLockWorkflow() {
       {
         type: "start",
         id: "start",
-        connections: { default: "lock-gate" },
+        connections: { default: "step1" },
       },
       {
-        type: "lock",
-        id: "lock-gate",
-        reason: "Testing lock tool actions",
-        connections: {
-          unlocked: "end-ok",
-        },
+        type: "agent-directive",
+        id: "step1",
+        directive: "Wait here",
+        completionCondition: "Done",
+        connections: { success: "end-ok" },
       },
       {
         type: "end",
@@ -52,26 +111,36 @@ function buildLockWorkflow() {
 describe("MCP Lock Tool", () => {
   let client: Client;
   let cleanup: () => Promise<void>;
+  let sessionCookie = "";
+  const workflowIds: string[] = [];
+  const createdLocks: Array<{ executionId: string; lockId: string }> = [];
 
   beforeAll(async () => {
-    const mcpClient = await createAuthenticatedMCPClient();
+    const baseUrl = getTestFetchUrl();
+    await ensureLockToolUser(baseUrl);
+    const mcpClient = await createAuthenticatedMCPClient({
+      email: LOCK_TOOL_USER_EMAIL,
+      password: LOCK_TOOL_USER_PASSWORD,
+    });
     client = mcpClient.client;
     cleanup = mcpClient.cleanup;
+    sessionCookie = await signInUser(baseUrl, LOCK_TOOL_USER_EMAIL, LOCK_TOOL_USER_PASSWORD);
   });
 
   afterAll(async () => {
+    await unlockOwnedLocks(createdLocks, sessionCookie);
+    await deleteOwnedWorkflows(workflowIds, sessionCookie);
     await cleanup();
   });
 
-  /**
-   * Helper: create and start a workflow that pauses at lock node
-   */
-  async function createLockedExecution(): Promise<{ processId: string; workflowId: string }> {
+  /** Helper: create and start a workflow that pauses at an agent step. */
+  async function createUnlockedExecution(): Promise<{ processId: string; workflowId: string }> {
     const result = await callMCPTool(client, "manage", {
       action: "create",
-      workflow: buildLockWorkflow(),
+      workflow: buildWaitingWorkflow(),
     });
     const workflowId = result.workflowId;
+    workflowIds.push(workflowId);
 
     const startRaw = await callMCPToolRaw(client, "start", {
       workflowId,
@@ -83,6 +152,28 @@ describe("MCP Lock Tool", () => {
     const processId = processIdMatch![1];
 
     return { processId, workflowId };
+  }
+
+  async function createLockedExecution(): Promise<{
+    processId: string;
+    workflowId: string;
+    pin: string;
+  }> {
+    const execution = await createUnlockedExecution();
+    const baseUrl = getTestFetchUrl();
+    const response = await fetch(`${baseUrl}/api/executions/${execution.processId}/lock`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: sessionCookieHeader(baseUrl, sessionCookie),
+      },
+      body: JSON.stringify({ reason: "Testing lock tool actions" }),
+    });
+    expect(response.ok).toBe(true);
+    const body = (await response.json()) as { data: { lockId: string; pin: string } };
+    expect(body.data.pin).toMatch(/^\d{6}$/);
+    createdLocks.push({ executionId: execution.processId, lockId: body.data.lockId });
+    return { ...execution, pin: body.data.pin };
   }
 
   describe("lock tool - status action", () => {
@@ -97,7 +188,7 @@ describe("MCP Lock Tool", () => {
       expect(result.locked).toBe(true);
       expect(result.lock).toBeDefined();
       expect(result.lock.executionId).toBe(processId);
-      expect(result.lock.nodeId).toBe("lock-gate");
+      expect(result.lock.nodeId).toBe("step1");
       expect(result.lock.reason).toBe("Testing lock tool actions");
       expect(result.lock.status).toBe("active");
       expect(result.lock.lockId).toBeDefined();
@@ -129,6 +220,7 @@ describe("MCP Lock Tool", () => {
         action: "create",
         workflow: simpleWorkflow,
       });
+      workflowIds.push(createResult.workflowId);
 
       const startRaw = await callMCPToolRaw(client, "start", {
         workflowId: createResult.workflowId,
@@ -162,7 +254,7 @@ describe("MCP Lock Tool", () => {
 
       const activeLock = result.locks.find((l: { status: string }) => l.status === "active");
       expect(activeLock).toBeDefined();
-      expect(activeLock.nodeId).toBe("lock-gate");
+      expect(activeLock.nodeId).toBe("step1");
       expect(activeLock.reason).toBe("Testing lock tool actions");
     });
   });
@@ -194,75 +286,38 @@ describe("MCP Lock Tool", () => {
   });
 
   describe("lock tool - lock (create) action", () => {
-    /**
-     * Helper: create an execution that pauses at an agent-directive node (no lock node)
-     */
-    async function createUnlockedExecution(): Promise<{ processId: string }> {
-      const simpleWorkflow = {
-        metadata: {
-          name: "Agent Lock Test Workflow",
-          version: "1.0.0",
-          description: "For testing agent-created locks",
-        },
-        nodes: [
-          { type: "start", id: "start", connections: { default: "step1" } },
-          {
-            type: "agent-directive",
-            id: "step1",
-            directive: "Wait here",
-            completionCondition: "Done",
-            connections: { success: "end" },
-          },
-          { type: "end", id: "end" },
-        ],
-      };
-
-      const createResult = await callMCPTool(client, "manage", {
-        action: "create",
-        workflow: simpleWorkflow,
-      });
-
-      const startRaw = await callMCPToolRaw(client, "start", {
-        workflowId: createResult.workflowId,
-        parentExecutionId: "none",
-      });
-
-      const processIdMatch = startRaw.match(/Process ID:\s*([a-f0-9-]+)/i);
-      expect(processIdMatch).not.toBeNull();
-      return { processId: processIdMatch![1] };
-    }
-
-    test("creates a lock on a running execution", async () => {
+    test("fails closed when trusted Telegram delivery is unavailable", async () => {
       const { processId } = await createUnlockedExecution();
 
-      const result = await callMCPTool(client, "lock", {
+      await callMCPToolRaw(client, "settings", {
+        action: "set",
+        key: "telegram.bot_token",
+        value: "malformed-token",
+      });
+      await callMCPToolRaw(client, "settings", {
+        action: "set",
+        key: "telegram.chat_id",
+        value: "12345",
+      });
+
+      const result = await callMCPToolRaw(client, "lock", {
         action: "lock",
         executionId: processId,
         reason: "Agent review needed",
       });
 
-      expect(result.lockId).toBeDefined();
-      expect(result.pin).toBeUndefined();
-      expect(result.locked).toBe(true);
+      expect(result).toContain("Trusted Telegram PIN delivery");
+      expect(result).not.toMatch(/\b\d{6}\b/);
 
-      // Verify lock status
       const status = await callMCPTool(client, "lock", {
         action: "status",
         executionId: processId,
       });
-      expect(status.locked).toBe(true);
-      expect(status.lock.reason).toBe("Agent review needed");
+      expect(status.locked).toBe(false);
     });
 
     test("prevents double-locking", async () => {
-      const { processId } = await createUnlockedExecution();
-
-      // First lock succeeds
-      await callMCPTool(client, "lock", {
-        action: "lock",
-        executionId: processId,
-        reason: "First lock",
-      });
+      const { processId } = await createLockedExecution();
 
       // Second lock fails
       const result = await callMCPToolRaw(client, "lock", {
@@ -283,15 +338,8 @@ describe("MCP Lock Tool", () => {
       expect(result).toContain("reason is required");
     });
 
-    test("step() is blocked when agent-created lock is active", async () => {
-      const { processId } = await createUnlockedExecution();
-
-      // Create a lock
-      await callMCPTool(client, "lock", {
-        action: "lock",
-        executionId: processId,
-        reason: "Block steps",
-      });
+    test("step() is blocked when an owner-created lock is active", async () => {
+      const { processId } = await createLockedExecution();
 
       // Try to execute step — should be blocked
       const stepResult = await callMCPToolRaw(client, "step", {
@@ -307,14 +355,25 @@ describe("MCP Lock Tool", () => {
 describe("MCP Session Lock Enrichment", () => {
   let client: Client;
   let cleanup: () => Promise<void>;
+  let sessionCookie = "";
+  const workflowIds: string[] = [];
+  const createdLocks: Array<{ executionId: string; lockId: string }> = [];
 
   beforeAll(async () => {
-    const mcpClient = await createAuthenticatedMCPClient();
+    const baseUrl = getTestFetchUrl();
+    await ensureLockToolUser(baseUrl);
+    const mcpClient = await createAuthenticatedMCPClient({
+      email: LOCK_TOOL_USER_EMAIL,
+      password: LOCK_TOOL_USER_PASSWORD,
+    });
     client = mcpClient.client;
     cleanup = mcpClient.cleanup;
+    sessionCookie = await signInUser(baseUrl, LOCK_TOOL_USER_EMAIL, LOCK_TOOL_USER_PASSWORD);
   });
 
   afterAll(async () => {
+    await unlockOwnedLocks(createdLocks, sessionCookie);
+    await deleteOwnedWorkflows(workflowIds, sessionCookie);
     await cleanup();
   });
 
@@ -322,11 +381,11 @@ describe("MCP Session Lock Enrichment", () => {
    * Helper: create locked execution
    */
   async function createLockedExecution(): Promise<string> {
-    const workflow = buildLockWorkflow();
     const createResult = await callMCPTool(client, "manage", {
       action: "create",
-      workflow,
+      workflow: buildWaitingWorkflow(),
     });
+    workflowIds.push(createResult.workflowId);
 
     const startRaw = await callMCPToolRaw(client, "start", {
       workflowId: createResult.workflowId,
@@ -335,7 +394,20 @@ describe("MCP Session Lock Enrichment", () => {
 
     const match = startRaw.match(/Process ID:\s*([a-f0-9-]+)/i);
     expect(match).not.toBeNull();
-    return match![1];
+    const processId = match![1];
+    const baseUrl = getTestFetchUrl();
+    const response = await fetch(`${baseUrl}/api/executions/${processId}/lock`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: sessionCookieHeader(baseUrl, sessionCookie),
+      },
+      body: JSON.stringify({ reason: "Session enrichment" }),
+    });
+    expect(response.ok).toBe(true);
+    const body = (await response.json()) as { data: { lockId: string } };
+    createdLocks.push({ executionId: processId, lockId: body.data.lockId });
+    return processId;
   }
 
   describe("session executions - locked status", () => {
@@ -371,7 +443,7 @@ describe("MCP Session Lock Enrichment", () => {
       // Should contain activeLock info
       expect(result).toContain("activeLock");
       expect(result).toContain("lockId");
-      expect(result).toContain("lock-gate");
+      expect(result).toContain("step1");
     });
   });
 });

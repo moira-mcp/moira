@@ -24,6 +24,7 @@ jest.mock("lucide-react", () => ({
   Loader2: (props: any) => <span data-testid="loader" {...props} />,
   Save: (props: any) => <span data-testid="save-icon" {...props} />,
   RotateCcw: (props: any) => <span data-testid="reset-icon" {...props} />,
+  RotateCw: (props: any) => <span data-testid="apply-icon" {...props} />,
   History: (props: any) => <span data-testid="history-icon" {...props} />,
 }));
 
@@ -73,7 +74,7 @@ describe("McpPromptsEditor", () => {
   });
 
   describe("Master-detail layout", () => {
-    it("renders left panel with all 10 prompt items", async () => {
+    it("renders only the two database-backed prompt items", async () => {
       render(<McpPromptsEditor {...defaultProps} />);
 
       const promptList = screen.getByTestId("prompt-list");
@@ -85,11 +86,11 @@ describe("McpPromptsEditor", () => {
       }
     });
 
-    it("renders section headers for System Prompts and Tool Descriptions", () => {
+    it("renders the system prompt section without a tool-description section", () => {
       render(<McpPromptsEditor {...defaultProps} />);
 
       expect(screen.getByText("admin.mcpPrompts.systemPrompts")).toBeInTheDocument();
-      expect(screen.getByText("admin.mcpPrompts.toolDescriptions")).toBeInTheDocument();
+      expect(screen.queryByText("admin.mcpPrompts.toolDescriptions")).not.toBeInTheDocument();
     });
 
     it("selects systemPrompt by default and renders its editor", async () => {
@@ -121,20 +122,15 @@ describe("McpPromptsEditor", () => {
       expect(mockFetchValue).toHaveBeenCalledWith("systemReminder", "default", null);
     });
 
-    it("switches to tool description when clicked", async () => {
+    it("does not expose a tool-description editor", async () => {
       render(<McpPromptsEditor {...defaultProps} />);
 
       await waitFor(() => {
         expect(mockFetchValue).toHaveBeenCalled();
       });
 
-      fireEvent.click(screen.getByTestId("prompt-item-toolDescription-list"));
-
-      await waitFor(() => {
-        expect(screen.getByTestId("mcp-prompt-toolDescription-list")).toBeInTheDocument();
-      });
-
-      expect(mockFetchValue).toHaveBeenCalledWith("toolDescription.list", "default", null);
+      expect(screen.queryByTestId("prompt-item-toolDescription-list")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("mcp-prompt-toolDescription-list")).not.toBeInTheDocument();
     });
   });
 

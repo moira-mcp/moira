@@ -4,7 +4,9 @@
  */
 
 import { MCPEngine } from "../core/mcp-engine.js";
-import { ToolResult, WorkflowSpecificParams } from "./interfaces/tool-interface.js";
+import { ToolResult } from "./interfaces/tool-interface.js";
+import { settingsSchema } from "./tool-schemas.js";
+import type { z } from "zod";
 import { getUserContext } from "../core/request-context.js";
 import { ERRORS, formatError, formatErrorWithAgentInstructions } from "../messages/index.js";
 import {
@@ -18,14 +20,7 @@ import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "ManageSettings" });
 
-type ManageSettingsAction = "get" | "set" | "list";
-
-interface ManageSettingsParams extends WorkflowSpecificParams {
-  action: ManageSettingsAction;
-  category?: string;
-  key?: string;
-  value?: unknown;
-}
+type ManageSettingsParams = z.infer<typeof settingsSchema>;
 
 // Minimal setting definition for agent response
 interface MinimalSettingDef {
@@ -35,6 +30,50 @@ interface MinimalSettingDef {
 
 type SettingsData =
   Record<string, unknown> | { key: string; updated: boolean } | MinimalSettingDef[];
+
+interface SettingsReadRepository {
+  getSettingsForApi(userId: string, category?: string): Promise<Record<string, unknown>>;
+}
+
+async function isAdminUser(userId: string): Promise<boolean> {
+  const { getDatabase, user } = await import("@mcp-moira/shared");
+  const { eq } = await import("drizzle-orm");
+  const [userRecord] = await getDatabase()
+    .select({ isAdmin: user.isAdmin })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  return userRecord?.isAdmin === true;
+}
+
+export async function readSettingsForMcp(
+  repository: SettingsReadRepository,
+  userId: string,
+  category?: string,
+  key?: string,
+  hiddenKeys: readonly string[] = [],
+): Promise<ToolResult<SettingsData>> {
+  const settings = await repository.getSettingsForApi(userId, category);
+  const visibleSettings = Object.fromEntries(
+    Object.entries(settings).filter(([settingKey]) => !hiddenKeys.includes(settingKey)),
+  );
+  const selected = key
+    ? Object.prototype.hasOwnProperty.call(visibleSettings, key)
+      ? { [key]: visibleSettings[key] }
+      : {}
+    : visibleSettings;
+
+  await logAuditEventDirect(repository as unknown as DatabaseRepository, {
+    userId,
+    action: AuditAction.MCP_SETTINGS_READ,
+    resource: "settings",
+    resourceId: key ?? category ?? "all",
+    source: "mcp",
+    metadata: { action: "get", category, key },
+  });
+
+  return { success: true, data: selected };
+}
 
 export async function manageSettings(
   params: ManageSettingsParams,
@@ -46,21 +85,41 @@ export async function manageSettings(
 
     switch (action) {
       case "get": {
-        // Get user settings by category or all
-        // Uses getSettingsForApi to mask encrypted values (Issue #374)
-        const settings = await repository.getSettingsForApi(userId, params.category);
+        const { key, category } = params;
+        const hasKey = key !== undefined;
+        const hasCategory = category !== undefined;
 
-        // Audit log for settings read
-        await logAuditEventDirect(repository as unknown as DatabaseRepository, {
-          userId,
-          action: AuditAction.MCP_SETTINGS_READ,
-          resource: "settings",
-          resourceId: params.category || "all",
-          source: "mcp",
-          metadata: { action: "get", category: params.category },
-        });
+        if (hasKey && hasCategory) {
+          return { success: false, error: "Use either key or category for get, not both" };
+        }
 
-        return { success: true, data: settings };
+        if (hasKey) {
+          if (key.trim().length === 0) {
+            return { success: false, error: "Setting key cannot be empty" };
+          }
+          const definition = await repository.getSettingDefinition(key);
+          if (!definition) {
+            return { success: false, error: ERRORS.setting_not_found(key) };
+          }
+          if (definition.adminOnly && !(await isAdminUser(userId))) {
+            return { success: false, error: ERRORS.admin_only_setting(key) };
+          }
+          return readSettingsForMcp(repository, userId, definition.category, key);
+        }
+
+        if (hasCategory && category.trim().length === 0) {
+          return { success: false, error: "Setting category cannot be empty" };
+        }
+
+        // Uses getSettingsForApi to mask encrypted values (Issue #374).
+        // Admin-only values stay outside non-admin MCP reads, as in the user settings API.
+        const definitions = await repository.getSettingDefinitions(category);
+        const adminOnlyKeys = definitions.filter((definition) => definition.adminOnly);
+        const hiddenKeys =
+          adminOnlyKeys.length > 0 && !(await isAdminUser(userId))
+            ? adminOnlyKeys.map((definition) => definition.key)
+            : [];
+        return readSettingsForMcp(repository, userId, category, undefined, hiddenKeys);
       }
 
       case "set": {
@@ -76,15 +135,8 @@ export async function manageSettings(
         }
 
         // Check admin-only settings
-        if (definition.adminOnly) {
-          const { getDatabase, user } = await import("@mcp-moira/shared");
-          const { eq } = await import("drizzle-orm");
-          const db = getDatabase();
-
-          const [userRecord] = await db.select().from(user).where(eq(user.id, userId)).limit(1);
-          if (!userRecord || !userRecord.isAdmin) {
-            return { success: false, error: ERRORS.admin_only_setting(params.key) };
-          }
+        if (definition.adminOnly && !(await isAdminUser(userId))) {
+          return { success: false, error: ERRORS.admin_only_setting(params.key) };
         }
 
         // Set setting (validation and encryption handled by repository)
@@ -129,8 +181,17 @@ export async function manageSettings(
       }
 
       case "list": {
+        if (params.category !== undefined && params.category.trim().length === 0) {
+          return { success: false, error: "Setting category cannot be empty" };
+        }
         // List setting definitions - minimal response for agents
-        const definitions = await repository.getSettingDefinitions(params.category);
+        let definitions = await repository.getSettingDefinitions(params.category);
+        if (
+          definitions.some((definition) => definition.adminOnly) &&
+          !(await isAdminUser(userId))
+        ) {
+          definitions = definitions.filter((definition) => !definition.adminOnly);
+        }
         const cleanDefinitions = definitions.map((def) => ({
           key: def.key,
           description: def.description,

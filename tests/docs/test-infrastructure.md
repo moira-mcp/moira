@@ -132,7 +132,7 @@ SQLite writer lock. Tests inside a file still exercise WAL read/write behavior w
 
 ### Test Runner Config
 
-- `test-runner.config.mjs` — central testfold config for the Jest and Playwright suites, environment routing, and hooks. The `.mjs` format is directly loadable by the Node 20 process that runs testfold; no TypeScript loader flag is required.
+- `test-runner.config.mjs` — central testfold config for the Jest and Playwright suites, environment routing, and hooks. The `.mjs` format is directly loadable by the Node 24 process that runs testfold; no TypeScript loader flag is required.
 
 ### Jest/Playwright Configs
 

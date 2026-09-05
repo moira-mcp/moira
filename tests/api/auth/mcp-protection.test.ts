@@ -35,17 +35,23 @@ describe("MCP Protection", () => {
     expect(json.error).toBe("invalid_token");
   });
 
-  test("MCP initialize requires auth", async () => {
+  test("MCP initialize rejects an invalid bearer credential", async () => {
     const res = await fetch(`${BASE_URL}/mcp`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        Authorization: "Bearer invalid-oauth-credential",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "initialize",
         id: 1,
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "invalid-auth-test", version: "1.0.0" },
+        },
       }),
     });
 

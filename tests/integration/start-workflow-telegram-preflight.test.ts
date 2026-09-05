@@ -71,10 +71,54 @@ const workflowWithoutTelegram: WorkflowGraph = {
   ],
 };
 
+const workflowWithLock: WorkflowGraph = {
+  id: "test-lock-preflight-wf",
+  metadata: {
+    name: "Lock Preflight Test",
+    version: "1.0.0",
+    description: "Workflow with mandatory trusted lock delivery",
+  },
+  nodes: [
+    { id: "start", type: "start", connections: { default: "step1" } },
+    {
+      id: "step1",
+      type: "agent-directive",
+      directive: "Prepare for the lock.",
+      completionCondition: "Ready.",
+      connections: { success: "lock-gate" },
+    },
+    {
+      id: "lock-gate",
+      type: "lock",
+      reason: "Approval required",
+      connections: { unlocked: "end" },
+    },
+    { id: "end", type: "end" },
+  ],
+};
+
+const workflowWithNotificationAndLock: WorkflowGraph = {
+  ...workflowWithLock,
+  id: "test-notification-lock-preflight-wf",
+  metadata: { ...workflowWithLock.metadata, name: "Notification and Lock Preflight Test" },
+  nodes: [
+    ...workflowWithLock.nodes.slice(0, 2),
+    {
+      id: "notify",
+      type: "telegram-notification",
+      message: "Preparing approval",
+      connections: { default: "lock-gate" },
+    },
+    ...workflowWithLock.nodes.slice(2),
+  ],
+};
+
 describe("Start Workflow Telegram Pre-flight Check", () => {
   let repository: DatabaseRepository;
   let telegramWorkflowId: string;
   let noTelegramWorkflowId: string;
+  let lockWorkflowId: string;
+  let combinedWorkflowId: string;
 
   beforeAll(async () => {
     repository = new DatabaseRepository();
@@ -99,7 +143,11 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
     }
 
     // Configure telegram for the "configured" user
-    await repository.setSetting(TEST_USER_CONFIGURED, "telegram.bot_token", "test-bot-token-123");
+    await repository.setSetting(
+      TEST_USER_CONFIGURED,
+      "telegram.bot_token",
+      "123456:test-bot-token-123",
+    );
     await repository.setSetting(TEST_USER_CONFIGURED, "telegram.chat_id", "123456789");
 
     // Create test workflows
@@ -120,12 +168,32 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       });
     });
     noTelegramWorkflowId = createResult2.data.workflowId;
+
+    const createResult3 = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
+      manageWorkflow({
+        action: "create",
+        workflow: { ...workflowWithLock, visibility: "public" },
+        overwrite: true,
+      }),
+    );
+    lockWorkflowId = createResult3.data.workflowId;
+
+    const createResult4 = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
+      manageWorkflow({
+        action: "create",
+        workflow: { ...workflowWithNotificationAndLock, visibility: "public" },
+        overwrite: true,
+      }),
+    );
+    combinedWorkflowId = createResult4.data.workflowId;
   });
 
   afterAll(async () => {
     try {
       await repository.deleteWorkflow(telegramWorkflowId, TEST_USER_ID);
       await repository.deleteWorkflow(noTelegramWorkflowId, TEST_USER_ID);
+      await repository.deleteWorkflow(lockWorkflowId, TEST_USER_ID);
+      await repository.deleteWorkflow(combinedWorkflowId, TEST_USER_ID);
     } catch {
       // Ignore cleanup errors
     }
@@ -190,6 +258,35 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       // Should NOT contain pre-flight message
       expect(result.data).not.toContain("not configured");
     });
+
+    test("cannot bypass mandatory delivery for a lock-only workflow", async () => {
+      const result = await runWithMCPContext({ userId: TEST_USER_ID }, () =>
+        startWorkflow({
+          workflowId: lockWorkflowId,
+          parentExecutionId: "none",
+          skipTelegramCheck: true,
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data).toContain("lock nodes");
+      expect(result.data).toContain("skipTelegramCheck cannot bypass");
+      expect(result.data).not.toContain("Process ID:");
+    });
+
+    test("cannot bypass a lock when notification and lock nodes are combined", async () => {
+      const result = await runWithMCPContext({ userId: TEST_USER_ID }, () =>
+        startWorkflow({
+          workflowId: combinedWorkflowId,
+          parentExecutionId: "none",
+          skipTelegramCheck: true,
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data).toContain("lock nodes");
+      expect(result.data).not.toContain("Process ID:");
+    });
   });
 
   describe("Workflow without telegram nodes", () => {
@@ -225,6 +322,40 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       // Should NOT contain the pre-flight directive message
       expect(result.data).not.toContain("Telegram notification nodes");
       expect(result.data).not.toContain("skipTelegramCheck");
+    });
+  });
+
+  describe("Workflow with lock nodes", () => {
+    test("starts when trusted Telegram configuration has a valid shape", async () => {
+      const result = await runWithMCPContext({ userId: TEST_USER_CONFIGURED }, () =>
+        startWorkflow({ workflowId: lockWorkflowId, parentExecutionId: "none" }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data).toContain("Process ID:");
+      expect(result.data).toContain("Prepare for the lock");
+    });
+
+    test("rejects malformed configuration before creating an execution", async () => {
+      await repository.setSetting(TEST_USER_CONFIGURED, "telegram.bot_token", "malformed");
+      try {
+        const result = await runWithMCPContext({ userId: TEST_USER_CONFIGURED }, () =>
+          startWorkflow({
+            workflowId: lockWorkflowId,
+            parentExecutionId: "none",
+            skipTelegramCheck: true,
+          }),
+        );
+        expect(result.success).toBe(true);
+        expect(result.data).toContain("configuration is invalid");
+        expect(result.data).not.toContain("Process ID:");
+      } finally {
+        await repository.setSetting(
+          TEST_USER_CONFIGURED,
+          "telegram.bot_token",
+          "123456:test-bot-token-123",
+        );
+      }
     });
   });
 });

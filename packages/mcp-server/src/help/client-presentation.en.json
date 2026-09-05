@@ -1,0 +1,74 @@
+{
+  "tabs": {
+    "claude-web": {
+      "label": "Claude Web",
+      "description": "claude.ai - Browser chat (most popular)",
+      "content": "# On claude.ai (Pro/Max/Team/Enterprise):\n\n# 1. Go to Settings → Connectors\n# 2. Click \"Add custom connector\"\n# 3. Enter:\n#    Server URL: {{mcpUrl}}\n# 4. Click \"Connect\"\n# 5. Complete OAuth authentication in browser\n# 6. Tools appear in chat\n\n# Requires paid plan"
+    },
+    "chatgpt": {
+      "label": "ChatGPT",
+      "description": "chat.openai.com - Browser chat",
+      "content": "# On chat.openai.com (Plus/Pro required):\n\n# 1. Profile → Settings\n# 2. Go to \"Connectors\" or \"Integrations\"\n# 3. Click \"Add connector\"\n# 4. Enter:\n#    Name: MCP Moira\n#    URL: {{mcpUrl}}\n# 5. Complete OAuth authentication\n# 6. Tools available in chat\n\n# Free tier doesn't support MCP"
+    },
+    "claude-code": {
+      "label": "Claude Code",
+      "recommended": "Recommended: Use CLI command",
+      "authIntro": "Then authenticate:",
+      "authContent": "# After adding, authenticate within claude\n/mcp\n# → Select \"moira\"\n# → Click \"Authenticate\"\n# → Browser opens for OAuth",
+      "alternativeTitle": "Alternative: Manual JSON config"
+    },
+    "copilot-cli": {
+      "label": "Copilot CLI",
+      "recommended": "Recommended: Config file",
+      "authIntro": "Then authenticate:",
+      "authContent": "# After saving the config:\n# 1. Start a Copilot CLI session\n# 2. Type /mcp\n# 3. Select \"moira\" → Authenticate\n# → Browser opens for OAuth",
+      "alternativeTitle": "Alternative: Interactive setup",
+      "alternativeContent": "# In Copilot CLI:\n/mcp\n# → Click \"Add server\"\n# → Enter server URL\n# → Complete OAuth\n\n# Project-level config:\n# .copilot/mcp-config.json (same format)"
+    },
+    "claude-desktop": {
+      "label": "Claude Desktop",
+      "description": "Desktop app: GUI method",
+      "content": "# In Claude Desktop app:\n\n# 1. Open Settings (⌘+,)\n# 2. Go to \"Connectors\" tab\n# 3. Click \"Add custom connector\"\n# 4. Enter:\n#    Server URL: {{mcpUrl}}\n# 5. Click \"Connect\"\n# 6. Browser opens → OAuth → Done\n\n# No file editing"
+    },
+    "cursor": {
+      "label": "Cursor",
+      "recommended": "Recommended: One-click install",
+      "deeplinkButton": "Add to Cursor",
+      "ariaLabel": "Install MCP Moira server in Cursor IDE",
+      "authIntro": "Then authenticate:",
+      "authContent": "# After clicking the button:\n# 1. Cursor opens with install prompt\n# 2. Click \"Install\" to add moira MCP server\n# 3. Settings → MCP Servers → Find \"moira\"\n# 4. Click \"Authenticate\" → Browser opens for OAuth",
+      "alternativeTitle": "Alternative: Manual JSON config"
+    },
+    "vscode": {
+      "label": "VS Code",
+      "recommended": "Recommended: One-click install",
+      "deeplinkButton": "Add to VS Code",
+      "ariaLabel": "Install MCP Moira server in VS Code",
+      "authIntro": "Then authenticate:",
+      "authContent": "# After clicking the button:\n# 1. VS Code opens with install prompt\n# 2. Click \"Install\" to add moira MCP server\n# 3. Settings → MCP Servers → Find \"moira\"\n# 4. Click \"Authenticate\" → Browser opens for OAuth",
+      "alternativeTitle": "Alternative: Manual configuration"
+    },
+    "perplexity": {
+      "label": "Perplexity",
+      "description": "Mac app: With helper",
+      "content": "# Perplexity Mac App:\n\n# 1. Install PerplexityXPC helper first:\n#    Settings → Connectors → Install Helper\n# 2. Click \"Add Connector\"\n# 3. Enter:\n#    Server Name: moira\n#    Command: npx\n#    Args: -y mcp-remote {{mcpUrl}}\n# 4. Complete OAuth authentication\n# 5. Ask Perplexity to use MCP Moira tools\n\n# Paid plan recommended"
+    },
+    "continue": {
+      "label": "Continue",
+      "description": "VS Code extension: Open-source AI assistant"
+    },
+    "zed": {
+      "label": "Zed",
+      "description": "Fast code editor with AI features"
+    },
+    "gemini-cli": {
+      "label": "Gemini CLI",
+      "description": "Google AI terminal assistant"
+    }
+  },
+  "tokenAuth": {
+    "sectionTitle": "Authentication without OAuth",
+    "description": "For CI/CD, Docker, or environments without a browser — use an API token instead of OAuth.",
+    "steps": "1. Log in to Moira web UI → Settings → API Tokens\n2. Create a token (starts with moira_)\n3. Replace moira_YOUR_TOKEN below with your token"
+  }
+}
