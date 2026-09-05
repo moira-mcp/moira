@@ -10,6 +10,7 @@
     "./email": "./src/email/index.ts",
     "./urls": "./src/config/urls.ts",
     "./mcp-clients": "./src/mcp-clients/index.ts",
+    "./portable-help": "./src/utils/portable-help.ts",
     "./services/workflow-catalog": "./src/services/workflow-catalog.ts",
     "./services/workflow-query-service": "./src/services/workflow-query-service.ts",
     "./utils/version-utils": "./src/utils/version-utils.ts",

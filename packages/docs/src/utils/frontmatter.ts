@@ -2,7 +2,7 @@ import getReadingTime from "reading-time";
 import { toString } from "mdast-util-to-string";
 import { visit } from "unist-util-visit";
 import type { RehypePlugin, RemarkPlugin } from "@astrojs/markdown-remark";
-import { getStaticArtifactsDomain } from "@mcp-moira/shared/urls";
+import { renderPortableHelpTokens } from "@mcp-moira/shared/portable-help";
 
 export const readingTimeRemarkPlugin: RemarkPlugin = () => {
   return function (tree, file) {
@@ -54,20 +54,17 @@ export const lazyImagesRehypePlugin: RehypePlugin = () => {
  * Remark plugin to replace {STATIC_DOMAIN} placeholder with actual domain
  * Works in code blocks and regular text
  */
-export const staticDomainRemarkPlugin: RemarkPlugin = () => {
-  const staticDomain = getStaticArtifactsDomain();
-
+export const portableHelpRemarkPlugin: RemarkPlugin = () => {
   return function (tree) {
-    visit(tree, "code", function (node) {
-      if (node.value && node.value.includes("{STATIC_DOMAIN}")) {
-        node.value = node.value.replace(/\{STATIC_DOMAIN\}/g, staticDomain);
-      }
-    });
-
-    visit(tree, "text", function (node) {
-      if (node.value && node.value.includes("{STATIC_DOMAIN}")) {
-        node.value = node.value.replace(/\{STATIC_DOMAIN\}/g, staticDomain);
-      }
+    for (const nodeType of ["code", "inlineCode", "text"] as const) {
+      visit(tree, nodeType, function (node) {
+        if (typeof node.value === "string") node.value = renderPortableHelpTokens(node.value);
+      });
+    }
+    visit(tree, "link", function (node) {
+      if (typeof node.url === "string") node.url = renderPortableHelpTokens(node.url);
     });
   };
 };
+
+export const staticDomainRemarkPlugin = portableHelpRemarkPlugin;

@@ -48,7 +48,7 @@ describe("user-onboarding", () => {
     expect(catalogEntry.slug).toBe("user-onboarding");
     expect(catalogEntry.visibility).toBe("public");
     expect(workflow.id).toBe("a1838a9a-d3a5-448e-aae1-18e15eeb8286");
-    expect(workflow.metadata.version).toBe("3.0.2");
+    expect(workflow.metadata.version).toBe("3.0.4");
 
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
@@ -81,8 +81,9 @@ describe("user-onboarding", () => {
       "exact qualified current identity",
       "explicit start-or-defer decision",
       "child of the onboarding execution",
-      "exact Process ID",
-      "skipTelegramCheck only to bypass premature graph-level notification preflight",
+      "skipTelegramCheck only to bypass optional graph-level notification preflight",
+      "requires the current user's valid Telegram bot token and chat ID for trusted PIN delivery when the selected workflow contains lock nodes",
+      "Lock setup guidance without a Process ID leaves the start incomplete",
       "Invalid or absent catalog choices return to selection",
       "defer performs no mutation",
       "does not change settings",
@@ -185,9 +186,20 @@ describe("user-onboarding", () => {
     expect(handoff.directive).toContain('parentExecutionId: "{{executionId}}"');
     expect(handoff.directive).toContain('Do not use parentExecutionId "none"');
     expect(handoff.directive).toContain("skipTelegramCheck: true");
-    expect(handoff.directive).toContain("does not authorize notification");
+    expect(handoff.directive).toContain("authorize notification, change the child's authority");
+    expect(handoff.directive).toContain(
+      "bypasses only the optional graph-level preflight for telegram-notification nodes",
+    );
+    expect(handoff.directive).toContain(
+      "does not bypass mandatory trusted PIN delivery for lock nodes",
+    );
+    expect(handoff.directive).toContain(
+      "setup guidance without creating a child execution or returning a Process ID",
+    );
+    expect(handoff.directive).toContain("do not start a substitute workflow or configure settings");
+    expect(handoff.directive).not.toContain("every current selected workflow");
     expect(handoff.directive).toContain("exact full process UUID from that successful response");
-    expect(handoff.directive).toContain("A random UUID, an error");
+    expect(handoff.directive).toContain("A random UUID, an error, setup guidance");
     expect(handoff.directive).toContain("leave this step incomplete");
     expect(handoff.inputSchema.required).toEqual(["child_execution_id"]);
   });

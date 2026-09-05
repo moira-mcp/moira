@@ -5,6 +5,8 @@
  */
 
 import { z } from "zod";
+import { manageLocksSchema } from "./tool-schemas.js";
+export { manageLocksSchema };
 import { ToolResult } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import {
@@ -15,19 +17,9 @@ import {
   normalizeError,
   isOperationalError,
 } from "@mcp-moira/shared";
-import { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import { createTrustedExecutionLock, DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "ManageLocks" });
-
-export const manageLocksSchema = z.object({
-  action: z.enum(["status", "list", "unlock", "lock"]).describe("Action to perform on locks"),
-  executionId: z.string().describe("Execution ID (required for all actions)"),
-  pin: z.string().optional().describe("PIN code to unlock (required for unlock action)"),
-  reason: z
-    .string()
-    .optional()
-    .describe("Reason for locking the execution (required for lock action)"),
-});
 
 type ManageLocksParams = z.infer<typeof manageLocksSchema>;
 
@@ -201,11 +193,12 @@ export async function manageLocks(params: ManageLocksParams): Promise<ToolResult
 
         const nodeId = execution.currentNodeId ?? "agent-lock";
 
-        const lockResult = await lockService.createLock({
+        const lockResult = await createTrustedExecutionLock(repository, {
           executionId,
+          workflowId: execution.workflowId,
           nodeId,
           reason: params.reason,
-          lockedBy: userId,
+          userId,
         });
 
         return {

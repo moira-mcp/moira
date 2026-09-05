@@ -177,7 +177,9 @@ function wrapFieldWithAutoparse(schema: z.ZodTypeAny): z.ZodTypeAny {
   if (schema instanceof z.ZodOptional) {
     const inner = (schema as z.ZodOptional<z.ZodTypeAny>).unwrap();
     const wrapped = wrapFieldWithAutoparse(inner);
-    return wrapped === inner ? schema : wrapped.optional();
+    if (wrapped === inner) return schema;
+    const optional = wrapped.optional();
+    return schema.description ? optional.describe(schema.description) : optional;
   }
 
   // Unwrap default: wrap inner, then re-apply .default()
@@ -185,7 +187,9 @@ function wrapFieldWithAutoparse(schema: z.ZodTypeAny): z.ZodTypeAny {
     const inner = schema.removeDefault();
     const defaultValue = schema._def.defaultValue();
     const wrapped = wrapFieldWithAutoparse(inner);
-    return wrapped === inner ? schema : wrapped.default(defaultValue);
+    if (wrapped === inner) return schema;
+    const withDefault = wrapped.default(defaultValue);
+    return schema.description ? withDefault.describe(schema.description) : withDefault;
   }
 
   // Object and array schemas: wrap with z.preprocess to auto-parse strings
@@ -194,7 +198,7 @@ function wrapFieldWithAutoparse(schema: z.ZodTypeAny): z.ZodTypeAny {
     schema instanceof z.ZodArray ||
     schema instanceof z.ZodRecord
   ) {
-    return z.preprocess((val: unknown) => {
+    const preprocessed = z.preprocess((val: unknown) => {
       if (typeof val === "string") {
         try {
           return parseFlexibleJSON(val);
@@ -204,6 +208,7 @@ function wrapFieldWithAutoparse(schema: z.ZodTypeAny): z.ZodTypeAny {
       }
       return val;
     }, schema);
+    return schema.description ? preprocessed.describe(schema.description) : preprocessed;
   }
 
   return schema;

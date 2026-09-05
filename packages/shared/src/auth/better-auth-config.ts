@@ -27,7 +27,6 @@ import {
   isLoadTestAuthEnabled,
   getExtraTrustedOrigins,
 } from "../config/env.js";
-import { getMcpServerVersion } from "../config/mcp-version.js";
 import { getFeatureResolver } from "../services/index.js";
 import { ACCOUNT_APPROVAL_REQUIRED_CODE, getAccountAccessDenial } from "./account-admission.js";
 import { generateHandleFromEmail, generateRandomHandleSuffix } from "../validation/slug-handle.js";
@@ -518,8 +517,6 @@ const baseConfig = {
             });
           }
 
-          // Note: toolsVersion is set in hooks.after on /mcp/token path
-          // because MCP plugin uses adapter.create directly which bypasses databaseHooks
           return { data: token };
         },
       },
@@ -798,61 +795,6 @@ const baseConfig = {
               userId: session.user.id,
               sessionId: session.session.id,
             });
-          }
-        }
-
-        // MCP OAuth token creation - add version (#196)
-        // Note: databaseHooks.oauthAccessToken.create.before is NOT called by MCP plugin
-        // because it uses adapter.create directly, so we update the token in after hook
-        // Path can be /mcp/token (direct) or /api/auth/mcp/token (via API prefix)
-        if (ctx.path.endsWith("/mcp/token") && ctx.method === "POST") {
-          const mcpVersion = getMcpServerVersion();
-          if (mcpVersion) {
-            try {
-              // Get the access token from the response body to find the correct token
-              // ctx.context.returned contains the response - may be JSON or Response object
-              const returned = ctx.context.returned as
-                { access_token?: string } | Response | undefined;
-              let accessToken: string | undefined;
-
-              if (returned && "access_token" in returned) {
-                // Direct JSON response
-                accessToken = returned.access_token;
-              }
-
-              if (!accessToken) {
-                logger.warn("Could not extract access_token from MCP token response", {
-                  returnedType: typeof returned,
-                });
-                return;
-              }
-
-              // Find and update the token by its accessToken value
-              const db = getDatabase();
-              const [tokenToUpdate] = await db
-                .select({ id: oauthAccessToken.id })
-                .from(oauthAccessToken)
-                .where(eq(oauthAccessToken.accessToken, accessToken))
-                .limit(1);
-
-              if (tokenToUpdate) {
-                await db
-                  .update(oauthAccessToken)
-                  .set({ toolsVersion: mcpVersion })
-                  .where(eq(oauthAccessToken.id, tokenToUpdate.id));
-
-                logger.info("MCP OAuth token version recorded", {
-                  tokenId: tokenToUpdate.id,
-                  version: mcpVersion,
-                });
-              } else {
-                logger.warn("Token not found by accessToken", {
-                  accessTokenPrefix: accessToken.substring(0, 8) + "...",
-                });
-              }
-            } catch (updateError) {
-              logger.error("Failed to record MCP token version", updateError);
-            }
           }
         }
       } catch (error) {

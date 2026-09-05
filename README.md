@@ -588,9 +588,15 @@ unset), a complete SMTP configuration takes precedence and a legacy
 Where things are documented. After changing code, find the area below and update
 the matching file in the same change.
 
-### Public docs — `packages/docs/src/content/docs/docs/` (EN) + `…/ru/docs/` (RU)
+### Public docs — MDX shells plus MCP-owned portable help
 
-Rendered to the docs site (`/docs`) and read by users. Each EN page has an RU mirror.
+Rendered pages live under `packages/docs/src/content/docs/docs/` (EN) and
+`packages/docs/src/content/docs/ru/docs/` (RU). Runtime-visible topics keep their semantic Markdown
+under `packages/mcp-server/src/help/content/`, with Russian counterparts under `…/content/ru/`.
+Each localized MDX shell imports its matching source through the MCP package. The `help` tool
+discovers and reads the English sources directly; pages with an interactive insertion compose the
+same authored before/after sections in runtime and public presentation. The special `tools` topic is
+listed alongside those file-backed topics and renders directly from the typed MCP contract.
 
 | Area            | Covers                                                                                  | Path               |
 | --------------- | --------------------------------------------------------------------------------------- | ------------------ |

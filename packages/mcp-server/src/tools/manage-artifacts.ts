@@ -12,6 +12,8 @@
  */
 
 import { z } from "zod";
+import { manageArtifactsSchema } from "./tool-schemas.js";
+export { manageArtifactsSchema };
 import { ToolResult, WorkflowSpecificParams } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import { ERRORS, formatDomainError } from "../messages/index.js";
@@ -39,32 +41,6 @@ export interface ManageArtifactsParams extends WorkflowSpecificParams {
 }
 
 // Schema for MCP tool registration
-export const manageArtifactsSchema = z.object({
-  action: z
-    .enum(["upload", "update", "delete", "list", "stats", "token"])
-    .describe("Action to perform on artifacts"),
-  name: z.string().optional().describe("Artifact name (required for upload action)"),
-  content: z.string().optional().describe("HTML content (required for upload and update actions)"),
-  executionId: z
-    .string()
-    .optional()
-    .describe("Link artifact to workflow execution (optional for upload)"),
-  uuid: z.string().optional().describe("Artifact UUID (required for update and delete actions)"),
-  limit: z
-    .number()
-    .min(1)
-    .max(100)
-    .optional()
-    .describe("Maximum artifacts to return (1-100, default 50)"),
-  offset: z.number().min(0).optional().describe("Pagination offset (default 0)"),
-  ttlMinutes: z
-    .number()
-    .min(1)
-    .max(1440)
-    .optional()
-    .describe("Token expiration in minutes (1-1440, default 60)"),
-});
-
 export type ManageArtifactsSchemaType = z.infer<typeof manageArtifactsSchema>;
 
 // Response types for different actions

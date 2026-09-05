@@ -11,7 +11,9 @@
 
 import { describe, it, expect } from "@jest/globals";
 import {
+  formatLockTelegramPreflightResponse,
   workflowHasTelegramNodes,
+  workflowHasLockNodes,
   formatTelegramPreflightResponse,
 } from "../../../packages/mcp-server/src/tools/start-workflow.js";
 import { TELEGRAM } from "../../../packages/mcp-server/src/messages/en.js";
@@ -64,6 +66,19 @@ describe("Telegram Pre-flight Check", () => {
     });
   });
 
+  describe("workflowHasLockNodes", () => {
+    it("detects lock nodes independently of notification nodes", () => {
+      expect(
+        workflowHasLockNodes([
+          { type: "start" },
+          { type: "lock" },
+          { type: "telegram-notification" },
+        ]),
+      ).toBe(true);
+      expect(workflowHasLockNodes([{ type: "telegram-notification" }])).toBe(false);
+    });
+  });
+
   describe("formatTelegramPreflightResponse", () => {
     it("includes directive text with workflow identifier", () => {
       const response = formatTelegramPreflightResponse("moira/test-workflow");
@@ -93,6 +108,22 @@ describe("Telegram Pre-flight Check", () => {
       expect(response).toContain("@BotFather");
       expect(response).toContain("bot token");
       expect(response).toContain("chat ID");
+    });
+  });
+
+  describe("formatLockTelegramPreflightResponse", () => {
+    it("requires trusted delivery without offering the notification bypass", () => {
+      const response = formatLockTelegramPreflightResponse("moira/locked", "missing");
+      expect(response).toContain("lock nodes");
+      expect(response).toContain("not configured");
+      expect(response).toContain("skipTelegramCheck cannot bypass");
+      expect(response).not.toContain("skipTelegramCheck: true");
+    });
+
+    it("distinguishes malformed configuration", () => {
+      expect(formatLockTelegramPreflightResponse("moira/locked", "invalid")).toContain(
+        "configuration is invalid",
+      );
     });
   });
 

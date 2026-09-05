@@ -1,10 +1,11 @@
 /**
  * MCP Tool: Get Help
  * Provides on-demand documentation for workflows, tools, and system concepts
- * Reads documentation exclusively from MDX files - single source of truth
+ * Discovers topics and serves content from the MCP-owned portable Markdown corpus
  *
- * Topics are discovered dynamically from filesystem:
- * - Scans DOCS_DIR for MDX files (excluding ru/ translations)
+ * Semantic topics are discovered dynamically from the filesystem; direct contract topics are
+ * represented explicitly in the same catalog:
+ * - Scans the local help corpus (excluding ru/ translations and insertion suffixes)
  * - Generates topic IDs from file paths
  * - Extracts metadata (title, description) from frontmatter
  * - Supports aliases for common topic names
@@ -12,19 +13,22 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import { ToolResult, WorkflowToolParams } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import {
-  getDocsDir,
+  getSystemPrompt,
   logAuditEventDirect,
   AuditAction,
   createLogger,
   normalizeError,
   isOperationalError,
 } from "@mcp-moira/shared";
+import { renderPortableHelpTokens } from "@mcp-moira/shared/portable-help";
 import { ERRORS, formatErrorWithAgentInstructions } from "../messages/index.js";
 import { MCPEngine } from "../core/mcp-engine.js";
 import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import { renderClientSetupMarkdown } from "../help/client-presentation.js";
 
 const logger = createLogger({ component: "GetHelp" });
 
@@ -32,15 +36,17 @@ interface HelpParams extends WorkflowToolParams {
   topic?: string | string[];
 }
 
-interface TopicInfo {
-  file: string; // Relative path from DOCS_DIR
+interface TopicSummary {
   title: string;
   description: string;
   category: string;
 }
 
-// MDX docs directory - copied from packages/docs at Docker build time
-const DOCS_DIR = getDocsDir();
+interface TopicInfo extends TopicSummary {
+  file: string;
+}
+
+const HELP_CONTENT_DIR = fileURLToPath(new URL("../help/content/", import.meta.url));
 
 // Topic aliases - map common names to canonical topic IDs
 const TOPIC_ALIASES: Record<string, string> = {
@@ -67,10 +73,21 @@ const CATEGORY_ORDER: Record<string, string> = {
   reference: "Reference",
 };
 
+const SPECIAL_TOPICS = {
+  tools: {
+    title: "MCP Tools Reference",
+    description: "Complete reference for all MCP tools available in Moira",
+    category: "reference",
+  },
+} as const satisfies Record<string, TopicSummary>;
+
 // Cache for discovered topics (lazy initialization)
 let topicCache: Map<string, TopicInfo> | null = null;
 
-export async function getHelp(params: HelpParams = {}): Promise<ToolResult<string>> {
+export async function getHelp(
+  params: HelpParams = {},
+  renderToolsReference?: () => string,
+): Promise<ToolResult<string>> {
   try {
     // Get authenticated user context
     const { userId } = getUserContext();
@@ -112,14 +129,22 @@ export async function getHelp(params: HelpParams = {}): Promise<ToolResult<strin
     if (Array.isArray(topic)) {
       const contents: string[] = [];
       for (const t of topic) {
-        const helpContent = await generateHelpContent(t, params.workflowsDirectory);
+        const helpContent = await generateHelpContent(
+          t,
+          params.workflowsDirectory,
+          renderToolsReference,
+        );
         contents.push(`# Topic: ${t}\n\n${helpContent}`);
       }
       return { success: true, data: contents.join("\n\n---\n\n") };
     }
 
     // Provide help for specific topic
-    const helpContent = await generateHelpContent(topic, params.workflowsDirectory);
+    const helpContent = await generateHelpContent(
+      topic,
+      params.workflowsDirectory,
+      renderToolsReference,
+    );
 
     return { success: true, data: helpContent };
   } catch (error) {
@@ -144,90 +169,59 @@ export async function getHelp(params: HelpParams = {}): Promise<ToolResult<strin
   }
 }
 
-/**
- * Strip MDX frontmatter (YAML between --- delimiters)
- */
-function stripFrontmatter(content: string): string {
-  const frontmatterRegex = /^---\s*\n[\s\S]*?\n---\s*\n/;
-  return content.replace(frontmatterRegex, "");
+interface PortableHelpPaths {
+  helpDirectory?: string;
+  systemPrompt?: string;
 }
 
-/**
- * Strip MDX/JSX imports and components
- */
-function stripJsx(content: string): string {
-  const withoutImports = content
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("import "))
-    .join("\n");
-  let result = "";
-
-  for (let index = 0; index < withoutImports.length;) {
-    if (withoutImports[index] !== "<") {
-      result += withoutImports[index++];
-      continue;
-    }
-
-    const marker =
-      withoutImports[index + 1] === "/" ? withoutImports[index + 2] : withoutImports[index + 1];
-    if (!marker || marker < "A" || marker > "Z") {
-      result += withoutImports[index++];
-      continue;
-    }
-
-    let quote: "'" | '"' | null = null;
-    let end = index + 1;
-    for (; end < withoutImports.length; end++) {
-      const character = withoutImports[end];
-      if (quote) {
-        if (character === quote) quote = null;
-      } else if (character === "'" || character === '"') {
-        quote = character;
-      } else if (character === ">") {
-        break;
-      }
-    }
-    if (end >= withoutImports.length) {
-      result += withoutImports[index++];
-      continue;
-    }
-    index = end + 1;
-  }
-
-  const lines = result.split("\n");
-  const compact: string[] = [];
-  let blankLines = 0;
-  for (const line of lines) {
-    if (line.trim() === "") {
-      blankLines++;
-      if (blankLines > 1) continue;
-    } else {
-      blankLines = 0;
-    }
-    compact.push(line);
-  }
-  return compact.join("\n").trim();
-}
-
-/**
- * Read and process MDX file
- */
-function readMdxFile(filePath: string): string | null {
+function renderPortableMarkdown(content: string): string | null {
   try {
-    if (!fs.existsSync(filePath)) {
-      return null;
-    }
-    const content = fs.readFileSync(filePath, "utf-8");
-    const withoutFrontmatter = stripFrontmatter(content);
-    const withoutJsx = stripJsx(withoutFrontmatter);
-    return withoutJsx;
+    return renderPortableHelpTokens(content).trim();
   } catch {
     return null;
   }
 }
 
+function stripFrontmatter(content: string): string {
+  return content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "").trim();
+}
+
+function readSource(helpDirectory: string, relativePath: string): string | null {
+  const sourcePath = path.join(helpDirectory, relativePath);
+  return fs.existsSync(sourcePath) ? stripFrontmatter(fs.readFileSync(sourcePath, "utf8")) : null;
+}
+
+function composePortableHelpFile(
+  relativePath: string,
+  paths: PortableHelpPaths = {},
+): string | null {
+  const helpDirectory = paths.helpDirectory ?? HELP_CONTENT_DIR;
+  const before = readSource(helpDirectory, relativePath);
+  if (before === null) return null;
+  const language = relativePath.startsWith("ru/") ? "ru" : "en";
+
+  const insertsClientSetup = [
+    "getting-started/quickstart.before.md",
+    "integration/mcp-clients.before.md",
+  ].some((suffix) => relativePath.endsWith(suffix));
+  if (insertsClientSetup) {
+    const after = readSource(helpDirectory, relativePath.replace(".before.md", ".after.md"));
+    return after === null
+      ? null
+      : renderPortableMarkdown(
+          `${before}\n\n${renderClientSetupMarkdown(language, "{MCP_URL}")}\n${after}`,
+        );
+  }
+  if (relativePath.endsWith("integration/agent-instructions.before.md")) {
+    const systemPrompt = stripFrontmatter(paths.systemPrompt ?? getSystemPrompt());
+    return renderPortableMarkdown(`${before}\n\n${systemPrompt}`);
+  }
+
+  return renderPortableMarkdown(before);
+}
+
 /**
- * Extract frontmatter metadata from MDX content
+ * Extract frontmatter metadata from a semantic Markdown source.
  */
 function extractFrontmatter(content: string): { title: string; description: string } {
   const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
@@ -257,7 +251,7 @@ function extractFrontmatter(content: string): { title: string; description: stri
  * - "reference/workflows/robust-task.mdx" -> "workflow-robust-task"
  */
 function filePathToTopicId(relativePath: string): string {
-  const parts = relativePath.replace(/\.mdx$/, "").split("/");
+  const parts = relativePath.replace(/(?:\.before)?\.(?:mdx|md)$/, "").split("/");
   const category = parts[0];
   const fileName = parts[parts.length - 1];
 
@@ -289,10 +283,10 @@ function getCategoryFromPath(relativePath: string): string {
 }
 
 /**
- * Recursively scan directory for MDX files
- * Excludes: ru/ translations, reference/workflows/ (website-only workflow catalog)
+ * Recursively scan the MCP-owned portable help corpus.
+ * Excludes translations, insertion suffixes, and website-only workflow references.
  */
-function scanMdxFiles(dir: string, baseDir: string, files: string[] = []): string[] {
+function scanHelpFiles(dir: string, baseDir: string, files: string[] = []): string[] {
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     const relativeDirPath = path.relative(baseDir, dir);
@@ -305,9 +299,12 @@ function scanMdxFiles(dir: string, baseDir: string, files: string[] = []): strin
         if (entry.name === "ru") continue;
         // Skip reference/workflows/ (website-only, too many individual workflow docs)
         if (relativeDirPath === "reference" && entry.name === "workflows") continue;
-        scanMdxFiles(fullPath, baseDir, files);
-      } else if (entry.isFile() && entry.name.endsWith(".mdx")) {
-        // Get relative path from base docs dir
+        scanHelpFiles(fullPath, baseDir, files);
+      } else if (
+        entry.isFile() &&
+        entry.name.endsWith(".md") &&
+        !entry.name.endsWith(".after.md")
+      ) {
         const relativePath = path.relative(baseDir, fullPath);
         files.push(relativePath);
       }
@@ -320,32 +317,28 @@ function scanMdxFiles(dir: string, baseDir: string, files: string[] = []): strin
 }
 
 /**
- * Discover all topics from MDX files in DOCS_DIR
+ * Discover all runtime topics from the MCP-owned semantic corpus.
  */
-function discoverTopics(): Map<string, TopicInfo> {
-  if (topicCache) {
+function discoverTopics(helpDirectory = HELP_CONTENT_DIR): Map<string, TopicInfo> {
+  if (helpDirectory === HELP_CONTENT_DIR && topicCache) {
     return topicCache;
   }
 
   const topics = new Map<string, TopicInfo>();
 
-  // Skip if DOCS_DIR doesn't exist (e.g., in tests without real filesystem)
-  if (!fs.existsSync(DOCS_DIR)) {
-    topicCache = topics;
+  if (!fs.existsSync(helpDirectory)) {
+    if (helpDirectory === HELP_CONTENT_DIR) topicCache = topics;
     return topics;
   }
 
-  const mdxFiles = scanMdxFiles(DOCS_DIR, DOCS_DIR);
+  const helpFiles = scanHelpFiles(helpDirectory, helpDirectory);
 
-  for (const file of mdxFiles) {
-    // Skip docs/index.mdx (root index)
-    if (file === "index.mdx") continue;
-
+  for (const file of helpFiles) {
     const topicId = filePathToTopicId(file);
     const category = getCategoryFromPath(file);
 
     // Read frontmatter for metadata
-    const fullPath = path.join(DOCS_DIR, file);
+    const fullPath = path.join(helpDirectory, file);
     const content = fs.readFileSync(fullPath, "utf-8");
     const { title, description } = extractFrontmatter(content);
 
@@ -357,7 +350,7 @@ function discoverTopics(): Map<string, TopicInfo> {
     });
   }
 
-  topicCache = topics;
+  if (helpDirectory === HELP_CONTENT_DIR) topicCache = topics;
   return topics;
 }
 
@@ -371,14 +364,22 @@ function resolveTopicId(topic: string): string {
 /**
  * Get topic info by ID (resolves aliases)
  */
-function getTopicInfo(topic: string): TopicInfo | undefined {
-  const topics = discoverTopics();
+function getTopicInfo(topic: string, helpDirectory = HELP_CONTENT_DIR): TopicInfo | undefined {
+  const topics = discoverTopics(helpDirectory);
   const resolvedId = resolveTopicId(topic);
   return topics.get(resolvedId);
 }
 
-function getTopicList(): string {
-  const topics = discoverTopics();
+function getTopicCatalog(helpDirectory = HELP_CONTENT_DIR): Map<string, TopicSummary> {
+  const topics = new Map<string, TopicSummary>(discoverTopics(helpDirectory));
+  for (const [topicId, info] of Object.entries(SPECIAL_TOPICS)) {
+    topics.set(topicId, info);
+  }
+  return topics;
+}
+
+function getTopicList(helpDirectory = HELP_CONTENT_DIR): string {
+  const topics = getTopicCatalog(helpDirectory);
 
   // Group topics by category
   const byCategory = new Map<string, string[]>();
@@ -470,17 +471,25 @@ function getTopicList(): string {
   return result;
 }
 
-async function generateHelpContent(topic: string, _workflowsDir?: string): Promise<string> {
+async function generateHelpContent(
+  topic: string,
+  _workflowsDir?: string,
+  renderToolsReference?: () => string,
+  paths: PortableHelpPaths = {},
+): Promise<string> {
+  if (resolveTopicId(topic) === "tools" && renderToolsReference) {
+    return renderToolsReference();
+  }
+
   // Resolve alias and get topic info
-  const topicInfo = getTopicInfo(topic);
+  const helpDirectory = paths.helpDirectory ?? HELP_CONTENT_DIR;
+  const topicInfo = getTopicInfo(topic, helpDirectory);
   if (topicInfo) {
-    const filePath = path.join(DOCS_DIR, topicInfo.file);
-    const content = readMdxFile(filePath);
+    const content = composePortableHelpFile(topicInfo.file, paths);
     if (content) {
       return content;
     }
-    // MDX file not found - return error message
-    return `${ERRORS.documentation_file_not_found(topicInfo.file, DOCS_DIR)}\n\n${getTopicList()}`;
+    return `${ERRORS.documentation_file_not_found(topicInfo.file, helpDirectory)}\n\n${getTopicList(helpDirectory)}`;
   }
 
   return `${ERRORS.unknown_help_topic(topic)}\n\nHint: Use help() without arguments to see all available topics.`;
@@ -488,12 +497,16 @@ async function generateHelpContent(topic: string, _workflowsDir?: string): Promi
 
 // Export for testing
 export const _testing = {
-  stripJsx,
+  renderPortableMarkdown,
+  stripFrontmatter,
+  composePortableHelpFile,
   extractFrontmatter,
   filePathToTopicId,
   resolveTopicId,
   discoverTopics,
+  scanHelpFiles,
   getTopicList,
+  generateHelpContent,
   resetCache: () => {
     topicCache = null;
   },

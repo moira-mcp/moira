@@ -16,6 +16,7 @@ import {
   writeManifest,
   getPromptMappings,
   processTemplateVariables,
+  isRetiredToolDescriptionKey,
   migratePrompts,
   type Manifest,
   type PromptMigrationConfig,
@@ -150,26 +151,17 @@ describe("prompt-migration", () => {
   });
 
   describe("getPromptMappings", () => {
-    it("returns 15 default mappings when no promptsDir provided", () => {
+    it("returns only the four database-backed default text mappings", () => {
       const mappings = getPromptMappings();
 
-      expect(mappings.length).toBe(15);
+      expect(mappings.length).toBe(4);
 
       const keys = mappings.map((m) => m.dbKey);
       expect(keys).toContain("mcp.systemPrompt");
       expect(keys).toContain("mcp.systemReminder");
-      expect(keys).toContain("mcp.toolDescription.list");
-      expect(keys).toContain("mcp.toolDescription.start");
-      expect(keys).toContain("mcp.toolDescription.step");
-      expect(keys).toContain("mcp.toolDescription.manage");
-      expect(keys).toContain("mcp.toolDescription.help");
-      expect(keys).toContain("mcp.toolDescription.settings");
-      expect(keys).toContain("mcp.toolDescription.token");
-      expect(keys).toContain("mcp.toolDescription.session");
-      expect(keys).toContain("mcp.toolDescription.notes");
-      expect(keys).toContain("mcp.toolDescription.artifacts");
       expect(keys).toContain("mcp.errorMessages");
       expect(keys).toContain("mcp.validationHelp");
+      expect(keys.some(isRetiredToolDescriptionKey)).toBe(false);
     });
 
     it("all default mappings have required fields", () => {
@@ -195,13 +187,13 @@ describe("prompt-migration", () => {
       const mappings = getPromptMappings(promptsDir);
       const keys = mappings.map((m) => m.dbKey);
 
-      // 15 defaults + 4 agent overrides
-      expect(mappings.length).toBe(19);
+      // Four defaults plus the three system prompt/reminder overrides.
+      expect(mappings.length).toBe(7);
 
       expect(keys).toContain("mcp.agent.chatgpt.systemPrompt");
       expect(keys).toContain("mcp.agent.chatgpt.systemReminder");
       expect(keys).toContain("mcp.agent.cursor.systemReminder");
-      expect(keys).toContain("mcp.agent.cursor.toolDescription.step");
+      expect(keys).not.toContain("mcp.agent.cursor.toolDescription.step");
     });
 
     it("agent override mappings have correct categories", () => {
@@ -228,7 +220,7 @@ describe("prompt-migration", () => {
       const keys = mappings.map((m) => m.dbKey);
 
       expect(keys).toContain("mcp.agent.chatgpt.model.gpt-4o.systemPrompt");
-      expect(keys).toContain("mcp.agent.chatgpt.model.gpt-4o.toolDescription.step");
+      expect(keys).not.toContain("mcp.agent.chatgpt.model.gpt-4o.toolDescription.step");
 
       const modelMapping = mappings.find(
         (m) => m.dbKey === "mcp.agent.chatgpt.model.gpt-4o.systemPrompt",
@@ -241,7 +233,7 @@ describe("prompt-migration", () => {
       fs.mkdirSync(promptsDir, { recursive: true });
 
       const mappings = getPromptMappings(promptsDir);
-      expect(mappings.length).toBe(15);
+      expect(mappings.length).toBe(4);
     });
   });
 
@@ -522,8 +514,7 @@ describe("prompt-migration", () => {
       createPromptFiles(promptsDir, {
         "systemPrompt.md": "System prompt content",
         "systemReminder.md": "System reminder content",
-        "toolDescriptions/list.md": "List tool description",
-        "toolDescriptions/start.md": "Start tool description",
+        "toolDescriptions/list.md": "Static list tool description",
         "errorMessages.json": '{"test": "error"}',
         "validationHelp.json": '{"general": ["help"]}',
       });
@@ -533,14 +524,13 @@ describe("prompt-migration", () => {
       // At least the files we created should be inserted
       expect(result.inserted).toContain("mcp.systemPrompt");
       expect(result.inserted).toContain("mcp.systemReminder");
-      expect(result.inserted).toContain("mcp.toolDescription.list");
-      expect(result.inserted).toContain("mcp.toolDescription.start");
+      expect(result.inserted).not.toContain("mcp.toolDescription.list");
       expect(result.inserted).toContain("mcp.errorMessages");
       expect(result.inserted).toContain("mcp.validationHelp");
       expect(result.conflicts).toHaveLength(0);
     });
 
-    it("migrates agent override prompts from agents/ directory", () => {
+    it("migrates agent prompts but ignores static agent tool descriptions", () => {
       createPromptFiles(promptsDir, {
         "systemPrompt.md": "Default system prompt",
         "agents/chatgpt/systemReminder.md": "ChatGPT reminder",
@@ -551,7 +541,7 @@ describe("prompt-migration", () => {
 
       expect(result.inserted).toContain("mcp.systemPrompt");
       expect(result.inserted).toContain("mcp.agent.chatgpt.systemReminder");
-      expect(result.inserted).toContain("mcp.agent.cursor.toolDescription.step");
+      expect(result.inserted).not.toContain("mcp.agent.cursor.toolDescription.step");
 
       // Verify DB values and categories
       const db = new Database(dbPath);
@@ -562,11 +552,70 @@ describe("prompt-migration", () => {
       expect(chatgptRow.category).toBe("mcp-agent-prompts");
 
       const cursorRow = db
-        .prepare("SELECT value, category FROM globalSetting WHERE key = ?")
-        .get("mcp.agent.cursor.toolDescription.step") as { value: string; category: string };
-      expect(cursorRow.value).toBe("Cursor step description");
-      expect(cursorRow.category).toBe("mcp-agent-prompts");
+        .prepare("SELECT value FROM globalSetting WHERE key = ?")
+        .get("mcp.agent.cursor.toolDescription.step");
+      expect(cursorRow).toBeUndefined();
       db.close();
+    });
+
+    it("retires every default, agent, and model tool-description row and manifest entry", () => {
+      const db = createTestDb(dbPath);
+      const insert = db.prepare(
+        "INSERT INTO globalSetting (key, value, type, label, category, sortOrder, updatedAt) VALUES (?, ?, 'text', 'Test', 'mcp', 0, ?)",
+      );
+      for (const key of [
+        "mcp.toolDescription.list",
+        "mcp.agent.cursor.toolDescription.step",
+        "mcp.agent.cursor.model.small.toolDescription.step",
+        "mcp.systemPrompt",
+        "mcp.systemReminder",
+        "unrelated.setting",
+      ]) {
+        insert.run(key, `value:${key}`, Date.now());
+      }
+      db.close();
+
+      writeManifest(manifestPath, {
+        version: 1,
+        entries: Object.fromEntries(
+          [
+            "mcp.toolDescription.list",
+            "mcp.agent.cursor.toolDescription.step",
+            "mcp.agent.cursor.model.small.toolDescription.step",
+          ].map((key) => [key, { hash: computeHash(`old:${key}`), updatedAt: Date.now() }]),
+        ),
+      });
+      createPromptFiles(promptsDir, {
+        "systemPrompt.md": "value:mcp.systemPrompt",
+        "systemReminder.md": "value:mcp.systemReminder",
+        "toolDescriptions/list.md": "must remain static",
+        "agents/cursor/toolDescriptions/step.md": "must remain static",
+      });
+
+      const first = migratePrompts(getConfig());
+      expect(first.removed.sort()).toEqual([
+        "mcp.agent.cursor.model.small.toolDescription.step",
+        "mcp.agent.cursor.toolDescription.step",
+        "mcp.toolDescription.list",
+      ]);
+      expect(first.conflicts).toEqual([]);
+
+      const second = migratePrompts(getConfig());
+      expect(second.removed).toEqual([]);
+      const remainingDb = new Database(dbPath);
+      const keys = remainingDb
+        .prepare("SELECT key FROM globalSetting ORDER BY key")
+        .all() as Array<{
+        key: string;
+      }>;
+      remainingDb.close();
+      expect(keys.map(({ key }) => key)).toEqual(
+        expect.arrayContaining(["mcp.systemPrompt", "mcp.systemReminder", "unrelated.setting"]),
+      );
+      expect(keys.some(({ key }) => isRetiredToolDescriptionKey(key))).toBe(false);
+      expect(
+        Object.keys(readManifest(manifestPath).entries).some(isRetiredToolDescriptionKey),
+      ).toBe(false);
     });
 
     it("detects conflict on agent override prompts", () => {

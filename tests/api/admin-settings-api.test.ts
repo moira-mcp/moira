@@ -288,34 +288,9 @@ describe("Admin Settings API", () => {
   });
 
   describe("Prompt Preview (POST /api/admin/global-settings/preview-prompt)", () => {
-    test("returns default prompt when no overrides exist", async () => {
-      const response = await fetch(`${BASE_URL}/api/admin/global-settings/preview-prompt`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Cookie: adminCookie,
-        },
-        body: JSON.stringify({
-          type: "toolDescription",
-          toolName: "list",
-        }),
-      });
-
-      expect(response.status).toBe(200);
-      const result = await response.json();
-      expect(result.success).toBe(true);
-      expect(result.data.resolvedFrom).toBe("default");
-      expect(result.data.value).toBeTruthy();
-      expect(result.data.context.type).toBe("toolDescription");
-    });
-
-    test("returns agent override when set", async () => {
-      const testValue = "TEST_AGENT_OVERRIDE_" + Date.now();
-      // Use valid vendor "gemini" for testing agent override
-      const agentKey = "mcp.agent.gemini.toolDescription.list";
-
-      // Create agent override using the set-scope-value API
-      const createRes = await fetch(`${BASE_URL}/api/admin/global-settings/set-scope-value`, {
+    test("rejects every retired tool-description admin contract without recreating a row", async () => {
+      const retiredKey = "mcp.agent.gemini.toolDescription.list";
+      const getResponse = await fetch(`${BASE_URL}/api/admin/global-settings/get-scope-value`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -324,13 +299,25 @@ describe("Admin Settings API", () => {
         body: JSON.stringify({
           promptType: "toolDescription.list",
           vendor: "gemini",
-          value: testValue,
         }),
       });
-      expect(createRes.status).toBe(200);
+      expect(getResponse.status).toBe(400);
 
-      // Preview with agent context
-      const response = await fetch(`${BASE_URL}/api/admin/global-settings/preview-prompt`, {
+      const setResponse = await fetch(`${BASE_URL}/api/admin/global-settings/set-scope-value`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: adminCookie,
+        },
+        body: JSON.stringify({
+          promptType: "toolDescription.list",
+          vendor: "gemini",
+          value: "must not be stored",
+        }),
+      });
+      expect(setResponse.status).toBe(400);
+
+      const previewResponse = await fetch(`${BASE_URL}/api/admin/global-settings/preview-prompt`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -342,18 +329,15 @@ describe("Admin Settings API", () => {
           toolName: "list",
         }),
       });
+      expect(previewResponse.status).toBe(400);
 
-      expect(response.status).toBe(200);
-      const result = await response.json();
-      expect(result.success).toBe(true);
-      expect(result.data.value).toBe(testValue);
-      expect(result.data.resolvedFrom).toBe("agent");
-
-      // Cleanup: reset the value to null
-      await fetch(`${BASE_URL}/api/admin/global-settings/${agentKey}`, {
-        method: "DELETE",
+      const settingsResponse = await fetch(`${BASE_URL}/api/admin/global-settings`, {
         headers: { Cookie: adminCookie },
       });
+      const settings = (await settingsResponse.json()) as {
+        data: { settings: Array<{ key: string }> };
+      };
+      expect(settings.data.settings.some(({ key }) => key === retiredKey)).toBe(false);
     });
 
     test("validates required type parameter", async () => {
@@ -369,7 +353,7 @@ describe("Admin Settings API", () => {
       expect(response.status).toBe(400);
     });
 
-    test("validates toolName required for toolDescription type", async () => {
+    test("rejects retired toolDescription preview even when a toolName is provided", async () => {
       const response = await fetch(`${BASE_URL}/api/admin/global-settings/preview-prompt`, {
         method: "POST",
         headers: {
@@ -378,6 +362,7 @@ describe("Admin Settings API", () => {
         },
         body: JSON.stringify({
           type: "toolDescription",
+          toolName: "list",
         }),
       });
 

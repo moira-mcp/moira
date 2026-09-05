@@ -2,17 +2,11 @@
  * Centralized English messages for MCP tools
  * All user-facing strings in one place for consistency and future i18n
  *
- * ARCHITECTURE:
- * - Tool descriptions are loaded from DB via McpTextService at server startup
- * - If DB value is missing, returns empty string (no fallback to hardcoded)
- * - System prompt is appended to help tool description from DB
- * - loadToolDescriptions() must be called before tools are registered
+ * Tool descriptions belong to the typed static registry. This module owns
+ * operational result/error messages only.
  */
 
 import {
-  getMcpTextService,
-  type McpToolName,
-  type McpPromptContext,
   DomainError,
   isDomainError,
   isNotFoundError,
@@ -20,53 +14,6 @@ import {
   isValidationError,
   getHost,
 } from "@mcp-moira/shared";
-
-// ============================================
-// Tool Descriptions (loaded from DB)
-// ============================================
-
-// System prompt is delivered via TWO mechanisms for maximum compatibility:
-// 1. MCP `instructions` field in server.ts (proper MCP way)
-// 2. Appended to help tool description below (fallback for clients ignoring instructions)
-const SYSTEM_PROMPT_HEADER = `
-
----
-SYSTEM INSTRUCTIONS (fallback for MCP clients without instructions field support):
-`;
-
-/**
- * Load tool descriptions from database with optional agent/model context
- * Called on each MCP client connection to get fresh descriptions
- * No caching - always reads from DB to support dynamic updates via AdminSettings UI
- *
- * Resolution order (first non-null wins):
- * 1. Model-level override: mcp.agent.{agent}.model.{model}.toolDescription.{tool}
- * 2. Agent-level override: mcp.agent.{agent}.toolDescription.{tool}
- * 3. Default: mcp.toolDescription.{tool}
- *
- * @param context - Optional agent/model identifiers for hierarchical override resolution
- */
-export async function loadToolDescriptions(
-  context?: McpPromptContext,
-): Promise<Record<McpToolName, string>> {
-  const mcpTextService = getMcpTextService();
-
-  // Load all tool descriptions with override resolution if context provided
-  const descriptions = context
-    ? await mcpTextService.getAllToolDescriptionsWithOverride(context)
-    : await mcpTextService.getAllToolDescriptions();
-
-  // Load system prompt and append to help description (fallback delivery mechanism)
-  const systemPrompt = context
-    ? await mcpTextService.getSystemPromptWithOverride(context)
-    : await mcpTextService.getSystemPrompt();
-
-  if (descriptions.help && systemPrompt) {
-    descriptions.help = descriptions.help + SYSTEM_PROMPT_HEADER + systemPrompt + "\n---";
-  }
-
-  return descriptions;
-}
 
 // ============================================
 // Error Messages

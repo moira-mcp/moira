@@ -90,22 +90,24 @@ function ordinaryInputs(): Record<string, MockInput> {
     "wait-for-expensive-state-change": { blocker_decision: "retry" },
     "review-plan-unit-with-user": { acceptance_decision: "accepted" },
     "create-and-upload-step-report": { report_url: "https://report.example/unit.html" },
-    "checkpoint-plan-unit": { checkpoint_outcome: "pass" },
+    "checkpoint-plan-unit": {},
     "repair-user-feedback": { resolution: "in_plan" },
-    "reconcile-documentation": { change_scope: "not_applicable" },
-    "validate-documentation": { review_outcome: "pass" },
-    "repair-documentation": { repair_outcome: "gate_local" },
+    "update-unit-documentation": { documentation_outcome: "ready" },
     "validate-feature-wide": { validation_outcome: "not_applicable" },
     "repair-feature-validation": { repair_outcome: "gate_local" },
     "wait-for-feature-state-change": { blocker_decision: "retry" },
-    "review-final-semantics": { review_outcome: "pass" },
-    "repair-final-semantics": { repair_outcome: "gate_local" },
-    "validate-requirements-coverage": { gaps_count: 0 },
+    "review-final-semantics": {
+      review_outcome: "pass",
+      gaps_count: 0,
+      review_file: "./moira-ws/example/final-reviews/001/review.md",
+    },
+    "repair-final-semantics": {
+      repair_outcome: "gate_local",
+      result_file: "./moira-ws/example/final-reviews/001/repair.md",
+    },
     "create-final-report": {},
-    "revise-plan-for-coverage": {},
     "finalize-feature": { finalization_outcome: "pass" },
     "repair-finalization-repository": { repair_outcome: "gate_local" },
-    "repair-checkpoint-repository": { repair_outcome: "changed", mutation_scope: "product" },
     "resolve-finalization-blocker": { blocker_decision: "retry" },
     "report-and-accept-feature": { feature_decision: "accepted" },
     "revise-plan-after-feedback": {},
@@ -383,7 +385,7 @@ const scenarios: TestScenario[] = [
       "wait-for-health-state-change": { blocker_decision: "abort" },
     },
     ["wait-for-health-state-change", "end-aborted"],
-    ["create-plan", "validate-requirements-coverage"],
+    ["create-plan", "review-final-semantics"],
   ),
   flow(
     "cheap test and architecture repairs invalidate all later evidence",
@@ -543,44 +545,35 @@ const scenarios: TestScenario[] = [
     {
       "activate-reviewed-plan": { ...activatedPlan, total_steps: 2 },
     },
-    ["advance-plan-unit", "reconcile-documentation", "end"],
+    ["advance-plan-unit", "update-unit-documentation", "end"],
   ),
   flow(
-    "documentation-only reconciliation has its own repair cone",
+    "documentation discovery of a product defect restarts product evidence",
     {
-      "reconcile-documentation": { change_scope: "documentation_affected" },
-      "validate-documentation": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
-    },
-    ["validate-documentation", "repair-documentation", "validate-feature-wide", "end"],
-  ),
-  flow(
-    "a documentation repair that discovers executable work returns to planning",
-    {
-      "reconcile-documentation": [
-        { change_scope: "documentation_affected" },
-        { change_scope: "not_applicable" },
+      "update-unit-documentation": [
+        { documentation_outcome: "product_repair" },
+        { documentation_outcome: "ready" },
       ],
-      "validate-documentation": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
-      "repair-documentation": { repair_outcome: "replan" },
     },
     [
-      "repair-documentation",
-      "route-documentation-repair-replan",
-      "advance-plan-revision-for-replan",
-      "revise-plan-for-replan",
+      "route-unit-documentation-product-repair",
+      "advance-evidence-iteration",
+      "validate-cheap",
       "end",
     ],
   ),
   flow(
-    "executable documentation requires a reviewed plan revision",
+    "documentation discovery of an invalid plan returns through approved replanning",
     {
-      "reconcile-documentation": [
-        { change_scope: "requires_replan" },
-        { change_scope: "not_applicable" },
+      "update-unit-documentation": [
+        { documentation_outcome: "replan" },
+        { documentation_outcome: "ready" },
       ],
+      "approve-plan": [approvedPlan, approvedPlan],
     },
     [
-      "route-executable-documentation",
+      "route-unit-documentation-replan",
+      "approve-current-unit-closure",
       "advance-plan-revision-for-replan",
       "revise-plan-for-replan",
       "end",
@@ -593,9 +586,23 @@ const scenarios: TestScenario[] = [
         { validation_outcome: "repository_failure" },
         { validation_outcome: "pass" },
       ],
-      "review-final-semantics": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
+      "review-final-semantics": [
+        {
+          review_outcome: "repair",
+          gaps_count: 1,
+          review_file: "./moira-ws/example/final-reviews/001/review.md",
+        },
+        {
+          review_outcome: "pass",
+          gaps_count: 0,
+          review_file: "./moira-ws/example/final-reviews/002/review.md",
+        },
+      ],
       "repair-feature-validation": { repair_outcome: "replan" },
-      "repair-final-semantics": { repair_outcome: "replan" },
+      "repair-final-semantics": {
+        repair_outcome: "replan",
+        result_file: "./moira-ws/example/final-reviews/001/reassessment.md",
+      },
     },
     ["repair-feature-validation", "repair-final-semantics", "end"],
   ),
@@ -617,17 +624,6 @@ const scenarios: TestScenario[] = [
     },
     ["wait-for-feature-state-change", "end-aborted"],
     ["review-final-semantics"],
-  ),
-  flow(
-    "requirements gap creates a reviewed and approved plan revision",
-    {
-      "validate-requirements-coverage": [{ gaps_count: 1 }, { gaps_count: 0 }],
-      "activate-reviewed-plan": [
-        activatedPlan,
-        { ...activatedPlan, current_step_index: 2, total_steps: 2 },
-      ],
-    },
-    ["revise-plan-for-coverage", "review-plan", "end"],
   ),
   flow(
     "authorized finalization repairs repository failure before retry",
@@ -686,44 +682,6 @@ const scenarios: TestScenario[] = [
     ["revise-plan-after-feedback", "review-plan", "end"],
   ),
   flow(
-    "authorized checkpoint repository failure repairs before cursor advance",
-    {
-      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
-      "checkpoint-plan-unit": [
-        { checkpoint_outcome: "repository_failure" },
-        { checkpoint_outcome: "pass" },
-      ],
-      "repair-checkpoint-repository": { repair_outcome: "changed", mutation_scope: "product" },
-    },
-    [
-      "checkpoint-plan-unit",
-      "route-checkpoint-abort",
-      "repair-checkpoint-repository",
-      "validate-cheap",
-      "end",
-    ],
-  ),
-  flow(
-    "a contained checkpoint repair returns to the checkpoint instead of the whole chain",
-    {
-      "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
-      "checkpoint-plan-unit": [
-        { checkpoint_outcome: "repository_failure" },
-        { checkpoint_outcome: "pass" },
-      ],
-      "repair-checkpoint-repository": {
-        repair_outcome: "changed",
-        mutation_scope: "verification_only",
-      },
-    },
-    [
-      "repair-checkpoint-repository",
-      "route-checkpoint-repair-reach",
-      "checkpoint-plan-unit",
-      "end",
-    ],
-  ),
-  flow(
     "a contained finalization repair returns to reconciliation instead of the whole chain",
     {
       "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
@@ -748,9 +706,23 @@ const scenarios: TestScenario[] = [
         { validation_outcome: "repository_failure" },
         { validation_outcome: "pass" },
       ],
-      "review-final-semantics": [{ review_outcome: "repair" }, { review_outcome: "pass" }],
+      "review-final-semantics": [
+        {
+          review_outcome: "repair",
+          gaps_count: 1,
+          review_file: "./moira-ws/example/final-reviews/001/review.md",
+        },
+        {
+          review_outcome: "pass",
+          gaps_count: 0,
+          review_file: "./moira-ws/example/final-reviews/001/review.md",
+        },
+      ],
       "repair-feature-validation": { repair_outcome: "gate_local" },
-      "repair-final-semantics": { repair_outcome: "gate_local" },
+      "repair-final-semantics": {
+        repair_outcome: "gate_local",
+        result_file: "./moira-ws/example/final-reviews/001/repair.md",
+      },
     },
     [
       "route-feature-repair-replan",
@@ -760,19 +732,6 @@ const scenarios: TestScenario[] = [
       "end",
     ],
     ["advance-evidence-iteration"],
-  ),
-  flow(
-    "authorized checkpoint aborts without cursor advance",
-    {
-      "activate-reviewed-plan": {
-        ...activatedPlan,
-        total_steps: 2,
-        vcs_commits_authorized: true,
-      },
-      "checkpoint-plan-unit": { checkpoint_outcome: "abort" },
-    },
-    ["checkpoint-plan-unit", "route-checkpoint-abort", "end-aborted"],
-    ["route-plan-complete", "advance-plan-unit"],
   ),
   flow(
     "plan reviewer can reject an invalid criterion before implementation",
@@ -923,39 +882,23 @@ const scenarios: TestScenario[] = [
     ["route-completeness-repair-outcome", "approve-current-unit-closure", "end"],
   ),
   flow(
-    "documentation reviewer can require replanning",
-    {
-      "reconcile-documentation": [
-        { change_scope: "documentation_affected" },
-        { change_scope: "not_applicable" },
-      ],
-      "validate-documentation": { review_outcome: "replan" },
-      "approve-plan": [approvedPlan, approvedPlan],
-    },
-    ["route-documentation-review-replan", "advance-plan-revision-for-replan", "end"],
-  ),
-  flow(
     "final semantic reviewer can require replanning",
     {
-      "review-final-semantics": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
+      "review-final-semantics": [
+        {
+          review_outcome: "replan",
+          gaps_count: 1,
+          review_file: "./moira-ws/example/final-reviews/001/review.md",
+        },
+        {
+          review_outcome: "pass",
+          gaps_count: 0,
+          review_file: "./moira-ws/example/final-reviews/002/review.md",
+        },
+      ],
       "approve-plan": [approvedPlan, approvedPlan],
     },
     ["route-final-review-replan", "advance-plan-revision-for-replan", "end"],
-  ),
-  flow(
-    "checkpoint repair can require replanning",
-    {
-      "activate-reviewed-plan": [
-        { ...activatedPlan, vcs_commits_authorized: true },
-        { ...activatedPlan, vcs_commits_authorized: true },
-      ],
-      "checkpoint-plan-unit": [
-        { checkpoint_outcome: "repository_failure" },
-        { checkpoint_outcome: "pass" },
-      ],
-      "repair-checkpoint-repository": { repair_outcome: "replan" },
-    },
-    ["route-checkpoint-repair-replan", "approve-current-unit-closure", "end"],
   ),
   flow(
     "finalization repair can require replanning",
@@ -974,7 +917,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v15.4.2", () => {
+describe("software-development-flow v15.5.0", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -985,7 +928,7 @@ describe("software-development-flow v15.4.2", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("15.4.2");
+    expect(workflow.metadata.version).toBe("15.5.0");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
     expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
       "workspace_path",
@@ -1074,7 +1017,7 @@ describe("software-development-flow v15.4.2", () => {
       "subgraph",
     ]);
     const visibleWaitingNodes = workflow.nodes.filter((node) => visibleWaitingTypes.has(node.type));
-    expect(visibleWaitingNodes).toHaveLength(54);
+    expect(visibleWaitingNodes).toHaveLength(49);
     expect(visibleWaitingNodes.filter((node) => !node.progressNodeId)).toEqual([]);
     expect(visibleWaitingNodes.filter((node) => !node.progressActiveContent)).toEqual([]);
     const stageOutcome = {
@@ -1111,6 +1054,16 @@ describe("software-development-flow v15.4.2", () => {
     expect(workflow.nodes.find((node) => node.id === "notify-workflow-stopped")).not.toHaveProperty(
       "attachProgressImage",
     );
+    expect(
+      workflow.nodes.filter((node) => node.type === "telegram-notification").map((node) => node.id),
+    ).toEqual([
+      "notify-plan-approval",
+      "notify-report-ready",
+      "notify-unit-approval",
+      "notify-workflow-complete",
+      "notify-workflow-stopped",
+      "notify-final-approval",
+    ]);
 
     const approval = workflow.nodes.find((node) => node.id === "approve-plan") as {
       inputSchema: { globalInputs?: string[]; properties: Record<string, unknown> };
@@ -1180,9 +1133,14 @@ describe("software-development-flow v15.4.2", () => {
 
     const completion = workflow.nodes.find((node) => node.id === "complete-plan-unit");
     expect(completion?.directive).toContain(
-      "Directly finish every reproducible foreseeable in-scope omission",
+      "Finish every reproducible producer-owned executable omission",
     );
-    expect(completion?.directive).toContain("Do not emit a findings-only handoff");
+    expect(completion?.directive).toContain("Do not mutate permanent project documentation");
+    const implementation = workflow.nodes.find((node) => node.id === "implement-plan-unit");
+    expect(implementation?.completionCondition).toContain(
+      "permanent project documentation remains deferred to update-unit-documentation",
+    );
+    expect(implementation?.completionCondition).not.toContain("tests and documentation");
 
     // The engine materializes standards once, and every reader receives the canonical path.
     const standardsVars = [
@@ -1237,18 +1195,17 @@ describe("software-development-flow v15.4.2", () => {
       completionCondition: string;
     };
     expect(repairPlan.directive).toContain(
-      "Closed units stay as they were closed and keep the index they were closed at",
+      "completed units at their originating revision and index",
     );
     // Forbidding the repair of a closed unit would loop forever without a way out: this flow has no
     // review-round limit at all, so the exit is the node's own, and it must cover a finding that
     // reproduces but may no longer be fixed.
     expect(repairPlan.directive).toContain(
-      "the finding cannot be corrected without touching a closed unit, that is a cause above repair",
+      "requires a material revision or touching a closed unit",
     );
     for (const [nodeId, directiveClause] of [
       ["revise-plan-after-rejection", "carry forward unaffected requirements and completed work"],
-      ["revise-plan-for-replan", "keep the index they were closed at"],
-      ["revise-plan-for-coverage", "Preserve prior revisions and completed work"],
+      ["revise-plan-for-replan", "closed-unit indices"],
       ["revise-plan-after-feedback", "Preserve prior revisions and completed work"],
     ] as const) {
       expect(
@@ -1261,7 +1218,6 @@ describe("software-development-flow v15.4.2", () => {
       ["repair-plan", "the index they were closed at"],
       ["revise-plan-after-rejection", "the index they were closed at"],
       ["revise-plan-for-replan", "the index they were closed at"],
-      ["revise-plan-for-coverage", "the index they were closed at"],
       ["revise-plan-after-feedback", "the index they were closed at"],
     ] as const) {
       expect(gate(nodeId)).toContain(gateClause);
@@ -1269,7 +1225,6 @@ describe("software-development-flow v15.4.2", () => {
     // Upstream owns the rest of each gate; the new clause is appended to it rather than replacing
     // it, so the gate still states the outcome it was written for.
     expect(gate("revise-plan-after-rejection")).toContain("rejection feedback");
-    expect(gate("revise-plan-for-coverage")).toContain("every final coverage gap");
     expect(gate("revise-plan-after-feedback")).toContain("final rejection feedback");
 
     expect(gate("create-plan")).toContain("every unit has valid visualMode and userApproval");
@@ -1280,7 +1235,6 @@ describe("software-development-flow v15.4.2", () => {
       "repair-plan",
       "revise-plan-after-rejection",
       "revise-plan-for-replan",
-      "revise-plan-for-coverage",
       "revise-plan-after-feedback",
     ]) {
       expect(gate(nodeId)).toContain(
@@ -1289,16 +1243,16 @@ describe("software-development-flow v15.4.2", () => {
     }
     const owner = workflow.nodes.find((node) => node.id === "capture-task-and-context");
     expect(owner?.directive).toContain("./moira-ws/software-development-flow-{task-name}");
-    expect(owner?.directive).toContain('session({ action: "add-reminder"');
-    expect(owner?.directive).toContain("standalone and child executions alike");
-    expect(owner?.directive).toContain("preserve it in canonical requirements");
-    expect(owner?.directive).toContain("neither performs nor authorizes the effect");
+    expect(owner?.directive).toContain(
+      "Preserve authorized caller-owned follow-ups as execution reminders",
+    );
+    expect(owner?.directive).toContain("without adding them to development units");
     expect(owner?.completionCondition).toContain("active execution reminder");
     expect(owner?.connections).toEqual({ success: "materialize-development-standards" });
     expect(gate("create-plan")).toContain("active execution reminder");
     expect(
       (workflow.nodes.find((node) => node.id === "create-plan") as { directive: string }).directive,
-    ).toContain("Do not copy reminder items into the development plan");
+    ).toContain("caller-owned reminders rather than plan units");
     expect(workflow.runtimePolicy?.externalVariableWrites).toBeUndefined();
 
     // The reviewer contract has one home: the finding format no longer repeats across directives.
@@ -1307,7 +1261,6 @@ describe("software-development-flow v15.4.2", () => {
       "review-plan",
       "review-architecture",
       "review-test-adequacy",
-      "validate-documentation",
       "review-final-semantics",
       "review-unit-completeness",
     ]) {
@@ -1315,11 +1268,6 @@ describe("software-development-flow v15.4.2", () => {
         (workflow.nodes.find((node) => node.id === id) as { directive: string }).directive,
       ).toContain("standards/review.md");
     }
-    expect(
-      (workflow.nodes.find((node) => node.id === "validate-cheap") as { directive: string })
-        .directive,
-    ).toContain("tests are not substitutes for them");
-
     // Exactly one delegated review per plan unit: the per-unit gates judge locally, and only the
     // completeness review obtains independence.
     for (const id of ["review-test-adequacy", "review-architecture"]) {
@@ -1327,13 +1275,9 @@ describe("software-development-flow v15.4.2", () => {
         directive: string;
         completionCondition: string;
       };
-      expect(gate.directive).toContain("do not delegate it");
+      expect(gate.directive).toContain("later completeness review owns independent unit review");
       expect(gate.completionCondition).not.toContain("Independent");
       expect(`${gate.directive} ${gate.completionCondition}`).not.toContain("fallback");
-      // Still a gate: report path and routing count survive.
-      expect(gate.directive).toContain(
-        "{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}",
-      );
     }
     expect(
       (
@@ -1341,7 +1285,7 @@ describe("software-development-flow v15.4.2", () => {
           directive: string;
         }
       ).directive,
-    ).toContain("Delegate the completeness review");
+    ).toContain("Delegate to a genuinely independent context when the host supports one");
 
     const start = workflow.nodes.find((node) => node.id === "start");
     expect(start).not.toHaveProperty("initialData");
@@ -1368,6 +1312,29 @@ describe("software-development-flow v15.4.2", () => {
       false: "route-plan-complete",
     });
     expect(
+      workflow.nodes.find((node) => node.id === "route-expensive-repository")?.connections,
+    ).toEqual({
+      true: "repair-expensive",
+      false: "update-unit-documentation",
+    });
+    expect(
+      workflow.nodes.find((node) => node.id === "route-unit-documentation-replan")?.connections,
+    ).toEqual({
+      true: "approve-current-unit-closure",
+      false: "route-unit-documentation-product-repair",
+    });
+    expect(
+      workflow.nodes.find((node) => node.id === "route-unit-documentation-product-repair")
+        ?.connections,
+    ).toEqual({
+      true: "advance-evidence-iteration",
+      false: "review-unit-completeness",
+    });
+    expect(workflow.nodes.find((node) => node.id === "route-plan-complete")?.connections).toEqual({
+      true: "validate-feature-wide",
+      false: "advance-plan-unit",
+    });
+    expect(
       workflow.nodes.find((node) => node.id === "route-feature-acceptance")?.connections,
     ).toEqual({
       true: "route-vcs-authority",
@@ -1389,35 +1356,67 @@ describe("software-development-flow v15.4.2", () => {
     expect(workflow.nodes.filter((node) => node.type === "lock")).toEqual([]);
 
     const checkpoint = workflow.nodes.find((node) => node.id === "checkpoint-plan-unit");
-    expect(checkpoint?.directive).toContain("only task-owned changes attributable to this unit");
-    expect(checkpoint?.directive).toContain("without an empty revision");
-    expect(checkpoint?.directive).toContain("explicitly skip this checkpoint, or abort");
+    expect(checkpoint?.directive).toContain("include only task-owned unit changes");
+    expect(checkpoint?.directive).toContain("complete without an empty commit");
+    expect(checkpoint?.directive).toContain("leave this node incomplete");
+    expect(checkpoint?.inputSchema?.properties).toEqual({});
+    expect(checkpoint?.connections).toEqual({ success: "route-plan-complete" });
 
     const runtime = workflow.nodes.find((node) => node.id === "validate-runtime");
-    expect(runtime?.directive).toContain("Use the current visual_mode");
-    expect(runtime?.directive).toContain("does not add a second capture pass");
-    expect(runtime?.directive).toContain("open the actual images");
+    expect(runtime?.directive).toContain("unit's current `visual_mode`");
+    expect(runtime?.directive).toContain("create and inspect one set");
+    expect(runtime?.directive).toContain("HTML reporting reuses that exact set");
     const unitReview = workflow.nodes.find((node) => node.id === "review-plan-unit-with-user");
     expect(unitReview?.directive).toContain("do not decide materiality again");
     expect(unitReview?.directive).toContain("Do not create or upload reports");
     const reportProducer = workflow.nodes.find(
       (node) => node.id === "create-and-upload-step-report",
     );
+    expect(reportProducer?.directive).toContain("agentic-report@latest");
     expect(reportProducer?.directive).toContain("Reuse the exact screenshots already captured");
-    expect(reportProducer?.directive).toContain("do not run capture tooling");
-    expect(reportProducer?.directive).toContain("do not submit success");
+    expect(reportProducer?.directive).toContain("Do not capture again");
+    expect(reportProducer?.directive).toContain("leave the node incomplete");
     const finalSemanticReview = workflow.nodes.find((node) => node.id === "review-final-semantics");
-    expect(finalSemanticReview?.directive).toContain(
-      "every current html_report obligation has current inspected evidence and a successfully uploaded current report",
-    );
-    expect(finalSemanticReview?.directive).toContain(
-      "user acceptance required only when that exact unit's current plan policy required it",
-    );
+    expect(finalSemanticReview?.directive).toContain("applicable visual-report or acceptance fact");
+    expect(finalSemanticReview?.directive).toContain("permanent document");
+    expect(finalSemanticReview?.directive).toContain("final-reviews/NNN/review.md");
+    expect(finalSemanticReview?.inputSchema?.required).toEqual([
+      "review_outcome",
+      "gaps_count",
+      "review_file",
+      "progress_finalize_outcome",
+    ]);
+    expect(
+      (
+        finalSemanticReview?.inputSchema as {
+          properties: { review_file: { pattern: string }; gaps_count: { minimum: number } };
+        }
+      ).properties,
+    ).toMatchObject({
+      review_file: { pattern: "final-reviews/[0-9]{3}/review\\.md$" },
+      gaps_count: { minimum: 0 },
+    });
+    const finalSemanticRepair = workflow.nodes.find((node) => node.id === "repair-final-semantics");
+    expect(finalSemanticRepair?.directive).toContain("{{review-final-semantics.review_file}}");
+    expect(finalSemanticRepair?.inputSchema?.required).toEqual([
+      "repair_outcome",
+      "result_file",
+      "progress_finalize_outcome",
+    ]);
+    expect(
+      workflow.nodes.find((node) => node.id === "route-final-semantic-review")?.connections,
+    ).toEqual({
+      true: "repair-final-semantics",
+      false: "create-final-report",
+    });
+    expect(
+      workflow.nodes.find((node) => node.id === "route-final-repair-replan")?.connections,
+    ).toEqual({
+      true: "advance-plan-revision-for-replan",
+      false: "validate-feature-wide",
+    });
     const finalReport = workflow.nodes.find((node) => node.id === "create-final-report");
-    expect(finalReport?.directive).toContain("every current successfully uploaded visual report");
-    expect(finalReport?.directive).toContain(
-      "interactive acceptance outcomes where the current plan required them",
-    );
+    expect(finalReport?.directive).toContain("the exact numeric final review");
     expect(`${finalSemanticReview?.directive} ${finalReport?.directive}`).not.toContain(
       "accepted visual report",
     );
@@ -1447,12 +1446,21 @@ describe("software-development-flow v15.4.2", () => {
       "record-executable-documentation-change",
       "proof_token",
       "pending_stage",
+      "reconcile-documentation",
+      "validate-documentation",
+      "repair-documentation",
+      "validate-requirements-coverage",
+      "revise-plan-for-coverage",
+      "repair-checkpoint-repository",
+      "checkpoint.md",
+      "final-semantic-review.md",
+      "behavior inventory",
     ]) {
       expect(serialized).not.toContain(removed);
     }
   });
 
-  test("binds current-unit work to the active plan revision", () => {
+  test("keeps current-unit work off stale plan revisions", () => {
     const currentPlanPath = "{{workspace_path}}/plans/{{plan_revision}}/plan.md";
     const previousPlanPath = "{{workspace_path}}/plans/{{previous_plan_revision}}/plan.md";
     const currentPlanConsumers = [
@@ -1472,7 +1480,7 @@ describe("software-development-flow v15.4.2", () => {
       "complete-plan-unit",
       "repair-unit-completeness",
       "checkpoint-plan-unit",
-      "repair-checkpoint-repository",
+      "update-unit-documentation",
       "create-and-upload-step-report",
       "teleport-replan",
     ];
@@ -1483,35 +1491,93 @@ describe("software-development-flow v15.4.2", () => {
           directive: string;
         }
       ).directive;
-      expect(directive).toContain(currentPlanPath);
       expect(directive).not.toContain(previousPlanPath);
     }
-
-    // Revision writers are the deliberate exception: they preserve the historical source while
-    // producing the already-advanced current revision. Ordinary unit work must never copy this
-    // contract, because it would silently execute stale acceptance criteria after a replan.
-    for (const nodeId of [
-      "revise-plan-after-rejection",
-      "revise-plan-for-replan",
-      "revise-plan-for-coverage",
-      "revise-plan-after-feedback",
-      "revise-plan-for-teleport",
-    ]) {
-      const directive = (
-        workflow.nodes.find((node) => node.id === nodeId) as {
+    expect(
+      (
+        workflow.nodes.find((node) => node.id === "update-unit-documentation") as {
           directive: string;
         }
-      ).directive;
-      expect(directive).toContain(previousPlanPath);
-      expect(directive).toContain(currentPlanPath);
+      ).directive,
+    ).toContain(currentPlanPath);
+
+    const sharedReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-replan") as {
+      directive: string;
+    };
+    expect(sharedReplan.directive).toContain("from the previous revision");
+    expect(sharedReplan.directive).toContain("Write plan revision {{plan_revision}}");
+
+    const unitPath = "{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}";
+    const iterationPath = `${unitPath}/iteration-{{current_iteration}}`;
+    const requiredProcessLocators: Record<string, string[]> = {
+      "review-plan": [currentPlanPath, "{{workspace_path}}/plans/{{plan_revision}}/review.md"],
+      "repair-plan": [
+        currentPlanPath,
+        "{{workspace_path}}/plans/{{plan_revision}}/review.md",
+        "{{workspace_path}}/plans/{{plan_revision}}/repair.md",
+      ],
+      "validate-cheap": [
+        currentPlanPath,
+        `${unitPath}/unit-report.md`,
+        `${unitPath}/iteration-{{previous_iteration}}/repair.md`,
+        `${iterationPath}/cheap-validation.md`,
+      ],
+      "repair-cheap-validation": [
+        currentPlanPath,
+        `${iterationPath}/cheap-validation.md`,
+        `${iterationPath}/repair.md`,
+        `${unitPath}/unit-report.md`,
+      ],
+      "repair-test-adequacy": [
+        currentPlanPath,
+        `${iterationPath}/test-adequacy-review.md`,
+        `${iterationPath}/repair.md`,
+        `${unitPath}/unit-report.md`,
+      ],
+      "review-architecture": [
+        currentPlanPath,
+        `${unitPath}/unit-report.md`,
+        `${iterationPath}/architecture-review.md`,
+      ],
+      "repair-architecture": [
+        currentPlanPath,
+        `${iterationPath}/architecture-review.md`,
+        `${iterationPath}/repair.md`,
+        `${unitPath}/unit-report.md`,
+      ],
+      "repair-runtime": [
+        currentPlanPath,
+        `${iterationPath}/runtime-validation.md`,
+        `${iterationPath}/repair.md`,
+        `${unitPath}/unit-report.md`,
+      ],
+      "repair-expensive": [
+        currentPlanPath,
+        `${iterationPath}/expensive-validation.md`,
+        `${iterationPath}/repair.md`,
+        `${unitPath}/unit-report.md`,
+      ],
+      "repair-user-feedback": [
+        currentPlanPath,
+        `${unitPath}/user-feedback.md`,
+        `${iterationPath}/repair.md`,
+        `${unitPath}/unit-report.md`,
+      ],
+      "repair-feature-validation": ["{{workspace_path}}/feature-validation.md"],
+      "repair-finalization-repository": ["{{workspace_path}}/finalization.md"],
+    };
+    for (const [nodeId, locators] of Object.entries(requiredProcessLocators)) {
+      const directive = workflow.nodes.find((node) => node.id === nodeId)?.directive ?? "";
+      for (const locator of locators) expect(directive).toContain(locator);
     }
 
     const progressResponseNodes = workflow.nodes.filter(
       (node) =>
         (node.type === "agent-directive" || node.type === "teleport") &&
-        node.inputSchema?.required?.some((field) => field.startsWith("progress_")),
+        node.inputSchema?.required?.some((field) => field.startsWith("progress_")) &&
+        node.inputSchema.required.some((field) => !field.startsWith("progress_")),
     );
-    expect(progressResponseNodes).toHaveLength(53);
+    expect(progressResponseNodes).toHaveLength(39);
     for (const node of progressResponseNodes) {
       expect(node.directive).not.toMatch(exclusiveResponseShape);
     }
@@ -1524,13 +1590,139 @@ describe("software-development-flow v15.4.2", () => {
       ["complete-plan-unit", "completion_outcome", "progress_implementation_outcome"],
     ] as const) {
       const node = workflow.nodes.find((candidate) => candidate.id === nodeId) as {
-        directive: string;
         inputSchema: { required: string[] };
       };
-      expect(node.directive).toContain("same response as the required progress output");
       expect(node.inputSchema.required).toEqual(
         expect.arrayContaining([functionalOutput, progressOutput]),
       );
+    }
+  });
+
+  test("materializes standards once and gives each agent only its applicable references", () => {
+    const expectedConsumers: Record<string, string[]> = {
+      "assess-project-health": ["review"],
+      "create-plan": ["planning"],
+      "review-plan": ["planning", "review"],
+      "repair-plan": ["planning", "review"],
+      "revise-plan-after-rejection": ["planning"],
+      "prepare-plan-unit-implementation": ["planning"],
+      "implement-plan-unit": ["engineering", "tests"],
+      "complete-plan-unit": ["engineering", "tests"],
+      "validate-cheap": ["engineering", "review", "tests"],
+      "repair-cheap-validation": ["engineering", "review", "tests"],
+      "review-test-adequacy": ["review", "tests"],
+      "repair-test-adequacy": ["review", "tests"],
+      "review-architecture": ["engineering", "review"],
+      "repair-architecture": ["engineering", "review"],
+      "revise-plan-for-replan": ["planning"],
+      "validate-runtime": ["review"],
+      "repair-runtime": ["engineering", "review", "tests"],
+      "validate-expensive": ["review"],
+      "repair-expensive": ["engineering", "review", "tests"],
+      "update-unit-documentation": ["documentation"],
+      "repair-user-feedback": ["engineering", "review", "tests"],
+      "validate-feature-wide": ["review"],
+      "repair-feature-validation": ["review"],
+      "review-final-semantics": ["documentation", "engineering", "review", "tests"],
+      "repair-final-semantics": ["documentation", "review"],
+      "revise-plan-after-feedback": ["planning"],
+      "repair-finalization-repository": ["review"],
+      "review-unit-completeness": ["documentation", "engineering", "review", "tests"],
+      "repair-unit-completeness": ["documentation", "engineering", "review", "tests"],
+      "revise-plan-for-teleport": ["planning"],
+      "create-final-report": ["review"],
+    };
+    const agentNodes = workflow.nodes.filter((node) => node.type === "agent-directive");
+    const actualConsumers: Record<string, string[]> = {};
+    for (const node of agentNodes) {
+      const references = [
+        ...(node.directive?.matchAll(
+          /standards\/(planning|engineering|tests|documentation|review)\.md/g,
+        ) ?? []),
+      ]
+        .map((match) => match[1])
+        .sort();
+      expect(new Set(references).size).toBe(references.length);
+      if (references.length > 0) actualConsumers[node.id] = references;
+    }
+    expect(actualConsumers).toEqual(expectedConsumers);
+    expect(Object.keys(actualConsumers)).toHaveLength(31);
+    expect(agentNodes.filter((node) => !actualConsumers[node.id])).toHaveLength(16);
+  });
+
+  test("keeps permanent documentation with the post-validation owners", () => {
+    const implementation = workflow.nodes.find((node) => node.id === "implement-plan-unit")!;
+    const producerCompletion = workflow.nodes.find((node) => node.id === "complete-plan-unit")!;
+    expect(`${implementation.directive} ${implementation.completionCondition}`).toContain(
+      "permanent project documentation remains deferred to update-unit-documentation",
+    );
+    expect(`${producerCompletion.directive} ${producerCompletion.completionCondition}`).toContain(
+      "permanent project documentation remains intentionally deferred",
+    );
+
+    for (const nodeId of [
+      "repair-cheap-validation",
+      "repair-test-adequacy",
+      "repair-architecture",
+      "repair-runtime",
+      "repair-expensive",
+      "repair-user-feedback",
+    ]) {
+      const directive = workflow.nodes.find((node) => node.id === nodeId)?.directive ?? "";
+      expect(directive).toContain(
+        "Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`",
+      );
+      expect(directive).not.toMatch(
+        /(?:correct|change|repair)[^.\n]*permanent (?:project )?documentation/i,
+      );
+    }
+  });
+
+  test("keeps shared review and repair doctrine in the materialized standard", () => {
+    const reviewStandard = String(workflow.variableRegistry?.review_standards?.default ?? "");
+    for (const ownerClause of [
+      "The reviewer reads the primary sources",
+      "The repair owner reproduces the defect before changing anything",
+      "A repeated root requires changed knowledge",
+      "Validation-only drift stops before another mutation",
+      "Class-wide means bounded real manifestations",
+      "Mutation scope follows actual reach",
+    ]) {
+      expect(reviewStandard).toContain(ownerClause);
+    }
+
+    const boundedConsumers = [
+      "review-plan",
+      "review-test-adequacy",
+      "review-architecture",
+      "review-unit-completeness",
+      "review-final-semantics",
+      "repair-plan",
+      "repair-cheap-validation",
+      "repair-test-adequacy",
+      "repair-architecture",
+      "repair-runtime",
+      "repair-expensive",
+      "repair-user-feedback",
+      "repair-feature-validation",
+      "repair-final-semantics",
+      "repair-finalization-repository",
+      "repair-unit-completeness",
+    ];
+    const duplicatedDoctrine = [
+      /reproduce[^.\n]*before mutation/i,
+      /classify each confirmed finding by its earliest cause/i,
+      /same root returned without/i,
+      /validation-only drift/i,
+      /never obtain a pass by weakening/i,
+      /do not add sleeps/i,
+      /zero findings is valid/i,
+      /bound class-wide work/i,
+      /do not run linters/i,
+    ];
+    for (const nodeId of boundedConsumers) {
+      const directive = workflow.nodes.find((node) => node.id === nodeId)?.directive ?? "";
+      for (const repeated of duplicatedDoctrine) expect(directive).not.toMatch(repeated);
     }
   });
 
@@ -1603,24 +1795,19 @@ describe("software-development-flow v15.4.2", () => {
       ["review-unit-completeness", "review", "Independent review · 2/5 · i4"],
       ["repair-unit-completeness", "review", "Repair completeness · 2/5 · i4"],
       ["checkpoint-plan-unit", "checkpoint", "Checkpoint · 2/5"],
-      ["repair-checkpoint-repository", "checkpoint", "Repair checkpoint · 2/5"],
       ["approve-current-unit-closure", "plan", "Replan decision · r3"],
       ["revise-plan-for-replan", "plan", "Replan r3"],
       ["teleport-replan", "plan", "Replan · r3"],
       ["revise-plan-for-teleport", "plan", "Replan · r3"],
       ["review-plan-unit-with-user", "review", "Unit review · 2/5"],
       ["create-and-upload-step-report", "review", "Visual report · 2/5"],
+      ["update-unit-documentation", "review", "Documentation · 2/5 · i4"],
       ["resolve-finalization-blocker", "finalize", "Finalization blocker"],
-      ["reconcile-documentation", "finalize", "Reconcile documentation"],
-      ["validate-documentation", "finalize", "Independent documentation review"],
-      ["repair-documentation", "finalize", "Repair documentation"],
       ["validate-feature-wide", "finalize", "Feature validation"],
       ["repair-feature-validation", "finalize", "Repair feature validation"],
       ["wait-for-feature-state-change", "finalize", "Feature blocker"],
       ["review-final-semantics", "finalize", "Independent final review"],
       ["repair-final-semantics", "finalize", "Repair final evidence"],
-      ["validate-requirements-coverage", "finalize", "Requirements coverage"],
-      ["revise-plan-for-coverage", "plan", "Coverage replan · r3"],
       ["report-and-accept-feature", "finalize", "Final result review"],
       ["revise-plan-after-feedback", "plan", "Feedback replan · r3"],
       ["finalize-feature", "finalize", "Finalize repository"],
@@ -1660,7 +1847,7 @@ describe("software-development-flow v15.4.2", () => {
       projectionAt("checkpoint-plan-unit")?.nodes.find((node) => node.id === "checkpoint")
         ?.connections,
     ).toEqual({ default: "implement" });
-    expect(projectionAt("reconcile-documentation")?.nodes.at(-1)?.state).toBe("current");
+    expect(projectionAt("update-unit-documentation")?.activeNodeId).toBe("review");
     const nextUnit = projectionAt("validate-cheap", "running", {
       current_step_index: 3,
       current_iteration: 1,
@@ -1731,6 +1918,67 @@ describe("software-development-flow v15.4.2", () => {
     expect(result.visitedNodes).not.toContain("revise-plan-for-teleport");
   });
 
+  test.each([
+    ["commit", "Committed accepted unit as abc1234"],
+    ["true no-op", "Verified accepted unit is a true no-op; no empty commit created"],
+  ])("records an authorized checkpoint %s as a distinct successful state", async (_, outcome) => {
+    const result = await runScenario(
+      workflow,
+      flow(
+        `authorized checkpoint ${outcome}`,
+        {
+          "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
+          "checkpoint-plan-unit": { progress_checkpoint_outcome: outcome },
+        },
+        ["checkpoint-plan-unit", "route-plan-complete", "end"],
+      ),
+      { engineSetup: useScenarioMaterializeGrant },
+    );
+    expect(result.passed).toBe(true);
+    expect(result.finalContext.progress_checkpoint_outcome).toBe(outcome);
+  });
+
+  test("a required checkpoint failure stays incomplete and cannot advance", async () => {
+    const result = await runScenario(
+      workflow,
+      flow(
+        "required checkpoint failure",
+        {
+          "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
+          "checkpoint-plan-unit": () => {
+            throw new Error("required commit failed");
+          },
+        },
+        ["checkpoint-plan-unit"],
+      ),
+      { engineSetup: useScenarioMaterializeGrant },
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("required commit failed");
+    expect(result.visitedNodes).not.toContain("route-plan-complete");
+  });
+
+  test("rejects a passing final review with a positive gap count", async () => {
+    const result = await runScenario(
+      workflow,
+      flow(
+        "invalid passing final review",
+        {
+          "review-final-semantics": {
+            review_outcome: "pass",
+            gaps_count: 1,
+            review_file: "./moira-ws/example/final-reviews/001/review.md",
+          },
+        },
+        ["review-final-semantics"],
+      ),
+      { engineSetup: useScenarioMaterializeGrant },
+    );
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("Input validation failed for node 'review-final-semantics'");
+    expect(result.visitedNodes).not.toContain("route-final-review-replan");
+  });
+
   test("classifies causes and exposes replan before mutation", () => {
     const review = String(workflow.variableRegistry?.review_standards?.default ?? "");
     for (const cause of [
@@ -1748,7 +1996,6 @@ describe("software-development-flow v15.4.2", () => {
       "review-test-adequacy",
       "review-architecture",
       "review-unit-completeness",
-      "validate-documentation",
       "review-final-semantics",
     ]) {
       const node = workflow.nodes.find((candidate) => candidate.id === id) as {
@@ -1762,7 +2009,6 @@ describe("software-development-flow v15.4.2", () => {
       "repair-test-adequacy",
       "repair-runtime",
       "repair-expensive",
-      "repair-checkpoint-repository",
     ]) {
       const node = workflow.nodes.find((candidate) => candidate.id === id) as {
         inputSchema: { properties: Record<string, { enum: string[] }> };
@@ -1774,24 +2020,24 @@ describe("software-development-flow v15.4.2", () => {
       ]);
     }
 
+    const documentation = workflow.nodes.find(
+      (candidate) => candidate.id === "update-unit-documentation",
+    ) as {
+      inputSchema: { properties: { documentation_outcome: { enum: string[] } } };
+    };
+    expect(documentation.inputSchema.properties.documentation_outcome.enum).toEqual([
+      "ready",
+      "product_repair",
+      "replan",
+    ]);
+
     const closure = workflow.nodes.find((node) => node.id === "approve-current-unit-closure") as {
       directive: string;
     };
-    expect(closure.directive).toContain(
-      "mixed earliest causes cross paired repair responsibilities",
-    );
-    expect(closure.directive).toContain("In `autonomous` mode do not ask the user");
-    expect(closure.directive).toContain("return `closure_decision=approved` whenever");
-    expect(closure.directive).toContain("approved unit outcome may remain sound");
-    expect(closure.directive).toContain(
-      "do not refuse closure merely because that outcome can still be delivered",
-    );
-    expect(closure.directive).toContain(
-      "Exactly one applicable source must state the current `replan` disposition",
-    );
-    expect(closure.directive).toContain(
-      "`closure_decision=refused` remains the user's explicit refusal",
-    );
+    expect(closure.directive).toContain("exactly one route-current replan source");
+    expect(closure.directive).toContain("documentation_outcome=replan");
+    expect(closure.directive).toContain("Interactive mode asks the user");
+    expect(closure.directive).toContain("autonomous mode approves only a diagnosis");
   });
 
   test("uses one product-review cursor instead of a validation resume stack", () => {
@@ -1935,6 +2181,10 @@ describe("software-development-flow v15.4.2", () => {
       "implement-plan-unit",
       "complete-plan-unit",
       "validate-cheap",
+      "validate-runtime",
+      "validate-expensive",
+      "update-unit-documentation",
+      "review-unit-completeness",
     ]);
 
     const multipleUnits = routeFor("multiple approved units advance without a report-only turn");
@@ -1942,11 +2192,13 @@ describe("software-development-flow v15.4.2", () => {
     const unitImplementation = positions(multipleUnits, "implement-plan-unit");
     const unitCompletion = positions(multipleUnits, "complete-plan-unit");
     const unitCheapValidation = positions(multipleUnits, "validate-cheap");
+    const unitDocumentation = positions(multipleUnits, "update-unit-documentation");
     for (const occurrences of [
       unitPreparation,
       unitImplementation,
       unitCompletion,
       unitCheapValidation,
+      unitDocumentation,
     ]) {
       expect(occurrences).toHaveLength(2);
     }
@@ -1954,6 +2206,7 @@ describe("software-development-flow v15.4.2", () => {
       expect(unitPreparation[unit]).toBeLessThan(unitImplementation[unit]);
       expect(unitImplementation[unit]).toBeLessThan(unitCompletion[unit]);
       expect(unitCompletion[unit]).toBeLessThan(unitCheapValidation[unit]);
+      expect(unitCheapValidation[unit]).toBeLessThan(unitDocumentation[unit]);
     }
     expect(unitCheapValidation[0]).toBeLessThan(unitPreparation[1]);
 
@@ -2015,10 +2268,6 @@ describe("software-development-flow v15.4.2", () => {
       ["runtime repository failure repairs and runtime external blocker retries", "repair-runtime"],
       ["expensive repository failure repairs and external blocker retries", "repair-expensive"],
       ["per-unit rejection can repair within the approved plan", "repair-user-feedback"],
-      [
-        "authorized checkpoint repository failure repairs before cursor advance",
-        "repair-checkpoint-repository",
-      ],
     ] as const;
     for (const [scenarioName, repairNode] of productRepairOrigins) {
       const route = routeFor(scenarioName);
@@ -2048,6 +2297,9 @@ describe("software-development-flow v15.4.2", () => {
       "validate-expensive",
       "route-expensive-external",
       "route-expensive-repository",
+      "update-unit-documentation",
+      "route-unit-documentation-replan",
+      "route-unit-documentation-product-repair",
       "review-unit-completeness",
     ] as const;
     const verificationTailWithoutArchitecture = [
@@ -2064,6 +2316,9 @@ describe("software-development-flow v15.4.2", () => {
       "validate-expensive",
       "route-expensive-external",
       "route-expensive-repository",
+      "update-unit-documentation",
+      "route-unit-documentation-replan",
+      "route-unit-documentation-product-repair",
       "review-unit-completeness",
     ] as const;
     const boundedRepairSegments = [
@@ -2130,24 +2385,6 @@ describe("software-development-flow v15.4.2", () => {
           "route-completeness-repair-gate-local",
           "route-unit-completeness-reach",
           ...verificationTailWithoutArchitecture,
-        ],
-      ],
-      [
-        "a contained checkpoint repair returns to the checkpoint instead of the whole chain",
-        [
-          "repair-checkpoint-repository",
-          "route-checkpoint-repair-replan",
-          "route-checkpoint-repair-reach",
-          ...verificationTailWithoutArchitecture,
-          "route-completeness-review-replan",
-          "route-unit-completeness",
-          "route-unit-html-report",
-          "route-unit-approval-required",
-          "notify-unit-approval",
-          "review-plan-unit-with-user",
-          "route-plan-unit-user-review",
-          "route-checkpoint-authority",
-          "checkpoint-plan-unit",
         ],
       ],
     ] as const;

@@ -72,7 +72,7 @@ export async function verifyUserEmail(baseUrl: string, userEmail: string): Promi
 }
 
 /**
- * Create test user and optionally verify email via API
+ * Create an admitted test user and optionally verify email via API
  * Pure HTTP, no browser automation
  *
  * @param baseUrl - Base URL of the application
@@ -136,6 +136,24 @@ export async function createTestUserViaApi(
   // Verify email if requested
   if (verifyEmail) {
     await verifyUserEmailViaAdmin(baseUrl, email, adminSessionCookie);
+  }
+
+  const featuresResponse = await fetch(`${baseUrl}/api/features`);
+  if (!featuresResponse.ok) {
+    throw new Error(`Failed to load deployment features: ${featuresResponse.status}`);
+  }
+  const features = (await featuresResponse.json()) as {
+    data: { features: { accountApproval: boolean } };
+  };
+  if (features.data.features.accountApproval) {
+    const approvalResponse = await fetch(`${baseUrl}/api/admin/users/${user.id}/approve`, {
+      method: "POST",
+      headers: { Cookie: formatSessionCookie(baseUrl, adminSessionCookie) },
+    });
+    if (!approvalResponse.ok) {
+      const error = await approvalResponse.text();
+      throw new Error(`Failed to approve test user: ${approvalResponse.status} ${error}`);
+    }
   }
 
   return { userId: user.id };

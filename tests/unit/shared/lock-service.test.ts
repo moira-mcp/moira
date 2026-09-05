@@ -100,6 +100,99 @@ describe("LockService", () => {
     });
   });
 
+  describe("createLockWithDelivery", () => {
+    const DELIVERED_PIN = "654321";
+
+    beforeEach(() => {
+      lockService = new LockService(lockRepo, auditRepo, () => DELIVERED_PIN);
+    });
+
+    it("activates only after trusted delivery and returns no plaintext PIN", async () => {
+      let deliveredSecret: { lockId: string; pin: string } | undefined;
+      const result = await lockService.createLockWithDelivery(
+        {
+          executionId: TEST_EXECUTION_ID,
+          nodeId: TEST_NODE_ID,
+          reason: "Trusted delivery",
+          lockedBy: TEST_USER_ID,
+        },
+        async (secret) => {
+          deliveredSecret = secret;
+          expect(await lockService.getActiveLock(TEST_EXECUTION_ID)).toBeNull();
+        },
+      );
+
+      expect(result).toEqual({ lockId: deliveredSecret!.lockId });
+      expect(result).not.toHaveProperty("pin");
+      expect(deliveredSecret!.pin).toBe(DELIVERED_PIN);
+
+      const active = await lockService.getActiveLock(TEST_EXECUTION_ID);
+      expect(active?.id).toBe(result.lockId);
+      expect(active?.pin).not.toBe(DELIVERED_PIN);
+      expect(isHashedPin(active!.pin)).toBe(true);
+      await expect(lockService.validatePin(result.lockId, DELIVERED_PIN)).resolves.toEqual({
+        valid: true,
+        lockStatus: "unlocked",
+      });
+    });
+
+    it("invalidates only the failed delivery attempt and hides it from active history", async () => {
+      let failedLockId = "";
+      await expect(
+        lockService.createLockWithDelivery(
+          {
+            executionId: TEST_EXECUTION_ID,
+            nodeId: TEST_NODE_ID,
+            reason: "Delivery failure",
+            lockedBy: TEST_USER_ID,
+          },
+          async ({ lockId }) => {
+            failedLockId = lockId;
+            throw new Error("sender failed");
+          },
+        ),
+      ).rejects.toThrow("sender failed");
+
+      expect(await lockService.getActiveLock(TEST_EXECUTION_ID)).toBeNull();
+      expect(await lockService.listLocks(TEST_EXECUTION_ID)).toEqual([]);
+      expect((await lockService.getLock(failedLockId))?.status).toBe("delivery_failed");
+    });
+
+    it("leaves an earlier lock and its external context reference unchanged", async () => {
+      const earlier = await lockService.createLock({
+        executionId: TEST_EXECUTION_ID,
+        nodeId: "earlier-node",
+        reason: "Earlier human lock",
+        lockedBy: TEST_USER_ID,
+      });
+      await lockService.validatePin(earlier.lockId, earlier.pin);
+      const contextReference = { _lockId: earlier.lockId };
+      let failedLockId = "";
+
+      await expect(
+        lockService.createLockWithDelivery(
+          {
+            executionId: TEST_EXECUTION_ID,
+            nodeId: TEST_NODE_ID,
+            reason: "Later failed attempt",
+            lockedBy: TEST_USER_ID,
+          },
+          async ({ lockId }) => {
+            failedLockId = lockId;
+            throw new Error("sender failed");
+          },
+        ),
+      ).rejects.toThrow("sender failed");
+
+      expect(contextReference._lockId).toBe(earlier.lockId);
+      expect((await lockService.getLock(earlier.lockId))?.status).toBe("unlocked");
+      expect((await lockService.getLock(failedLockId))?.status).toBe("delivery_failed");
+      expect(await lockService.listLocks(TEST_EXECUTION_ID)).toEqual([
+        expect.objectContaining({ id: earlier.lockId, status: "unlocked" }),
+      ]);
+    });
+  });
+
   describe("validatePin", () => {
     it("should unlock with correct PIN", async () => {
       const { lockId, pin } = await lockService.createLock({

@@ -4,11 +4,11 @@ import { describe, expect, test } from "@jest/globals";
 
 describe("self-host upgrade documentation parity", () => {
   const english = readFileSync(
-    resolve("packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx"),
+    resolve("packages/mcp-server/src/help/content/getting-started/self-hosting.md"),
     "utf8",
   );
   const russian = readFileSync(
-    resolve("packages/docs/src/content/docs/ru/docs/getting-started/self-hosting.mdx"),
+    resolve("packages/mcp-server/src/help/content/ru/getting-started/self-hosting.md"),
     "utf8",
   );
   const envExample = readFileSync(resolve(".env.example"), "utf8");

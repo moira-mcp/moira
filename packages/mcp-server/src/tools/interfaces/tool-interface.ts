@@ -43,6 +43,11 @@ export interface ListWorkflowsParams {
 export interface ListWorkflowsResult {
   workflows: WorkflowSummary[];
   total: number;
+  offset: number;
+  limit: number;
+  returnedCount: number;
+  hasMore: boolean;
+  nextOffset: number | null;
 }
 
 // Standard parameters for workflow tools

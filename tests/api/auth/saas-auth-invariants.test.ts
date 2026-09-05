@@ -247,7 +247,16 @@ describe("SaaS authentication invariants", () => {
           Accept: "application/json, text/event-stream",
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }),
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "initialize",
+          id: 1,
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "saas-admission-test", version: "1.0.0" },
+          },
+        }),
       });
     const getMcpSession = (accessToken: string) =>
       fetch(`${BASE_URL}/api/auth/mcp/get-session`, {

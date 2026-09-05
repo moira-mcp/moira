@@ -5,6 +5,8 @@
  */
 
 import { z } from "zod";
+import { getSessionInfoHandlerSchema, getSessionInfoSchema } from "./tool-schemas.js";
+export { getSessionInfoSchema };
 import { ToolResult } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import {
@@ -33,80 +35,7 @@ import { ERRORS, formatDomainError } from "../messages/index.js";
 
 const logger = createLogger({ component: "GetSessionInfo" });
 
-const GetSessionInfoParamsSchema = z.object({
-  action: z
-    .enum([
-      "user",
-      "executions",
-      "execution_context",
-      "current_step",
-      "update-note",
-      "set-parent",
-      "add-reminder",
-      "reminders",
-      "update-reminder",
-      "remove-reminder",
-      "variables",
-      "set-variable",
-      "progress",
-      "progress-image-token",
-    ])
-    .describe("Action to perform"),
-  executionId: z
-    .string()
-    .optional()
-    .describe(
-      "Execution ID (required for execution_context, current_step, and update-note actions)",
-    ),
-  // Parameters for executions action
-  // Issue #386: 2-status model - "running" (active) and "completed" (finished)
-  // Old values "waiting" and "failed" accepted for backward compatibility (mapped to new values)
-  status: z
-    .array(z.enum(["running", "waiting", "completed", "failed", "locked"]))
-    .optional()
-    .describe('Filter by status (default: ["running"] for active only)'),
-  workflowId: z.string().optional().describe("Filter by workflow ID"),
-  search: z.string().optional().describe("Search in note field"),
-  sort: z.enum(["createdAt", "updatedAt"]).optional().describe("Sort field (default: createdAt)"),
-  sortOrder: z.enum(["asc", "desc"]).optional().describe("Sort order (default: desc)"),
-  limit: z
-    .number()
-    .min(1)
-    .max(100)
-    .optional()
-    .describe("Number of results (default: 20, max: 100)"),
-  offset: z.number().min(0).optional().describe("Offset for pagination (default: 0)"),
-  // Parameters for update-note action
-  note: z
-    .string()
-    .max(500)
-    .optional()
-    .describe("New note value (max 500 chars, required for update-note action)"),
-  parentExecutionId: z.string().optional().describe("Parent execution ID for set-parent action"),
-  expectedRevision: z.number().int().min(0).optional().describe("Expected execution revision"),
-  reminderId: z.string().optional().describe("Reminder ID"),
-  reminderText: z.string().optional().describe("Reminder text"),
-  idempotencyKey: z.string().optional().describe("Idempotency key for add-reminder"),
-  reminderStatus: z.enum(["active", "cancelled"]).optional().describe("Reminder status filter"),
-  names: z.array(z.string()).optional(),
-  theme: z.enum(["light", "dark"]).optional(),
-  viewportWidth: z.number().int().min(480).max(4096).optional(),
-  types: z.array(z.string()).optional(),
-  editable: z.boolean().optional(),
-  hasValue: z.boolean().optional(),
-  writePhase: z.enum(["current", "other"]).optional(),
-  variableName: z.string().optional(),
-  variableValue: z.unknown().optional(),
-  // Parameters for execution_context action
-  variables: z
-    .array(z.string())
-    .optional()
-    .describe(
-      "Filter context.variables to only include these variable names (execution_context action)",
-    ),
-});
-
-type GetSessionInfoParams = z.infer<typeof GetSessionInfoParamsSchema>;
+type GetSessionInfoParams = z.infer<typeof getSessionInfoHandlerSchema>;
 
 interface UserInfo {
   email: string;
@@ -726,5 +655,3 @@ export async function getSessionInfo(
     };
   }
 }
-
-export const getSessionInfoSchema = GetSessionInfoParamsSchema;

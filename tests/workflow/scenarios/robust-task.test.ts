@@ -1,7 +1,15 @@
 /** Observable scenarios for the cause-aware Robust Task v9. */
 
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
-import { GraphValidator, detectCycles, type WorkflowGraph } from "@mcp-moira/workflow-engine";
+import {
+  AgentMessageQueue,
+  GraphExecutionEngine,
+  GraphValidator,
+  InMemoryRepository,
+  MaterializeHandler,
+  detectCycles,
+  type WorkflowGraph,
+} from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
@@ -138,6 +146,22 @@ function scenario(
     expect: { status: "completed", reaches, maxSteps: 220 },
     ...options,
   };
+}
+
+function configureMaterialize(engine: GraphExecutionEngine): void {
+  const handlers = (engine as unknown as { nodeHandlers: Map<string, MaterializeHandler> })
+    .nodeHandlers;
+  handlers.set(
+    "materialize",
+    new MaterializeHandler(
+      { createMaterializeToken: () => "materialize-token" },
+      () => "https://moira.example",
+    ),
+  );
+}
+
+async function runRobustScenario(route: TestScenario) {
+  return runScenario(loadWorkflow(), route, { engineSetup: configureMaterialize });
 }
 
 const scenarios: TestScenario[] = [
@@ -453,94 +477,66 @@ describe("Robust Task cause-aware contract", () => {
       expect(serialized).not.toContain(removed);
     }
 
-    expect(workflow.metadata.version).toBe("9.1.3");
+    expect(workflow.metadata.version).toBe("9.2.0");
     expect(node(workflow, "initialize-workspace").directive).toContain("process-id.txt");
 
     // Version is pinned so a directive change cannot ship without reopening this file.
-    expect(workflow.metadata.version).toBe("9.1.3");
-    expect(workflow.metadata.description).toContain("restartable state across context loss");
+    expect(workflow.metadata.version).toBe("9.2.0");
+    expect(workflow.metadata.description).toContain(
+      "restartable immutable history across context loss",
+    );
     expect(workflow.metadata.description).toContain("truthfully incomplete");
-    // A plan step fixes what must become true, the evidence that would accept it, and what it
-    // depends on; it never carries the deliverable. The rule is written
-    // out once where the first plan is made, and every node that publishes a later plan version
-    // carries the reference in both halves — directive and gate — because a plan is lowered back
-    // onto the result while it is being repaired or replanned, not while it is first written. The
-    // gate binds only the steps that node may reshape: four of the five preserve completed steps as
-    // executed, so demanding altitude of those would make the gate unpassable mid-run.
-    const createPlan = node(workflow, "create-plan");
-    expect(createPlan.directive).toContain("it does not carry the deliverable itself");
-    expect(createPlan.directive).toContain("Where the result is prose");
-    expect(createPlan.directive).toContain("work an intelligent executor still has to do remains");
-    expect(createPlan.directive).toContain(
-      "a step a later turn could satisfy by copying text out of the plan",
+    const guide = workflow.variableRegistry?.workflow_guide?.default;
+    expect(typeof guide).toBe("string");
+    expect(guide).toContain("A rule that does not apply");
+    expect(guide).toContain("requires no artifact or evidence of inapplicability");
+    expect(guide).toContain("Each plan step states what must become true");
+    expect(guide).toContain("Otherwise a convenient surrogate can pass");
+    expect(guide).toContain("An inventory, metric, or log analysis remains valid");
+
+    const materialize = node(workflow, "materialize-workflow-guide");
+    expect(node(workflow, "initialize-workspace").connections.success).toBe(
+      "materialize-workflow-guide",
     );
-    expect(createPlan.completionCondition).toContain(
-      "every step fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
+    expect(materialize).toMatchObject({
+      type: "materialize",
+      basePath: "{{workspace_path}}",
+      files: [{ path: "workflow-guide.md", from: "workflow_guide" }],
+      connections: { success: "create-plan" },
+      progressNodeId: "intake",
+    });
+    expect(node(workflow, "initialize-workspace").directive).not.toContain(
+      "write a concise workflow-guide.md",
     );
-    // fix-plan looks pre-approval, but a mid-run replan re-enters review and a blocking finding
-    // routes straight back into it (execute-step → teleport-replan → reset-plan-review-round →
-    // review-plan → route-plan-review:false → check-plan-review-limit:false), so it binds only the
-    // steps it shapes, exactly like the four nodes below.
-    const fixPlan = node(workflow, "fix-plan");
-    expect(fixPlan.directive).toContain(
-      "The steps this revision shapes keep the altitude the first plan is held to",
+
+    const guideReaders = workflow.nodes
+      .filter(
+        (candidate: any) =>
+          ["agent-directive", "teleport"].includes(candidate.type) &&
+          candidate.directive.includes("{{workspace_path}}workflow-guide.md"),
+      )
+      .map((candidate) => candidate.id);
+    expect(guideReaders).toHaveLength(21);
+    expect(
+      workflow.nodes
+        .filter((candidate) => candidate.type === "agent-directive")
+        .filter((candidate: any) => !candidate.directive.includes("workflow-guide.md"))
+        .map((candidate) => candidate.id),
+    ).toEqual(["initialize-workspace", "approve-plan"]);
+    expect(guideReaders).toEqual(
+      expect.arrayContaining([
+        "ask-plan-review-limit",
+        "ask-final-review-limit",
+        "teleport-replan",
+      ]),
     );
-    expect(fixPlan.completionCondition).toContain(
-      "every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
-    );
-    // Work that is already closed stays closed: every node that publishes a plan version after
-    // execution may begin says so in its directive and answers for it at its gate. fix-plan looked
-    // exempt because its only edges come from the review router, but the run reaches it mid-flight
-    // through replan-from-verdict, so it carries the same obligation. Evidence needs no clause here:
-    // it lives in immutable attempt directories addressed by plan version, and no plan node writes
-    // there.
-    expect(node(workflow, "fix-plan").directive).toContain("preserve unaffected decisions");
-    expect(node(workflow, "fix-plan").directive).toContain(
-      "Steps already executed stay as they were executed",
-    );
-    expect(node(workflow, "revise-plan").directive).toContain(
-      "Preserve completed steps 1 through {{current_step}} - 1 when execution has begun",
-    );
-    expect(node(workflow, "replan-from-verdict").directive).toContain(
-      "preserve completed outcomes",
-    );
-    expect(node(workflow, "replan-from-decision").directive).toContain(
-      "Preserve completed steps and reshape only the open step and unfinished tail",
-    );
-    expect(node(workflow, "teleport-replan").directive).toContain(
-      "preserve completed steps before {{current_step}}, and reshape only the open step and unfinished tail",
-    );
-    // The gates say it in three shapes that predate this edit and are kept as equals; each is pinned
-    // where it stands, so swapping one for another is visible too.
-    for (const [nodeId, gateClause] of [
-      ["fix-plan", "every step it shapes fixes an outcome"],
-      ["revise-plan", "completed work remains preserved"],
-      ["replan-from-verdict", "preserves completed outcomes"],
-      ["replan-from-decision", "completed work is preserved"],
-      ["teleport-replan", "preserves completed work"],
-    ] as const) {
-      expect(node(workflow, nodeId).completionCondition).toContain(gateClause);
-    }
-    // The four nodes that reshape a plan mid-run may only touch the unfinished tail, so both halves
-    // bind exactly the steps they shape: a gate demanding more would be unpassable once a run has
-    // executed a step written below the altitude.
-    for (const nodeId of [
-      "revise-plan",
-      "replan-from-verdict",
-      "replan-from-decision",
-      "teleport-replan",
-    ]) {
-      const publisher = node(workflow, nodeId);
-      expect(publisher.directive).toContain(
-        "The steps this revision shapes keep the altitude the first plan is held to",
-      );
-      expect(publisher.directive).toContain(
-        "they fix what must become true, the evidence that would accept it, and what it depends on",
-      );
-      expect(publisher.completionCondition).toContain(
-        "every step it shapes fixes an outcome, its acceptance, and what it depends on rather than containing the deliverable",
-      );
-    }
+
+    const directiveText = workflow.nodes
+      .filter((candidate: any) => typeof candidate.directive === "string")
+      .map((candidate: any) => candidate.directive)
+      .join("\n");
+    expect(directiveText).not.toContain("The steps this revision shapes");
+    expect(directiveText).not.toContain("For every contractual check");
     // Autonomous mode is routed, not schema-driven: the plan-approval gate is entered through its
     // mode condition, and both notification routes lead to that condition.
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
@@ -582,6 +578,85 @@ describe("Robust Task cause-aware contract", () => {
     ]);
   });
 
+  test("materialization blocks before planning until the canonical guide is delivered", async () => {
+    const materialize = node(workflow, "materialize-workflow-guide");
+    const repository = new InMemoryRepository();
+    const engine = new GraphExecutionEngine(repository);
+    const queue = new AgentMessageQueue();
+    const context = {
+      variables: { workspace_path: "./moira-ws/robust-task-example-20260821-2300/" },
+      nodeStates: {},
+      executionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      workflowId: workflow.id,
+      userId: "workflow-test-user",
+    };
+    const handler = new MaterializeHandler(
+      { createMaterializeToken: () => "materialize-token" },
+      () => "https://moira.example",
+    );
+
+    const presented = await handler.execute(
+      materialize,
+      context,
+      queue,
+      repository,
+      engine,
+      undefined,
+      workflow.variableRegistry,
+    );
+    expect(presented.action).toBe("pause");
+    expect(presented.nextNodeId).toBeUndefined();
+    expect(queue.peekNext()).toMatchObject({
+      nodeId: "materialize-workflow-guide",
+      completionCondition: "Run the command successfully, then complete this step with null or {}.",
+    });
+    expect((queue.peekNext() as { directive: string }).directive).toContain("workflow-guide.md");
+
+    // A failed client download or extraction is represented by withholding the empty completion
+    // submission. Re-presenting that same current node must issue a fresh command and remain
+    // paused; it cannot advance to create-plan merely because a previous grant was issued.
+    const retryQueue = new AgentMessageQueue();
+    const rePresentedAfterClientFailure = await handler.execute(
+      materialize,
+      context,
+      retryQueue,
+      repository,
+      engine,
+      undefined,
+      workflow.variableRegistry,
+    );
+    expect(rePresentedAfterClientFailure.action).toBe("pause");
+    expect(rePresentedAfterClientFailure.nextNodeId).toBeUndefined();
+    expect(retryQueue.peekNext()).toMatchObject({
+      nodeId: "materialize-workflow-guide",
+      completionCondition: "Run the command successfully, then complete this step with null or {}.",
+    });
+    expect((retryQueue.peekNext() as { directive: string }).directive).toContain(
+      "workflow-guide.md",
+    );
+    expect(node(workflow, "create-plan").directive).toContain(
+      "Read {{workspace_path}}workflow-guide.md",
+    );
+
+    const failingHandler = new MaterializeHandler({
+      createMaterializeToken: () => {
+        throw new Error("materialize grant unavailable");
+      },
+    });
+    await expect(
+      failingHandler.execute(
+        materialize,
+        context,
+        new AgentMessageQueue(),
+        repository,
+        engine,
+        undefined,
+        workflow.variableRegistry,
+      ),
+    ).rejects.toThrow("materialize grant unavailable");
+    expect(materialize.connections).toEqual({ success: "create-plan" });
+  });
+
   test("projects complete render-only progress from the latest authoritative plan revision", () => {
     expect(workflow.progress?.nodes.map((candidate) => candidate.id)).toEqual([
       "intake",
@@ -608,7 +683,7 @@ describe("Robust Task cause-aware contract", () => {
       "subgraph",
     ]);
     const waitingNodes = workflow.nodes.filter((candidate) => waitingTypes.has(candidate.type));
-    expect(waitingNodes).toHaveLength(23);
+    expect(waitingNodes).toHaveLength(24);
     expect(
       waitingNodes.every(
         (candidate: any) =>
@@ -749,7 +824,7 @@ describe("Robust Task cause-aware contract", () => {
   test("representative routes cover every node and branch", async () => {
     const results = [];
     for (const route of scenarios) {
-      const result = await runScenario(workflow, route);
+      const result = await runRobustScenario(route);
       expect({
         scenario: route.name,
         error: result.error,

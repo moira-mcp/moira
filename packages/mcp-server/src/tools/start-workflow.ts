@@ -26,6 +26,7 @@ import {
   AuditAction,
   isExecutionParentReference,
 } from "@mcp-moira/shared";
+import { checkTrustedLockDeliveryConfiguration } from "@mcp-moira/workflow-engine";
 import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "StartWorkflow" });
@@ -141,6 +142,10 @@ export function workflowHasTelegramNodes(nodes: Array<{ type: string }>): boolea
   return nodes.some((node) => node.type === "telegram-notification");
 }
 
+export function workflowHasLockNodes(nodes: Array<{ type: string }>): boolean {
+  return nodes.some((node) => node.type === "lock");
+}
+
 /**
  * Format synthetic pre-flight response for workflows with unconfigured Telegram.
  * Mimics the real directive format but no execution is created in DB.
@@ -149,6 +154,20 @@ export function formatTelegramPreflightResponse(workflowIdentifier: string): str
   return (
     `Your next task: ${TELEGRAM.preflight_directive(workflowIdentifier)}\n\n` +
     `Success criteria: ${TELEGRAM.preflight_completion_condition}\n\n` +
+    `No specific input format required. Send any data that fulfills the success criteria.`
+  );
+}
+
+export function formatLockTelegramPreflightResponse(
+  workflowIdentifier: string,
+  reason: "missing" | "invalid",
+): string {
+  const configurationState = reason === "missing" ? "not configured" : "invalid";
+  return (
+    `Your next task: Configure Telegram before starting workflow "${workflowIdentifier}". ` +
+    `This workflow contains lock nodes whose PIN delivery is mandatory, and the current Telegram configuration is ${configurationState}. ` +
+    `Run moira/telegram-setup or configure a valid bot token and chat ID. skipTelegramCheck cannot bypass trusted lock PIN delivery.\n\n` +
+    `Success criteria: Telegram is configured for the authenticated user and the workflow can deliver lock PINs to that user's chat.\n\n` +
     `No specific input format required. Send any data that fulfills the success criteria.`
   );
 }
@@ -169,10 +188,30 @@ export async function startWorkflow(params: StartWorkflowParams): Promise<ToolRe
 
     const engine = MCPEngine.getInstance();
 
-    // Telegram pre-flight check (before creating any execution)
-    if (!params.skipTelegramCheck) {
-      const resolved = await engine.repository.resolveWorkflow(params.workflowId, userId);
-      if (resolved && workflowHasTelegramNodes(resolved.workflow.nodes)) {
+    // Resolve once so lock delivery can remain mandatory even when ordinary
+    // notification pre-flight is explicitly skipped.
+    const resolved = await engine.repository.resolveWorkflow(params.workflowId, userId);
+    if (resolved) {
+      if (workflowHasLockNodes(resolved.workflow.nodes)) {
+        const trustedConfiguration = await checkTrustedLockDeliveryConfiguration(
+          engine.repository,
+          userId,
+        );
+        if (!trustedConfiguration.configured) {
+          logger.info("Trusted lock delivery pre-flight check failed", {
+            workflowId: params.workflowId,
+            userId,
+            reason: trustedConfiguration.reason,
+          });
+          return {
+            success: true,
+            data: formatLockTelegramPreflightResponse(
+              params.workflowId,
+              trustedConfiguration.reason,
+            ),
+          };
+        }
+      } else if (!params.skipTelegramCheck && workflowHasTelegramNodes(resolved.workflow.nodes)) {
         const botToken = await engine.repository.getSetting<string>(userId, "telegram.bot_token");
         const chatId = await engine.repository.getSetting<string>(userId, "telegram.chat_id");
 

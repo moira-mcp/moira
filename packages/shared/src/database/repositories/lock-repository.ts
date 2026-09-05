@@ -8,7 +8,8 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { executionLock } from "../schema.js";
 import type * as schema from "../schema.js";
 
-export type LockStatus = "active" | "unlocked";
+export type PublicLockStatus = "active" | "unlocked";
+export type LockStatus = "pending_delivery" | PublicLockStatus | "delivery_failed";
 
 export interface LockRecord {
   id: string;
@@ -29,6 +30,7 @@ export interface CreateLockInput {
   reason: string;
   lockedBy: string;
   pin: string;
+  status?: LockStatus;
   createdAt: Date;
 }
 
@@ -43,7 +45,7 @@ export class LockRepository {
       reason: input.reason,
       lockedBy: input.lockedBy,
       pin: input.pin,
-      status: "active",
+      status: input.status ?? "active",
       createdAt: input.createdAt,
     });
   }
@@ -58,14 +60,16 @@ export class LockRepository {
     return rows.length > 0 ? (rows[0] as LockRecord) : null;
   }
 
-  async getActiveByExecution(executionId: string): Promise<LockRecord | null> {
+  async getActiveByExecution(
+    executionId: string,
+  ): Promise<(LockRecord & { status: "active" }) | null> {
     const rows = await this.db
       .select()
       .from(executionLock)
       .where(and(eq(executionLock.executionId, executionId), eq(executionLock.status, "active")))
       .limit(1);
 
-    return rows.length > 0 ? (rows[0] as LockRecord) : null;
+    return rows.length > 0 ? (rows[0] as LockRecord & { status: "active" }) : null;
   }
 
   async updateStatus(
@@ -80,7 +84,9 @@ export class LockRepository {
     await this.db.update(executionLock).set(updates).where(eq(executionLock.id, lockId));
   }
 
-  async getActiveByExecutionPrefix(executionIdPrefix: string): Promise<LockRecord | null> {
+  async getActiveByExecutionPrefix(
+    executionIdPrefix: string,
+  ): Promise<(LockRecord & { status: "active" }) | null> {
     // Sanitize LIKE special characters to prevent wildcard injection
     const sanitized = executionIdPrefix.replace(/[%_]/g, "");
     if (sanitized.length < 8) {
@@ -95,7 +101,7 @@ export class LockRepository {
       )
       .limit(1);
 
-    return rows.length > 0 ? (rows[0] as LockRecord) : null;
+    return rows.length > 0 ? (rows[0] as LockRecord & { status: "active" }) : null;
   }
 
   async listByExecution(executionId: string): Promise<LockRecord[]> {

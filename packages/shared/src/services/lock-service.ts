@@ -9,6 +9,7 @@ import type {
   LockRepository,
   LockRecord,
   LockStatus,
+  PublicLockStatus,
 } from "../database/repositories/lock-repository.js";
 import type { AuditRepository } from "../database/repositories/audit-repository.js";
 import { getAuditSource } from "../logging/context.js";
@@ -29,6 +30,15 @@ export interface CreateLockResult {
   pin: string;
 }
 
+export interface DeliveredLockResult {
+  lockId: string;
+}
+
+export interface LockDeliverySecret {
+  lockId: string;
+  pin: string;
+}
+
 export interface ValidatePinResult {
   valid: boolean;
   lockStatus: LockStatus;
@@ -40,47 +50,82 @@ export class LockService {
   constructor(
     private lockRepo: LockRepository,
     private auditRepo: AuditRepository,
+    private pinGenerator: () => string = () => LockService.generatePin(),
   ) {}
 
   /**
    * Create a new execution lock with generated PIN
    */
   async createLock(options: CreateLockOptions): Promise<CreateLockResult> {
-    const lockId = randomUUID();
-    const pin = this.generatePin();
-    const now = new Date();
+    const prepared = this.prepareLock();
 
     await this.lockRepo.create({
-      id: lockId,
+      id: prepared.lockId,
       executionId: options.executionId,
       nodeId: options.nodeId,
       reason: options.reason,
       lockedBy: options.lockedBy,
       // Store only the hash; the plaintext PIN is returned once to the caller.
-      pin: hashPin(pin),
-      createdAt: now,
+      pin: prepared.pinHash,
+      createdAt: prepared.createdAt,
     });
 
-    await this.auditRepo.log({
-      userId: options.lockedBy,
-      action: AuditAction.LOCK_CREATE,
-      resource: "execution",
-      resourceId: options.executionId,
-      source: getAuditSource(),
-      metadata: JSON.stringify({
-        lockId,
-        nodeId: options.nodeId,
-        reason: options.reason,
-      }),
-    });
+    await this.logLockCreated(options, prepared.lockId);
 
     this.logger.info("Execution lock created", {
-      lockId,
+      lockId: prepared.lockId,
       executionId: options.executionId,
       nodeId: options.nodeId,
     });
 
-    return { lockId, pin };
+    return { lockId: prepared.lockId, pin: prepared.pin };
+  }
+
+  /**
+   * Create a lock for an agent-reachable caller and expose the plaintext PIN only
+   * to the trusted delivery callback. The lock is not active until delivery succeeds.
+   */
+  async createLockWithDelivery(
+    options: CreateLockOptions,
+    deliver: (secret: LockDeliverySecret) => Promise<void>,
+  ): Promise<DeliveredLockResult> {
+    const prepared = this.prepareLock();
+
+    await this.lockRepo.create({
+      id: prepared.lockId,
+      executionId: options.executionId,
+      nodeId: options.nodeId,
+      reason: options.reason,
+      lockedBy: options.lockedBy,
+      pin: prepared.pinHash,
+      status: "pending_delivery",
+      createdAt: prepared.createdAt,
+    });
+
+    try {
+      await deliver({ lockId: prepared.lockId, pin: prepared.pin });
+      await this.logLockCreated(options, prepared.lockId);
+      await this.lockRepo.updateStatus(prepared.lockId, "active");
+
+      this.logger.info("Execution lock activated after trusted delivery", {
+        lockId: prepared.lockId,
+        executionId: options.executionId,
+        nodeId: options.nodeId,
+      });
+
+      return { lockId: prepared.lockId };
+    } catch (error) {
+      try {
+        await this.lockRepo.updateStatus(prepared.lockId, "delivery_failed");
+      } catch {
+        // The original pending state is also fail-closed: active queries ignore it.
+        this.logger.error("Failed to mark trusted lock delivery attempt as failed", {
+          lockId: prepared.lockId,
+          executionId: options.executionId,
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -219,15 +264,19 @@ export class LockService {
   /**
    * Get active lock for an execution
    */
-  async getActiveLock(executionId: string): Promise<LockRecord | null> {
+  async getActiveLock(executionId: string): Promise<(LockRecord & { status: "active" }) | null> {
     return await this.lockRepo.getActiveByExecution(executionId);
   }
 
   /**
    * List all locks for an execution
    */
-  async listLocks(executionId: string): Promise<LockRecord[]> {
-    return await this.lockRepo.listByExecution(executionId);
+  async listLocks(executionId: string): Promise<Array<LockRecord & { status: PublicLockStatus }>> {
+    const locks = await this.lockRepo.listByExecution(executionId);
+    return locks.filter(
+      (lock): lock is LockRecord & { status: PublicLockStatus } =>
+        lock.status === "active" || lock.status === "unlocked",
+    );
   }
 
   /**
@@ -242,10 +291,43 @@ export class LockService {
   /**
    * Generate a numeric PIN of PIN_LENGTH digits
    */
-  private generatePin(): string {
+  private static generatePin(): string {
     const min = Math.pow(10, PIN_LENGTH - 1); // 100000
     const max = Math.pow(10, PIN_LENGTH) - 1; // 999999
     return String(randomInt(min, max + 1));
+  }
+
+  private prepareLock(): {
+    lockId: string;
+    pin: string;
+    pinHash: string;
+    createdAt: Date;
+  } {
+    const pin = this.pinGenerator();
+    if (!/^\d{6}$/.test(pin)) {
+      throw new Error("Lock PIN generator must return exactly six digits");
+    }
+    return {
+      lockId: randomUUID(),
+      pin,
+      pinHash: hashPin(pin),
+      createdAt: new Date(),
+    };
+  }
+
+  private async logLockCreated(options: CreateLockOptions, lockId: string): Promise<void> {
+    await this.auditRepo.log({
+      userId: options.lockedBy,
+      action: AuditAction.LOCK_CREATE,
+      resource: "execution",
+      resourceId: options.executionId,
+      source: getAuditSource(),
+      metadata: JSON.stringify({
+        lockId,
+        nodeId: options.nodeId,
+        reason: options.reason,
+      }),
+    });
   }
 
   /**

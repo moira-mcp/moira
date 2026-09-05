@@ -455,98 +455,116 @@ describe("workflow-management-flow v6", () => {
     workflow = loadWorkflow();
   });
 
-  test("keeps the complete authoring policy embedded and file-backed", async () => {
+  test("keeps canonical authoring doctrine themed, materialized, and explicitly consumed", async () => {
     const result = await new GraphValidator().validateUnified(workflow);
     expect(result.valid).toBe(true);
     expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(workflow.metadata.version).toBe("6.5.0");
+    expect(workflow.metadata.version).toBe("6.6.0");
     expect(workflow.metadata.description).toContain("one complete Moira workflow");
-    expect(workflow.metadata.description).toContain("content-rich execution progress");
+    expect(workflow.metadata.description).toContain("nine canonical thematic authoring references");
     // One node fewer than upstream 6.1.0: the analysis responsibility moved into the planning node.
     expect(workflow.nodes).toHaveLength(57);
     expect(workflow.nodes.some((node) => node.type === "expression")).toBe(false);
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
 
-    expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
-      "additional_edit_scope",
-      "local_workflow_path",
-      "workspace_path",
-      "action_type",
-      "workflow_artifact_path",
-      "workflow_authoring_reference",
-      "operating_mode",
-      "workspace_process_id_file",
-      "progress_source_outcome",
-      "progress_requirements_outcome",
-      "progress_design_outcome",
-      "progress_build_outcome",
-      "progress_review_outcome",
-      "progress_delivery_outcome",
-    ]);
+    expect(Object.keys(workflow.variableRegistry ?? {}).sort()).toEqual(
+      [
+        "additional_edit_scope",
+        "action_type",
+        "local_workflow_path",
+        "operating_mode",
+        "progress_build_outcome",
+        "progress_delivery_outcome",
+        "progress_design_outcome",
+        "progress_requirements_outcome",
+        "progress_review_outcome",
+        "progress_source_outcome",
+        "workflow_artifact_path",
+        "workflow_reference_antipatterns",
+        "workflow_reference_artifacts",
+        "workflow_reference_authority",
+        "workflow_reference_design",
+        "workflow_reference_engine",
+        "workflow_reference_patterns",
+        "workflow_reference_progress",
+        "workflow_reference_review_repair",
+        "workflow_reference_validation",
+        "workspace_path",
+        "workspace_process_id_file",
+      ].sort(),
+    );
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
-    const reference = String(workflow.variableRegistry?.workflow_authoring_reference?.default);
-    for (const section of [
-      "## Engine contract",
-      "## Durable artifact and context rules",
-      "## Review and repair",
-      "## Validation and cost ordering",
-      "## Patterns",
-      "## Antipattern catalog",
-      "## Reviewer contract",
-      "### Operating mode (autonomous vs interactive)",
-      "### Revising the process while the work runs",
-      "### The reference the run writes itself",
-      "### Design before build",
-      "### Discriminating evidence and matching modality",
-      "### Cause before repair",
-      "### Replan without requirement erosion",
-      "### Bounded class-wide repair",
-      "### Validation as a requested result",
-      "### Minimal consumed process record",
-      "### Routing a confirmed repair by its stale-evidence cone",
-      "### Late design discovery",
-      "### Non-discriminating evidence",
-      "### Evidence modality mismatch",
-      "### Repair before diagnosis",
-      "### Validator nesting",
-      "### Changed bytes without changed knowledge",
-      "### Universal detector for a contextual property",
-      "### Validation-only drift",
-      "### User approval as semantic review",
-      "### Engine state computed by the agent",
-      "### A reference with no address",
-      "mechanical validation",
-      "decorative flags",
-      "do not force the same agent to reread",
-      "## Content-rich execution progress",
-      "progressActiveContent",
-      "shallowly replaces only supplied",
-    ]) {
-      expect(reference.toLowerCase()).toContain(section.toLowerCase());
+    const references = Object.fromEntries(
+      Object.entries(workflow.variableRegistry ?? {})
+        .filter(([name]) => name.startsWith("workflow_reference_"))
+        .map(([name, declaration]) => [name, String(declaration.default)]),
+    );
+    expect(Object.keys(references)).toHaveLength(9);
+    const expectedReferenceSections: Record<string, string[]> = {
+      workflow_reference_engine: ["## Engine contract"],
+      workflow_reference_design: [
+        "## Design method",
+        "### Design before build",
+        "### Revising the process while the work runs",
+        "### Rules stated as outcomes, each carrying its reason",
+      ],
+      workflow_reference_artifacts: [
+        "## Durable artifact and context rules",
+        "### Minimal consumed process record",
+        "### Workspace owner",
+        "### Source provenance and semantic reconciliation",
+        "### The reference the run writes itself",
+      ],
+      workflow_reference_review_repair: [
+        "## Review and repair",
+        "### File-backed review without data roundtrip",
+        "### Cause before repair",
+        "### Replan without requirement erosion",
+        "### Bounded class-wide repair",
+        "### Routing a confirmed repair by its stale-evidence cone",
+        "## Reviewer contract",
+      ],
+      workflow_reference_validation: [
+        "## Validation and cost ordering",
+        "### Discriminating evidence and matching modality",
+        "### Validation as a requested result",
+        "### Current structural projection before topology judgment",
+      ],
+      workflow_reference_authority: [
+        "## Authority and side effects",
+        "### Operating mode (autonomous vs interactive)",
+      ],
+      workflow_reference_patterns: [
+        "## Patterns",
+        "### Straight-line default",
+        "### Minimal workflow editing",
+      ],
+      workflow_reference_antipatterns: [
+        "## Antipattern catalog",
+        "### A reference with no address",
+        "### Materialized doctrine duplicated in directives",
+        "### Plan as a mechanical implementation script",
+        "### Order of telling taken for order of work",
+        "### Redundancy required in every plan item",
+        "### Directive as a drill order",
+      ],
+      workflow_reference_progress: [
+        "## Content-rich execution progress",
+        "progressActiveContent",
+        "shallowly replaces only supplied",
+      ],
+    };
+    for (const [name, sections] of Object.entries(expectedReferenceSections)) {
+      for (const section of sections) expect(references[name]).toContain(section);
     }
-
-    // One assertion per rule the formulation pass carries: each pins the phrase that carries the
-    // rule, so removing the rule fails here instead of passing silently. The rule about matching
-    // evidence to the kind of claim is upstream's ("Discriminating evidence and matching
-    // modality"), so only the prose-deliverable paragraph it lacked is ours, and it lives inside
-    // upstream's plan-as-a-script antipattern rather than in a second section of its own.
-    for (const rule of [
-      "### Rules stated as outcomes, each carrying its reason",
-      "### Order of telling taken for order of work",
-      "the order belongs to the executor",
-      "### Redundancy required in every plan item",
-      "judged item by item, on whether it genuinely applies there",
-      "### Directive as a drill order",
-      "Remove the capitals and the signs",
-      "### Discriminating evidence and matching modality",
-      "Where the deliverable is itself prose",
-      "does not distinguish two states of the result",
-    ]) {
-      expect(reference.toLowerCase()).toContain(rule.toLowerCase());
-    }
-    // The prose paragraph continues upstream's code-only prohibition instead of standing apart.
-    const scriptSection = reference.slice(
-      reference.indexOf("### Plan as a mechanical implementation script"),
+    const allReferences = Object.values(references).join("\n");
+    expect(allReferences).not.toContain("### Context-blind forced reread");
+    expect(allReferences.toLowerCase()).toContain("materialization proves only that files were");
+    expect(allReferences).toContain("each shared rule still has exactly one canonical owner");
+    const scriptSection = references.workflow_reference_antipatterns.slice(
+      references.workflow_reference_antipatterns.indexOf(
+        "### Plan as a mechanical implementation script",
+      ),
     );
     expect(scriptSection).toContain("Where the deliverable is itself prose");
 
@@ -561,24 +579,19 @@ describe("workflow-management-flow v6", () => {
       nodes["review-workflow-design"].inputSchema.properties.design_review_outcome.enum,
     ).toEqual(["pass", "repair", "replan"]);
 
-    // One responsibility writes one document: the analysis section and the outcomes derived from
-    // it share a file, so a correction cannot land in one of them and leave the other superseded.
-    // Each assertion pins a half that lived in the deleted analysis node, and the completion
-    // condition demands both — without it the gate would accept a plan with no analysis at all.
     const merged = nodes["create-edit-plan"];
     for (const carried of [
-      "the analysis section first",
+      "analysis first",
       "source-provenance.md",
-      "workflow-authoring-reference.md",
       "{{additional_edit_scope}}",
-      "baseline diagnostics",
-      "observable acceptance criteria",
-      "entry points, not an exhaustive whitelist",
+      "must not record turn counts",
+      "discriminating acceptance criteria",
     ]) {
       expect(merged.directive).toContain(carried);
     }
     expect(merged.completionCondition).toContain("complete analysis");
-    expect(merged.completionCondition).toContain("outcome-oriented edit design contract");
+    expect(merged.completionCondition).toContain("outcome-oriented edit contract");
+    expect(merged.completionCondition).toContain("without unused process diagnostics");
 
     // The acceptance criteria of an approved plan are the contract the executor is judged by, so
     // the executor may not reword them: it states the rule and names the teleport as the way out.
@@ -595,43 +608,137 @@ describe("workflow-management-flow v6", () => {
         "changed_knowledge",
       ]);
     }
-    expect(nodes["design-workflow-structure"].directive).toContain("plausible wrong state");
-    expect(nodes["create-edit-plan"].directive).toContain("observation that distinguishes");
-    expect(nodes["review-workflow-quality"].directive).toContain("surrogate signal");
-    for (const id of ["design-workflow-structure", "create-edit-plan"]) {
-      expect(nodes[id].directive).toContain("optional static execution-progress presentation");
-      expect(nodes[id].directive).toContain("3–10 ordered milestones");
-      expect(nodes[id].directive).toContain("mobile horizontal readability");
-      expect(nodes[id].directive).toContain("always-visible UI and PNG renderer");
-      expect(nodes[id].directive).toContain("short-lived one-time PNG download metadata");
-      expect(nodes[id].directive).toContain("internal direct `attachProgressImage`");
+    const referencePaths = (id: string): string[] =>
+      Array.from(
+        nodes[id].directive.matchAll(/\{\{workspace_path\}\}\/reference\/([a-z-]+\.md)/g),
+        (match: RegExpMatchArray) => match[1],
+      );
+    const consumerReferences: Record<string, string[]> = {
+      "gather-workflow-requirements": ["authority.md", "progress.md"],
+      "gather-edit-requirements": ["authority.md", "progress.md"],
+      "design-workflow-structure": [
+        "design.md",
+        "validation.md",
+        "patterns.md",
+        "authority.md",
+        "progress.md",
+      ],
+      "refine-structure": ["design.md", "authority.md", "progress.md"],
+      "create-workflow-json": [
+        "engine.md",
+        "design.md",
+        "artifacts.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "prepare-edit-workflow": ["engine.md", "artifacts.md"],
+      "audit-complete-workflow": [
+        "engine.md",
+        "design.md",
+        "artifacts.md",
+        "review-repair.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "create-edit-plan": [
+        "engine.md",
+        "design.md",
+        "artifacts.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "revise-edit-plan": [
+        "design.md",
+        "review-repair.md",
+        "engine.md",
+        "artifacts.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "apply-workflow-changes": [
+        "engine.md",
+        "design.md",
+        "artifacts.md",
+        "review-repair.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "review-workflow-design": [
+        "design.md",
+        "validation.md",
+        "authority.md",
+        "review-repair.md",
+        "engine.md",
+        "progress.md",
+      ],
+      "fix-create-design": ["design.md", "validation.md", "review-repair.md"],
+      "fix-edit-plan": ["design.md", "validation.md", "review-repair.md"],
+      "review-workflow-quality": [
+        "engine.md",
+        "design.md",
+        "artifacts.md",
+        "review-repair.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "fix-quality-issues": [
+        "engine.md",
+        "review-repair.md",
+        "design.md",
+        "artifacts.md",
+        "validation.md",
+        "authority.md",
+        "patterns.md",
+        "antipatterns.md",
+        "progress.md",
+      ],
+      "reassess-design-contract": [
+        "design.md",
+        "validation.md",
+        "authority.md",
+        "review-repair.md",
+        "progress.md",
+      ],
+    };
+    for (const [id, expected] of Object.entries(consumerReferences)) {
+      expect(referencePaths(id)).toEqual(expected);
+      expect(nodes[id].directive).toMatch(
+        /Before (deciding|designing|changing|mutation|preparing|auditing|analysis|revising|review|repair|reassessment)/,
+      );
     }
-    for (const id of ["create-workflow-json", "apply-workflow-changes"]) {
-      expect(nodes[id].directive).toContain("array order alone determines");
-      expect(nodes[id].directive).toContain("shared projection/model parity across UI and PNG");
-      expect(nodes[id].directive).toContain("only on a mapped Telegram node");
-      expect(nodes[id].directive).toContain("do not place an agent one-time download token");
-    }
-    for (const id of ["review-workflow-design", "review-workflow-quality"]) {
-      expect(nodes[id].directive).toContain("complete observable-wait mapping");
-      expect(nodes[id].directive).toContain("consumer drift");
-      expect(nodes[id].directive).toContain("incomplete mappings");
-      expect(nodes[id].directive).toContain("Block dynamic/state/routing progress fields");
-    }
-    for (const id of ["design-workflow-structure", "create-edit-plan"]) {
-      expect(nodes[id].directive).toContain("progressActiveLabel");
-      expect(nodes[id].directive).toContain("inactive milestones keep the stable base label");
-      expect(nodes[id].directive).toContain("authoritative on every route");
-    }
-    for (const id of ["create-workflow-json", "apply-workflow-changes"]) {
-      expect(nodes[id].directive).toContain("progressActiveLabel");
-      expect(nodes[id].directive).toContain("official CLI");
-      expect(nodes[id].directive).toContain("initial, active, next-iteration and replan contexts");
-    }
-    for (const id of ["review-workflow-design", "review-workflow-quality"]) {
-      expect(nodes[id].directive).toContain("progressActiveLabel");
-      expect(nodes[id].directive).toContain("undefined/stale counters");
-      expect(nodes[id].directive).toContain("inactive-label drift");
+    for (const id of [
+      "get-action-type",
+      "approve-structure",
+      "present-edit-plan",
+      "ask-full-antipattern-audit",
+      "user-final-review",
+      "report-final-result",
+      "ask-upload",
+      "save-workflow-to-target",
+      "handle-upload-error",
+      "sync-local-file",
+      "revise-create-requirements",
+      "revise-edit-requirements",
+    ]) {
+      expect(referencePaths(id)).toEqual([]);
     }
     expect(workflow.progress).toMatchObject({
       title: "Workflow Management Flow",
@@ -807,7 +914,15 @@ describe("workflow-management-flow v6", () => {
       basePath: "{{workspace_path}}",
       files: [
         { path: "process-id.txt", from: "workspace_process_id_file" },
-        { path: "workflow-authoring-reference.md", from: "workflow_authoring_reference" },
+        { path: "reference/engine.md", from: "workflow_reference_engine" },
+        { path: "reference/design.md", from: "workflow_reference_design" },
+        { path: "reference/artifacts.md", from: "workflow_reference_artifacts" },
+        { path: "reference/review-repair.md", from: "workflow_reference_review_repair" },
+        { path: "reference/validation.md", from: "workflow_reference_validation" },
+        { path: "reference/authority.md", from: "workflow_reference_authority" },
+        { path: "reference/patterns.md", from: "workflow_reference_patterns" },
+        { path: "reference/antipatterns.md", from: "workflow_reference_antipatterns" },
+        { path: "reference/progress.md", from: "workflow_reference_progress" },
       ],
       connections: { success: "route-action-type" },
     });
@@ -854,8 +969,10 @@ describe("workflow-management-flow v6", () => {
     expect(nodes["report-final-result"].inputSchema.properties).toEqual({});
     // The nodes that keep asking in interactive mode must state their autonomous rule.
     expect(nodes["ask-upload"].directive).toContain("`autonomous` mode do not ask");
-    expect(nodes["audit-complete-workflow"].directive).toContain("select the scope yourself");
-    expect(nodes["prepare-edit-workflow"].directive).toContain("decide on evidence");
+    expect(nodes["audit-complete-workflow"].directive).toContain(
+      "Autonomous mode includes confirmed findings",
+    );
+    expect(nodes["prepare-edit-workflow"].directive).toContain("autonomous mode decides");
     // Intake resolves the canonical path once; both branch owners consume that global path.
     expect(nodes["get-action-type"].directive).toContain("./moira-ws/workflow-management-flow-");
     for (const id of ["gather-workflow-requirements", "prepare-edit-workflow"]) {

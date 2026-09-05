@@ -396,7 +396,7 @@ Response:
   data: {
     totalNotes: number;
     totalSize: number;
-    limit: number; // 1048576 (1MB)
+    limit: number; // Effective total-storage limit in bytes
     usedPercent: number;
   }
   timestamp: string;
@@ -481,7 +481,7 @@ Request body:
 ```typescript
 {
   key: string;      // 1-100 chars, alphanumeric/underscore/hyphen
-  value: string;    // Max 100KB
+  value: string;    // Enforced against the active per-note size policy
   tags?: string[];  // Max 10 tags, each 1-50 chars
 }
 ```
@@ -508,8 +508,8 @@ Errors:
 - 400: Note with key already exists
 - 400: Invalid key format
 - 400: Too many tags
-- 400: Note size exceeded (100KB)
-- 400: Quota exceeded (1MB total)
+- 400: Note size exceeded (error reports the active boundary)
+- 400: Total note-storage quota exceeded
 
 Authentication: Required
 
@@ -525,7 +525,7 @@ Request body:
 
 ```typescript
 {
-  value: string;    // Max 100KB
+  value: string;    // Enforced against the active per-note size policy
   tags?: string[];  // Max 10 tags
 }
 ```
@@ -627,7 +627,7 @@ Response:
   data: {
     artifacts: Array<{
       uuid: string;
-      url: string; // https://${STATIC_ARTIFACTS_DOMAIN}/{uuid}.html
+      url: string; // Canonical public URL for the active deployment configuration
       name: string;
       size: number;
       mimeType: string;
@@ -656,8 +656,8 @@ Response:
   data: {
     totalArtifacts: number;
     totalSize: number;
-    storageLimit: number; // 52428800 (50MB)
-    countLimit: number; // 100
+    storageLimit: number; // Effective storage limit in bytes
+    countLimit: number; // Effective artifact-count limit
     storageUsedPercent: number;
     countUsedPercent: number;
   }
@@ -734,9 +734,9 @@ Response:
 Errors:
 
 - 400: Invalid HTML content (must contain `<html>` tag)
-- 400: Size exceeded (max 5MB)
-- 400: Storage quota exceeded (50MB total)
-- 400: Count quota exceeded (100 artifacts)
+- 400: Size exceeded (error reports the active boundary)
+- 400: Storage quota exceeded
+- 400: Artifact-count quota exceeded
 
 Authentication: Required
 
@@ -3485,14 +3485,15 @@ Authentication: Required (admin role)
 
 Preview effective prompt for agent/model combination with hierarchy resolution.
 
+Tool descriptions are static MCP contract data. This endpoint does not accept or preview them.
+
 Request body:
 
 ```typescript
 {
   agent?: string;           // Agent identifier (e.g., "claude", "chatgpt")
   model?: string;           // Model identifier (e.g., "claude-opus-4-5-20251101")
-  type: "toolDescription" | "systemPrompt" | "systemReminder";
-  toolName?: string;        // Required when type is "toolDescription"
+  type: "systemPrompt" | "systemReminder";
 }
 ```
 
@@ -3509,7 +3510,6 @@ Response:
       agent?: string;
       model?: string;
       type: string;
-      toolName?: string;
     }
   }
   timestamp: string;
@@ -3518,13 +3518,13 @@ Response:
 
 Resolution hierarchy (first non-null wins):
 
-1. Model-specific: `mcp.agent.{agent}.model.{model}.{type}[.{toolName}]`
-2. Agent-specific: `mcp.agent.{agent}.{type}[.{toolName}]`
-3. Default: `mcp.{type}[.{toolName}]`
+1. Model-specific: `mcp.agent.{agent}.model.{model}.{type}`
+2. Agent-specific: `mcp.agent.{agent}.{type}`
+3. Default: `mcp.{type}`
 
 Errors:
 
-- 400: Missing required fields (type, toolName for toolDescription)
+- 400: Missing or unsupported `type`
 - 401: Not authenticated
 - 403: Non-admin user
 

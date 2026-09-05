@@ -28,8 +28,7 @@ test.describe("MCP Prompts Editor (Global Settings)", () => {
     // Verify system prompts section exists in nav (use heading selector to be specific)
     await expect(page.getByRole("heading", { name: "System Prompts" })).toBeVisible();
 
-    // Verify tool descriptions section exists in nav (use heading selector to be specific)
-    await expect(page.getByRole("heading", { name: "Tool Descriptions" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tool Descriptions" })).toHaveCount(0);
 
     // Verify systemPrompt editor exists (default selection)
     await expect(page.getByTestId("mcp-prompt-systemPrompt")).toBeVisible();
@@ -150,28 +149,12 @@ test.describe("MCP Prompts Editor (Global Settings)", () => {
 
   // Fullscreen button was removed from McpPromptsEditor in the master-detail refactor
 
-  test("tool description editors are present", async ({ page }) => {
+  test("tool description editors are not exposed", async ({ page }) => {
     await page.goto(`${BASE_URL}/admin/global-settings`);
     await page.waitForLoadState("domcontentloaded");
 
-    // Verify tool description editors exist by clicking each nav item
-    const expectedTools = [
-      "list",
-      "start",
-      "step",
-      "manage",
-      "help",
-      "settings",
-      "session",
-      "token",
-    ];
-
-    for (const tool of expectedTools) {
-      const navItemTestId = `prompt-item-toolDescription-${tool}`;
-      await page.getByTestId(navItemTestId).click();
-      const testId = `mcp-prompt-toolDescription-${tool}`;
-      await expect(page.getByTestId(testId)).toBeVisible();
-    }
+    await expect(page.locator('[data-testid^="prompt-item-toolDescription-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="mcp-prompt-toolDescription-"]')).toHaveCount(0);
   });
 
   test("save persists value for Default scope", async ({ page }, testInfo) => {

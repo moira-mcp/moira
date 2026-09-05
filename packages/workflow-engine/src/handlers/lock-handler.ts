@@ -10,9 +10,8 @@ import { INodeHandler } from "../interfaces/core-interfaces.js";
 import { IDataRepository } from "../interfaces/data-repository.js";
 import { IGraphExecutionEngine } from "../interfaces/graph-execution-engine.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
-import { getTelegramClient } from "../services/telegram-client-factory.js";
+import { createTrustedExecutionLock } from "../services/trusted-lock-delivery.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
-import { buildApproveKeyboard } from "../types/telegram-types.js";
 import { createLogger, WorkflowLogger, InternalError, getLockService } from "@mcp-moira/shared";
 
 /**
@@ -160,18 +159,17 @@ export class LockHandler implements INodeHandler {
     messageQueue: AgentMessageQueue,
     repository: IDataRepository,
   ): Promise<NodeExecutionResult> {
-    const lockService = getLockService();
     const userId = context.userId || "system";
 
     // Process reason template
     const reason = this.templateProcessor.processDirective(lockNode.reason, context);
 
-    // Create lock
-    const lockResult = await lockService.createLock({
+    const lockResult = await createTrustedExecutionLock(repository, {
       executionId: context.executionId,
+      workflowId: context.workflowId,
       nodeId: lockNode.id,
       reason,
-      lockedBy: userId,
+      userId,
     });
 
     this.logger.info("Lock created for workflow execution", {
@@ -180,11 +178,8 @@ export class LockHandler implements INodeHandler {
       nodeId: lockNode.id,
     });
 
-    // Store lockId in context for subsequent visits
+    // Publish the context reference only after trusted delivery and activation succeed.
     context.variables["_lockId"] = lockResult.lockId;
-
-    // Send PIN via Telegram
-    await this.sendPinViaTelegram(lockNode, context, lockResult, reason, repository);
 
     // Add notification to message queue for agent
     messageQueue.addNotification(
@@ -200,99 +195,5 @@ export class LockHandler implements INodeHandler {
       reason,
       message: "Execution locked. PIN sent via Telegram. Provide PIN to unlock.",
     });
-  }
-
-  /**
-   * Send PIN to user via Telegram with approve inline keyboard
-   */
-  private async sendPinViaTelegram(
-    lockNode: LockNode,
-    context: ExecutionContext,
-    lockResult: { lockId: string; pin: string },
-    reason: string,
-    repository: IDataRepository,
-  ): Promise<void> {
-    const userId = context.userId || "system";
-
-    // Load telegram settings
-    let botToken: string | null = null;
-    let defaultChatId: string | null = null;
-
-    try {
-      botToken = await repository.getSetting<string>(userId, "telegram.bot_token");
-      defaultChatId = await repository.getSetting<string>(userId, "telegram.chat_id");
-    } catch {
-      this.logger.debug("Failed to load telegram settings", { userId });
-    }
-
-    if (!botToken || !defaultChatId) {
-      this.logger.warn("Telegram not configured — PIN not sent", {
-        executionId: context.executionId,
-        lockId: lockResult.lockId,
-      });
-      return;
-    }
-
-    // Creating the client validates the bot token format and throws on a
-    // malformed token. A bad stored token must not crash the lock step (and thus
-    // start()) — degrade gracefully: the PIN remains available via the lock
-    // service.
-    let telegramClient: ReturnType<typeof getTelegramClient>;
-    try {
-      telegramClient = getTelegramClient(botToken, defaultChatId);
-    } catch (error) {
-      this.logger.warn("Invalid Telegram configuration — PIN not sent", {
-        executionId: context.executionId,
-        lockId: lockResult.lockId,
-        error: (error as Error).message,
-      });
-      return;
-    }
-    if (!telegramClient) {
-      this.logger.warn("Failed to create Telegram client for lock notification", {
-        executionId: context.executionId,
-      });
-      return;
-    }
-
-    const processId = context.executionId.substring(0, 8);
-
-    // Resolve workflow name for footer
-    let workflowName = context.workflowId || "unknown";
-    try {
-      const workflow = await repository.getWorkflow(context.workflowId, userId);
-      if (workflow?.metadata?.name) {
-        workflowName = workflow.metadata.name;
-      }
-    } catch {
-      // Fallback to raw workflowId
-    }
-
-    const message =
-      `🔒 *Execution Lock*\n\n` +
-      `Reason: ${reason}\n` +
-      `PIN: \`${lockResult.pin}\`\n\n` +
-      `---\n📋 Process: ${processId}\n🔄 Workflow: ${workflowName}\n🤖 via MCP Moira`;
-
-    try {
-      await telegramClient.sendMessage({
-        chatId: defaultChatId,
-        text: message,
-        parseMode: "Markdown",
-        replyMarkup: buildApproveKeyboard(context.executionId, lockNode.id),
-      });
-
-      this.logger.info("Lock PIN sent via Telegram", {
-        lockId: lockResult.lockId,
-        executionId: context.executionId,
-      });
-    } catch (error) {
-      this.logger.warn("Failed to send lock PIN via Telegram", {
-        lockId: lockResult.lockId,
-        executionId: context.executionId,
-        error: (error as Error).message,
-      });
-      // Don't fail the lock — PIN is available in lock service
-    }
   }
 }

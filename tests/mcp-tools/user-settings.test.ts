@@ -68,6 +68,29 @@ describe("MCP User Settings Tools E2E", () => {
     }
   });
 
+  test("manage_settings rejects empty and ambiguous get selectors at the registered boundary", async () => {
+    const emptySelectorRequests = [
+      { action: "get", key: "" },
+      { action: "get", category: "" },
+      { action: "get", key: "   " },
+      { action: "get", category: "   " },
+      { action: "get", key: "", category: "ui" },
+      { action: "get", key: "ui.theme", category: "" },
+    ];
+
+    for (const args of emptySelectorRequests) {
+      const result = await client.callTool({ name: "settings", arguments: args });
+      expect(result.isError).toBe(true);
+    }
+
+    const ambiguous = await callMCPTool(client, "settings", {
+      action: "get",
+      key: "ui.theme",
+      category: "ui",
+    });
+    expect(ambiguous).toEqual(expect.stringContaining("key or category"));
+  });
+
   test("manage_settings set and get workflow", async () => {
     const testKey = "ui.theme";
     const testValue = "dark";
@@ -85,8 +108,9 @@ describe("MCP User Settings Tools E2E", () => {
     // Get setting back
     const settings = await callMCPTool(client, "settings", {
       action: "get",
+      key: testKey,
     });
-    expect(settings[testKey]).toBe(testValue);
+    expect(settings).toEqual({ [testKey]: testValue });
   });
 
   test("encrypted settings are masked in get action (Issue #374)", async () => {
@@ -103,7 +127,7 @@ describe("MCP User Settings Tools E2E", () => {
     // Get settings - encrypted values should be masked
     const settings = await callMCPTool(client, "settings", {
       action: "get",
-      category: "notifications",
+      key: "telegram.bot_token",
     });
 
     // Token should be masked, not exposed

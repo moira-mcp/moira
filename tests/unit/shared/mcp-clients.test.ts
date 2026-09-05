@@ -315,7 +315,7 @@ describe("mcp-clients", () => {
         const config = generateContinueConfig(testUrl);
         expect(config).toContain("mcpServers:");
         expect(config).toContain("name: moira");
-        expect(config).toContain(`url: ${testUrl}`);
+        expect(config).toContain(`url: ${JSON.stringify(testUrl)}`);
         expect(config).not.toContain("mcp-remote");
       });
     });
@@ -364,7 +364,7 @@ describe("mcp-clients", () => {
         const config = generateContinueConfigWithToken(testUrl);
         expect(config).toContain("mcpServers:");
         expect(config).toContain("name: moira");
-        expect(config).toContain(`url: ${testUrl}`);
+        expect(config).toContain(`url: ${JSON.stringify(testUrl)}`);
         expect(config).toContain("Authorization:");
         expect(config).toContain("Bearer moira_YOUR_TOKEN");
       });

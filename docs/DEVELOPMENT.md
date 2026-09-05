@@ -3,6 +3,7 @@
 ## Setup
 
 ```bash
+nvm use          # Reads repository .nvmrc and selects Node 24.20.0
 npm install
 
 # Local environment — copy the template, then set BETTER_AUTH_SECRET.
@@ -22,6 +23,7 @@ npm run test:e2e          # E2E tests (Docker required)
 
 # Code Quality
 npm run fix               # ESLint + Prettier fix all files
+
 ```
 
 **All development happens through Docker containers.**
@@ -163,11 +165,15 @@ and the destructive `--force` escape hatch.
 
 ### Prompt Migration
 
-At startup, `scripts/prompt-migration.ts` syncs `config/prompts/` files into `globalSettings` DB table:
+At startup, `scripts/prompt-migration.ts` syncs the runtime-configurable prompt, reminder, error,
+and validation files from `config/prompts/` into the `globalSetting` table:
 
 - **Fresh key:** Inserts the file value when the DB key does not exist. If a DB value predates the manifest, records its hash as the baseline without overwriting it.
 - **Subsequent deploys:** Compares the DB value with the last deployed manifest hash. An unchanged DB value is updated from the file; a manually edited DB value is preserved and reported as a conflict.
 - **Removed agent/model override:** Deletes its DB row only when the value still matches the last deployed hash. A manually edited override remains in the DB and is reported as a conflict.
+- **Static tool descriptions:** Typed default and agent/model variants live in
+  `packages/mcp-server/src/tools/tool-descriptions.ts` and are outside prompt migration. Legacy
+  description rows and their manifest entries are removed from the database.
 - **Null safety:** Treats a null `globalSetting.value` as an empty string for hashing.
 - **Atomicity:** All DB writes wrapped in `db.transaction()`.
 
@@ -211,6 +217,11 @@ src/graph/handlers/ # StartHandler, AgentDirectiveHandler, ConditionHandler, End
 src/graph/storage/  # DatabaseRepository, InMemoryRepository (IDataRepository implementations)
 src/graph/types/    # TypeScript definitions
 packages/mcp-server/src/tools/     # MCP tool implementations
+packages/mcp-server/src/tools/tool-schemas.ts      # Canonical side-effect-free input schemas
+packages/mcp-server/src/tools/tool-descriptions.ts # Typed static description data and variants
+packages/mcp-server/src/tools/tool-definitions.ts  # Pure MCP contract, reference model, and revision
+packages/mcp-server/src/tools/tool-bindings.ts     # Exhaustive lazy executable bindings and adapters
+packages/mcp-server/src/help/      # Portable EN/RU help sources and client presentation contract
 packages/mcp-server/src/messages/  # Centralized English messages (i18n ready)
 src/server.ts       # StreamableHTTPServerTransport (stateless mode)
 packages/web-backend/           # Express API server (internal port 4201)
@@ -222,17 +233,15 @@ config/             # Docker deployment configuration
 ├── nginx.conf          # Reverse proxy configuration
 ├── environment.env     # Environment variables template
 ├── docker-deploy.sh    # Deployment automation script
-└── prompts/            # File-based prompt storage (migrated to DB at startup)
+└── prompts/            # Runtime-configurable prompts and messages
     ├── systemPrompt.md
     ├── systemReminder.md
-    ├── toolDescriptions/*.md  # MCP tool descriptions
     ├── errorMessages.json
     ├── validationHelp.json
     └── agents/           # Agent-specific prompt overrides
         └── {agent}/      # e.g., chatgpt/, cursor/
             ├── systemPrompt.md
             ├── systemReminder.md
-            ├── toolDescriptions/*.md
             └── models/{model}/  # Model-level overrides
                 └── *.md
 tests/unit/         # Component tests
@@ -267,7 +276,7 @@ const transport = new StreamableHTTPServerTransport({
 ### Tool Execution Flow
 
 ```
-HTTP POST /mcp → JSON-RPC → Spawned Process → Tool Logic → JSON Response
+HTTP POST /mcp → JSON-RPC → Pure Tool Contract → Executable Binding → Direct Tool Logic → JSON Response
 ```
 
 ### Environment Variables Pattern
@@ -387,10 +396,12 @@ NodeResultBuilder.error(nodeId, errorMessage); // Fail execution
 
 ### LockHandler
 
-- **Pause behavior** - creates lock and pauses execution until unlocked
-- **PIN generation** - 6-digit PIN via crypto.randomInt; stored as a scrypt hash (`scrypt$<saltHex>$<hashHex>`) via `hashPin()`, verified with `verifyPin()` (constant-time). Plaintext PIN is returned once at lock creation, never persisted.
-- **Telegram notification** - sends lock reason + PIN with inline approve button
-- **Unlock sources** - MCP tool, web UI button, Telegram callback webhook
+- **Trusted delivery prerequisite** - loads the current user's Telegram bot token and chat ID and validates client construction before generating an agent-path PIN
+- **Two-phase activation** - generates a 6-digit PIN with `crypto.randomInt`, stores only its scrypt hash (`scrypt$<saltHex>$<hashHex>`) as pending, sends the plaintext PIN to the configured chat with an inline approve button, and activates the exact lock only after delivery succeeds
+- **Failure behavior** - missing or malformed settings fail before PIN generation; send or activation failure leaves the exact attempt pending or `delivery_failed`, neither of which is visible as an active/public lock or published as `_lockId`
+- **Agent projection** - the workflow handler and MCP lock action receive only `lockId`; no agent-facing result, error, or log contains the generated PIN
+- **Human compatibility** - the authenticated Web creation route uses the separate human operation that returns its one-time PIN to the execution owner while persisting only the hash
+- **Unlock sources** - workflow step input with a user-supplied PIN, MCP lock action, Web owner/admin action, or Telegram callback
 - **Single connection** - only "unlocked" path (no rejection or expiration)
 
 ## Testing
@@ -431,7 +442,7 @@ npm run test:api                  # API (Docker required)
 npm run test:mcp-tools            # MCP tools (Docker required)
 npm run test:e2e                  # E2E browser (Docker required)
 
-# One file (Testfold requires Node.js 20+)
+# One file (run Testfold with the repository's Node 24 runtime)
 npm run test:e2e -- --file tests/e2e/admin-panel.spec.ts
 ```
 
@@ -661,24 +672,43 @@ Docker commands route through configured context: `tests/utils/docker-command.ts
 
 ### MCP Version Check
 
-Server validates client MCP tools version on each request. OAuth tokens store `toolsVersion` at authorization time.
+Server validates the computed MCP tool-contract revision after authentication and account admission
+for both OAuth access tokens and persistent API tokens. Token issuance leaves `toolsVersion` null;
+successful MCP initialization records acceptance.
 
 **Behavior:**
 
-- Token version matches server version → request proceeds
-- Token version differs or null → HTTP 426 Upgrade Required with reconnect instruction
+- Token revision matches `MCP_TOOLS_REVISION` → request proceeds
+- Token revision differs or is null and the request is ordinary → HTTP 426 Upgrade Required
+- Token revision differs or is null and the request is an SDK-valid singleton `initialize` → the
+  exact credential is stamped before the successful result is emitted
+- Invalid, revoked, expired, blocked, pending, or applicable unverified credentials fail before the
+  revision gate
 
-**After deploy with version bump:**
+**After the contract revision changes:**
 
 ```bash
 # Client receives HTTP 426 error with message:
-# "MCP server updated to vX.Y.Z. Run '/mcp reconnect moira' to refresh tools."
+# "MCP tool contract changed. Run '/mcp reconnect moira' to refresh tools."
 
 # In Claude Code:
 /mcp reconnect moira-local  # Local Docker
 ```
 
-**Version source:** Root `package.json` version field
+Reconnect reuses the existing still-valid OAuth or persistent credential. Catalog refresh does not
+rotate a token. Notifications, malformed requests, batches, and initialize errors do not stamp the
+credential.
+
+**Revision source:** the deterministic pure contract in `tool-definitions.ts`, including every
+static default and agent/model description variant. `MCP_TOOLS_REVISION` is computed once when the
+MCP contract loads; `shared` persists only the revision accepted by each credential. Tool
+descriptions are not database settings. The root package version remains the server release
+identity.
+
+SQLite migration `0021_static_tool_descriptions` removes retired database-backed description rows
+and adds nullable `apiToken.toolsVersion`. Existing persistent-token IDs, hashes, ownership,
+revocation, and expiry remain unchanged; their null revision requires the next successful MCP
+initialize before ordinary requests proceed.
 
 ## Validation Rules (Code Facts)
 

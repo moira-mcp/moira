@@ -9,6 +9,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { MCP_TOOLS_REVISION } from "@mcp-moira/mcp-server/tool-contract";
 import { createAuthenticatedMCPClient, callMCPTool, verifyUserEmail } from "../utils/mcp-auth.js";
 import {
   getTestFetchUrl,
@@ -31,6 +32,17 @@ const TEST_USER = {
 let userCookie: string;
 let adminCookie: string;
 let testUserId: string;
+
+const initializeBody = (id: number) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "initialize",
+  params: {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "persistent-revision-test", version: "1.0.0" },
+  },
+});
 
 /** Sign in and return session cookie */
 async function signIn(email: string, password: string): Promise<string> {
@@ -94,12 +106,13 @@ async function unblockUser(userId: string): Promise<void> {
 /** Make raw MCP JSON-RPC request with a Bearer token */
 async function mcpRequest(
   token: string,
-  body: Record<string, unknown>,
+  body: unknown,
 ): Promise<{ status: number; body: unknown }> {
   const res = await fetch(`${FETCH_URL}/mcp`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(body),
@@ -144,11 +157,24 @@ describe("MCP Persistent Token Authentication", () => {
     if (!signUpData?.user) throw new Error("Failed to create test user");
     testUserId = signUpData.user.id;
 
+    // Sign in as admin for deployment-mode admission and block/unblock operations.
+    adminCookie = await signIn(ADMIN_CREDENTIALS.email, ADMIN_CREDENTIALS.password);
+
     // Verify email via admin helper
     await verifyUserEmail(FETCH_URL, TEST_USER.email);
 
-    // Sign in as admin (for block/unblock operations)
-    adminCookie = await signIn(ADMIN_CREDENTIALS.email, ADMIN_CREDENTIALS.password);
+    const featuresResponse = await fetch(`${FETCH_URL}/api/features`);
+    expect(featuresResponse.status).toBe(200);
+    const features = (await featuresResponse.json()) as {
+      data: { features: { accountApproval: boolean } };
+    };
+    if (features.data.features.accountApproval) {
+      const approvalResponse = await fetch(`${FETCH_URL}/api/admin/users/${testUserId}/approve`, {
+        method: "POST",
+        headers: { Cookie: adminCookie },
+      });
+      expect(approvalResponse.status).toBe(200);
+    }
 
     // Sign in as test user
     userCookie = await signIn(TEST_USER.email, TEST_USER.password);
@@ -196,11 +222,7 @@ describe("MCP Persistent Token Authentication", () => {
     const { token, id } = await createToken(userCookie, "revoked-token-test");
     await revokeToken(userCookie, id);
 
-    const { status, body } = await mcpRequest(token, {
-      jsonrpc: "2.0",
-      method: "tools/list",
-      id: 1,
-    });
+    const { status, body } = await mcpRequest(token, initializeBody(1));
 
     expect(status).toBe(401);
     expect(body).toHaveProperty("error", "invalid_token");
@@ -215,11 +237,7 @@ describe("MCP Persistent Token Authentication", () => {
       `UPDATE apiToken SET expiresAt = '2020-01-01T00:00:00.000Z' WHERE id = '${id}'`,
     );
 
-    const { status, body } = await mcpRequest(token, {
-      jsonrpc: "2.0",
-      method: "tools/list",
-      id: 1,
-    });
+    const { status, body } = await mcpRequest(token, initializeBody(1));
 
     expect(status).toBe(401);
     expect(body).toHaveProperty("error", "invalid_token");
@@ -247,11 +265,7 @@ describe("MCP Persistent Token Authentication", () => {
     await blockUser(testUserId);
 
     try {
-      const { status, body } = await mcpRequest(token, {
-        jsonrpc: "2.0",
-        method: "tools/list",
-        id: 1,
-      });
+      const { status, body } = await mcpRequest(token, initializeBody(1));
 
       expect(status).toBe(403);
       expect(body).toHaveProperty("error", "access_denied");
@@ -274,22 +288,80 @@ describe("MCP Persistent Token Authentication", () => {
     }
   });
 
-  test("persistent token skips version check (no 426 response)", async () => {
-    // Version check only applies to OAuth tokens. Persistent tokens should bypass it entirely.
-    // If version check were applied, persistent tokens would always fail with 426
-    // since they have no toolsVersion field. The fact that the first test passes
-    // proves version check is skipped, but we explicitly verify with a raw request.
-    const { token } = await createToken(userCookie, "version-check-test");
+  test("initializes only the exact persistent credential with the same token", async () => {
+    const first = await createToken(userCookie, "revision-first");
+    const sibling = await createToken(userCookie, "revision-sibling");
+    expect(
+      execSqliteInDocker(
+        `SELECT COALESCE(toolsVersion, 'null') FROM apiToken WHERE id IN ('${first.id}', '${sibling.id}') ORDER BY id`,
+      ).split("\n"),
+    ).toEqual(["null", "null"]);
 
-    const { status } = await mcpRequest(token, {
-      jsonrpc: "2.0",
-      method: "tools/list",
-      id: 1,
-    });
+    expect(
+      (await mcpRequest(first.token, { jsonrpc: "2.0", method: "tools/list", id: 1 })).status,
+    ).toBe(426);
+    expect(
+      execSqliteInDocker(
+        `SELECT COALESCE(toolsVersion, 'null') FROM apiToken WHERE id = '${first.id}'`,
+      ),
+    ).toBe("null");
+    expect((await mcpRequest(first.token, initializeBody(2))).status).toBe(200);
+    expect(execSqliteInDocker(`SELECT toolsVersion FROM apiToken WHERE id = '${first.id}'`)).toBe(
+      MCP_TOOLS_REVISION,
+    );
+    expect(
+      execSqliteInDocker(
+        `SELECT COALESCE(toolsVersion, 'null') FROM apiToken WHERE id = '${sibling.id}'`,
+      ),
+    ).toBe("null");
+    expect(
+      (await mcpRequest(first.token, { jsonrpc: "2.0", method: "tools/list", id: 3 })).status,
+    ).toBe(200);
 
-    // Should NOT be 426 (upgrade_required) — persistent tokens skip version check
-    expect(status).not.toBe(426);
-    // Should be 200 (success) or SSE response
-    expect([200]).toContain(status);
+    execSqliteInDocker(
+      `UPDATE apiToken SET toolsVersion = 'stale-revision' WHERE id = '${first.id}'`,
+    );
+    expect(
+      (await mcpRequest(first.token, { jsonrpc: "2.0", method: "tools/list", id: 4 })).status,
+    ).toBe(426);
+    expect(execSqliteInDocker(`SELECT toolsVersion FROM apiToken WHERE id = '${first.id}'`)).toBe(
+      "stale-revision",
+    );
+    expect((await mcpRequest(first.token, initializeBody(5))).status).toBe(200);
+    expect(execSqliteInDocker(`SELECT toolsVersion FROM apiToken WHERE id = '${first.id}'`)).toBe(
+      MCP_TOOLS_REVISION,
+    );
+  });
+
+  test("does not initialize from notification, malformed, or batched input", async () => {
+    const credential = await createToken(userCookie, "revision-invalid-shapes");
+    const withoutId = { ...initializeBody(1), id: undefined };
+    const malformed = { ...initializeBody(2), params: { capabilities: {} } };
+
+    expect((await mcpRequest(credential.token, withoutId)).status).toBe(426);
+    expect((await mcpRequest(credential.token, malformed)).status).toBe(426);
+    expect((await mcpRequest(credential.token, [initializeBody(3)])).status).toBe(426);
+
+    expect(
+      execSqliteInDocker(
+        `SELECT COALESCE(toolsVersion, 'null') FROM apiToken WHERE id = '${credential.id}'`,
+      ),
+    ).toBe("null");
+  });
+
+  test("repeated concurrent initialization converges without rotating the persistent token", async () => {
+    const credential = await createToken(userCookie, "revision-concurrent");
+    const responses = await Promise.all([
+      mcpRequest(credential.token, initializeBody(10)),
+      mcpRequest(credential.token, initializeBody(11)),
+    ]);
+
+    expect(responses.map(({ status }) => status)).toEqual([200, 200]);
+    expect(
+      execSqliteInDocker(`SELECT toolsVersion FROM apiToken WHERE id = '${credential.id}'`),
+    ).toBe(MCP_TOOLS_REVISION);
+    expect(
+      (await mcpRequest(credential.token, { jsonrpc: "2.0", method: "tools/list", id: 12 })).status,
+    ).toBe(200);
   });
 });

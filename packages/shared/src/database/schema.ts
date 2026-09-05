@@ -114,8 +114,7 @@ export const oauthAccessToken = sqliteTable("oauthAccessToken", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   scopes: text("scopes").notNull(),
-  // MCP server version at token creation time (#196)
-  // Used to detect outdated clients after server deploy
+  // Static MCP catalog revision accepted by successful initialization.
   toolsVersion: text("toolsVersion"),
   createdAt: text("createdAt").notNull(),
   updatedAt: text("updatedAt").notNull(),
@@ -526,6 +525,7 @@ export const apiToken = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     scopes: text("scopes"),
+    toolsVersion: text("toolsVersion"),
     expiresAt: text("expiresAt"),
     lastUsedAt: text("lastUsedAt"),
     createdAt: text("createdAt").notNull(),
@@ -542,7 +542,7 @@ export const apiToken = sqliteTable(
 
 /**
  * Execution Lock - PIN-based lock for workflow execution gates
- * Simple block/unblock gate with plaintext PIN
+ * Simple block/unblock gate with a hashed PIN and internal delivery states
  */
 export const executionLock = sqliteTable(
   "executionLock",
@@ -557,7 +557,7 @@ export const executionLock = sqliteTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     pin: text("pin").notNull(),
-    status: text("status").notNull().default("active"), // active | unlocked
+    status: text("status").notNull().default("active"), // pending_delivery | active | unlocked | delivery_failed
     createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
     unlockedAt: integer("unlockedAt", { mode: "timestamp_ms" }),
   },

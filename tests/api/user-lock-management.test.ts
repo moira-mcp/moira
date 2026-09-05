@@ -6,8 +6,10 @@
  * IMPORTANT: Tests run against Docker by default (localhost:DOCKER_PORT from .env)
  */
 
-import { describe, test, expect, beforeAll } from "@jest/globals";
+import { afterAll, describe, test, expect, beforeAll } from "@jest/globals";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
+import { callMCPTool, callMCPToolRaw, createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const BASE_URL = getTestBaseUrl();
 const ADMIN_CREDENTIALS = getAdminCredentials();
@@ -18,6 +20,13 @@ let userBCookie: string;
 let userAId: string;
 let userBId: string;
 let testExecutionId: string | null = null;
+let humanExecutionId = "";
+let humanWorkflowId = "";
+let humanLockId = "";
+let humanMcpClient: Client;
+let cleanupHumanMcp: (() => Promise<void>) | undefined;
+let accountApprovalEnabled = false;
+let multiUserAdminEnabled = false;
 
 /**
  * Helper: signup, verify, and login a test user. Returns { cookie, userId }.
@@ -47,6 +56,14 @@ async function createAndLoginUser(suffix: string): Promise<{ cookie: string; use
     headers: { Cookie: adminCookie },
   });
 
+  if (accountApprovalEnabled) {
+    const approvalRes = await fetch(`${BASE_URL}/api/admin/users/${userId}/approve`, {
+      method: "POST",
+      headers: { Cookie: adminCookie },
+    });
+    expect(approvalRes.ok).toBe(true);
+  }
+
   // Login
   const loginRes = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
@@ -71,6 +88,14 @@ describe("User Lock Management API - Permission Checks", () => {
     expect(adminLoginRes.ok).toBe(true);
     adminCookie = adminLoginRes.headers.get("set-cookie") || "";
 
+    const featuresRes = await fetch(`${BASE_URL}/api/features`);
+    expect(featuresRes.ok).toBe(true);
+    const features = (await featuresRes.json()) as {
+      data?: { features?: { accountApproval?: boolean; multiUserAdmin?: boolean } };
+    };
+    accountApprovalEnabled = features.data?.features?.accountApproval === true;
+    multiUserAdminEnabled = features.data?.features?.multiUserAdmin === true;
+
     // Create two test users
     const userA = await createAndLoginUser("a");
     userACookie = userA.cookie;
@@ -86,6 +111,60 @@ describe("User Lock Management API - Permission Checks", () => {
     });
     const execData = (await execRes.json()) as any;
     testExecutionId = execData.data?.executions?.[0]?.executionId || null;
+
+    const authenticated = await createAuthenticatedMCPClient();
+    humanMcpClient = authenticated.client;
+    cleanupHumanMcp = authenticated.cleanup;
+    const workflow = await callMCPTool(humanMcpClient, "manage", {
+      action: "create",
+      workflow: {
+        metadata: {
+          name: `Human Lock Compatibility ${Date.now()}`,
+          version: "1.0.0",
+          description: "Verifies owner-only one-time PIN creation response",
+        },
+        nodes: [
+          { id: "start", type: "start", connections: { default: "wait" } },
+          {
+            id: "wait",
+            type: "agent-directive",
+            directive: "Wait for the human lock.",
+            completionCondition: "The lock is resolved.",
+            connections: { success: "end" },
+          },
+          { id: "end", type: "end" },
+        ],
+      },
+    });
+    humanWorkflowId = workflow.workflowId;
+    const started = await callMCPToolRaw(humanMcpClient, "start", {
+      workflowId: workflow.workflowId,
+      parentExecutionId: "none",
+    });
+    humanExecutionId = started.match(/Process ID:\s*([a-f0-9-]+)/i)?.[1] ?? "";
+    expect(humanExecutionId).toMatch(/^[a-f0-9-]+$/);
+  });
+
+  afterAll(async () => {
+    if (humanLockId) {
+      const unlockResponse = await fetch(
+        `${BASE_URL}/api/executions/${humanExecutionId}/locks/${humanLockId}/unlock`,
+        { method: "POST", headers: { Cookie: adminCookie } },
+      );
+      if (!unlockResponse.ok) {
+        throw new Error(`Failed to clean human compatibility lock: ${unlockResponse.status}`);
+      }
+    }
+    if (humanWorkflowId) {
+      const deleteResponse = await fetch(`${BASE_URL}/api/workflows/${humanWorkflowId}`, {
+        method: "DELETE",
+        headers: { Cookie: adminCookie },
+      });
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        throw new Error(`Failed to clean human compatibility workflow: ${deleteResponse.status}`);
+      }
+    }
+    await cleanupHumanMcp?.();
   });
 
   describe("GET /api/executions/:id/locks", () => {
@@ -170,6 +249,18 @@ describe("User Lock Management API - Permission Checks", () => {
       const lockedRes = await fetch(`${BASE_URL}/api/admin/executions?status=locked&limit=100`, {
         headers: { Cookie: adminCookie },
       });
+      if (!multiUserAdminEnabled) {
+        expect(lockedRes.status).toBe(403);
+        const denied = (await lockedRes.json()) as any;
+        expect(denied.error).toEqual(
+          expect.objectContaining({
+            code: "ACCESS_DENIED",
+            details: expect.objectContaining({ capability: "multiUserAdmin" }),
+          }),
+        );
+        return;
+      }
+
       expect(lockedRes.ok).toBe(true);
       const lockedData = (await lockedRes.json()) as any;
       const lockedExecs = lockedData.data?.executions ?? [];
@@ -240,6 +331,31 @@ describe("User Lock Management API - Permission Checks", () => {
         body: JSON.stringify({ pin: "123456" }),
       });
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe("POST /api/executions/:id/lock", () => {
+    test("returns the one-time PIN only to the authenticated human owner", async () => {
+      const ownerResponse = await fetch(`${BASE_URL}/api/executions/${humanExecutionId}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie },
+        body: JSON.stringify({ reason: "Human-mediated approval" }),
+      });
+      expect(ownerResponse.ok).toBe(true);
+      const ownerBody = (await ownerResponse.json()) as any;
+      expect(ownerBody.data).toEqual(
+        expect.objectContaining({ locked: true, lockId: expect.any(String) }),
+      );
+      expect(ownerBody.data.pin).toMatch(/^\d{6}$/);
+      humanLockId = ownerBody.data.lockId;
+
+      const foreignResponse = await fetch(`${BASE_URL}/api/executions/${humanExecutionId}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: userBCookie },
+        body: JSON.stringify({ reason: "Unauthorized attempt" }),
+      });
+      expect(foreignResponse.status).toBe(401);
+      expect(await foreignResponse.text()).not.toContain(ownerBody.data.pin);
     });
   });
 });

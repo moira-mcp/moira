@@ -1961,7 +1961,7 @@ export class MoiraApiClient {
    * Used by MCP Prompts Editor to load values for editing
    */
   async getMcpPromptScopeValue(params: {
-    promptType: string;
+    promptType: "systemPrompt" | "systemReminder";
     vendor: "default" | "claude" | "chatgpt" | "gemini" | "cursor";
     model?: string | null;
   }): Promise<{
@@ -1990,7 +1990,7 @@ export class MoiraApiClient {
    * Used by MCP Prompts Editor to save values
    */
   async setMcpPromptScopeValue(params: {
-    promptType: string;
+    promptType: "systemPrompt" | "systemReminder";
     vendor: "default" | "claude" | "chatgpt" | "gemini" | "cursor";
     model?: string | null;
     value: string | null;
@@ -2018,10 +2018,9 @@ export class MoiraApiClient {
    * Used to test prompt hierarchy resolution
    */
   async previewPrompt(params: {
-    type: "systemPrompt" | "systemReminder" | "toolDescription";
+    type: "systemPrompt" | "systemReminder";
     agent?: string;
     model?: string;
-    toolName?: string;
   }): Promise<{
     value: string | null;
     resolvedFrom: "default" | "agent" | "model";
@@ -2029,7 +2028,6 @@ export class MoiraApiClient {
       agent?: string;
       model?: string;
       type: string;
-      toolName?: string;
     };
   }> {
     try {
@@ -2041,7 +2039,6 @@ export class MoiraApiClient {
             agent?: string;
             model?: string;
             type: string;
-            toolName?: string;
           };
         }>
       >("/admin/global-settings/preview-prompt", params);

@@ -886,7 +886,7 @@
       },
       "mcpPrompts": {
         "title": "MCP Prompts",
-        "description": "Manage system prompts and tool descriptions for different AI agents and models.",
+        "description": "Manage system prompts and reminders for different AI agents and models.",
         "howItWorks": "How it works",
         "hint1": "Select a scope (Default, Claude, ChatGPT, etc.) to view/edit prompts for that agent",
         "hint2": "Select a model to create model-specific overrides within an agent",
@@ -895,7 +895,7 @@
     },
     "globalSettings": {
       "title": "Global Settings",
-      "description": "Manage MCP tool descriptions, system prompts, and other agent-facing texts.",
+      "description": "Manage MCP system prompts and other runtime-configurable agent-facing texts.",
       "loadError": "Failed to load settings",
       "retry": "Retry",
       "noSettings": "No settings configured",
@@ -966,13 +966,12 @@
     },
     "mcpPrompts": {
       "title": "MCP Prompts",
-      "description": "Manage system prompts and tool descriptions for different AI agents and models.",
+      "description": "Manage system prompts and reminders for different AI agents and models.",
       "howItWorks": "How it works",
       "hint1": "Select a scope (Default, Claude, ChatGPT, etc.) to view/edit prompts for that agent",
       "hint2": "Select a model to create model-specific overrides within an agent",
       "hint3": "Empty value = uses parent level fallback (Model → Agent → Default)",
       "systemPrompts": "System Prompts",
-      "toolDescriptions": "Tool Descriptions",
       "history": {
         "button": "History",
         "version": "Version:",

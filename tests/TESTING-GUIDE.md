@@ -16,8 +16,8 @@ npm run test:unit                 # Unit tests (in-memory)
 npm run test:integration          # Integration tests (test-integration.db)
 ```
 
-Testfold requires Node.js 20 or newer. Select a single test file with its
-`--file` option after npm's argument separator:
+Use the repository's Node 24 runtime for Testfold. Select a single test file
+with its `--file` option after npm's argument separator:
 
 ```bash
 npm run test:workflow -- --file tests/workflow/engine/template-processor.test.ts

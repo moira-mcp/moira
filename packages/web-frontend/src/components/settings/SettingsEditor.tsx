@@ -294,7 +294,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
         );
 
       case "text": {
-        // "text" type is always multiline (tool descriptions, prompts, etc.)
+        // "text" settings are always multiline.
         const textValue = (value as string) || "";
         return (
           <div className="space-y-2">

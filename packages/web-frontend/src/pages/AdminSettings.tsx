@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 /**
  * Global Settings Page
- * Dedicated admin interface for managing global settings VALUES (tool descriptions, prompts, etc.)
+ * Dedicated admin interface for managing global setting values and runtime prompts.
  * Located at /admin/global-settings
  *
  * Uses SettingsEditor component for unified settings editing experience.

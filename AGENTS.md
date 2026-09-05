@@ -174,8 +174,11 @@ Point your MCP client at your configured Moira server for normal work; use a loc
 Docker instance (`/mcp` on your `DOCKER_PORT`) to test changes before they ship.
 If authentication fails, diagnose the cause — do not silently switch servers.
 
-The MCP tool list is cached at authorization time. After changing tool
-names/parameters/descriptions, the client must reconnect to pick them up.
+The MCP tool catalog is accepted during authenticated `initialize`. After changing tool
+names, parameters, descriptions, or other generated catalog facts, an ordinary request from a
+credential that has not accepted the current revision receives HTTP 426. Reconnect with the same
+still-valid OAuth or persistent token so the client initializes again; catalog refresh does not
+rotate the credential.
 
 ## Standard Flows
 

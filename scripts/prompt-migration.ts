@@ -56,34 +56,6 @@ export interface MigrationResult {
 
 // --- Constants ---
 
-const TOOL_NAMES = [
-  "list",
-  "start",
-  "step",
-  "manage",
-  "help",
-  "settings",
-  "token",
-  "session",
-  "notes",
-  "artifacts",
-  "lock",
-] as const;
-
-const TOOL_METADATA: Record<string, { label: string; sortOrder: number }> = {
-  list: { label: "List Workflows", sortOrder: 20 },
-  start: { label: "Start Workflow", sortOrder: 21 },
-  step: { label: "Execute Step", sortOrder: 22 },
-  manage: { label: "Manage Workflow", sortOrder: 23 },
-  help: { label: "Get Help", sortOrder: 24 },
-  settings: { label: "Settings", sortOrder: 25 },
-  token: { label: "Create Token", sortOrder: 26 },
-  session: { label: "Session Info", sortOrder: 27 },
-  notes: { label: "Manage Notes", sortOrder: 28 },
-  artifacts: { label: "Manage Artifacts", sortOrder: 29 },
-  lock: { label: "Manage Locks", sortOrder: 30 },
-};
-
 // --- Prompt Mappings ---
 
 function getDefaultMappings(): PromptMapping[] {
@@ -106,19 +78,6 @@ function getDefaultMappings(): PromptMapping[] {
     },
   ];
 
-  // Tool descriptions
-  for (const name of TOOL_NAMES) {
-    const meta = TOOL_METADATA[name];
-    mappings.push({
-      dbKey: `mcp.toolDescription.${name}`,
-      filePath: `toolDescriptions/${name}.md`,
-      label: meta.label,
-      description: `Description for MCP tool: ${name}`,
-      category: "mcp",
-      sortOrder: meta.sortOrder,
-    });
-  }
-
   // Error messages and validation help
   mappings.push({
     dbKey: "mcp.errorMessages",
@@ -126,7 +85,7 @@ function getDefaultMappings(): PromptMapping[] {
     label: "Error Messages",
     description: "Static error messages as JSON. Messages with parameters remain in code.",
     category: "mcp",
-    sortOrder: 31,
+    sortOrder: 20,
   });
 
   mappings.push({
@@ -135,7 +94,7 @@ function getDefaultMappings(): PromptMapping[] {
     label: "Validation Help",
     description: "Validation help messages as JSON. Organized by category.",
     category: "mcp",
-    sortOrder: 32,
+    sortOrder: 21,
   });
 
   return mappings;
@@ -146,10 +105,8 @@ function getDefaultMappings(): PromptMapping[] {
  * Directory structure:
  *   agents/{agent}/systemPrompt.md      → mcp.agent.{agent}.systemPrompt
  *   agents/{agent}/systemReminder.md    → mcp.agent.{agent}.systemReminder
- *   agents/{agent}/toolDescriptions/{tool}.md → mcp.agent.{agent}.toolDescription.{tool}
  *   agents/{agent}/models/{model}/systemPrompt.md   → mcp.agent.{agent}.model.{model}.systemPrompt
  *   agents/{agent}/models/{model}/systemReminder.md → mcp.agent.{agent}.model.{model}.systemReminder
- *   agents/{agent}/models/{model}/toolDescriptions/{tool}.md → mcp.agent.{agent}.model.{model}.toolDescription.{tool}
  */
 function getAgentOverrideMappings(promptsDir: string): PromptMapping[] {
   const agentsDir = path.join(promptsDir, "agents");
@@ -190,23 +147,6 @@ function getAgentOverrideMappings(promptsDir: string): PromptMapping[] {
       });
     }
 
-    // Agent-level tool description overrides
-    const agentToolsDir = path.join(promptsDir, agentPath, "toolDescriptions");
-    if (fs.existsSync(agentToolsDir)) {
-      const toolFiles = fs.readdirSync(agentToolsDir).filter((f) => f.endsWith(".md"));
-      for (const toolFile of toolFiles) {
-        const toolName = toolFile.replace(".md", "");
-        mappings.push({
-          dbKey: `mcp.agent.${agent}.toolDescription.${toolName}`,
-          filePath: `${agentPath}/toolDescriptions/${toolFile}`,
-          label: `${capitalize(agent)} - ${toolName}`,
-          description: `Tool description override for ${toolName} (${agent} agent)`,
-          category: "mcp-agent-prompts",
-          sortOrder: 0,
-        });
-      }
-    }
-
     // Model-level overrides
     const modelsDir = path.join(promptsDir, agentPath, "models");
     if (fs.existsSync(modelsDir)) {
@@ -239,22 +179,6 @@ function getAgentOverrideMappings(promptsDir: string): PromptMapping[] {
             sortOrder: 0,
           });
         }
-
-        const modelToolsDir = path.join(promptsDir, modelPath, "toolDescriptions");
-        if (fs.existsSync(modelToolsDir)) {
-          const toolFiles = fs.readdirSync(modelToolsDir).filter((f) => f.endsWith(".md"));
-          for (const toolFile of toolFiles) {
-            const toolName = toolFile.replace(".md", "");
-            mappings.push({
-              dbKey: `mcp.agent.${agent}.model.${model}.toolDescription.${toolName}`,
-              filePath: `${modelPath}/toolDescriptions/${toolFile}`,
-              label: `${capitalize(agent)}/${model} - ${toolName}`,
-              description: `Tool description override for ${toolName} (${agent}/${model})`,
-              category: "mcp-model-prompts",
-              sortOrder: 0,
-            });
-          }
-        }
       }
     }
   }
@@ -266,6 +190,13 @@ export function getPromptMappings(promptsDir?: string): PromptMapping[] {
   const defaults = getDefaultMappings();
   if (!promptsDir) return defaults;
   return [...defaults, ...getAgentOverrideMappings(promptsDir)];
+}
+
+export function isRetiredToolDescriptionKey(key: string): boolean {
+  return (
+    key.startsWith("mcp.toolDescription.") ||
+    (key.startsWith("mcp.agent.") && key.includes(".toolDescription."))
+  );
 }
 
 // --- Hash Utilities ---
@@ -327,6 +258,21 @@ export function migratePrompts(config: PromptMigrationConfig): MigrationResult {
     // If any unexpected error occurs (e.g. TypeError), all changes roll back.
     const runMigration = sqlite.transaction(() => {
       const activeKeys = new Set(mappings.map((mapping) => mapping.dbKey));
+
+      const retiredKeys = new Set<string>(
+        Object.keys(manifest.entries).filter(isRetiredToolDescriptionKey),
+      );
+      const persistedKeys = sqlite.prepare("SELECT key FROM globalSetting").all() as Array<{
+        key: string;
+      }>;
+      for (const { key } of persistedKeys) {
+        if (isRetiredToolDescriptionKey(key)) retiredKeys.add(key);
+      }
+      for (const dbKey of retiredKeys) {
+        sqlite.prepare("DELETE FROM globalSetting WHERE key = ?").run(dbKey);
+        delete manifest.entries[dbKey];
+        result.removed.push(dbKey);
+      }
 
       // Agent/model overrides are discovered from files. If a previously managed
       // override file is removed, delete its DB row only when the stored value

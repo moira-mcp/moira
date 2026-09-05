@@ -90,32 +90,61 @@ Used by: `ExecutionRepository`, `AuditRepository`, `NoteRepository`, `ArtifactRe
 
 ```typescript
 // HTTP Server: StreamableHTTPServerTransport (Stateless Mode)
-// Direct imports: import { listWorkflows } from './tools/list-workflows.js'
 const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: undefined  // Stateless - no session storage
+  sessionIdGenerator: undefined, // Stateless - no session storage
 });
 
-// MCP Tools (short names)
-list(search?, visibility?, sort?, sortOrder?, limit?, offset?)  // Get workflows with filtering and pagination
-start(workflowId: string, note?: string, parentExecutionId: string, skipTelegramCheck?: boolean)  // Initialize execution by UUID, slug, or handle/slug (e.g., "john/my-workflow"), optional note (max 500 chars), required parent link (use "none" for standalone), skip Telegram pre-flight check
-step(processId: string, input?: any)                // Process next step with enhanced input parsing
-manage(action: string, ...)                         // Workflow CRUD with action-based routing (create/edit/get/get-structure/get-node/search-nodes/validate/list-variables/get-variable/set-variable/delete-variable/diff)
-session(action: string, executionId?: string)       // Get session information (user, executions, execution_context, current_step, update-note)
-help(topic?: string | string[])                     // Get help documentation (single or multiple topics)
-settings(action: string, ...)                       // User settings management (get/set/list)
-token(action: string, ...)                          // Generate upload/download tokens for large workflows
-notes(action: string, ...)                          // Persistent notes storage with versioning (list/get/save/delete/history/stats)
-artifacts(action: string, ...)                      // Static HTML artifacts hosting (upload/update/delete/list/stats/token)
-lock(action: string, executionId: string, ...)      // Execution lock management (status/list/unlock/lock)
+// HTTP endpoints
+// POST /mcp — JSON-RPC 2.0 requests
+// GET /health — server health status
 
-// HTTP Endpoints
-POST /mcp     // JSON-RPC 2.0 requests
-GET  /health  // Server health status
-
-// Version Check
-// Server compares client's toolsVersion (stored at OAuth authorize) with current server version
-// If mismatch: HTTP 426 Upgrade Required with hint "/mcp reconnect moira"
+// Catalog revision gate (after credential validity and account admission)
+// Matching OAuth/API-token toolsVersion → ordinary request proceeds
+// Missing/stale toolsVersion + ordinary request → HTTP 426 Upgrade Required
+// Missing/stale toolsVersion + valid singleton initialize → exact credential is stamped before
+// the successful initialize result is emitted
 ```
+
+`tool-schemas.ts` owns side-effect-free canonical Zod schemas. `tool-definitions.ts` is the pure
+catalog that associates each public name with its static default and agent/model description
+variants, schema, response policy, validated examples, localized factual metadata, reference model,
+and deterministic revision. `tool-bindings.ts` separately binds every catalog identity to its lazy
+runtime handler. `register-tools.ts` combines them through the reconciliation-aware SDK wrapper;
+server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions are
+not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
+`instructions` channel.
+
+The same structured reference model renders `help({ topic: "tools" })` and the English and Russian
+public reference pages directly. `MCP_TOOLS_REVISION` is computed once from stable client-visible
+contract facts in the MCP package. New OAuth access tokens and persistent API
+tokens begin without an accepted catalog revision. After authentication and account admission, the
+MCP server permits a missing/stale credential to run one SDK-valid singleton `initialize` request
+and conditionally stamps only that credential immediately before forwarding its successful result.
+Errors, notifications, malformed requests, batches, revoked/expired credentials, and denied accounts
+cannot stamp acceptance. Ordinary missing/stale requests receive HTTP 426; matching credentials
+proceed without token rotation. Package version remains diagnostic release identity and is not the
+catalog invalidation input. The public docs package consumes the pure MCP contract through its
+`tool-contract` export during Astro build; no generated revision or tool-reference copy must be
+refreshed. See the [public MCP tools reference](../packages/docs/src/content/docs/docs/reference/tools.mdx)
+for the direct catalog and action-specific behavior.
+
+Non-`tools` runtime help topics are owned by the MCP package under
+`packages/mcp-server/src/help/content/`. Runtime discovers topic IDs and metadata from the English
+semantic Markdown and reads the same sources that the English and Russian public MDX shells import
+through the `help-content` package export. Quick start and MCP clients compose authored before/after
+sections with client setup; agent instructions compose its authored section with the existing system
+prompt. The no-argument topic catalog adds the special `tools` entry from MCP-owned contract metadata,
+and that topic renders directly from the typed tool contract rather than a Markdown copy.
+Presentation-only Astro components remain in the shells, and runtime never parses or removes MDX/JSX.
+
+`renderPortableHelpTokens()` in `packages/shared/src/utils/portable-help.ts` is the shared resolver
+for configured MCP, Moira and static-artifact URLs and MCP client deeplinks. The MCP runtime applies
+it to complete Markdown, and the Astro remark adapter applies the same function to Markdown values
+and links. `packages/mcp-server/src/help/client-presentation.ts` derives localized setup from the
+canonical shared client registry and its configuration, token and deeplink generators; runtime
+Markdown and `ClientSetupTabs.astro` consume that projection directly. The Docker runtime carries the
+MCP-owned help corpus and the existing checked-in default system prompt; public MDX is compiled only
+into the static documentation site.
 
 ### Enhanced Input Parsing
 
@@ -150,7 +179,7 @@ All MCP tool `inputSchema` fields with `z.object()`, `z.array()`, or `z.record()
 
 ```typescript
 // Implementation: packages/mcp-server/src/utils/flexible-json-parser.ts
-// Applied in: packages/mcp-server/src/server.ts via wrapSchemaWithAutoparse()
+// Applied in: packages/mcp-server/src/tools/register-tools.ts via wrapSchemaWithAutoparse()
 
 // Example: manage tool receives workflow as string instead of object
 manage({ action: "create", workflow: '{"metadata":{"name":"test"},"nodes":[]}' });
@@ -194,16 +223,21 @@ step({ processId: "abc-123", teleportTo: "replan-node" });
 
 ### Telegram Pre-flight Check
 
-start() checks if the workflow contains telegram-notification nodes. If the user has not configured Telegram (missing bot_token or chat_id), returns a synthetic directive with setup instructions instead of starting the workflow.
+`start()` resolves the workflow before execution creation and applies two Telegram checks:
+
+- A workflow with `telegram-notification` nodes returns a synthetic setup directive when the current user has no bot token or chat ID. `skipTelegramCheck` may bypass this optional-notification check.
+- A workflow with a `lock` node always requires a valid-shaped bot token and chat ID for the current user. `skipTelegramCheck` does not bypass this requirement. Missing or malformed configuration returns a synthetic setup directive without a Process ID or execution record.
 
 ```typescript
-// Bypass the check to start without Telegram notifications
+// Bypass only the optional telegram-notification check
 start({
   workflowId: "moira/software-development-flow",
   parentExecutionId: "none",
   skipTelegramCheck: true,
 });
 ```
+
+Preflight checks configuration shape, not Telegram network reachability. `LockHandler` repeats the authoritative check and performs trusted delivery when execution reaches the lock node, so a later send failure still creates no usable active lock.
 
 ### Parent-Child Workflow Linking
 
@@ -264,6 +298,9 @@ manage({
   offset: 0,
   limit: 10
 })
+// Returns complete metadata, variableRegistry, runtimePolicy, progress,
+// systemReminder, structure, optional nodes, and optional validation.
+// includeNodes and includeValidation remove only their named fields.
 
 // Get workflow structure (metadata + node graph, no full content)
 manage({
@@ -288,12 +325,24 @@ manage({
 })
 // Returns: nodes containing query in directive/completionCondition
 
+// List compact node summaries
+manage({ action: 'list-nodes', workflowId: 'workflow-id', includePreview: true })
+
+// Get a selected node batch
+manage({ action: 'get-nodes', workflowId: 'workflow-id', nodeIds: ['start', 'end'] })
+
+// Analyze definition-wide variable sources and usage
+manage({ action: 'analyze-variables', workflowId: 'workflow-id' })
+
+// Change an owned workflow's visibility
+manage({ action: 'set-visibility', workflowId: 'workflow-id', visibility: 'private' })
+
 // Validate workflow
 manage({
   action: 'validate',
-  workflowId: 'workflow-id'
+  workflow: { metadata: {...}, nodes: [...] }
 })
-// Returns: errors, warnings, isValid
+// Returns: valid, errorCount, warningCount, errors, warnings
 
 // List workflow variables (declared globals from variableRegistry)
 manage({
@@ -333,7 +382,7 @@ manage({
   workflowId: 'workflow-v1',
   compareWorkflowId: 'workflow-v2'
 })
-// Returns: metadataDiff, addedNodes[], removedNodes[], modifiedNodes[]
+// Returns: identical, summary, and optional details for metadata, nodes, and reminder changes
 ```
 
 ## Slug and Handle System
@@ -746,10 +795,10 @@ logger[logLevel]("Failed to X", appError, {
 
 `executeStep()` checks for active locks before processing. When execution has an active lock:
 
-- Queries `lockService.findActiveLock(executionId)` to check for active locks
-- Only blocks locks created by agents (source: "agent"); locks from workflow lock nodes pass through
-- Throws `ValidationError` with message: "Execution is locked: {reason}. Unlock via lock tool with PIN."
-- Agent must use the `lock` MCP tool with action `unlock` and correct PIN to proceed
+- Queries `lockService.getActiveLock(executionId)`.
+- Allows execution only when the current graph node is a `lock` node, because `LockHandler` owns that node's validation and Telegram-approval resume path.
+- Blocks every other current node with `ValidationError` containing the lock reason and the exact MCP unlock call shape.
+- The caller must resolve the lock through `lock({ action: "unlock", executionId, pin })`, owner/admin unlock, or Telegram approval before another node can advance.
 
 ### Node Results
 
@@ -1095,6 +1144,7 @@ apiToken: {
   tokenHash: string; // SHA-256 hash (plaintext never stored)
   userId: string; // FK to user.id with CASCADE delete
   scopes: string | null; // JSON array, null = full access
+  toolsVersion: string | null; // Catalog revision accepted by successful MCP initialize
   expiresAt: string | null; // ISO timestamp, null = never
   lastUsedAt: string | null;
   createdAt: string;
@@ -1256,5 +1306,10 @@ List workflows with filtering, sorting, and pagination.
     createdAt: string;  // ISO 8601
   }>;
   total: number;
+  offset: number;          // Effective offset used by this request
+  limit: number;           // Effective limit used by this request
+  returnedCount: number;
+  hasMore: boolean;
+  nextOffset: number | null; // Pass as offset for the next page; null on the last page
 }
 ```

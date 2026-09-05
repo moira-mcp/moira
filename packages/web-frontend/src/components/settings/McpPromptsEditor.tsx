@@ -4,7 +4,7 @@
  *
  * Layout: Left panel with clickable prompt list, right panel with full-height editor.
  * Features:
- * - 10 prompts (systemPrompt, systemReminder, 8 tool descriptions)
+ * - System prompt and system reminder editing
  * - Each prompt has Scope dropdown (Default/Claude/ChatGPT/Gemini/Cursor)
  * - Model dropdown (disabled when Default, populated with vendor-specific models)
  * - Dynamic loading of values based on scope/model selection
@@ -28,18 +28,7 @@ import { Loader2, Save, RotateCcw, History, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Prompt types
-export const PROMPT_TYPES = [
-  "systemPrompt",
-  "systemReminder",
-  "toolDescription.list",
-  "toolDescription.start",
-  "toolDescription.step",
-  "toolDescription.manage",
-  "toolDescription.help",
-  "toolDescription.settings",
-  "toolDescription.session",
-  "toolDescription.token",
-] as const;
+export const PROMPT_TYPES = ["systemPrompt", "systemReminder"] as const;
 
 export type PromptType = (typeof PROMPT_TYPES)[number];
 
@@ -67,14 +56,6 @@ export const VENDOR_LABELS: Record<Vendor, string> = {
 export const PROMPT_LABELS: Record<PromptType, string> = {
   systemPrompt: "System Prompt",
   systemReminder: "System Reminder",
-  "toolDescription.list": "Tool: list",
-  "toolDescription.start": "Tool: start",
-  "toolDescription.step": "Tool: step",
-  "toolDescription.manage": "Tool: manage",
-  "toolDescription.help": "Tool: help",
-  "toolDescription.settings": "Tool: settings",
-  "toolDescription.session": "Tool: session",
-  "toolDescription.token": "Tool: token",
 };
 
 /** Result from fetching MCP prompt value - includes the settings key for history */
@@ -602,11 +583,6 @@ const PromptDetailEditor: React.FC<{
   );
 };
 
-const SYSTEM_PROMPTS = PROMPT_TYPES.filter(
-  (pt) => pt === "systemPrompt" || pt === "systemReminder",
-);
-const TOOL_PROMPTS = PROMPT_TYPES.filter((pt) => pt.startsWith("toolDescription."));
-
 export const McpPromptsEditor: React.FC<McpPromptsEditorProps> = ({
   onFetchValue,
   onSave,
@@ -633,27 +609,7 @@ export const McpPromptsEditor: React.FC<McpPromptsEditorProps> = ({
             <h3 className="text-xs font-semibold uppercase text-muted-foreground mb-1 px-2">
               {t("admin.mcpPrompts.systemPrompts")}
             </h3>
-            {SYSTEM_PROMPTS.map((pt) => (
-              <button
-                key={pt}
-                onClick={() => setSelectedPrompt(pt)}
-                className={cn(
-                  "w-full text-left px-3 py-2 rounded-md text-sm transition-colors",
-                  selectedPrompt === pt
-                    ? "bg-primary text-primary-foreground font-medium"
-                    : "text-foreground hover:bg-muted",
-                )}
-                data-testid={`prompt-item-${pt.replace(".", "-")}`}
-              >
-                {PROMPT_LABELS[pt]}
-              </button>
-            ))}
-          </div>
-          <div>
-            <h3 className="text-xs font-semibold uppercase text-muted-foreground mb-1 px-2">
-              {t("admin.mcpPrompts.toolDescriptions")}
-            </h3>
-            {TOOL_PROMPTS.map((pt) => (
+            {PROMPT_TYPES.map((pt) => (
               <button
                 key={pt}
                 onClick={() => setSelectedPrompt(pt)}

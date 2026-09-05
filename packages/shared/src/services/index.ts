@@ -62,12 +62,10 @@ export {
 } from "./note-service.js";
 export {
   McpTextService,
-  MCP_TOOL_NAMES,
   MCP_TEXT_KEYS,
   MCP_CATEGORY,
   MCP_AGENT_CATEGORY,
   MCP_MODEL_CATEGORY,
-  type McpToolName,
   type McpPromptContext,
 } from "./mcp-text-service.js";
 export {
@@ -233,6 +231,8 @@ export {
   LockNotActiveError,
   type CreateLockOptions,
   type CreateLockResult,
+  type DeliveredLockResult,
+  type LockDeliverySecret,
   type ValidatePinResult,
 } from "./lock-service.js";
 
@@ -419,7 +419,7 @@ export function getUserService(): UserService {
 
 /**
  * Get McpTextService singleton instance
- * Provides access to tool descriptions, system prompt, and error messages from DB
+ * Provides access to runtime-configurable MCP prompts and messages from DB.
  */
 export function getMcpTextService(): McpTextService {
   if (!mcpTextServiceInstance) {

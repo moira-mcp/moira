@@ -84,6 +84,7 @@ ENV CONTACT_EMAIL=${CONTACT_EMAIL}
 ENV STATIC_ARTIFACTS_DOMAIN=${STATIC_ARTIFACTS_DOMAIN}
 # astro.config reads these explicit, non-secret build values to resolve the
 # MCP/static URLs baked into documentation pages.
+COPY packages/mcp-server/ ./packages/mcp-server/
 COPY packages/docs/ ./packages/docs/
 RUN --mount=type=cache,id=astro-docs-${BUILD_ID},target=/app/packages/docs/node_modules/.astro \
     cd packages/docs && npx astro build
@@ -178,9 +179,9 @@ COPY config/favicon/ /var/www/html/favicon/
 # pattern), so its dist contains a `docs/` dir served by nginx at /docs.
 COPY --from=docs-build /app/packages/docs/dist/ /var/www/html/
 
-# Copy MDX docs for get_help MCP tool (raw source — get_help reads MDX via fs, no astro build needed)
-# Note: docs are nested in src/content/docs/docs/ due to Starlight nested folder pattern for /docs/ URL prefix
-COPY packages/docs/src/content/docs/docs ./docs
+# Copy the checked-in default system prompt read by runtime initialization and
+# help composition. Portable help ships with its owning MCP package.
+COPY packages/docs/src/content/docs/docs/SYSTEM-PROMPT.md ./docs/SYSTEM-PROMPT.md
 ENV DOCS_DIR=/app/docs
 
 # Create required directories
