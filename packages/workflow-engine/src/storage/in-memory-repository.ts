@@ -644,7 +644,10 @@ export class InMemoryRepository implements IDataRepository {
     }
 
     let stringValue: string;
-    if (declared?.type === "json") {
+    // Match the production repository's storage boundary: structural values are serialized before
+    // type conversion reads them back. Limiting this to manifest-declared JSON would make ordinary
+    // stored JSON definitions become "[object Object]" only in the in-memory implementation.
+    if (typeof value === "object" && value !== null) {
       stringValue = JSON.stringify(value);
     } else {
       stringValue = String(value);

@@ -173,6 +173,8 @@ describe("The CLI in a separate process", () => {
 
     const invalid = runCli();
     expect(invalid.status).not.toBe(0);
-    expect(invalid.output).toMatch(/schema declared by 'corporate-messenger\.send'.*must be string/s);
+    expect(invalid.output).toMatch(
+      /schema declared by 'corporate-messenger\.send'.*must be string/s,
+    );
   });
 });
