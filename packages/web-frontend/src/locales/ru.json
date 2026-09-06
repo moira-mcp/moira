@@ -1800,10 +1800,23 @@
       "showWorkflowInfo": "← Воркфлоу",
       "nodeId": "ID узла",
       "from": "Откуда",
-      "to": "Куда"
+      "to": "Куда",
+      "providedBy": "Предоставлено расширением",
+      "configuration": "Конфигурация",
+      "nodeSchema": {
+        "required": "обязательное поле",
+        "notSet": "не задано",
+        "notDeclared": "не объявлено для этого типа узла"
+      }
     },
     "workflowGraph": {
       "loading": "Расчёт раскладки...",
+      "extensionOwner": "расширение {{extensionName}}",
+      "nodeFallback": {
+        "extensionMissing": "Тип расширения «{{extensionName}}», которое здесь не установлено",
+        "extensionUnavailable": "Тип расширения «{{extensionName}}», подключение к которому здесь недоступно",
+        "unknown": "Неизвестный тип узла: {{nodeType}}"
+      },
       "controls": {
         "fitView": "По размеру",
         "fitViewTitle": "Вписать в окно",

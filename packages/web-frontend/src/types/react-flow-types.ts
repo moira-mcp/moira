@@ -51,6 +51,12 @@ export type MoiraNodeType =
   | "upsert-note"
   | "materialize"
   | "end"
+  /**
+   * A type Moira knows and this bundle has no dedicated rendering for: a node contributed by an
+   * extension, or a built-in type added after this bundle was built. Everything shown about such a
+   * node — title, description, owner — comes from the catalog the server serves.
+   */
+  | "catalog"
   | "fallback";
 
 export interface MoiraNodeData extends Record<string, unknown> {
@@ -177,10 +183,31 @@ export interface MaterializeNodeData extends MoiraNodeData {
  * Fallback node data for unknown/unsupported node types
  * Displays with warning badge instead of crashing the application
  */
+export interface CatalogNodeData extends MoiraNodeData {
+  nodeType: "catalog";
+  /** The type as written in the workflow, e.g. `corporate-messenger.send`. */
+  originalType: string;
+  /** Where the type comes from, as the server reported it. */
+  origin: "builtin" | "extension";
+  /** Extension that contributed the type; absent for a built-in one. */
+  extensionName?: string;
+  extensionVersion?: string;
+  /** The schema the server published for this type, used to read the node's configuration. */
+  schema?: Record<string, unknown> | null;
+  schemaScope?: "node" | "config";
+  /** The node body as authored, so a panel can show it against the schema. */
+  config?: Record<string, unknown>;
+  connections?: Record<string, string>;
+}
+
 export interface FallbackNodeData extends MoiraNodeData {
   nodeType: "fallback";
   /** The original unrecognized node type string */
   originalType: string;
+  /** Why the server catalog could not describe this type; presentation localizes the explanation. */
+  fallbackReason: "extension-missing" | "extension-unavailable" | "unknown";
+  /** Extension parsed from a namespaced type, when the fallback belongs to an extension. */
+  extensionName?: string;
   /** Generic connections extracted from original node */
   connections?: Record<string, string>;
 }
@@ -197,6 +224,7 @@ export type MoiraNodeDataUnion =
   | UpsertNoteNodeData
   | MaterializeNodeData
   | EndNodeData
+  | CatalogNodeData
   | FallbackNodeData;
 
 export interface MoiraReactFlowNode extends Node {
@@ -426,6 +454,19 @@ export const DEFAULT_NODE_STYLES: Record<MoiraNodeType, NodeStyleConfig> = {
     minWidth: 120,
     minHeight: 40,
   },
+  catalog: {
+    nodeType: "catalog",
+    colors: {
+      primary: "#0ea5e9",
+      background: "#f0f9ff",
+      border: "#7dd3fc",
+      text: "#0369a1",
+    },
+    shape: "rectangle",
+    icon: "puzzle",
+    minWidth: 120,
+    minHeight: 40,
+  },
   fallback: {
     nodeType: "fallback",
     colors: {
@@ -489,6 +530,10 @@ export const NODE_HANDLE_POSITIONS: Record<
     sources: [Position.Bottom],
   },
   materialize: {
+    targets: [Position.Top],
+    sources: [Position.Bottom],
+  },
+  catalog: {
     targets: [Position.Top],
     sources: [Position.Bottom],
   },

@@ -23,6 +23,7 @@ import {
   WorkflowValidationRequest,
   AdminStatsResponse,
   AdminSystemStatusResponse,
+  NodeTypeCatalog,
 } from "../types";
 
 export interface ExecutionVariableAccess {
@@ -394,6 +395,12 @@ export class MoiraApiClient {
         ApiErrorCode.WORKFLOW_NOT_FOUND,
       );
     }
+  }
+
+  /** Get the server-owned catalog of built-in and installed extension node types. */
+  async getNodeTypes(): Promise<NodeTypeCatalog> {
+    const response = await this.client.get<ApiResponse<NodeTypeCatalog>>("/node-types");
+    return response.data.data!;
   }
 
   /**

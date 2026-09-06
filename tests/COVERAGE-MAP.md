@@ -309,13 +309,21 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/workflow-engine/extension-node-execution.test.ts` — custom-node graph dispatch, node-scoped result storage, downstream template access and process-default registry/client composition
 - `tests/unit/workflow-engine/extension-node-handler.test.ts` — template/config/input/output boundaries, normalized error routing, explicit-registry secret grants and schema refresh on long-lived handlers
 - `tests/unit/workflow-engine/extension-node-validation.test.ts` — registered/unresolvable/missing custom types, declared config schemas, registry refresh and unchanged built-in validation
-- `tests/unit/workflow-engine/extension-registry-reach.test.ts` — process registry propagation, external snapshots, registry-origin distinctions, startup synchronization and built-in type authority
+- `tests/unit/workflow-engine/extension-registry-reach.test.ts` — process registry propagation, external snapshots, registry-origin distinctions, startup synchronization, final snapshot publication/failure reporting and built-in type authority
 - `tests/unit/workflow-engine/extension-registry.test.ts` — versioned manifest, bounded schema dialect, settings/permission declarations, conflicts, registry lifecycle and snapshots
 - `tests/unit/workflow-engine/extension-runner-client-http.test.ts` — transport deadlines and mapping of HTTP/network responses to extension failure classes
+- `tests/unit/workflow-engine/node-type-catalog.test.ts` — complete engine-owned built-in catalog, live/unconfigured/unreachable/snapshot registry distinctions, extension declarations and schema exposure without settings leakage
+- `tests/unit/workflow-engine/validator-node-diagnostics.test.ts` — complete missing-field diagnostics with bounded nested schema-error volume
+- `tests/unit/web-backend/node-types-route.test.ts` — node-type endpoint delegates to the active process registry rather than rebuilding a private catalog
+- `tests/unit/web-backend/validation-service-node-types.test.ts` — visualization compatibility shares engine built-ins and extension classification instead of a drifting backend allowlist
+- `tests/unit/web-frontend/workflow-transformer-node-catalog.test.ts` — catalog-driven generic cards preserve real type, declaration, origin, owner, schema and configuration; missing, unavailable and unknown fallbacks remain semantic presentation states; dedicated built-ins keep their renderer
+- `tests/unit/web-frontend/workflow-sidebar-schema-readout.test.tsx` — extension ownership plus English and Russian presentation of declared, unset and undeclared configuration fields in the generic node detail panel
 
 **integration**
 
 - `tests/integration/extension-runner-contract.test.ts` — real HTTP/child-process execution, startup and queue deadlines, cancellation/shutdown, crash recovery, redirect/secret/artifact permissions, malformed IPC containment and node-scoped error routing
+- `tests/integration/extension-registry-consumers.test.ts` — MCP process registry and separate CLI snapshot consumption validate the same custom-node workflow consistently
+- `tests/integration/node-types-endpoint.test.ts` — real HTTP route exposes built-in and live extension types from the process registry without extension setting keys
 
 ### expressions
 
@@ -731,13 +739,14 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text, and subgraph navigation callback
+- `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text and subgraph callback; English and Russian missing-extension, unavailable-registry and unknown-type tooltip explanations
 - `tests/unit/web-frontend/backend-health.test.ts` — a reconciliation-degraded backend remains operable/connected while a hard health error disconnects
 - `tests/unit/web-frontend/admin-reconciliation-status.test.tsx` — self-host administrator dashboard makes no disabled analytics request and renders managed-workflow conflict identity, classification, all candidate references, WMF instruction, and clear state
 - `tests/unit/web-frontend/quick-start-card.test.ts` — i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked
 
 **e2e**
 
+- `tests/e2e/node-type-catalog.spec.ts` — anonymous catalog denial plus a real authenticated browser workflow whose custom catalog node renders its non-derivable title, exact type, extension owner/version and config-scoped schema, with screenshot evidence
 - `tests/e2e/dashboard.spec.ts`
 - `tests/e2e/mobile-navigation.spec.ts`
 - `tests/e2e/sidebar.spec.ts`

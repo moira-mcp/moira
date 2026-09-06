@@ -141,8 +141,10 @@ results.
 
 ## Node Types
 
-Common node types are shown below. This table is representative, not exhaustive; see
-[Nodes](/docs/concepts/nodes/) for every supported type and its current contract.
+Common built-in node types are shown below. This table is representative, not exhaustive; see
+[Nodes](/docs/concepts/nodes/) for the built-in types and their current contracts. Installed
+extensions may add namespaced node types; their current title, origin, version, and configuration
+schema come from the installation's node-type catalog.
 
 | Type                    | Purpose                                            |
 | ----------------------- | -------------------------------------------------- |

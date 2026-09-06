@@ -27,6 +27,8 @@ import {
   ArrowLeft,
   FileJson,
   ArchiveRestore,
+  Puzzle,
+  HelpCircle,
   Files,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -34,6 +36,8 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { displayNodeType } from "../../types/node-type-catalog";
+import { NodeSchemaReadout } from "./NodeSchemaReadout";
 
 interface NodeDetailSheetProps {
   open: boolean;
@@ -45,6 +49,9 @@ interface NodeDetailSheetProps {
 
 // Node type icons
 const NODE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  // Drawn from the catalog: the icon says only that Moira knows the type, the panel says which.
+  catalog: Puzzle,
+  fallback: HelpCircle,
   start: Play,
   "agent-directive": Bot,
   condition: GitBranch,
@@ -114,8 +121,18 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
   if (!node) return null;
 
   const data = node.data as Record<string, unknown>;
-  const nodeType = (node.type || "unknown") as string;
-  const Icon = NODE_ICONS[nodeType] || Bot;
+  // How the node is drawn and what type the workflow gave it are two different things: a node drawn
+  // from the catalog keeps its real type in the data.
+  const renderedAs = (node.type || "unknown") as string;
+  const nodeType =
+    renderedAs === "catalog" || renderedAs === "fallback"
+      ? ((data.originalType as string) ?? renderedAs)
+      : renderedAs;
+  const Icon = NODE_ICONS[renderedAs] || NODE_ICONS[nodeType] || Bot;
+  const extensionName = data.extensionName as string | undefined;
+  const extensionVersion = data.extensionVersion as string | undefined;
+  const nodeSchema = data.schema as Record<string, unknown> | null | undefined;
+  const nodeConfig = data.config as Record<string, unknown> | undefined;
 
   // Extract data fields
   const directive = data.directive as string | undefined;
@@ -140,6 +157,8 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
     end: "bg-destructive/10 text-destructive",
     expression: "bg-chart-3/10 text-chart-3",
     materialize: "bg-primary/10 text-primary",
+    catalog: "bg-chart-1/10 text-chart-1",
+    fallback: "bg-muted text-muted-foreground",
   };
 
   return (
@@ -151,7 +170,7 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
             <div
               className={cn(
                 "w-9 h-9 rounded-md flex items-center justify-center shrink-0",
-                typeColors[nodeType] || "bg-muted text-muted-foreground",
+                typeColors[renderedAs] || typeColors[nodeType] || "bg-muted text-muted-foreground",
               )}
             >
               <Icon className="w-4.5 h-4.5" />
@@ -162,10 +181,20 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
               </SheetTitle>
               <div className="flex items-center gap-2 mt-1">
                 <span
-                  className={cn("text-xs px-1.5 py-0.5 rounded font-medium", typeColors[nodeType])}
+                  className={cn(
+                    "text-xs px-1.5 py-0.5 rounded font-medium",
+                    typeColors[renderedAs] || typeColors[nodeType],
+                  )}
                 >
-                  {nodeType.replace("-", " ")}
+                  {displayNodeType(nodeType)}
                 </span>
+                {extensionName && (
+                  <span className="text-xs text-muted-foreground">
+                    {`${t("components.workflowSidebar.providedBy", "Provided by extension")} ${extensionName}${
+                      extensionVersion ? ` ${extensionVersion}` : ""
+                    }`}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -285,6 +314,15 @@ export const NodeDetailSheet: React.FC<NodeDetailSheetProps> = ({
                 <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-64">
                   {JSON.stringify(inputSchema, null, 2)}
                 </pre>
+              </Section>
+            )}
+
+            {nodeConfig !== undefined && (
+              <Section
+                title={t("components.workflowSidebar.configuration", "Configuration")}
+                icon={FileJson}
+              >
+                <NodeSchemaReadout schema={nodeSchema ?? null} value={nodeConfig} />
               </Section>
             )}
 

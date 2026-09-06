@@ -264,6 +264,47 @@ describe("A snapshot that does not list a type cannot conclude the extension is 
     expect(fs.existsSync(extensionRegistrySnapshotPath(stateDir))).toBe(false);
   });
 
+  test("a snapshot writer publishes the registry after the runner fills it", async () => {
+    const outcome = await initializeExtensionsForProcess({
+      runnerUrl: "http://runner.local",
+      createClient: () => ({
+        listExtensions: async () => [MANIFEST],
+        invoke: async () => ({ output: {} }),
+      }),
+      publishSnapshot: true,
+      stateDir,
+    });
+
+    expect(outcome.synced).toBe(true);
+    expect(outcome.publication).toMatchObject({ published: true, removed: false });
+    expect(readExtensionRegistrySnapshot(stateDir)!.snapshot.extensions).toEqual([
+      {
+        name: "corporate-messenger",
+        version: "1.2.0",
+        nodeTypes: ["corporate-messenger.send"],
+      },
+    ]);
+  });
+
+  test("reports failure of the final snapshot write", async () => {
+    const blockedStateDir = path.join(stateDir, "not-a-directory");
+    fs.writeFileSync(blockedStateDir, "blocks mkdir", "utf-8");
+
+    const outcome = await initializeExtensionsForProcess({
+      runnerUrl: "http://runner.local",
+      createClient: () => ({
+        listExtensions: async () => [MANIFEST],
+        invoke: async () => ({ output: {} }),
+      }),
+      publishSnapshot: true,
+      stateDir: blockedStateDir,
+    });
+
+    expect(outcome.synced).toBe(true);
+    expect(outcome.publication?.published).toBe(false);
+    expect(outcome.publication?.reason).toBeTruthy();
+  });
+
   test("a refused manifest is reported with its reasons, not dropped in silence", async () => {
     // Required state: the author of a bundle Moira refuses can find out why. Plausible wrong state:
     // the reasons are computed by manifest validation, returned to start-up and discarded there —

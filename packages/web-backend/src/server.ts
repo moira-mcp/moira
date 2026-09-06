@@ -48,6 +48,11 @@ import {
   selectAnalyticsSurfaceCapability,
 } from "./middleware/admin-route-capability.js";
 import { apiLimiter, authLimiter } from "./middleware/rate-limit-middleware.js";
+import {
+  initializeExtensionsForProcess,
+  getExtensionRunnerUrl,
+  HttpExtensionRunnerClient,
+} from "@mcp-moira/workflow-engine";
 import { requestBodyLogger } from "./middleware/request-body-logger.js";
 import { inputContextMiddleware } from "./middleware/input-context-middleware.js";
 import { workflowRoutes } from "./routes/workflows.js";
@@ -58,6 +63,7 @@ import { executionRoutes } from "./routes/executions.js";
 import { healthRoutes } from "./routes/health.js";
 import { featuresRoutes } from "./routes/features.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { nodeTypesRoutes } from "./routes/node-types.js";
 import { adminRoutes } from "./routes/admin.js";
 import { userInfoRoutes } from "./routes/auth-info.js";
 import oauthConsentRoutes from "./routes/oauth-consent.js";
@@ -380,6 +386,7 @@ class MoiraApiServer {
     this.app.use("/api/invites", apiLimiter, optionalAuth, inviteAcceptRoutes); // Auth optional for GET, checked inside for POST
     this.app.use("/api/executions", apiLimiter, requireAuth, executionRoutes);
     this.app.use("/api/settings", apiLimiter, requireAuth, settingsRoutes);
+    this.app.use("/api/node-types", apiLimiter, requireAuth, nodeTypesRoutes);
     this.app.use("/api/oauth/consent", apiLimiter, requireAuth, oauthConsentRoutes);
     this.app.use("/api/notifications", apiLimiter, requireAuth, notificationsRoutes);
     this.app.use("/api/stats", apiLimiter, requireAuth, statsRoutes);
@@ -454,6 +461,26 @@ class MoiraApiServer {
       // Start periodic execution-retention cleanup (no-op unless
       // executions.retention_days > 0).
       getExecutionRetentionService().start();
+
+      // Establish this process's extension state. The API server and the MCP server run as
+      // separate processes, so each needs its own registry and its own runner client: without them
+      // this process would report custom node types as unresolvable while the other reports them as
+      // installed — the disagreement custom types were made to avoid. Publishing the snapshot stays
+      // with the MCP server so that one writer owns the file.
+      const extensionRunnerUrl = getExtensionRunnerUrl();
+      const extensionState = await initializeExtensionsForProcess({
+        runnerUrl: extensionRunnerUrl,
+        createClient: (baseUrl) => new HttpExtensionRunnerClient({ baseUrl }),
+        publishSnapshot: false,
+      });
+      if (extensionRunnerUrl) {
+        logger.info("Extension registry state for API process", {
+          runnerUrl: extensionRunnerUrl,
+          synced: extensionState.synced,
+          registered: extensionState.registered,
+          reason: extensionState.reason,
+        });
+      }
 
       this.server = this.app.listen(port, () => {
         logger.info("MCP Moira API Server Started", {

@@ -10,7 +10,13 @@ import { fileURLToPath } from "url";
 import { WorkflowGraph, WorkflowValidationStatus } from "../types/index.js";
 
 // Import unified validation system
-import { GraphValidator } from "@mcp-moira/workflow-engine";
+import {
+  GraphValidator,
+  BUILTIN_NODE_TYPES,
+  classifyNodeType,
+  describeNodeTypeClassification,
+  getActiveExtensionRegistry,
+} from "@mcp-moira/workflow-engine";
 import type { UnifiedValidationResult } from "@mcp-moira/workflow-engine";
 
 // ES module compatibility
@@ -172,24 +178,31 @@ export class WorkflowValidationService {
       warnings.push("No end node found - workflow may appear incomplete in visualization");
     }
 
-    // Check supported node types
-    const supportedTypes = [
-      "start",
-      "agent-directive",
-      "condition",
-      "end",
-      "telegram-notification",
-      "subgraph",
-      "expression",
-      "read-note",
-      "write-note",
-      "upsert-note",
-      "lock",
-      "teleport",
-    ];
+    // Node types are classified by the engine, never by a private copy kept here: such a copy
+    // drifts without anyone noticing, which is how `materialize` used to be reported as unsupported
+    // long after it shipped. The classification also keeps "this installation lacks the extension"
+    // apart from "this process cannot resolve custom types at all" — collapsing the two made the
+    // same workflow valid for one caller and invalid for another.
+    const registry = getActiveExtensionRegistry();
     workflow.nodes.forEach((node) => {
-      if (!supportedTypes.includes(node.type)) {
-        issues.push(`Unsupported node type for visualization: ${node.type} (node: ${node.id})`);
+      const classification = classifyNodeType(node.type, registry);
+
+      switch (classification.kind) {
+        case "builtin":
+        case "extension-installed":
+          return;
+        case "extension-unresolvable":
+          warnings.push(
+            `Node ${node.id}: ${describeNodeTypeClassification(classification)}. Visualization renders it as a generic node.`,
+          );
+          return;
+        case "extension-missing":
+          issues.push(`Node ${node.id}: ${describeNodeTypeClassification(classification)}`);
+          return;
+        case "unknown":
+          issues.push(
+            `Unsupported node type for visualization: ${node.type} (node: ${node.id}). Known types: ${BUILTIN_NODE_TYPES.join(", ")}, or a namespaced extension type such as 'my-extension.my-node'`,
+          );
       }
     });
 

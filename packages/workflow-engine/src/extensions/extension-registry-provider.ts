@@ -302,9 +302,8 @@ export async function initializeExtensionsForProcess(options: {
   );
   setActiveExtensionRunnerClient(null);
 
-  const publication = options.publishSnapshot ? publishExtensionRegistry(stateDir) : undefined;
-
   if (!options.runnerUrl) {
+    const publication = options.publishSnapshot ? publishExtensionRegistry(stateDir) : undefined;
     return { publication, synced: false, registered: [], rejected: [] };
   }
 
@@ -316,8 +315,10 @@ export async function initializeExtensionsForProcess(options: {
 
   const sync = await syncExtensionRegistryFromRunner(client, {
     stateDir,
-    publish: options.publishSnapshot,
+    // This helper owns publication so it can return the result of the final write to the caller.
+    publish: false,
     log: options.log,
   });
+  const publication = options.publishSnapshot ? publishExtensionRegistry(stateDir) : undefined;
   return { publication, ...sync };
 }

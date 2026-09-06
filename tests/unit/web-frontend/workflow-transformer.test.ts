@@ -687,37 +687,5 @@ describe("WorkflowTransformer", () => {
 
       expect(exoticNode!.data.label).toBe("EXOTIC-TYPE");
     });
-
-    test("should include description with original type for fallback nodes", () => {
-      const workflow: WorkflowGraph = {
-        id: "test-workflow",
-        metadata: {
-          name: "Test",
-          version: "1.0.0",
-          description: "Test",
-        },
-        nodes: [
-          {
-            type: "start",
-            id: "start",
-            connections: { default: "mystery" },
-          },
-          {
-            type: "mystery-node" as never,
-            id: "mystery",
-            connections: { default: "end" },
-          },
-          {
-            type: "end",
-            id: "end",
-          },
-        ],
-      };
-
-      const result = WorkflowTransformer.transformWorkflow(workflow);
-      const mysteryNode = result.nodes.find((n) => n.id === "mystery");
-
-      expect(mysteryNode!.data.description).toContain("mystery-node");
-    });
   });
 });

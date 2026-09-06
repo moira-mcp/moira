@@ -7,7 +7,10 @@ Nodes are the building blocks of Moira workflows. Each node represents a step in
 
 ## Node Types
 
-Moira supports interactive node types and automatic node types:
+The list below is Moira's built-in set. An installation may also expose namespaced node types such
+as `extension-name.node-name` from installed extensions. The live extension registry supplies their
+configuration schemas to validation, while Moira's node-type catalog describes them to the workflow
+viewer.
 
 ### Start
 

@@ -16,7 +16,7 @@ Workflows are validated against a JSON Schema definition:
 - Structure validation against workflow schema
 - Required field checking (id, metadata, nodes)
 - Type validation for all properties
-- Enum validation for node types
+- Built-in node schema branches and the namespaced extension-node form
 
 ### 2. Structural Validation
 
@@ -30,6 +30,9 @@ Graph structure is analyzed for correctness:
 - **Materialize declarations** - Every entry has exactly one source (`from` or empty `content`),
   registry sources are string defaults, declared paths are safe and unique, and all connection
   targets exist
+- **Extension node types** - Types found in the live extension registry validate their declared
+  configuration schema. A live registry that does not contain a type reports an error; validation
+  without authoritative live registry data reports an unresolved warning instead
 
 ### 3. Input Validation
 

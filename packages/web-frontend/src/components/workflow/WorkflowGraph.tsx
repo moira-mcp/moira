@@ -51,6 +51,7 @@ import {
   WorkflowValidationStatus,
 } from "../../types";
 import { useTranslation } from "react-i18next";
+import { useNodeTypes } from "../../hooks/useNodeTypes";
 import { Button } from "@/components/ui/button";
 
 // All node types now use CompactNode for unified compact visualization
@@ -68,6 +69,8 @@ const nodeTypes = {
   "upsert-note": CompactNode,
   materialize: CompactNode,
   end: CompactNode,
+  // A type Moira knows and this bundle has no dedicated rendering for; drawn from the catalog.
+  catalog: CompactNode,
   fallback: CompactNode,
 };
 
@@ -228,11 +231,25 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
     }
   }, [showMinimap, showMiniMapDelayed]);
 
+  // What Moira knows about node types; a node whose type this bundle has no branch for is drawn
+  // from this instead of being reported as unknown.
+  const {
+    catalog: nodeTypeCatalog,
+    index: nodeTypeIndex,
+    loading: nodeTypesLoading,
+  } = useNodeTypes();
+
   // Transform workflow to visualization data (memoized)
   const visualizationData = useMemo(() => {
-    if (!workflow) return null;
-    return WorkflowTransformer.transformWorkflow(workflow, validation);
-  }, [workflow, validation]);
+    if (!workflow || nodeTypesLoading) return null;
+    return WorkflowTransformer.transformWorkflow(
+      workflow,
+      validation,
+      DEFAULT_LAYOUT_OPTIONS,
+      nodeTypeIndex,
+      nodeTypeCatalog?.extensionsAvailable ?? false,
+    );
+  }, [workflow, validation, nodeTypesLoading, nodeTypeIndex, nodeTypeCatalog?.extensionsAvailable]);
 
   /**
    * Apply layout when visualization data changes
@@ -420,7 +437,7 @@ const WorkflowGraphInner: React.FC<WorkflowGraphProps> = ({
     [nodes, edges],
   );
 
-  if (isLayouting) {
+  if (isLayouting || nodeTypesLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-muted-foreground">{t("components.workflowGraph.loading")}</div>

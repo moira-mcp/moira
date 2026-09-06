@@ -10,3 +10,6 @@ export * from "./react-flow-types";
 
 // Re-export all API types
 export * from "./api-types";
+
+// Re-export the node-type catalog shape
+export * from "./node-type-catalog";

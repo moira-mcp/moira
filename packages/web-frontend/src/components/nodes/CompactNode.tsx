@@ -11,6 +11,8 @@
  */
 
 import React from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Handle, Position } from "@xyflow/react";
 import {
   Play,
@@ -26,6 +28,7 @@ import {
   FilePlus,
   ArchiveRestore,
   HelpCircle,
+  Puzzle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -129,6 +132,13 @@ const NODE_CONFIG: Record<
     bgColor: "bg-primary/10",
     textColor: "text-primary",
   },
+  catalog: {
+    icon: Puzzle,
+    label: "NODE",
+    borderColor: "border-chart-1",
+    bgColor: "bg-chart-1/10",
+    textColor: "text-chart-1",
+  },
   fallback: {
     icon: HelpCircle,
     label: "UNKNOWN",
@@ -154,7 +164,7 @@ function getDisplayLabel(data: MoiraNodeDataUnion): string {
 /**
  * Get tooltip description for node
  */
-function getTooltipDescription(data: MoiraNodeDataUnion): string {
+function getTooltipDescription(data: MoiraNodeDataUnion, t: TFunction): string {
   if (data.nodeType === "agent-directive" && "directive" in data) {
     return data.directive?.substring(0, 100) || data.label;
   }
@@ -179,8 +189,35 @@ function getTooltipDescription(data: MoiraNodeDataUnion): string {
   if (data.nodeType === "upsert-note" && "keyTemplate" in data) {
     return `Upsert → ${data.keyTemplate}`;
   }
+  if (data.nodeType === "catalog" && "originalType" in data) {
+    // Everything said here comes from the catalog Moira serves, not from a table in this bundle.
+    const owner =
+      "extensionName" in data && data.extensionName
+        ? ` (${t("components.workflowGraph.extensionOwner", {
+            extensionName: data.extensionName,
+            defaultValue: "extension {{extensionName}}",
+          })})`
+        : "";
+    const summary = data.description ? `${data.description} — ` : "";
+    return `${summary}${data.originalType}${owner}`;
+  }
   if (data.nodeType === "fallback" && "originalType" in data) {
-    return `Unknown node type: ${data.originalType}`;
+    if (data.fallbackReason === "extension-missing") {
+      return t("components.workflowGraph.nodeFallback.extensionMissing", {
+        extensionName: data.extensionName,
+        defaultValue: 'Type of extension "{{extensionName}}", which is not installed here',
+      });
+    }
+    if (data.fallbackReason === "extension-unavailable") {
+      return t("components.workflowGraph.nodeFallback.extensionUnavailable", {
+        extensionName: data.extensionName,
+        defaultValue: 'Type of extension "{{extensionName}}", which is not connected here',
+      });
+    }
+    return t("components.workflowGraph.nodeFallback.unknown", {
+      nodeType: data.originalType,
+      defaultValue: "Unknown node type: {{nodeType}}",
+    });
   }
   return data.description || data.label;
 }
@@ -204,7 +241,13 @@ function arePropsEqual(prevProps: CompactNodeProps, nextProps: CompactNodeProps)
     prevData.nodeId === nextData.nodeId &&
     prevData.nodeType === nextData.nodeType &&
     prevData.label === nextData.label &&
-    getTooltipDescription(prevData) === getTooltipDescription(nextData) &&
+    prevData.description === nextData.description &&
+    ("originalType" in prevData ? prevData.originalType : undefined) ===
+      ("originalType" in nextData ? nextData.originalType : undefined) &&
+    ("extensionName" in prevData ? prevData.extensionName : undefined) ===
+      ("extensionName" in nextData ? nextData.extensionName : undefined) &&
+    ("fallbackReason" in prevData ? prevData.fallbackReason : undefined) ===
+      ("fallbackReason" in nextData ? nextData.fallbackReason : undefined) &&
     prevData.validationStatus === nextData.validationStatus &&
     prevData.validationErrors?.[0] === nextData.validationErrors?.[0] &&
     prevData.isCurrent === nextData.isCurrent &&
@@ -218,6 +261,7 @@ function arePropsEqual(prevProps: CompactNodeProps, nextProps: CompactNodeProps)
  * Compact Node Component
  */
 const CompactNodeInner: React.FC<CompactNodeProps> = ({ data, selected }) => {
+  const { t } = useTranslation();
   const config = NODE_CONFIG[data.nodeType] || NODE_CONFIG["agent-directive"];
   const Icon = config.icon;
   const isCurrent = data.isCurrent;
@@ -260,7 +304,7 @@ const CompactNodeInner: React.FC<CompactNodeProps> = ({ data, selected }) => {
         <TooltipContent side="top" className="max-w-[300px]">
           <div className="space-y-1">
             <div className="font-medium">{data.nodeId}</div>
-            <div className="text-xs text-muted-foreground">{getTooltipDescription(data)}</div>
+            <div className="text-xs text-muted-foreground">{getTooltipDescription(data, t)}</div>
             {data.validationErrors && data.validationErrors.length > 0 && (
               <div className="text-xs text-destructive">{data.validationErrors[0]}</div>
             )}

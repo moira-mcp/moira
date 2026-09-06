@@ -1800,10 +1800,23 @@
       "showWorkflowInfo": "← Workflow",
       "nodeId": "Node ID",
       "from": "From",
-      "to": "To"
+      "to": "To",
+      "providedBy": "Provided by extension",
+      "configuration": "Configuration",
+      "nodeSchema": {
+        "required": "required",
+        "notSet": "not set",
+        "notDeclared": "not declared by this node type"
+      }
     },
     "workflowGraph": {
       "loading": "Calculating layout...",
+      "extensionOwner": "extension {{extensionName}}",
+      "nodeFallback": {
+        "extensionMissing": "Type of extension \"{{extensionName}}\", which is not installed here",
+        "extensionUnavailable": "Type of extension \"{{extensionName}}\", which is not connected here",
+        "unknown": "Unknown node type: {{nodeType}}"
+      },
       "controls": {
         "fitView": "Fit View",
         "fitViewTitle": "Fit to view",

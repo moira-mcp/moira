@@ -49,6 +49,11 @@ export const MCP_SERVER_VERSION: string = getMcpServerVersion() || "0.0.0";
 // Set global service for this process (MUST be first thing after imports)
 setGlobalService(Service.MCP_SERVER);
 import { and, eq, gt, isNull, or } from "drizzle-orm";
+import {
+  initializeExtensionsForProcess,
+  getExtensionRunnerUrl,
+  HttpExtensionRunnerClient,
+} from "@mcp-moira/workflow-engine";
 import { runWithMCPContext } from "./core/request-context.js";
 import { auth } from "./auth.js";
 import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
@@ -547,6 +552,32 @@ async function main() {
   try {
     // Config is validated automatically on first access (lazy initialization)
     const port = getMcpPort();
+
+    // The MCP and API servers are separate processes, so each owns a registry and runner client.
+    // This process is the single writer of the snapshot consumed by tools outside the container.
+    const runnerUrl = getExtensionRunnerUrl();
+    const extensionState = await initializeExtensionsForProcess({
+      runnerUrl,
+      createClient: (baseUrl) => new HttpExtensionRunnerClient({ baseUrl }),
+      publishSnapshot: true,
+    });
+    if (extensionState.publication && !extensionState.publication.published) {
+      logger.warn("Extension registry snapshot was not published", {
+        reason: extensionState.publication.reason,
+      });
+    }
+    if (runnerUrl && extensionState.synced) {
+      logger.info("Extension registry filled from runner", {
+        runnerUrl,
+        registered: extensionState.registered,
+        rejected: extensionState.rejected.length,
+      });
+    } else if (runnerUrl) {
+      logger.warn("Extension runner could not be reached at startup", {
+        runnerUrl,
+        reason: extensionState.reason,
+      });
+    }
     const reconciliationNotice = formatWorkflowReconciliationNotice(getSqliteInstance());
     if (reconciliationNotice) {
       logger.error(
