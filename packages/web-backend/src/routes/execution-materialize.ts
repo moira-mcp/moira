@@ -1,5 +1,11 @@
-import { Router } from "express";
-import { TokenManager, ValidationError, type WorkflowToken } from "@mcp-moira/shared";
+import { Router, type Response } from "express";
+import {
+  createLogger,
+  materializeDownloadsTotal,
+  TokenManager,
+  ValidationError,
+  type WorkflowToken,
+} from "@mcp-moira/shared";
 import {
   DatabaseRepository,
   createMaterializeTar,
@@ -11,12 +17,26 @@ import {
 
 interface MaterializeTokenStore {
   validateToken(token: string, expectedType: "materialize"): WorkflowToken | null;
-  claimMaterializeToken(
+  authorizeMaterializeToken(
     token: string,
     executionId: string,
     nodeId: string,
     userId: string,
   ): boolean;
+}
+
+const logger = createLogger({ component: "MaterializeDownload" });
+
+type MaterializeDenialReason =
+  | "grant_invalid_or_expired"
+  | "execution_binding_mismatch"
+  | "workflow_node_unavailable"
+  | "authorization_lost";
+
+function denyMaterialize(res: Response, reason: MaterializeDenialReason): void {
+  materializeDownloadsTotal.inc({ outcome: "denied", reason });
+  logger.warn("Materialize download denied", { reason });
+  res.status(401).json({ error: "Invalid or expired materialize token" });
 }
 
 interface MaterializeRepository {
@@ -34,7 +54,7 @@ export function createExecutionMaterializeRoutes(
     try {
       const grant = tokens.validateToken(token, "materialize");
       if (!grant?.executionId || !grant.nodeId) {
-        res.status(401).json({ error: "Invalid or expired materialize token" });
+        denyMaterialize(res, "grant_invalid_or_expired");
         return;
       }
       const execution = await repository.getExecution(grant.executionId);
@@ -44,13 +64,13 @@ export function createExecutionMaterializeRoutes(
         execution.currentNodeId !== grant.nodeId ||
         execution.waitingForInputNodeId !== grant.nodeId
       ) {
-        res.status(401).json({ error: "Invalid or expired materialize token" });
+        denyMaterialize(res, "execution_binding_mismatch");
         return;
       }
       const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
       const node = graph?.nodes.find((candidate) => candidate.id === grant.nodeId);
       if (!graph || !node || !isMaterializeNode(node)) {
-        res.status(401).json({ error: "Invalid or expired materialize token" });
+        denyMaterialize(res, "workflow_node_unavailable");
         return;
       }
 
@@ -60,15 +80,19 @@ export function createExecutionMaterializeRoutes(
         execution.globalContext,
       );
       const archive = await createMaterializeTar(files);
-      if (!tokens.claimMaterializeToken(token, execution.executionId, node.id, execution.userId)) {
-        res.status(401).json({ error: "Invalid or expired materialize token" });
+      if (
+        !tokens.authorizeMaterializeToken(token, execution.executionId, node.id, execution.userId)
+      ) {
+        denyMaterialize(res, "authorization_lost");
         return;
       }
+      materializeDownloadsTotal.inc({ outcome: "success", reason: "authorized" });
       res.setHeader("Content-Type", "application/x-tar");
       res.setHeader("Content-Disposition", 'attachment; filename="materialize.tar"');
       res.send(archive);
     } catch (error) {
       if (error instanceof ValidationError) {
+        materializeDownloadsTotal.inc({ outcome: "failed", reason: "archive_invalid" });
         res.status(400).json({ error: "Materialize archive could not be generated" });
         return;
       }

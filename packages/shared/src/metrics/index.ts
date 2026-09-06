@@ -252,5 +252,16 @@ export const auditActionsTotal = new promClient.Counter({
   registers: [metricsRegistry],
 });
 
+/**
+ * Materialize archive delivery metrics.
+ * Reasons are a closed, low-cardinality set and never contain grant values.
+ */
+export const materializeDownloadsTotal = new promClient.Counter({
+  name: "moira_materialize_downloads_total",
+  help: "Total number of materialize archive download outcomes",
+  labelNames: ["outcome", "reason"],
+  registers: [metricsRegistry],
+});
+
 // Re-export prom-client types for convenience
 export { Counter, Gauge, Histogram, Registry } from "prom-client";

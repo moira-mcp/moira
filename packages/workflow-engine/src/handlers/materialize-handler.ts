@@ -72,7 +72,11 @@ export class MaterializeHandler implements INodeHandler {
         const directive =
           `Materialize ${paths.length} ${paths.length === 1 ? "file" : "files"} into ${JSON.stringify(basePath)}.\n` +
           "Run exactly this, then call step() — the contents never pass through your context:\n\n" +
-          `${command}\n\nFiles:\n${fileSummary}`;
+          `${command}\n\n` +
+          "This URL can be downloaded repeatedly for five minutes while this execution is waiting on this node. " +
+          "Retry the same command if downloading or extracting fails. The URL stops working when the five-minute window expires or the execution advances.\n\n" +
+          "Materialization delivers files but does not prove that you read them. After extraction, explicitly read every materialized file required by a later directive before using it.\n\n" +
+          `Files:\n${fileSummary}`;
         messageQueue.addMessage(
           node.id,
           directive,

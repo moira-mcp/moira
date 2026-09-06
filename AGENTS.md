@@ -195,7 +195,7 @@ slug:
 
 When a request says "standard flows" without naming them, it means exactly this set.
 Research flows (`Verified Research`, `Deep Corpus Research`, `Iterative Research`,
-and the rest) are not part of it, and neither is `software-development-flow-lite`.
+and the rest) are not part of it.
 
 ## Workflow Authoring
 

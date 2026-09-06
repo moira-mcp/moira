@@ -1,6 +1,6 @@
 ---
 title: Materialize Files
-description: Deliver bounded registry-backed files to an agent through a one-use tar archive
+description: Deliver bounded registry-backed files through a short-lived reusable tar grant
 ---
 
 A `materialize` node delivers workflow-authored files to the agent filesystem without placing their
@@ -61,16 +61,19 @@ When the node is presented, Moira renders `basePath` and the path summary, creat
 grant, and returns a POSIX command with every argument already shell-quoted:
 
 ```bash
-mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath>'
 ```
 
 Run the emitted command exactly. The URL is an opaque bearer credential: do not reconstruct, edit,
-log, or share it. After extraction succeeds, complete the step with `null` or `{}`. No other input
-shape is accepted.
+log, or share it. The same command may be retried during its five-minute lifetime while the
+execution is still waiting on this node. After extraction succeeds, complete the step with `null`
+or `{}`. No other input shape is accepted.
 
-Calling `session({ action: "current_step" })` while the execution is paused issues a fresh command
-and grant without advancing the graph. Completing the step does not prove that extraction happened,
-so make the successor verify any file that is required for its work.
+The generated directive states the lifetime and retry behavior, warns that advancing the execution
+invalidates the URL, and explains that delivery does not prove reading. Calling
+`session({ action: "current_step" })` while the execution is paused issues a fresh command and grant
+without advancing the graph. A later directive must still explicitly require the agent to read each
+materialized file it uses.
 
 ## Archive and path contract
 
@@ -96,16 +99,17 @@ and agents must inspect the emitted destination before running the command.
 ## Grant and error behavior
 
 The five-minute grant is stored server-side and bound to the current user, execution, and node. The
-execution must still be running and waiting at that same materialize node. A valid grant is claimed
-atomically only after the archive has been rendered successfully, so it can be used for exactly one
-successful download. Request logging redacts the credential from the materialize URL.
+execution must still be running and waiting at that same materialize node. The server reauthorizes
+every request against those bindings, so the same grant supports repeated downloads during the
+absolute five-minute window but stops working immediately after the execution advances. Request
+logging redacts the credential from the materialize URL.
 
-| Failure                                                                                                                    | Result                                                                               |
-| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Invalid node definition, rendered destination, configuration, database access, or grant issuance while presenting the step | Follow `connections.error` when present; otherwise the execution surfaces the error  |
-| Invalid, expired, already used, or incorrectly bound URL                                                                   | HTTP 401 with `Invalid or expired materialize token`                                 |
-| Invalid rendered archive path, missing registry source, template failure, or size-limit violation                          | HTTP 400 with `Materialize archive could not be generated`; the grant is not claimed |
-| Local `curl`, pipe, filesystem, or `tar` failure                                                                           | The agent reports the blocker and does not complete the step                         |
+| Failure                                                                                                                    | Result                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Invalid node definition, rendered destination, configuration, database access, or grant issuance while presenting the step | Follow `connections.error` when present; otherwise the execution surfaces the error |
+| Invalid, expired, or incorrectly bound URL                                                                                 | HTTP 401 with `Invalid or expired materialize token`                                |
+| Invalid rendered archive path, missing registry source, template failure, or size-limit violation                          | HTTP 400 with `Materialize archive could not be generated`                          |
+| Local `curl`, pipe, filesystem, or `tar` failure                                                                           | The agent reports the blocker and does not complete the step                        |
 
 :::caution
 `connections.error` cannot catch a download or extraction failure because those operations happen

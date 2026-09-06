@@ -439,7 +439,6 @@ function getTopicList(helpDirectory = HELP_CONTENT_DIR): string {
   result += `| User Request Contains | Start Workflow |\n`;
   result += `| --------------------- | -------------- |\n`;
   result += `| "develop feature", "implement", "build feature", "fix bug" | \`moira/software-development-flow\` |\n`;
-  result += `| one bounded low-risk software outcome with contained recovery; hand off when security, data, public contracts, rollout, uncertainty, or multiple units spread | \`moira/software-development-flow-lite\` |\n`;
   result += `| general plan-first task where only the current plan/evidence must remain durable | \`moira/simple-plan-execution\` |\n`;
   result += `| one bounded task needing decomposition, independent item review, changed retries, suffix revision, and filesystem or memory operation | \`moira/task-breakdown-flow\` |\n`;
   result += `| human-guided stream of tasks that are not known in advance | \`moira/infinite-task-loop\` |\n`;

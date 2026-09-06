@@ -104,15 +104,12 @@ function binaryParser(
 }
 
 describe("GET /api/public/executions/materialize/:token", () => {
-  test("reads the current workflow definition, returns tar, and permits one claim", async () => {
-    let used = false;
-    let claims = 0;
+  test("reads the current workflow definition and permits repeated concurrent downloads", async () => {
+    let authorizations = 0;
     const tokens = {
-      validateToken: () => (used ? null : grant),
-      claimMaterializeToken: () => {
-        if (used) return false;
-        used = true;
-        claims++;
+      validateToken: () => grant,
+      authorizeMaterializeToken: () => {
+        authorizations++;
         return true;
       },
     };
@@ -139,17 +136,18 @@ describe("GET /api/public/executions/materialize/:token", () => {
       request(app).get("/api/public/executions/materialize/grant").buffer(true).parse(binaryParser),
       request(app).get("/api/public/executions/materialize/grant").buffer(true).parse(binaryParser),
     ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 401]);
-    const response = responses.find((candidate) => candidate.status === 200)!;
-    expect(response.headers["content-type"]).toContain("application/x-tar");
-    expect(response.headers["content-disposition"]).toBe('attachment; filename="materialize.tar"');
-    expect(claims).toBe(1);
-    expect(await firstTarEntry(response.body as Buffer)).toEqual({
-      name: "result.md",
-      content: "fresh definition for runtime",
-    });
-
-    expect(claims).toBe(1);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    for (const response of responses) {
+      expect(response.headers["content-type"]).toContain("application/x-tar");
+      expect(response.headers["content-disposition"]).toBe(
+        'attachment; filename="materialize.tar"',
+      );
+      expect(await firstTarEntry(response.body as Buffer)).toEqual({
+        name: "result.md",
+        content: "fresh definition for runtime",
+      });
+    }
+    expect(authorizations).toBe(2);
   });
 
   test("returns no tar and preserves the grant for every one-over resource bound", async () => {
@@ -182,11 +180,11 @@ describe("GET /api/public/executions/materialize/:token", () => {
     ];
 
     for (const scenario of cases) {
-      let claims = 0;
+      let authorizations = 0;
       const tokens = {
         validateToken: () => grant,
-        claimMaterializeToken: () => {
-          claims++;
+        authorizeMaterializeToken: () => {
+          authorizations++;
           return true;
         },
       };
@@ -203,16 +201,16 @@ describe("GET /api/public/executions/materialize/:token", () => {
       expect(response.status).toBe(400);
       expect(response.headers["content-type"]).not.toContain("application/x-tar");
       expect(response.body.error).toBe("Materialize archive could not be generated");
-      expect(claims).toBe(0);
+      expect(authorizations).toBe(0);
     }
   });
 
   test("returns no tar and preserves the grant for a declared non-string source", async () => {
-    let claims = 0;
+    let authorizations = 0;
     const tokens = {
       validateToken: () => grant,
-      claimMaterializeToken: () => {
-        claims++;
+      authorizeMaterializeToken: () => {
+        authorizations++;
         return true;
       },
     };
@@ -235,7 +233,7 @@ describe("GET /api/public/executions/materialize/:token", () => {
     expect(response.status).toBe(400);
     expect(response.headers["content-type"]).not.toContain("application/x-tar");
     expect(response.body.error).toBe("Materialize archive could not be generated");
-    expect(claims).toBe(0);
+    expect(authorizations).toBe(0);
   });
 
   test("rejects expired, wrong-node, unsafe, and colliding requests without archive data", async () => {
@@ -322,11 +320,11 @@ describe("GET /api/public/executions/materialize/:token", () => {
     ];
 
     for (const scenario of cases) {
-      let claims = 0;
+      let authorizations = 0;
       const tokens = {
         validateToken: scenario.validate ?? (() => grant),
-        claimMaterializeToken: () => {
-          claims++;
+        authorizeMaterializeToken: () => {
+          authorizations++;
           return true;
         },
       };
@@ -342,16 +340,16 @@ describe("GET /api/public/executions/materialize/:token", () => {
       expect(response.status).toBe(scenario.expectedStatus);
       expect(response.headers["content-type"]).not.toContain("application/x-tar");
       expect(typeof response.body.error).toBe("string");
-      expect(claims).toBe(0);
+      expect(authorizations).toBe(0);
     }
   });
 
   test("forwards unexpected failures to the HTTP error boundary", async () => {
-    let claims = 0;
+    let authorizations = 0;
     const tokens = {
       validateToken: () => grant,
-      claimMaterializeToken: () => {
-        claims++;
+      authorizeMaterializeToken: () => {
+        authorizations++;
         return true;
       },
     };
@@ -373,6 +371,6 @@ describe("GET /api/public/executions/materialize/:token", () => {
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ error: "Internal server error" });
     expect(JSON.stringify(response.body)).not.toContain("unexpected repository defect");
-    expect(claims).toBe(0);
+    expect(authorizations).toBe(0);
   });
 });

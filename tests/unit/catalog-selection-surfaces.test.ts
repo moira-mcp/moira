@@ -27,7 +27,6 @@ const expectedPublicSlugs = [
   "simple-plan-execution",
   "smart-purchase-assistant",
   "software-development-flow",
-  "software-development-flow-lite",
   "startup-idea-validation",
   "task-breakdown-flow",
   "telegram-setup",

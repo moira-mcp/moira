@@ -29,7 +29,7 @@ The typed catalog defines what clients can send. The following notes describe au
 
 Parent changes use optimistic revision checks, accept `"none"` to detach, require same-owner running executions, and reject ancestry cycles. Reminders do not change the workflow plan or grant authority; active reminders are returned when an execution completes. Runtime variable writes are default-deny, must satisfy the variable schema, and never advance the graph.
 
-When `current_step` presents a paused materialization node, it returns a fresh five-minute, one-use archive command rather than file contents. The grant is bound to the current user, execution, and node. Run the returned command exactly, then complete the node with `null` or `{}`.
+When `current_step` presents a paused materialization node, it returns a fresh five-minute archive command rather than file contents. The grant is bound to the current user, execution, and node and can be downloaded repeatedly only while that execution remains waiting on the node. Run or retry the returned command exactly, then complete the node with `null` or `{}`; advancing the execution invalidates the URL.
 
 Progress-image grants are bound to the execution owner, workflow version, execution revision, and normalized render options. Failed rendering or failed HTTP delivery does not consume the grant; successful response completion does.
 

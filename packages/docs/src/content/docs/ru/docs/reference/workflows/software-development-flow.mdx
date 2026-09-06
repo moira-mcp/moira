@@ -39,9 +39,9 @@ Findings классифицируются как product, test/validation, evide
 
 Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Permanent documentation закрывается вместе со своим vertical unit; финальная reconciliation продолжает проверять cross-unit truth и независимо ревьюит только изменённую либо ранее не покрытую документацию. Финальный suffix включает feature-wide validation, semantic review, requirements coverage, factual report и локальную VCS reconciliation в пределах полномочий. Normal и stopped endings отправляют best-effort Telegram notification, когда он настроен.
 
-## Выбор full или Lite
+## Когда использовать
 
-Используйте full SDF для security/privacy boundaries, persistent data или migrations, breaking public contracts, нескольких vertical units, неразрешённой архитектуры, сложного rollout/recovery или spreading work. Для одного ограниченного низкорискового результата используйте [Software Development Flow Lite](./software-development-flow-lite/); при потере eligibility он создаёт handoff сюда. Quick Task и Robust Task не заменяют software lifecycle.
+Используйте Software Development Flow для реализации в репозитории любого размера: его план и условные проверки масштабируются под фактическое изменение, сохраняя единый полный software lifecycle. Границы security/privacy, постоянные данные и migrations, breaking public contracts, несколько vertical units, неразрешённая архитектура и сложный rollout/recovery требуют более сильных units и evidence внутри этого же flow. Quick Task и Robust Task не заменяют software lifecycle.
 
 Development-plan SDF может включать явно разрешённые локальные commits или checkpoints. Push, создание или merge pull request, publication, release и deployment являются работой caller или parent process и никогда не становятся development-plan units. Запуск SDF не разрешает notification, production mutation или administrative override; любой side effect остаётся ограничен originating authority.
 

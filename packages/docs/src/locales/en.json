@@ -780,7 +780,7 @@
     },
     "terminal": {
       "prompt1": "Start development workflow",
-      "output1": "Starting moira/software-development-flow-lite...",
+      "output1": "Starting moira/software-development-flow...",
       "directive1": "Study project foundations",
       "prompt2": "Project studied. Moving to planning...",
       "directive2": "Create implementation plan",
@@ -917,45 +917,6 @@
             "completion": {
               "name": "Completion",
               "description": "Report, documentation update, notifications"
-            }
-          }
-        },
-        "lite": {
-          "label": "SDF Lite",
-          "badge": "Risk-based fast path",
-          "description": "Complete delivery for one bounded low-risk change, with full-SDF handoff when work spreads.",
-          "phases": {
-            "requirements": {
-              "name": "Eligibility",
-              "description": "Reuse the task and confirm the bounded low-risk product boundary"
-            },
-            "planning": {
-              "name": "Planning",
-              "description": "Repository-grounded plan with independent semantic review"
-            },
-            "approval": {
-              "name": "User Approval",
-              "description": "Interactive mode only; autonomous mode skips the wait"
-            },
-            "implementation": {
-              "name": "Implementation",
-              "description": "One producer owns applicable code, tests, documentation, and integrations"
-            },
-            "testing": {
-              "name": "Testing",
-              "description": "Run only project-applicable deterministic and runtime checks"
-            },
-            "quality": {
-              "name": "Independent Review",
-              "description": "Whole-result semantic and architectural judgment"
-            },
-            "review": {
-              "name": "Repair or Reassessment",
-              "description": "Route product, evidence, contract, blocked, or full-SDF handoff causes"
-            },
-            "completion": {
-              "name": "Completion",
-              "description": "Truthful local result and only explicitly authorized VCS closure"
             }
           }
         }

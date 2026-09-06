@@ -50,7 +50,7 @@ PIN-based execution gate with Telegram approval.
 
 ### Materialize
 
-Deliver registry-backed files as a one-use tar archive.
+Deliver registry-backed files through a five-minute, node-bound tar grant.
 
 ## Start Node
 
@@ -395,8 +395,8 @@ MCP and workflow responses never contain the generated PIN. The user can enter a
 ## Materialize Node
 
 Delivers author-defined files to the agent filesystem without placing their rendered contents in
-the agent context. The server creates a one-use tar download; the agent runs the exact command in
-the generated directive and then completes the step with `null` or `{}`.
+the agent context. The server creates a five-minute, node-bound tar grant; the agent runs or retries
+the exact command in the generated directive and then completes the step with `null` or `{}`.
 
 ```json
 {
@@ -436,7 +436,7 @@ definition to issue a new command and grant instead of using a seeded execution 
 The generated POSIX command has this shape, with every argument already shell-quoted:
 
 ```bash
-mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath>'
 ```
 
 Copy the emitted command exactly. Archive entries are relative to `basePath`; the tar never
@@ -444,10 +444,12 @@ contains `basePath` itself. Paths must be normalized, relative, non-empty, uniqu
 rendering, and contain no empty, `.`, `..`, absolute, backslash-rooted, or NUL segments. Limits are
 100 files, 1 MiB UTF-8 content per file, and 10 MiB total uncompressed content.
 
-The URL expires after five minutes, is bound to the current user, execution, and node, and succeeds
-only once. Calling `session({ action: "current_step" })` while paused issues a new one-use URL without
-advancing the graph. There is intentionally no textual content fallback: if the command cannot be
-run or the download fails, report the blocker instead of copying file contents through chat.
+The URL expires after five minutes and is bound to the current user, execution, and node. It can be
+downloaded repeatedly while the execution remains waiting on that node and is invalid immediately
+after the execution advances. The generated directive explains this retry window and reminds the
+agent that delivery does not prove reading; each later consumer must still explicitly require the
+files it uses to be read. Calling `session({ action: "current_step" })` while paused issues a fresh
+URL without advancing the graph. There is intentionally no textual content fallback.
 
 See [Materialize Files](/docs/reference/materialize/) for the complete archive, path, grant, error,
 and Workflow Management Flow contracts.
