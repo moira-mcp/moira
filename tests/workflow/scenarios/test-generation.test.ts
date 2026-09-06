@@ -1,4 +1,4 @@
-/** Behavioral contracts for moira/test-generation v2.0.3. */
+/** Behavioral contracts for moira/test-generation v2.0.4. */
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
@@ -118,7 +118,7 @@ describe("test-generation", () => {
     });
     expect(entry.owner).toBe("system-moira");
     expect(entry.visibility).toBe("public");
-    expect(graph.metadata.version).toBe("2.0.3");
+    expect(graph.metadata.version).toBe("2.0.4");
     expect(graph.metadata.description).toContain("executable test code");
     expect(graph.metadata.description).toContain("never modifies production code");
     expect(graph.nodes.some((node) => node.type === "telegram-notification")).toBe(false);

@@ -780,7 +780,7 @@
     },
     "terminal": {
       "prompt1": "Запуск workflow разработки",
-      "output1": "Запуск moira/software-development-flow-lite...",
+      "output1": "Запуск moira/software-development-flow...",
       "directive1": "Изучить основы проекта",
       "prompt2": "Проект изучен. Переход к планированию...",
       "directive2": "Создать план реализации",
@@ -917,45 +917,6 @@
             "completion": {
               "name": "Завершение",
               "description": "Отчёт, обновление документации, уведомления"
-            }
-          }
-        },
-        "lite": {
-          "label": "SDF Lite",
-          "badge": "Risk-based fast path",
-          "description": "Полная поставка одного ограниченного низкорискового изменения с handoff в полный SDF при расширении.",
-          "phases": {
-            "requirements": {
-              "name": "Применимость",
-              "description": "Повторное использование задачи и подтверждение ограниченной низкорисковой границы"
-            },
-            "planning": {
-              "name": "Планирование",
-              "description": "План на основе репозитория с независимым семантическим ревью"
-            },
-            "approval": {
-              "name": "Одобрение",
-              "description": "Только интерактивный режим; автономный пропускает ожидание"
-            },
-            "implementation": {
-              "name": "Реализация",
-              "description": "Один producer владеет применимыми кодом, тестами, документацией и интеграциями"
-            },
-            "testing": {
-              "name": "Тестирование",
-              "description": "Только применимые проектные детерминированные и runtime-проверки"
-            },
-            "quality": {
-              "name": "Независимое ревью",
-              "description": "Семантическое и архитектурное суждение о полном результате"
-            },
-            "review": {
-              "name": "Repair или reassessment",
-              "description": "Разделение product, evidence, contract, blocked и full-SDF handoff причин"
-            },
-            "completion": {
-              "name": "Завершение",
-              "description": "Правдивый локальный результат и только явно разрешённое VCS-завершение"
             }
           }
         }

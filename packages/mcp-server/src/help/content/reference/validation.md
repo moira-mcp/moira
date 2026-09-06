@@ -259,8 +259,9 @@ be unique. Each entry declares exactly one of:
 Because paths can contain templates, the same safety and collision checks run again after
 rendering against the current execution context. Runtime rendering additionally enforces 1 MiB per
 file and 10 MiB total uncompressed content. A failure while preparing the step routes through the
-optional `connections.error`; otherwise it is raised. The HTTP download validates the one-use,
-five-minute grant and its user/execution/node binding before rendering any content.
+optional `connections.error`; otherwise it is raised. Every HTTP download revalidates the
+five-minute grant and its user/execution/node binding; repeats are accepted only while the bound
+execution remains waiting on that node.
 
 ## Best Practices
 

@@ -48,7 +48,7 @@ describe("user-onboarding", () => {
     expect(catalogEntry.slug).toBe("user-onboarding");
     expect(catalogEntry.visibility).toBe("public");
     expect(workflow.id).toBe("a1838a9a-d3a5-448e-aae1-18e15eeb8286");
-    expect(workflow.metadata.version).toBe("3.0.4");
+    expect(workflow.metadata.version).toBe("3.0.5");
 
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
@@ -137,7 +137,7 @@ describe("user-onboarding", () => {
       "cost or durability profile",
       "authority and side-effect boundary",
       "closest alternatives",
-      "Lite versus full software development",
+      "software lifecycle implementation versus general task execution",
       "external-source research versus supplied-data analysis",
       "test strategy versus executable test code",
       "workflow authoring versus executing the downstream task",

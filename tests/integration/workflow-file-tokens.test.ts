@@ -4,72 +4,11 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
-import { Worker } from "node:worker_threads";
+import express from "express";
+import request from "supertest";
 import { DatabaseError, getSqliteInstance, TokenManager } from "@mcp-moira/shared";
-
-interface ClaimWorkerHandle {
-  worker: Worker;
-  ready: Promise<void>;
-  result: Promise<boolean>;
-}
-
-function createClaimWorker(): ClaimWorkerHandle {
-  const tsxApiUrl = import.meta.resolve("tsx/esm/api");
-  const tokenManagerUrl = new URL(
-    "../../packages/shared/src/services/token-manager.ts",
-    import.meta.url,
-  ).href;
-  const source = `
-    import { parentPort } from "node:worker_threads";
-    import { register } from ${JSON.stringify(tsxApiUrl)};
-    register();
-    const { TokenManager } = await import(${JSON.stringify(tokenManagerUrl)});
-    parentPort.postMessage({ type: "ready" });
-    parentPort.once("message", (binding) => {
-      try {
-        const claimed = TokenManager.getInstance().claimMaterializeToken(
-          binding.token,
-          binding.executionId,
-          binding.nodeId,
-          binding.userId,
-        );
-        parentPort.postMessage({ type: "result", claimed });
-        setImmediate(() => process.exit(0));
-      } catch (error) {
-        parentPort.postMessage({
-          type: "error",
-          error: error instanceof Error ? error.stack : String(error),
-        });
-        setImmediate(() => process.exit(1));
-      }
-    });
-  `;
-  const worker = new Worker(new URL(`data:text/javascript,${encodeURIComponent(source)}`), {
-    type: "module",
-  });
-  let resolveReady!: () => void;
-  let resolveResult!: (claimed: boolean) => void;
-  let rejectReady!: (error: Error) => void;
-  let rejectResult!: (error: Error) => void;
-  const ready = new Promise<void>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
-  const result = new Promise<boolean>((resolve, reject) => {
-    resolveResult = resolve;
-    rejectResult = reject;
-  });
-  worker.on("message", (message: { type: string; claimed?: boolean; error?: string }) => {
-    if (message.type === "ready") resolveReady();
-    if (message.type === "result") resolveResult(message.claimed === true);
-    if (message.type === "error") rejectResult(new Error(message.error));
-  });
-  worker.once("error", (error) => {
-    rejectReady(error);
-    rejectResult(error);
-  });
-  return { worker, ready, result };
-}
+import type { WorkflowExecution, WorkflowGraph } from "@mcp-moira/workflow-engine";
+import { createExecutionMaterializeRoutes } from "../../packages/web-backend/src/routes/execution-materialize.js";
 
 describe("Workflow File Tokens", () => {
   let tokenManager: TokenManager;
@@ -298,7 +237,7 @@ describe("Workflow File Tokens", () => {
     clock.mockRestore();
   });
 
-  test("materialize claim is atomic, one-use, and checks every binding", async () => {
+  test("materialize authorization is reusable during its TTL and checks every binding", () => {
     seedMaterializeExecution();
     const create = () =>
       tokenManager.createMaterializeToken("materialize-token-execution", "materialize", testUserId);
@@ -306,7 +245,7 @@ describe("Workflow File Tokens", () => {
     const wrongBindingToken = create();
     expect(tokenManager.validateToken(wrongBindingToken, "download")).toBeNull();
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         wrongBindingToken,
         "materialize-token-execution",
         "wrong-node",
@@ -314,7 +253,7 @@ describe("Workflow File Tokens", () => {
       ),
     ).toBe(false);
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         wrongBindingToken,
         "wrong-execution",
         "materialize",
@@ -322,7 +261,7 @@ describe("Workflow File Tokens", () => {
       ),
     ).toBe(false);
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         wrongBindingToken,
         "materialize-token-execution",
         "materialize",
@@ -333,7 +272,7 @@ describe("Workflow File Tokens", () => {
 
     const uploadToken = tokenManager.createUploadToken(testUserId);
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         uploadToken,
         "materialize-token-execution",
         "materialize",
@@ -348,7 +287,7 @@ describe("Workflow File Tokens", () => {
     const expiry = tokenManager.getTokenData(expiredAtClaim)!.expiresAt;
     clock.mockReturnValue(expiry);
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         expiredAtClaim,
         "materialize-token-execution",
         "materialize",
@@ -367,7 +306,7 @@ describe("Workflow File Tokens", () => {
       )
       .run("materialize-token-execution");
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         advancedExecutionToken,
         "materialize-token-execution",
         "materialize",
@@ -388,7 +327,7 @@ describe("Workflow File Tokens", () => {
       .prepare("UPDATE workflowExecution SET state = 'completed' WHERE executionId = ?")
       .run("materialize-token-execution");
     expect(
-      tokenManager.claimMaterializeToken(
+      tokenManager.authorizeMaterializeToken(
         completedExecutionToken,
         "materialize-token-execution",
         "materialize",
@@ -401,19 +340,103 @@ describe("Workflow File Tokens", () => {
       .run("materialize-token-execution");
 
     const token = create();
-    const workers = [createClaimWorker(), createClaimWorker()];
-    await Promise.all(workers.map((worker) => worker.ready));
-    for (const { worker } of workers) {
-      worker.postMessage({
+    const authorize = () =>
+      tokenManager.authorizeMaterializeToken(
         token,
+        "materialize-token-execution",
+        "materialize",
+        testUserId,
+      );
+    expect(authorize()).toBe(true);
+    expect(authorize()).toBe(true);
+    expect(tokenManager.getTokenData(token)?.used).toBe(false);
+    expect(tokenManager.validateToken(token, "materialize")).not.toBeNull();
+  });
+
+  test("one materialize URL downloads repeatedly through HTTP until expiry or node transition", async () => {
+    seedMaterializeExecution();
+    const graph: WorkflowGraph = {
+      id: "materialize-token-workflow",
+      metadata: { name: "Materialize", version: "1.0.0", description: "Integration" },
+      nodes: [
+        { id: "start", type: "start", connections: { default: "materialize" } },
+        {
+          id: "materialize",
+          type: "materialize",
+          basePath: "workspace",
+          files: [{ path: "guide.md", content: "" }],
+          connections: { success: "end" },
+        },
+        { id: "end", type: "end" },
+      ],
+    };
+    const execution: WorkflowExecution = {
+      revision: 0,
+      executionId: "materialize-token-execution",
+      workflowId: "materialize-token-workflow",
+      userId: testUserId,
+      currentNodeId: "materialize",
+      waitingForInputNodeId: "materialize",
+      globalContext: {
         executionId: "materialize-token-execution",
-        nodeId: "materialize",
+        workflowId: "materialize-token-workflow",
         userId: testUserId,
-      });
-    }
-    const claims = await Promise.all(workers.map((worker) => worker.result));
-    expect(claims.sort()).toEqual([false, true]);
-    expect(tokenManager.validateToken(token, "materialize")).toBeNull();
+        variables: {},
+        nodeStates: {},
+      },
+      status: "running",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const repository = {
+      getExecution: async () => execution,
+      getWorkflowGraph: async () => graph,
+    };
+    const app = express().use(
+      "/api/public/executions",
+      createExecutionMaterializeRoutes(tokenManager, repository),
+    );
+    const token = tokenManager.createMaterializeToken(
+      "materialize-token-execution",
+      "materialize",
+      testUserId,
+    );
+    const url = `/api/public/executions/materialize/${token}`;
+
+    await request(app)
+      .get(url)
+      .expect(200)
+      .expect("Content-Type", /application\/x-tar/);
+    await request(app)
+      .get(url)
+      .expect(200)
+      .expect("Content-Type", /application\/x-tar/);
+
+    getSqliteInstance()
+      .prepare(
+        `UPDATE workflowExecution
+         SET currentNodeId = 'end', waitingForInputNodeId = NULL
+         WHERE executionId = ?`,
+      )
+      .run("materialize-token-execution");
+    await request(app).get(url).expect(401);
+
+    getSqliteInstance()
+      .prepare(
+        `UPDATE workflowExecution
+         SET currentNodeId = 'materialize', waitingForInputNodeId = 'materialize'
+         WHERE executionId = ?`,
+      )
+      .run("materialize-token-execution");
+    const expiring = tokenManager.createMaterializeToken(
+      "materialize-token-execution",
+      "materialize",
+      testUserId,
+    );
+    const expiry = tokenManager.getTokenData(expiring)!.expiresAt;
+    const clock = jest.spyOn(Date, "now").mockReturnValue(expiry);
+    await request(app).get(`/api/public/executions/materialize/${expiring}`).expect(401);
+    clock.mockRestore();
   });
 
   test("markTokenAsUsed prevents reuse", () => {

@@ -372,7 +372,7 @@ const NodeDetail: React.FC<{
         </Section>
       )}
 
-      {/* Declaration-only summary: never expose rendered contents or one-use grants. */}
+      {/* Declaration-only summary: never expose rendered contents or runtime grants. */}
       {basePath && filePaths && (
         <Section title="Materialize" icon={ArchiveRestore}>
           <div className="space-y-2 text-sm">

@@ -62,7 +62,7 @@ npm run docker:restart  # Build → Start → Wait for ready
 # 9. Verify MCP functionality via moira-local MCP server
 # MCP servers: moira = production (${MOIRA_HOST}), moira-stage = staging, moira-local = Docker (localhost:${DOCKER_PORT})
 /mcp list                                               # Test MCP tools
-/mcp start software-development-flow-lite               # Test workflow execution
+/mcp start software-development-flow                    # Test workflow execution
 /mcp manage {"action":"get","workflowId":"software-development-flow"}  # Test workflow inspection
 /mcp step <process-id> {"input": "test"}                # Test step execution
 
@@ -84,7 +84,7 @@ curl http://localhost:${DOCKER_PORT}/api/health        # Backend API health
 - **teleport** - Jump target only reachable via explicit teleport, behaves like agent-directive
 - **subgraph** - Delegates to another workflow, maps input/output context
 - **lock** - Pauses at a PIN/Telegram approval gate until unlocked
-- **materialize** - Pauses with a one-use command that delivers registry-backed files as a tar archive
+- **materialize** - Pauses with a five-minute node-bound command that can retry delivery of registry-backed files as a tar archive
 - **end** - Auto-executes, collects final data, completes
 
 Automatic node types (execute without agent interaction):

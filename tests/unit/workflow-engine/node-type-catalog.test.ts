@@ -88,6 +88,14 @@ describe("Built-in types in the catalog", () => {
     expect(byType.get("lock")?.title).toBe("Lock");
     expect(byType.get("teleport")?.title).toBe("Teleport");
   });
+
+  test("materialize describes its bounded reusable node-bound download contract", () => {
+    const materialize = builtinNodeTypeDescriptors().find((item) => item.type === "materialize");
+
+    expect(materialize?.description).toContain("reusable five-minute download");
+    expect(materialize?.description).toContain("waiting node");
+    expect(materialize?.description).not.toContain("one-use");
+  });
 });
 
 describe("An installation with no extension service", () => {

@@ -14,7 +14,7 @@
 | Input Schema         | JSON Schema validating agent responses                   |
 | Template Variable    | `{{variable}}` syntax for dynamic content                |
 | Connection           | Link between nodes defining flow direction               |
-| Materialize          | One-use tar delivery of registry-backed files            |
+| Materialize          | Five-minute node-bound tar delivery of registry files    |
 
 ## Execution Management
 
@@ -88,7 +88,8 @@ mcp__moira__session({
 ```
 
 For a paused `materialize` node, `current_step` re-presents that node without traversing a
-connection or changing execution state. It issues a fresh one-use download URL each time.
+connection or changing execution state. It issues a fresh five-minute URL each time; each URL can
+be downloaded repeatedly only while the execution remains waiting on that node.
 
 ### Recovery After Interruption
 
@@ -697,7 +698,7 @@ rendered contents in the agent context.
 The generated directive contains an already POSIX-quoted command. The agent must copy it exactly:
 
 ```bash
-mkdir -p -- '<basePath>' && curl -sSf -- '<one-use-url>' | tar -x -C '<basePath>'
+mkdir -p -- '<basePath>' && curl -sSf -- '<reusable-url>' | tar -x -C '<basePath>'
 ```
 
 The tar contains archive-relative entries and extracts under `basePath`; it does not contain the
@@ -705,16 +706,19 @@ destination prefix. Declared and rendered paths must be normalized, relative, an
 NUL, absolute/backslash root, empty segment, `.`, or `..`. Runtime limits are 1 MiB UTF-8 content
 per file and 10 MiB total uncompressed content.
 
-The five-minute token is one-use and bound to user, execution, and node. When the step is presented,
-the handler renders `basePath` and the file-path summary shown in the directive; that rendered
-`basePath` is embedded in the issued shell command. When the HTTP request arrives, the route reloads
-the current workflow and re-renders each archive entry path and registry-backed content with the
-bound execution context, including system variables such as `executionId`. A workflow change after
+The five-minute token is bound to user, execution, and node. The same token can authorize repeated
+downloads while that execution remains running and waiting on the node, and becomes invalid as soon
+as the execution advances or the absolute TTL expires. When the step is presented, the handler
+renders `basePath` and the file-path summary shown in the directive; that rendered `basePath` is
+embedded in the issued shell command. The built-in directive explains the retry window and reminds
+the agent that delivery does not prove reading. When the HTTP request arrives, the route reloads the
+current workflow and re-renders each archive entry path and registry-backed content with the bound
+execution context, including system variables such as `executionId`. A workflow change after
 issuance can therefore change the downloaded archive paths or contents, but it cannot change the
 destination in the already-issued command. Re-presenting the paused node through `current_step`
 creates a new grant and recomputes the directive without advancing the graph. The UI and MCP response
-show paths and counts only, never rendered content. There is no textual fallback; a failed client
-command is a blocker.
+show paths and counts only, never rendered content. Later consumer directives must explicitly require
+reading their applicable files. There is no textual fallback; a failed client command is a blocker.
 
 ### End Node
 

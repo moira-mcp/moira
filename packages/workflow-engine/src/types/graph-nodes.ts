@@ -275,7 +275,7 @@ export interface MaterializeFile {
   content?: "";
 }
 
-// 13. Materialize Node - securely exposes registry-backed files as a one-use tar archive
+// 13. Materialize Node - securely exposes registry-backed files through a bounded reusable grant
 export interface MaterializeNode extends BaseNode {
   type: "materialize";
   basePath: string;

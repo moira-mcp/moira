@@ -262,16 +262,17 @@ export class TokenManager {
     );
   }
 
-  claimMaterializeToken(
+  authorizeMaterializeToken(
     token: string,
     executionId: string,
     nodeId: string,
     userId: string,
   ): boolean {
     const db = getSqliteInstance();
-    const result = db
+    const row = db
       .prepare(
-        `UPDATE workflow_tokens SET used = 1
+        `SELECT 1 AS authorized
+         FROM workflow_tokens
          WHERE token = ? AND type = 'materialize' AND execution_id = ? AND node_id = ?
            AND user_id = ? AND used = 0 AND expires_at > ?
            AND EXISTS (
@@ -283,8 +284,8 @@ export class TokenManager {
                AND execution.waitingForInputNodeId = workflow_tokens.node_id
            )`,
       )
-      .run(token, executionId, nodeId, userId, Date.now());
-    return result.changes === 1;
+      .get(token, executionId, nodeId, userId, Date.now()) as { authorized: number } | undefined;
+    return row?.authorized === 1;
   }
 
   markTokenAsUsed(token: string): void {

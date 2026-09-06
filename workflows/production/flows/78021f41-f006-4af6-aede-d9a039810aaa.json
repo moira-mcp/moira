@@ -2,7 +2,7 @@
   "id": "78021f41-f006-4af6-aede-d9a039810aaa",
   "metadata": {
     "name": "Test Generation",
-    "version": "2.0.3",
+    "version": "2.0.4",
     "description": "Adds or updates executable test code for one authorized target in an existing project. Captures repository, target behavior, test levels and VCS authority; materializes a durable workspace; analyzes production behavior and existing project test patterns; designs behavior/risk/boundary cases; writes the complete authorized test, fixture, configuration and coverage-record change to real project paths; performs a fresh producer completion pass before targeted and broader deterministic commands; and requires independent semantic review. Test, target/design and evidence defects have cause-owned repair; production-code requirements end in a durable Software Development Flow handoff. Autonomous mode skips human waits only, and VCS effects require separate originating authority. The workflow never modifies production code, publishes, notifies, releases or deploys. Choose Test Planning for strategy without code, Test Suite Audit for an existing-suite audit, or Software Development Flow for production implementation with tests and documentation."
   },
   "nodes": [
@@ -28,7 +28,7 @@
       "id": "intake",
       "type": "agent-directive",
       "directive": "Reuse the originating test-generation request and explicit repository, target behavior, scope, operating mode, acceptance, test/config/fixture authority and separate commit/push decisions. Read only non-mutating context needed to classify preliminary_outcome eligible, handoff or blocked. Eligible means one bounded executable test-code outcome; production-code change, unknown repository, cross-repository work or unresolved testability architecture requires handoff. Autonomous mode skips human waits only and never grants VCS authority.",
-      "completionCondition": "The existing task, mode and authority are preserved and preliminary Lite eligibility is truthfully classified without mutation or numeric heuristics",
+      "completionCondition": "The existing task, mode and authority are preserved and preliminary test-only scope eligibility is truthfully classified without mutation or numeric heuristics",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -186,7 +186,7 @@
       "id": "plan-change",
       "type": "agent-directive",
       "directive": "Verify workspace correlation. Inspect repository instructions, actual target behavior and public surface, existing tests, fixtures, helpers, framework/configuration, commands, coverage conventions, dependencies and VCS state. Write immutable test-contract.md and concise plan.md with behavioral/risk/boundary cases, intended test levels, authorized files and observable acceptance. Return eligible, handoff when production code or full SDF is required, or blocked. Do not mutate the repository.",
-      "completionCondition": "Canonical task and proportionate plan are durable and actual project evidence either confirms Lite eligibility or truthfully produces handoff or blocked",
+      "completionCondition": "Canonical task and proportionate plan are durable and actual project evidence either confirms test-only scope eligibility or truthfully produces handoff or blocked",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -275,7 +275,7 @@
     {
       "id": "review-plan",
       "type": "agent-directive",
-      "directive": "Delegate a genuinely independent review and keep the same reviewer context for rereview where supported. The reviewer reads the originating task and authority, test-contract.md, plan.md and relevant repository primary sources directly, then overwrites plan-review.md with every current reproducible blocker. It judges task coverage, Lite eligibility, acceptance/evidence modality, dependencies, risks, authority and whether the plan leaves implementation work to an intelligent producer. It does not repair, run linters as semantic judgment, require a finding or design process machinery. Return design_review_outcome=pass only at zero blockers; repair only when every blocker is plan-owned under a valid upstream contract; replan for task interpretation, eligibility, criterion, evidence, authority, process or mixed cause. Return blocked when a genuinely independent review cannot be obtained because of an irreducible capability or authority constraint; do not substitute self-review and call it independent. If the same root returns after one repair without changed relevant source knowledge, return replan. Read accepted corrected-contract.md as part of the effective contract when present.",
+      "directive": "Delegate a genuinely independent review and keep the same reviewer context for rereview where supported. The reviewer reads the originating task and authority, test-contract.md, plan.md and relevant repository primary sources directly, then overwrites plan-review.md with every current reproducible blocker. It judges task coverage, test-only scope eligibility, acceptance/evidence modality, dependencies, risks, authority and whether the plan leaves implementation work to an intelligent producer. It does not repair, run linters as semantic judgment, require a finding or design process machinery. Return design_review_outcome=pass only at zero blockers; repair only when every blocker is plan-owned under a valid upstream contract; replan for task interpretation, eligibility, criterion, evidence, authority, process or mixed cause. Return blocked when a genuinely independent review cannot be obtained because of an irreducible capability or authority constraint; do not substitute self-review and call it independent. If the same root returns after one repair without changed relevant source knowledge, return replan. Read accepted corrected-contract.md as part of the effective contract when present.",
       "completionCondition": "For pass, repair or replan, the complete independent plan review is durable and matches the earliest cause; for blocked, a factual durable inability record exists and no independent-review claim is made",
       "inputSchema": {
         "type": "object",
@@ -404,7 +404,7 @@
       "id": "reassess-contract",
       "type": "agent-directive",
       "directive": "Reassess the active process or review cause against immutable test-contract.md, original repository scope, production-code prohibition and commit/push authority. Read corrected-contract-findings.md when the cause came from correction review. Rewrite corrected-contract.md as the complete cumulative supplement, preserving every still-valid correction and recording explicit supersession. Never alter originating authority. Return corrected with earliest reentry_owner target|design|tests|evidence|completion, handoff when production code/full SDF is required, or blocked.",
-      "completionCondition": "The earliest invalid contract is materially corrected for plan rereview, or Lite truthfully ends in handoff or blocked without an unchanged loop",
+      "completionCondition": "The earliest invalid contract is materially corrected for plan rereview, or the Test Generation workflow truthfully ends in handoff or blocked without an unchanged loop",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1524,8 +1524,8 @@
     {
       "id": "finalize-handoff",
       "type": "agent-directive",
-      "directive": "Write or complete {{workspace_path}}/handoff.md as the truthful full-SDF handoff. Preserve the original task and authority, inspected repository evidence, completed safe work, current dirty/commit state, unresolved obligations and risks, and the exact eligibility reason. Do not start full SDF, mutate production code, commit, push, publish, deploy or describe Lite as complete. Return delivery_status=handoff, artifact_path exactly {{workspace_path}}/handoff.md, bounded summary and vcs_status=not_applicable.",
-      "completionCondition": "A complete durable full-SDF handoff is projected without false Lite completion or external mutation",
+      "directive": "Write or complete {{workspace_path}}/handoff.md as the truthful full-SDF handoff. Preserve the original task and authority, inspected repository evidence, completed safe work, current dirty/commit state, unresolved obligations and risks, and the exact eligibility reason. Do not start full SDF, mutate production code, commit, push, publish, deploy or describe the test-generation work as complete. Return delivery_status=handoff, artifact_path exactly {{workspace_path}}/handoff.md, bounded summary and vcs_status=not_applicable.",
+      "completionCondition": "A complete durable full-SDF handoff is projected without false test-generation completion or external mutation",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1568,7 +1568,7 @@
     {
       "id": "finalize-blocked",
       "type": "agent-directive",
-      "directive": "Write {{workspace_path}}/final-report.md with the factual irreducible blocker, completed safe work, repository/VCS state, preserved artifacts and what change in authority, evidence or prerequisites could resume the task. Do not claim semantic acceptance or Lite completion and do not perform external side effects. Return delivery_status=blocked, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary and truthful vcs_status.",
+      "directive": "Write {{workspace_path}}/final-report.md with the factual irreducible blocker, completed safe work, repository/VCS state, preserved artifacts and what change in authority, evidence or prerequisites could resume the task. Do not claim semantic acceptance or test-generation completion and do not perform external side effects. Return delivery_status=blocked, artifact_path exactly {{workspace_path}}/final-report.md, bounded summary and truthful vcs_status.",
       "completionCondition": "The post-materialization blocker and preserved local state are durable and truthfully projected",
       "inputSchema": {
         "type": "object",
@@ -2020,7 +2020,7 @@
   "variableRegistry": {
     "workspace_path": {
       "type": "string",
-      "description": "Execution-correlated materialized workspace for canonical Lite artifacts.",
+      "description": "Execution-correlated materialized workspace for canonical Test Generation artifacts.",
       "const": "./moira-ws/test-generation-{{executionId}}",
       "default": "./moira-ws/test-generation-{{executionId}}"
     },
@@ -2031,7 +2031,7 @@
     },
     "operating_mode": {
       "type": "string",
-      "description": "How Lite handles human waits; quality and authority gates are unchanged.",
+      "description": "How Test Generation handles human waits; quality and authority gates are unchanged.",
       "enum": [
         "autonomous",
         "interactive"
@@ -2050,7 +2050,7 @@
     },
     "delivery_status": {
       "type": "string",
-      "description": "Truthful terminal class for the Lite execution.",
+      "description": "Truthful terminal class for the Test Generation execution.",
       "enum": [
         "complete",
         "handoff",

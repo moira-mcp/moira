@@ -132,7 +132,8 @@ const BUILTIN_NODE_DESCRIPTIONS: Record<
   },
   materialize: {
     title: "Materialize",
-    description: "Exposes selected context content as a one-use downloadable file bundle.",
+    description:
+      "Exposes selected context content through a reusable five-minute download bound to the waiting node.",
   },
 };
 
