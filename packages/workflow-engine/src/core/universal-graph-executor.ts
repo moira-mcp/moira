@@ -33,15 +33,31 @@ import {
   ConflictError,
 } from "@mcp-moira/shared";
 
+import type { ExtensionRegistry } from "../extensions/extension-registry.js";
+import { getActiveExtensionRegistry } from "../extensions/extension-registry-provider.js";
+import type { IExtensionRunnerClient } from "../extensions/extension-runner-client.js";
+
 export class UniversalGraphExecutor implements IGraphExecutor {
   private repository: IDataRepository;
   private graphEngine: IGraphExecutionEngine;
   private logger: WorkflowLogger;
   private _globalSettingsRepo: GlobalSettingsRepository | null = null;
 
-  constructor(repository: IDataRepository) {
+  constructor(
+    repository: IDataRepository,
+    options: {
+      extensionRegistry?: ExtensionRegistry;
+      extensionRunnerClient?: IExtensionRunnerClient;
+    } = {},
+  ) {
     this.repository = repository;
-    this.graphEngine = new GraphExecutionEngine(repository);
+    // Extension support is optional and passed straight to the engine. When the caller passes
+    // nothing, the process default applies — the same source the validator uses. Without it the
+    // executor would refuse a custom node every validator had just accepted.
+    this.graphEngine = new GraphExecutionEngine(repository, {
+      extensionRegistry: options.extensionRegistry ?? getActiveExtensionRegistry() ?? undefined,
+      extensionRunnerClient: options.extensionRunnerClient,
+    });
     this.logger = createLogger({ component: "UniversalGraphExecutor" });
     this.logger.info("Universal Graph Executor initialized - factory pattern");
   }

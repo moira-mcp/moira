@@ -11,7 +11,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
-import { validateNodeConnections } from "../types/graph-nodes.js";
+import { validateNodeConnections, isExtensionNode } from "../types/graph-nodes.js";
+import type { BuiltinGraphNode } from "../types/graph-nodes.js";
 import type {
   GraphNode,
   ConditionNode,
@@ -27,6 +28,14 @@ import { ConfigurationError } from "@mcp-moira/shared/errors";
 import type { UnifiedValidationResult, UnifiedValidationIssue } from "./validation-types.js";
 import { parseExpressionAst } from "../expression/expression-parser.js";
 import { registerWorkflowSchemaKeywords } from "../utils/schema-validator.js";
+import type { ExtensionRegistry } from "../extensions/extension-registry.js";
+import { getActiveExtensionRegistry } from "../extensions/extension-registry-provider.js";
+import { canonicalJson, DECLARED_SCHEMA_AJV_OPTIONS } from "../extensions/declared-schema.js";
+import { isExtensionNodeType } from "../extensions/extension-contract.js";
+import {
+  classifyNodeType,
+  describeNodeTypeClassification,
+} from "../extensions/node-type-classification.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -98,6 +107,10 @@ export class GraphValidator {
   private nodeAjv: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private nodeValidators = new Map<string, any>();
+  /** Custom node types this validator can resolve; null when no registry was supplied. */
+  private extensionRegistry: ExtensionRegistry | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extensionSchemaValidators = new Map<string, any>();
   private schema: object;
   private logger = createLogger({ component: "GraphValidator" });
 
@@ -136,7 +149,12 @@ export class GraphValidator {
     );
   }
 
-  constructor(schemaPath?: string) {
+  constructor(schemaPath?: string, options: { extensionRegistry?: ExtensionRegistry } = {}) {
+    // Without a registry this validator behaves as before for built-in types and reports custom
+    // types as unresolvable rather than invalid.
+    // An explicitly passed registry always wins; otherwise the process default applies, so a
+    // caller that was never updated still validates custom types the same way as every other.
+    this.extensionRegistry = options.extensionRegistry ?? getActiveExtensionRegistry();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.ajv = new (AjvModule as any).default({
       allErrors: true,
@@ -147,9 +165,12 @@ export class GraphValidator {
     (addFormatsModule as any).default(this.ajv);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.nodeAjv = new (AjvModule as any).default({
+      ...DECLARED_SCHEMA_AJV_OPTIONS,
+      // Node-level checking wants the first problem, not all of them; the shared options carry the
+      // part that matters here — a declared `$id` is never registered, so one instance can compile
+      // two extensions' schemas that happen to share it.
       allErrors: false,
       verbose: true,
-      strict: false,
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (addFormatsModule as any).default(this.nodeAjv);
@@ -241,8 +262,9 @@ export class GraphValidator {
         continue;
       }
 
-      // Map node type to schema definition name
-      const schemaDefMap: Record<GraphNode["type"], string> = {
+      // Map node type to schema definition name. Built-in types are listed exhaustively; a
+      // namespaced custom type is validated against the extension branch instead.
+      const schemaDefMap: Record<BuiltinGraphNode["type"], string> = {
         start: "startNode",
         end: "endNode",
         "agent-directive": "agentDirectiveNode",
@@ -258,12 +280,14 @@ export class GraphValidator {
         materialize: "materializeNode",
       };
 
-      const expectedDef = schemaDefMap[nodeType as GraphNode["type"]];
+      const expectedDef = isExtensionNodeType(nodeType)
+        ? "extensionNode"
+        : schemaDefMap[nodeType as BuiltinGraphNode["type"]];
       if (!expectedDef) {
         errors.push({
           type: "schema",
           nodeId: nodeId || "unknown",
-          message: `Unknown node type: '${nodeType}'. Valid types: ${Object.keys(schemaDefMap).join(", ")}`,
+          message: `Unknown node type: '${nodeType}'. Valid types: ${Object.keys(schemaDefMap).join(", ")}, or a namespaced extension type such as 'my-extension.my-node'`,
         });
         continue;
       }
@@ -287,6 +311,15 @@ export class GraphValidator {
       if (relevantErrors.length > 0) {
         // Group similar errors
         const uniqueMessages = new Set<string>();
+
+        // Missing top-level required fields are named in full, not one per validation pass.
+        // This is a direct comparison of the node object against the branch's own `required`
+        // list, so it collects no AJV errors and its cost is the number of declared fields —
+        // the fail-fast body check above stays exactly as it is, and a deeply nested body
+        // still cannot amplify how much is reported.
+        for (const missing of this.missingRequiredFields(expectedDef, node)) {
+          uniqueMessages.add(`Missing required field: '${missing}'`);
+        }
 
         for (const error of relevantErrors) {
           // Create readable message
@@ -505,6 +538,8 @@ export class GraphValidator {
    */
   private validateStructureUnified(workflow: WorkflowGraph): UnifiedValidationIssue[] {
     const issues: UnifiedValidationIssue[] = [];
+
+    issues.push(...this.validateExtensionNodes(workflow));
 
     // Metadata validation
     if (!workflow.metadata?.name) {
@@ -900,6 +935,13 @@ export class GraphValidator {
    */
   private validateNodeType(node: GraphNode, graph: WorkflowGraph): UnifiedValidationIssue[] {
     const issues: UnifiedValidationIssue[] = [];
+
+    // Custom types carry no built-in semantics; their rules come from the schemas their extension
+    // declared and are checked in validateExtensionNodes. Returning here also narrows the union so
+    // the exhaustiveness check below keeps guarding the built-in types.
+    if (isExtensionNode(node)) {
+      return issues;
+    }
 
     switch (node.type) {
       case "condition":
@@ -1937,6 +1979,109 @@ export class GraphValidator {
 
     walk(condition);
     return issues;
+  }
+
+  /**
+   * Top-level required properties the node does not have, in the order the branch declares them.
+   * Only the branch's own `required` list is consulted: no nested schema is entered and no
+   * validation errors are produced, so the amount reported does not depend on the node's body.
+   */
+  private missingRequiredFields(schemaDefName: string, node: unknown): string[] {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return [];
+    const defs = (this.schema as { $defs?: Record<string, unknown> }).$defs;
+    const branch = defs?.[schemaDefName] as { required?: unknown } | undefined;
+    const required = branch?.required;
+    if (!Array.isArray(required)) return [];
+
+    const present = node as Record<string, unknown>;
+    return required.filter(
+      (name): name is string =>
+        typeof name === "string" && !Object.prototype.hasOwnProperty.call(present, name),
+    );
+  }
+
+  /**
+   * Custom node types are known to the extension registry, not to this file. Three situations are
+   * deliberately kept apart, because collapsing them makes a working workflow look broken:
+   *  - the registry knows the type → the node is valid, and its config is checked against the
+   *    schema the extension declared;
+   *  - a registry exists but does not know the type → the extension is not installed here;
+   *  - no registry was supplied → this caller (for example the CLI outside the container) cannot
+   *    resolve custom types at all, which is not evidence that the workflow is wrong.
+   */
+  private validateExtensionNodes(workflow: WorkflowGraph): UnifiedValidationIssue[] {
+    const issues: UnifiedValidationIssue[] = [];
+    const nodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+
+    for (const node of nodes) {
+      if (!node || typeof node.type !== "string" || !isExtensionNodeType(node.type)) continue;
+
+      const classification = classifyNodeType(node.type, this.extensionRegistry);
+
+      if (classification.kind === "extension-unresolvable") {
+        issues.push({
+          type: "structure",
+          severity: "warning",
+          nodeId: node.id,
+          message: `Node ${node.id}: ${describeNodeTypeClassification(classification)}. Custom node types are only verified where the extension registry is available.`,
+        });
+        continue;
+      }
+
+      if (classification.kind !== "extension-installed") {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          message: `Node ${node.id}: ${describeNodeTypeClassification(classification)}`,
+        });
+        continue;
+      }
+
+      const registered = this.extensionRegistry!.get(node.type)!;
+
+      const configIssue = this.validateAgainstDeclaredSchema(
+        registered.declaration.configSchema,
+        (node as { config?: unknown }).config ?? {},
+        node.type,
+      );
+      if (configIssue) {
+        issues.push({
+          type: "structure",
+          severity: "error",
+          nodeId: node.id,
+          field: "config",
+          message: `Node ${node.id}: config does not match the schema declared by '${node.type}': ${configIssue}`,
+        });
+      }
+    }
+
+    return issues;
+  }
+
+  /** Validate a value against a schema an extension declared; returns readable errors or null. */
+  private validateAgainstDeclaredSchema(
+    schema: Record<string, unknown>,
+    value: unknown,
+    cacheKey: string,
+  ): string | null {
+    const schemaCacheKey = `${cacheKey}\u0000${canonicalJson(schema)}`;
+    let validate = this.extensionSchemaValidators.get(schemaCacheKey);
+    if (!validate) {
+      try {
+        validate = this.nodeAjv.compile(schema);
+      } catch (error) {
+        return `declared schema is not compilable (${error instanceof Error ? error.message : String(error)})`;
+      }
+      this.extensionSchemaValidators.set(schemaCacheKey, validate);
+    }
+    if (validate(value)) return null;
+    return (validate.errors ?? [])
+      .map(
+        (issue: { instancePath?: string; message?: string }) =>
+          `${issue.instancePath || "/"} ${issue.message ?? "is invalid"}`,
+      )
+      .join("; ");
   }
 
   /**

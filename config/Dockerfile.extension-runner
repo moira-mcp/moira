@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+
+# Image of the extension runner — the service that hosts extension handlers.
+#
+# It is a separate image from the application on purpose: Moira must never import or execute
+# extension code, and the two containers therefore share nothing but an HTTP contract. The runner
+# needs the SDK, the engine's extension contract and a JavaScript runtime; it needs no database, no
+# secrets and no application configuration.
+#
+# In this scope the image is built from the source tree. Publishing it to a registry is outside the
+# authority of this work, so an installation running the published Moira image also needs this
+# checkout to enable extensions — the administrator documentation says so.
+
+FROM node:24-alpine AS base
+
+WORKDIR /app
+
+RUN apk add --no-cache curl
+RUN npm install -g tsx
+
+# Dependency resolution for the workspaces the runner needs.
+COPY package*.json ./
+COPY tsconfig*.json ./
+COPY packages/shared/package.json ./packages/shared/
+COPY packages/workflow-engine/package.json ./packages/workflow-engine/
+COPY packages/extension-sdk/package.json ./packages/extension-sdk/
+COPY packages/extension-runner/package.json ./packages/extension-runner/
+
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --workspaces --include-workspace-root
+
+COPY packages/shared/ ./packages/shared/
+COPY packages/workflow-engine/ ./packages/workflow-engine/
+COPY packages/extension-sdk/ ./packages/extension-sdk/
+COPY packages/extension-runner/ ./packages/extension-runner/
+
+# Where bundles are mounted, read-only, and where the service listens. Both are overridable, and the
+# defaults are what the compose profile relies on.
+ENV MOIRA_EXTENSIONS_DIR=/app/extensions
+ENV MOIRA_EXTENSION_RUNNER_PORT=9110
+ENV NODE_ENV=production
+
+EXPOSE 9110
+
+# An empty or absent bundle directory is a working state — the service starts and reports that it
+# hosts nothing — so the image creates the mount point rather than failing without it.
+RUN mkdir -p /app/extensions
+
+# 127.0.0.1 rather than `localhost`: the service listens on IPv4, and in this base image `localhost`
+# resolves to ::1 first, so a health check spelled with the name would fail on a healthy service.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${MOIRA_EXTENSION_RUNNER_PORT}/health" || exit 1
+
+CMD ["npx", "tsx", "packages/extension-runner/src/main.ts"]

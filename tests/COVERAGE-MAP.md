@@ -301,6 +301,22 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/executions-navigation.spec.ts`
 - `tests/e2e/executions-page.spec.ts`
 
+### extension-runtime
+
+**unit**
+
+- `tests/unit/extension-runner/bundle-loader.test.ts` — manifest-only bundle discovery, canonical entrypoint containment, isolated refusal, namespace conflicts and missing-directory behavior
+- `tests/unit/workflow-engine/extension-node-execution.test.ts` — custom-node graph dispatch, node-scoped result storage, downstream template access and process-default registry/client composition
+- `tests/unit/workflow-engine/extension-node-handler.test.ts` — template/config/input/output boundaries, normalized error routing, explicit-registry secret grants and schema refresh on long-lived handlers
+- `tests/unit/workflow-engine/extension-node-validation.test.ts` — registered/unresolvable/missing custom types, declared config schemas, registry refresh and unchanged built-in validation
+- `tests/unit/workflow-engine/extension-registry-reach.test.ts` — process registry propagation, external snapshots, registry-origin distinctions, startup synchronization and built-in type authority
+- `tests/unit/workflow-engine/extension-registry.test.ts` — versioned manifest, bounded schema dialect, settings/permission declarations, conflicts, registry lifecycle and snapshots
+- `tests/unit/workflow-engine/extension-runner-client-http.test.ts` — transport deadlines and mapping of HTTP/network responses to extension failure classes
+
+**integration**
+
+- `tests/integration/extension-runner-contract.test.ts` — real HTTP/child-process execution, startup and queue deadlines, cancellation/shutdown, crash recovery, redirect/secret/artifact permissions, malformed IPC containment and node-scoped error routing
+
 ### expressions
 
 **api**

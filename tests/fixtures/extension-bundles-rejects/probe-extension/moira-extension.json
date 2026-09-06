@@ -1,0 +1,47 @@
+{
+  "apiVersion": "moira.extensions/v1",
+  "name": "probe",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [
+    {
+      "type": "probe.behave",
+      "title": "Behave as instructed",
+      "description": "Test bundle whose single node performs the behaviour named in its configuration.",
+      "configSchema": {
+        "type": "object",
+        "required": ["behaviour"],
+        "properties": {
+          "behaviour": {
+            "type": "string",
+            "enum": [
+              "succeed",
+              "throw",
+              "hang",
+              "bad-output",
+              "crash",
+              "network",
+              "secret",
+              "artifact"
+            ]
+          },
+          "host": { "type": "string" },
+          "alias": { "type": "string" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["observed"],
+        "properties": {
+          "observed": { "type": "string" },
+          "cancelled": { "type": "boolean" }
+        }
+      }
+    }
+  ],
+  "settings": [{ "key": "probe.token", "type": "encrypted", "label": "Probe token" }],
+  "permissions": {
+    "network": ["allowed.example"],
+    "secrets": ["probe.token"]
+  }
+}

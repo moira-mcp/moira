@@ -1,0 +1,12 @@
+{
+  "name": "@mcp-moira/extension-sdk",
+  "version": "0.1.0",
+  "description": "Authoring SDK for Moira extension nodes",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "private": true
+}

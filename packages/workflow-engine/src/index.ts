@@ -14,6 +14,9 @@ export * from "./core/index.js";
 // Node handlers
 export * from "./handlers/index.js";
 
+// Extension support (custom node types contributed by installed extensions)
+export * from "./extensions/index.js";
+
 // Services
 export * from "./services/index.js";
 export * from "./materialize/index.js";

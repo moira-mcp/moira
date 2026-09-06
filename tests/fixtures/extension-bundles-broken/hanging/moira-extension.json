@@ -1,0 +1,7 @@
+{
+  "apiVersion": "moira.extensions/v1",
+  "name": "hanging",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [{ "type": "hanging.go", "title": "Hang", "configSchema": {}, "outputSchema": {} }]
+}

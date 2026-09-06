@@ -5,6 +5,10 @@
 
 import { randomUUID } from "node:crypto";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
+import {
+  extensionSettingDefinition,
+  mergeSettingDefinitions,
+} from "../extensions/extension-settings.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
   WorkflowExecution,
@@ -587,7 +591,7 @@ export class InMemoryRepository implements IDataRepository {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getSetting<T = any>(userId: string, key: string): Promise<T | null> {
-    const definition = this.settingDefinitions.get(key);
+    const definition = extensionSettingDefinition(key) ?? this.settingDefinitions.get(key);
     if (!definition) {
       return null;
     }
@@ -621,7 +625,7 @@ export class InMemoryRepository implements IDataRepository {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async setSetting(userId: string, key: string, value: any): Promise<void> {
-    const definition = this.settingDefinitions.get(key);
+    const definition = extensionSettingDefinition(key) ?? this.settingDefinitions.get(key);
     if (!definition) {
       throw new Error(`Setting definition not found: ${key}`);
     }
@@ -694,11 +698,15 @@ export class InMemoryRepository implements IDataRepository {
   }
 
   async getSettingDefinition(key: string): Promise<SettingDefinition | null> {
-    return this.settingDefinitions.get(key) || null;
+    // Settings declared by installed extensions are visible here for the same reason they are in
+    // the database repository: two implementations of the same interface that disagree about which
+    // settings exist would make a test green while the product refuses the very same key. The
+    // declaration wins over a stored row of the same key, as it does there.
+    return extensionSettingDefinition(key) ?? this.settingDefinitions.get(key) ?? null;
   }
 
   async getSettingDefinitions(category?: string): Promise<SettingDefinition[]> {
-    const all = Array.from(this.settingDefinitions.values());
+    const all = mergeSettingDefinitions(Array.from(this.settingDefinitions.values()));
 
     if (category) {
       return all.filter((d) => d.category === category);

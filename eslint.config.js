@@ -151,6 +151,21 @@ export default [
       "no-restricted-syntax": "off",
     },
   },
+  // Extension runner - standalone Node.js service and CLI process boundary
+  {
+    files: ["packages/extension-runner/**/*.{ts,js}"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+    rules: {
+      "no-console": "off",
+      "no-restricted-syntax": "off",
+    },
+  },
   // Config files - allow process.env
   {
     files: [
