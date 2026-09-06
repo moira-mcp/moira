@@ -5,8 +5,9 @@
  * input, checks them against the schemas the extension declared, hands a serialisable call to the
  * runner client and checks the returned result the same way. Five causes (configuration or input not
  * matching its schema, handler error, timeout, runner unavailable, result not matching its schema)
- * all route to `error` with diagnostics that name the cause, because a custom node's result is
- * consumed by later nodes and a silent `default` would hide it.
+ * produce diagnostics that name the cause. They route through `error` when the node defines it;
+ * otherwise execution pauses on the node, because a silent `default` would hide the failure from
+ * later consumers.
  */
 
 import * as AjvModule from "ajv";
@@ -56,7 +57,10 @@ export class ExtensionNodeHandler implements INodeHandler {
   }
 
   canExecute(node: GraphNode, _context: ExecutionContext): boolean {
-    return isExtensionNode(node) && this.registry.has(node.type);
+    return (
+      isExtensionNode(node) &&
+      (this.registry.has(node.type) || this.registry.origin === "unreachable")
+    );
   }
 
   async execute(
@@ -71,6 +75,15 @@ export class ExtensionNodeHandler implements INodeHandler {
       throw new InternalError("ExtensionNodeHandler can only execute extension nodes", {
         nodeType: node.type,
       });
+    }
+
+    if (this.registry.origin === "unreachable") {
+      return this.routeFailure(
+        node,
+        messageQueue,
+        "runner-unavailable",
+        "the configured extension runner did not provide a valid catalog",
+      );
     }
 
     const registered = this.registry.get(node.type);

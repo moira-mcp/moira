@@ -17,6 +17,8 @@ import {
   EXTENSION_API_VERSION,
   setActiveExtensionRegistry,
   setActiveExtensionRunnerClient,
+  initializeExtensionsForProcess,
+  syncExtensionRegistryFromRunner,
 } from "@mcp-moira/workflow-engine";
 import type {
   ExecutionContext,
@@ -141,6 +143,85 @@ describe("Executing a custom node inside a graph", () => {
     await expect(engine.executeGraph(graph(), context(), queue, "start")).rejects.toThrow(
       /runner is not configured/i,
     );
+  });
+
+  test("a configured runner unavailable at startup follows the authored error branch", async () => {
+    await initializeExtensionsForProcess({
+      runnerUrl: "http://runner.local",
+      createClient: () => ({
+        listExtensions: async () => Promise.reject(new Error("connection refused")),
+        invoke: async () => ({ output: {} }),
+      }),
+      publishSnapshot: false,
+    });
+
+    try {
+      const executor = new UniversalGraphExecutor(new InMemoryRepository());
+      const engine = (executor as unknown as { graphEngine: GraphExecutionEngine }).graphEngine;
+      const queue = new AgentMessageQueue();
+      const result = await engine.executeGraph(graph(), context(), queue, "start");
+
+      expect(result.context.variables.send).toMatchObject({
+        extensionFailed: true,
+        failureKind: "runner-unavailable",
+      });
+      const directives = queue
+        .flush("exec-extension")
+        .messages.filter((message) => "directive" in message)
+        .map((message) => (message as { directive: string }).directive);
+      expect(directives).toEqual([]);
+    } finally {
+      setActiveExtensionRegistry(null);
+      setActiveExtensionRunnerClient(null);
+    }
+  });
+
+  test("a live catalog still reports a missing extension as not installed", async () => {
+    const engine = new GraphExecutionEngine(new InMemoryRepository(), {
+      extensionRegistry: new ExtensionRegistry("live"),
+      extensionRunnerClient: client,
+    });
+
+    await expect(
+      engine.executeGraph(graph(), context(), new AgentMessageQueue(), "start"),
+    ).rejects.toThrow(/belongs to an extension that is not currently installed/);
+  });
+
+  test("a failed refresh cannot execute through preserved declarations", async () => {
+    const registry = new ExtensionRegistry("live");
+    registry.register(MANIFEST);
+    setActiveExtensionRegistry(registry);
+    let invoked = false;
+    const unavailableClient = {
+      listExtensions: async () => Promise.reject(new Error("incompatible catalog")),
+      invoke: async () => {
+        invoked = true;
+        return { output: { messageId: "must-not-exist" } };
+      },
+    };
+    setActiveExtensionRunnerClient(unavailableClient);
+    await syncExtensionRegistryFromRunner(unavailableClient, { publish: false });
+
+    try {
+      const executor = new UniversalGraphExecutor(new InMemoryRepository());
+      const engine = (executor as unknown as { graphEngine: GraphExecutionEngine }).graphEngine;
+      const queue = new AgentMessageQueue();
+      const result = await engine.executeGraph(graph(), context(), queue, "start");
+
+      expect(registry.has("corporate-messenger.send")).toBe(true);
+      expect(registry.origin).toBe("unreachable");
+      expect(result.context.variables.send).toMatchObject({
+        extensionFailed: true,
+        failureKind: "runner-unavailable",
+      });
+      expect(queue.flush("exec-extension").messages.some((message) => "directive" in message)).toBe(
+        false,
+      );
+      expect(invoked).toBe(false);
+    } finally {
+      setActiveExtensionRegistry(null);
+      setActiveExtensionRunnerClient(null);
+    }
   });
 });
 

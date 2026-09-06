@@ -5,7 +5,8 @@ description: Add custom node types with the extension SDK and isolated runner
 
 An extension adds namespaced node types to Moira. They use the same workflow graph as built-in
 nodes: Moira validates their configuration, calls the isolated extension runner, stores a successful
-result under the node ID, and follows the node's `error` connection on failure.
+result under the node ID, and follows the node's `error` connection on failure when it exists.
+Without that connection, Moira records the diagnostic and pauses on the node for retry.
 
 Extension code never runs in the Moira application processes. The runner imports each bundle in a
 separate child process. This contains crashes and deadlines, but it is not a hostile-code sandbox:

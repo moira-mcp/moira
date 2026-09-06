@@ -40,6 +40,21 @@ describe("Requests that carry no deadline of their own", () => {
     await expect(client.listExtensions()).rejects.toMatchObject({ kind: "runner-unavailable" });
     expect(Date.now() - started).toBeLessThan(2_000);
   });
+
+  test.each([
+    ["JSON error status", new Response('{"error":"bad gateway"}', { status: 502 })],
+    [
+      "incompatible protocol version",
+      Response.json({ apiVersion: "moira.extensions/v99", extensions: [] }),
+    ],
+  ])("%s cannot become an authoritative empty catalog", async (_case, response) => {
+    const client = new HttpExtensionRunnerClient({
+      baseUrl: "http://runner.invalid",
+      fetchImpl: (async () => response) as unknown as typeof fetch,
+    });
+
+    await expect(client.listExtensions()).rejects.toMatchObject({ kind: "runner-unavailable" });
+  });
 });
 
 describe("Transport reality mapped to failure classes", () => {

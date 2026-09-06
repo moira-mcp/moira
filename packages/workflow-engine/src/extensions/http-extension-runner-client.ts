@@ -16,6 +16,7 @@ import {
   type IExtensionRunnerClient,
 } from "./extension-runner-client.js";
 import type { ExtensionManifest } from "./extension-contract.js";
+import { EXTENSION_API_VERSION } from "./extension-contract.js";
 
 export interface HttpExtensionRunnerClientOptions {
   /** Base URL of the runner service, for example `http://moira-extension-runner:9110`. */
@@ -54,14 +55,47 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
   /** Declarations the runner currently provides, for filling the registry. */
   async listExtensions(): Promise<ExtensionManifest[]> {
     const response = await this.requestWithDeadline("/nodes");
-    const body = (await response.json()) as {
-      apiVersion?: string;
-      extensions?: Array<Omit<ExtensionManifest, "apiVersion">>;
+    if (!response.ok) {
+      throw new ExtensionInvocationError(
+        "runner-unavailable",
+        `the extension runner metadata endpoint answered with HTTP ${response.status}`,
+      );
+    }
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      throw new ExtensionInvocationError(
+        "runner-unavailable",
+        `the extension runner metadata response is not JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new ExtensionInvocationError(
+        "runner-unavailable",
+        "the extension runner metadata response is not an object",
+      );
+    }
+    const envelope = body as {
+      apiVersion?: unknown;
+      extensions?: unknown;
     };
-    if (!Array.isArray(body.extensions)) return [];
-    return body.extensions.map((extension) => ({
+    if (envelope.apiVersion !== EXTENSION_API_VERSION) {
+      throw new ExtensionInvocationError(
+        "runner-unavailable",
+        `the extension runner metadata uses incompatible apiVersion '${String(envelope.apiVersion ?? "missing")}', expected '${EXTENSION_API_VERSION}'`,
+      );
+    }
+    if (!Array.isArray(envelope.extensions)) {
+      throw new ExtensionInvocationError(
+        "runner-unavailable",
+        "the extension runner metadata response has no extensions array",
+      );
+    }
+    return envelope.extensions.map((extension) => ({
       ...(extension as Omit<ExtensionManifest, "apiVersion">),
-      apiVersion: body.apiVersion ?? "",
+      apiVersion: EXTENSION_API_VERSION,
     })) as ExtensionManifest[];
   }
 

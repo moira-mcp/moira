@@ -125,6 +125,7 @@ export interface ExtensionRegistrySnapshot {
   extensions: Array<{
     name: string;
     version: string;
-    nodeTypes: string[];
+    /** Data-only declarations required to validate configuration outside the live process. */
+    nodes: ExtensionNodeDeclaration[];
   }>;
 }

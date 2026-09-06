@@ -169,10 +169,8 @@ export function getActiveExtensionRunnerClient(): IExtensionRunnerClient | null 
 
 /**
  * Registry reconstructed from a published snapshot, for a process that cannot ask the live one.
- * A snapshot carries which types exist and who owns them, but not their schemas, so node
- * configuration cannot be checked against a declaration here — the reconstructed declarations
- * accept any configuration object on purpose, and that limitation is what "resolved from a
- * snapshot" means.
+ * A snapshot carries data-only node declarations, including bounded schemas, so the CLI applies the
+ * same configuration contract without importing extension code or receiving settings/permissions.
  */
 export function readExtensionRegistrySnapshot(
   stateDir: string = getExtensionStateDir(),
@@ -189,32 +187,32 @@ export function readExtensionRegistrySnapshot(
   }
 
   const snapshot = parsed as Partial<ExtensionRegistrySnapshot>;
-  if (snapshot?.apiVersion !== EXTENSION_API_VERSION || !Array.isArray(snapshot.extensions)) {
+  if (
+    snapshot?.apiVersion !== EXTENSION_API_VERSION ||
+    typeof snapshot.generatedAt !== "string" ||
+    !Array.isArray(snapshot.extensions)
+  ) {
     return null;
   }
 
   const registry = new ExtensionRegistry("snapshot");
   for (const extension of snapshot.extensions) {
-    if (!extension || typeof extension.name !== "string" || !Array.isArray(extension.nodeTypes)) {
-      continue;
+    if (
+      !extension ||
+      typeof extension.name !== "string" ||
+      typeof extension.version !== "string" ||
+      !Array.isArray(extension.nodes)
+    ) {
+      return null;
     }
-    const nodes: ExtensionNodeDeclaration[] = extension.nodeTypes
-      .filter((type): type is string => typeof type === "string")
-      .map((type) => ({
-        type,
-        title: type,
-        // Schema-free by construction: the snapshot does not carry declarations.
-        configSchema: { type: "object" },
-        outputSchema: { type: "object" },
-      }));
-    if (nodes.length === 0) continue;
-    registry.register({
+    const registration = registry.register({
       apiVersion: EXTENSION_API_VERSION,
       name: extension.name,
-      version: typeof extension.version === "string" ? extension.version : "0.0.0",
+      version: extension.version,
       entrypoint: "(from snapshot)",
-      nodes,
+      nodes: extension.nodes as ExtensionNodeDeclaration[],
     });
+    if (!registration.registered) return null;
   }
 
   return { registry, snapshot: snapshot as ExtensionRegistrySnapshot };
@@ -243,6 +241,7 @@ export async function syncExtensionRegistryFromRunner(
   try {
     manifests = await client.listExtensions();
   } catch (error) {
+    registry.noteKnowledgeSource("unreachable");
     return {
       synced: false,
       registered: [],
@@ -319,6 +318,10 @@ export async function initializeExtensionsForProcess(options: {
     publish: false,
     log: options.log,
   });
-  const publication = options.publishSnapshot ? publishExtensionRegistry(stateDir) : undefined;
+  const publication = options.publishSnapshot
+    ? sync.synced
+      ? publishExtensionRegistry(stateDir)
+      : undefined
+    : undefined;
   return { publication, ...sync };
 }

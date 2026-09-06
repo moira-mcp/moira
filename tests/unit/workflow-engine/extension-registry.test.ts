@@ -542,7 +542,7 @@ describe("ExtensionRegistry", () => {
     expect(registry.settingDeclarations()[0].extensionName).toBe("corporate-messenger");
   });
 
-  test("the snapshot carries contract version, extensions and their node types", () => {
+  test("the snapshot carries contract version and data-only node declarations", () => {
     registry.register(manifest());
     const snapshot = registry.snapshot(new Date("2026-09-02T00:00:00.000Z"));
 
@@ -553,7 +553,7 @@ describe("ExtensionRegistry", () => {
         {
           name: "corporate-messenger",
           version: "1.0.0",
-          nodeTypes: ["corporate-messenger.send"],
+          nodes: manifest().nodes,
         },
       ],
     });

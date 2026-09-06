@@ -488,7 +488,7 @@ export class ExtensionRegistry {
       extensions: [...this.manifestsByName.values()].map((manifest) => ({
         name: manifest.name,
         version: manifest.version,
-        nodeTypes: manifest.nodes.map((node) => node.type),
+        nodes: manifest.nodes,
       })),
     };
   }

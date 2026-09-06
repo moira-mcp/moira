@@ -457,7 +457,8 @@ and Workflow Management Flow contracts.
 Installed extensions contribute namespaced types such as `corporate-messenger.send`. Their
 manifest supplies the configuration form and validation schemas; the browser renders those schemas
 with its generic editor and never loads extension frontend code. A successful result is stored under
-the node ID, while input, handler, timeout, runner and output failures follow `connections.error`.
+the node ID. Input, handler, timeout, runner and output failures follow `connections.error` when it
+exists; otherwise Moira records the diagnostic and pauses on the node for retry.
 
 The live node-type catalogue distinguishes an unavailable extension runner from a live registry in
 which one extension is not installed. See [Writing an Extension](/docs/guides/writing-extensions/)

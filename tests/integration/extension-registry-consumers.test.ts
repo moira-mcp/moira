@@ -7,7 +7,7 @@
  * published snapshot. Both are exercised here on one and the same graph.
  */
 
-import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
+import { describe, test, expect, beforeAll, beforeEach, afterAll } from "@jest/globals";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
@@ -33,7 +33,12 @@ const MANIFEST: ExtensionManifest = {
     {
       type: "corporate-messenger.send",
       title: "Send",
-      configSchema: { type: "object" },
+      configSchema: {
+        type: "object",
+        required: ["text"],
+        additionalProperties: false,
+        properties: { text: { type: "string", minLength: 1 } },
+      },
       outputSchema: { type: "object" },
     },
   ],
@@ -96,6 +101,9 @@ describe("The CLI in a separate process", () => {
   beforeAll(() => {
     stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-cli-registry-"));
     workflowFile = path.join(stateDir, "workflow.json");
+  });
+
+  beforeEach(() => {
     fs.writeFileSync(
       workflowFile,
       JSON.stringify({ ...workflowWithCustomNode, id: "cli-consumer-test" }, null, 2),
@@ -143,5 +151,28 @@ describe("The CLI in a separate process", () => {
 
     expect(output).toMatch(/Workflow is valid/);
     expect(output).not.toMatch(/cannot be resolved here/);
+  });
+
+  test("the snapshot applies the declared configuration schema", () => {
+    writeExtensionRegistrySnapshot(registryWithExtension(), stateDir);
+    fs.writeFileSync(
+      workflowFile,
+      JSON.stringify(
+        {
+          ...workflowWithCustomNode,
+          id: "cli-consumer-invalid",
+          nodes: workflowWithCustomNode.nodes.map((node) =>
+            node.id === "send" ? { ...node, config: { text: 42 } } : node,
+          ),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const invalid = runCli();
+    expect(invalid.status).not.toBe(0);
+    expect(invalid.output).toMatch(/schema declared by 'corporate-messenger\.send'.*must be string/s);
   });
 });

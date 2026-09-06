@@ -20,6 +20,7 @@ import {
   readExtensionRegistrySnapshot,
   writeExtensionRegistrySnapshot,
   publishExtensionRegistry,
+  syncExtensionRegistryFromRunner,
   initializeExtensionsForProcess,
   getActiveExtensionRunnerClient,
   setActiveExtensionRunnerClient,
@@ -130,7 +131,7 @@ describe("Snapshot for consumers outside the process", () => {
     const restored = readExtensionRegistrySnapshot(stateDir);
     expect(restored).not.toBeNull();
     expect(restored!.snapshot.extensions).toEqual([
-      { name: "corporate-messenger", version: "1.2.0", nodeTypes: ["corporate-messenger.send"] },
+      { name: "corporate-messenger", version: "1.2.0", nodes: MANIFEST.nodes },
     ]);
     expect(restored!.registry.has("corporate-messenger.send")).toBe(true);
   });
@@ -161,6 +162,23 @@ describe("Snapshot for consumers outside the process", () => {
     fs.writeFileSync(
       extensionRegistrySnapshotPath(stateDir),
       JSON.stringify({ apiVersion: "moira.extensions/v99", extensions: [] }),
+      "utf-8",
+    );
+    expect(readExtensionRegistrySnapshot(stateDir)).toBeNull();
+
+    fs.writeFileSync(
+      extensionRegistrySnapshotPath(stateDir),
+      JSON.stringify({
+        apiVersion: EXTENSION_API_VERSION,
+        generatedAt: new Date().toISOString(),
+        extensions: [
+          {
+            name: "corporate-messenger",
+            version: "1.2.0",
+            nodeTypes: ["corporate-messenger.send"],
+          },
+        ],
+      }),
       "utf-8",
     );
     expect(readExtensionRegistrySnapshot(stateDir)).toBeNull();
@@ -281,9 +299,46 @@ describe("A snapshot that does not list a type cannot conclude the extension is 
       {
         name: "corporate-messenger",
         version: "1.2.0",
-        nodeTypes: ["corporate-messenger.send"],
+        nodes: MANIFEST.nodes,
       },
     ]);
+  });
+
+  test("failed metadata preserves declarations and the last published snapshot", async () => {
+    const registry = registryWithExtension();
+    setActiveExtensionRegistry(registry);
+    writeExtensionRegistrySnapshot(registry, stateDir);
+    const before = fs.readFileSync(extensionRegistrySnapshotPath(stateDir), "utf8");
+
+    const outcome = await syncExtensionRegistryFromRunner(
+      { listExtensions: async () => Promise.reject(new Error("incompatible metadata")) },
+      { stateDir },
+    );
+
+    expect(outcome.synced).toBe(false);
+    expect(registry.origin).toBe("unreachable");
+    expect(registry.has("corporate-messenger.send")).toBe(true);
+    expect(fs.readFileSync(extensionRegistrySnapshotPath(stateDir), "utf8")).toBe(before);
+  });
+
+  test("failed startup does not replace the last published snapshot", async () => {
+    writeExtensionRegistrySnapshot(registryWithExtension(), stateDir);
+    const before = fs.readFileSync(extensionRegistrySnapshotPath(stateDir), "utf8");
+
+    const outcome = await initializeExtensionsForProcess({
+      runnerUrl: "http://runner.local",
+      createClient: () => ({
+        listExtensions: async () => Promise.reject(new Error("connection refused")),
+        invoke: async () => ({ output: {} }),
+      }),
+      publishSnapshot: true,
+      stateDir,
+    });
+
+    expect(outcome.synced).toBe(false);
+    expect(outcome.publication).toBeUndefined();
+    expect(getActiveExtensionRegistry()!.origin).toBe("unreachable");
+    expect(fs.readFileSync(extensionRegistrySnapshotPath(stateDir), "utf8")).toBe(before);
   });
 
   test("reports failure of the final snapshot write", async () => {

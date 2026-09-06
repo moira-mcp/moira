@@ -115,13 +115,18 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
   }
 
   /**
-   * Built-in types come from the handler map; a namespaced type is served by the extension
-   * handler only when the registry actually knows it.
+   * Built-in types come from the handler map. A namespaced type is also served by the extension
+   * handler while a configured registry is unreachable, so that state can follow the node's normal
+   * error route instead of being misreported as an absent installation.
    */
   private resolveHandler(node: GraphNode): INodeHandler | undefined {
     const builtin = this.nodeHandlers.get(node.type);
     if (builtin) return builtin;
-    if (isExtensionNode(node) && this.extensionHandler && this.extensionRegistry?.has(node.type)) {
+    if (
+      isExtensionNode(node) &&
+      this.extensionHandler &&
+      (this.extensionRegistry?.has(node.type) || this.extensionRegistry?.origin === "unreachable")
+    ) {
       return this.extensionHandler;
     }
     return undefined;
