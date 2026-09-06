@@ -24,11 +24,12 @@ Persistent audit trail for:
 - Query by userId, action, date range
 - Pagination support
 
-**3. Service Layer** (`packages/shared/src/services/`)
+**3. Service and Repository Boundaries**
 
 - `WorkflowService` - workflow CRUD with automatic audit
 - `ExecutionService` - execution lifecycle with automatic audit
-- `SettingsService` - settings management with automatic audit
+- `SettingsService` - database-backed settings management with automatic audit
+- `DatabaseRepository` - routes manifest-declared extension settings to their separate value store and writes equivalent audit events without recording secret plaintext
 - Services obtain the source from the AsyncLocalStorage context automatically
 
 **4. Audit Helpers**
@@ -124,7 +125,7 @@ Database INSERT → auditLog table (with source)
 
 ### Mandatory Pattern
 
-**IMPORTANT:** All data-changing operations MUST go through the Service Layer to guarantee audit logging.
+**IMPORTANT:** Data-changing operations must go through an audited boundary. The service layer owns ordinary writes. `DatabaseRepository` is the unified settings boundary because it delegates database-backed values to `SettingsService` and audits manifest-declared extension values stored outside that service.
 
 ```
 ✅ CORRECT:
@@ -140,16 +141,18 @@ Route/Tool → Repository → Database (audit lost!)
 
 **Auth hooks** may use AuditRepository directly - this is Better Auth infrastructure code, not business logic.
 
+`DatabaseRepository` may use `ExtensionSettingsRepository` for a setting declared by an installed extension manifest. The ordinary value table requires a stored definition, while extension definitions are not stored. This path writes the value mutation and its `SETTINGS_SET` or `SETTINGS_DELETE` record in one SQLite transaction and masks encrypted changes as `[encrypted]`; an audit insert failure rolls the value mutation back.
+
 ### Rules
 
-1. **Forbidden** to use Repositories directly for write operations in routes/tools
+1. **Forbidden** to use storage repositories directly for write operations in routes/tools; extension-aware callers use `DatabaseRepository`
 2. **Required** to use Services for all CRUD operations:
    - `getWorkflowService()` for workflows
    - `getExecutionService()` for executions
    - `getSettingsService()` for user settings
    - `getGlobalSettingsService()` for admin global settings
 3. **Read operations** may use repositories directly (no audit needed)
-4. **DatabaseRepository** in workflow-engine uses Services internally for write operations
+4. **DatabaseRepository** in workflow-engine uses services for ordinary writes and performs the documented audited extension-setting exception
 
 ### Available Services
 
@@ -328,7 +331,7 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 - `SETTINGS_SET` - user set a setting value
 - `SETTINGS_DELETE` - user deleted a setting
 
-**Logged via:** SettingsService (automatic)
+**Logged via:** SettingsService for database-backed settings; DatabaseRepository for manifest-declared extension settings
 
 ### Note Events
 
@@ -468,11 +471,13 @@ await executionService.start(execution); // EXECUTION_START
 await executionService.step(execution, nodeId); // EXECUTION_STEP
 await executionService.complete(execution); // EXECUTION_COMPLETE
 
-// Settings operations - audit logged automatically
+// Database-backed settings operations - audit logged automatically
 const settingsService = getSettingsService();
 await settingsService.set(userId, key, value); // SETTINGS_SET
 await settingsService.delete(userId, key); // SETTINGS_DELETE
 ```
+
+Manifest-declared extension settings use `DatabaseRepository.setSetting()` and `deleteUserSettingValue()` so their separate value row and the same audit action commit atomically.
 
 #### Express Route Example (Manual Audit)
 
@@ -1050,25 +1055,25 @@ API authorization is verified by tests:
 The full set of `AuditAction` types is defined in `packages/shared/src/audit/actions.ts`.
 Every action type has call sites in the codebase, logged via the source noted below:
 
-| Category              | Logged via                          |
-| --------------------- | ----------------------------------- |
-| Auth events           | ✅ Via Better Auth hooks            |
-| User profile          | ✅ Via REST API                     |
-| OAuth consent         | ✅ Via REST API                     |
-| Workflow              | ✅ Via WorkflowService              |
-| Workflow sharing      | ✅ Via WorkflowSharingService       |
-| Execution             | ✅ Via ExecutionService + MCPEngine |
-| Attempt events        | ✅ Via MCPEngine + MCP tools        |
-| User settings         | ✅ Via SettingsService              |
-| Notes                 | ✅ Via NoteService + MCP tools      |
-| Artifacts             | ✅ Via ArtifactService + MCP tools  |
-| Tokens                | ✅ Via TokenManager / REST API      |
-| Admin user mgmt       | ✅ Via REST API                     |
-| Admin security        | ✅ Via REST API                     |
-| Admin settings        | ✅ Via REST API                     |
-| Admin global settings | ✅ Via GlobalSettingsService        |
-| Admin execution       | ✅ Via REST API                     |
-| Admin database        | ✅ Via REST API                     |
-| Admin artifacts       | ✅ Via REST API                     |
-| Execution lock mgmt   | ✅ Via LockService                  |
-| MCP read ops          | ✅ Via MCP tools                    |
+| Category              | Logged via                                  |
+| --------------------- | ------------------------------------------- |
+| Auth events           | ✅ Via Better Auth hooks                    |
+| User profile          | ✅ Via REST API                             |
+| OAuth consent         | ✅ Via REST API                             |
+| Workflow              | ✅ Via WorkflowService                      |
+| Workflow sharing      | ✅ Via WorkflowSharingService               |
+| Execution             | ✅ Via ExecutionService + MCPEngine         |
+| Attempt events        | ✅ Via MCPEngine + MCP tools                |
+| User settings         | ✅ Via SettingsService + DatabaseRepository |
+| Notes                 | ✅ Via NoteService + MCP tools              |
+| Artifacts             | ✅ Via ArtifactService + MCP tools          |
+| Tokens                | ✅ Via TokenManager / REST API              |
+| Admin user mgmt       | ✅ Via REST API                             |
+| Admin security        | ✅ Via REST API                             |
+| Admin settings        | ✅ Via REST API                             |
+| Admin global settings | ✅ Via GlobalSettingsService                |
+| Admin execution       | ✅ Via REST API                             |
+| Admin database        | ✅ Via REST API                             |
+| Admin artifacts       | ✅ Via REST API                             |
+| Execution lock mgmt   | ✅ Via LockService                          |
+| MCP read ops          | ✅ Via MCP tools                            |

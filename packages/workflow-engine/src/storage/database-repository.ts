@@ -11,6 +11,7 @@ import {
   WorkflowRepository,
   ExecutionRepository,
   SettingsRepository,
+  ExtensionSettingsRepository,
   AuditRepository,
   getWorkflowService,
   getExecutionService,
@@ -32,13 +33,38 @@ import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { WorkflowExecution } from "../types/base-types.js";
 import type { ReminderMutation, ReminderMutationResult } from "../types/base-types.js";
-import { createLogger } from "@mcp-moira/shared";
+import { createLogger, ValidationError, AuditAction, getAuditSource } from "@mcp-moira/shared";
+import {
+  extensionSettingDefinition,
+  extensionSettingDefinitions,
+  mergeSettingDefinitions,
+  prepareExtensionSettingValue,
+} from "../extensions/extension-settings.js";
+import { maskEncryptedValue } from "../utils/encryption.js";
+
+function convertSettingValue(raw: string, type: SettingDefinition["type"]): unknown {
+  switch (type) {
+    case "number":
+      return Number(raw);
+    case "boolean":
+      return raw === "true" || raw === "1";
+    case "json":
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    default:
+      return raw;
+  }
+}
 
 export class DatabaseRepository implements IDataRepository {
   // Repositories for read operations
   private workflowRepo: WorkflowRepository;
   private executionRepo: ExecutionRepository;
   private settingsRepo: SettingsRepository;
+  private extensionSettingsRepo: ExtensionSettingsRepository;
   private auditRepo: AuditRepository;
 
   // Services for write operations (with automatic audit)
@@ -57,6 +83,7 @@ export class DatabaseRepository implements IDataRepository {
     this.workflowRepo = new WorkflowRepository(db);
     this.executionRepo = new ExecutionRepository(db);
     this.settingsRepo = new SettingsRepository(db);
+    this.extensionSettingsRepo = new ExtensionSettingsRepository(db);
     this.auditRepo = new AuditRepository(db);
 
     // Get singleton services for write operations
@@ -277,42 +304,182 @@ export class DatabaseRepository implements IDataRepository {
   // === Settings Operations ===
   // Write operations use SettingsService for automatic audit
 
+  /**
+   * Settings of installed extensions are served from here as well, so that every consumer of this
+   * repository — the settings screen, the admin screen, the MCP tool, the execution engine — sees
+   * one list and one value. Which half answers is decided by the definition: a declaration from a
+   * manifest means the value lives in the extension value store, because the ordinary value table
+   * cannot hold a value whose definition is not a row in the database.
+   */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getSetting<T = any>(userId: string, key: string): Promise<T | null> {
+    const declared = extensionSettingDefinition(key);
+    if (declared) {
+      const stored = await this.extensionSettingsRepo.getValue(userId, key);
+      const raw = stored ?? declared.defaultValue ?? null;
+      return raw === null ? null : (convertSettingValue(raw, declared.type) as T);
+    }
     return await this.settingsRepo.getSetting<T>(userId, key);
   }
 
   async getRawSettingValue(userId: string, key: string): Promise<string | null> {
+    if (extensionSettingDefinition(key)) {
+      return await this.extensionSettingsRepo.getRawValue(userId, key);
+    }
     return await this.settingsRepo.getRawSettingValue(userId, key);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async setSetting(userId: string, key: string, value: any): Promise<void> {
+    const declared = extensionSettingDefinition(key);
+    if (declared) {
+      // The settings screen sends what the field held, and a structural setting's field is a
+      // textarea — so a `json` setting arrives as text. Parse before checking, or the declared
+      // object schema would be applied to a string and reject every correct value an administrator
+      // could type.
+      const candidate = prepareExtensionSettingValue(declared, value);
+      if (candidate.problem) {
+        // Named refusal rather than a silently unsaved value: an administrator must be able to tell
+        // a rejected value from one that was accepted and then read back empty.
+        throw new ValidationError(
+          `Value for setting '${key}' does not satisfy type '${declared.type}' and the schema declared by extension '${declared.extensionName}': ${candidate.problem}`,
+          { key, extensionName: declared.extensionName },
+        );
+      }
+      // Whether the value is encrypted comes from the declaration, not from the caller: an
+      // administrator saving a token must not be able to store it in the clear by accident.
+      const serialised =
+        declared.type === "json" ? JSON.stringify(candidate.value) : String(candidate.value);
+      // Audited like a stored setting: the value store is different, but "who changed which setting
+      // and when" is the same question, and an unaudited half would make the log lie by omission.
+      // The value itself is never recorded for an encrypted setting. Both rows share one database
+      // transaction so a failed audit insert cannot leave a saved value that the caller reports as
+      // refused.
+      await this.extensionSettingsRepo.setValueWithAudit(
+        userId,
+        key,
+        serialised,
+        declared.type === "encrypted",
+        {
+          action: AuditAction.SETTINGS_SET,
+          resource: "setting",
+          resourceId: key,
+          source: getAuditSource(),
+          metadata: JSON.stringify({
+            category: declared.category,
+            extensionName: declared.extensionName,
+          }),
+          changes: JSON.stringify([
+            {
+              field: key,
+              newValue: declared.type === "encrypted" ? "[encrypted]" : serialised,
+            },
+          ]),
+        },
+      );
+      return;
+    }
     // Use SettingsService for automatic audit
     await this.settingsService.set(userId, key, value);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getSettings(userId: string, category?: string): Promise<Record<string, any>> {
-    return await this.settingsRepo.getSettings(userId, category);
+    const stored = await this.settingsRepo.getSettings(userId, category);
+    return { ...stored, ...(await this.extensionSettingsForInternalUse(userId, category)) };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getSettingsForApi(userId: string, category?: string): Promise<Record<string, any>> {
-    return await this.settingsRepo.getSettingsForApi(userId, category);
+    const stored = await this.settingsRepo.getSettingsForApi(userId, category);
+    return { ...stored, ...(await this.extensionSettingsForApi(userId, category)) };
+  }
+
+  /** Decrypted typed values for trusted in-process consumers. */
+  private async extensionSettingsForInternalUse(
+    userId: string,
+    category?: string,
+  ): Promise<Record<string, unknown>> {
+    const declarations = extensionSettingDefinitions().filter(
+      (definition) => category === undefined || definition.category === category,
+    );
+    const values: Record<string, unknown> = {};
+    for (const definition of declarations) {
+      const raw = await this.extensionSettingsRepo.getRawValue(userId, definition.key);
+      const hasEffectiveValue =
+        raw !== null || (definition.defaultValue !== null && definition.defaultValue !== undefined);
+      if (!hasEffectiveValue) continue;
+      const value = await this.getSetting(userId, definition.key);
+      // A stored/default JSON `null` is a value, while no row and no default is absence. Checking
+      // the source separately preserves that distinction even though getSetting uses null as its
+      // general not-found sentinel.
+      values[definition.key] = value;
+    }
+    return values;
+  }
+
+  /**
+   * Extension settings as a consumer-facing map: a set encrypted value appears as a mask of itself,
+   * never as plaintext. The mask is of the stored value, so "set" and "not set" stay distinguishable
+   * — an empty answer for a filled secret would read as an unfilled setting.
+   */
+  private async extensionSettingsForApi(
+    userId: string,
+    category?: string,
+  ): Promise<Record<string, unknown>> {
+    const declarations = extensionSettingDefinitions().filter(
+      (definition) => category === undefined || definition.category === category,
+    );
+    if (declarations.length === 0) return {};
+
+    const values: Record<string, unknown> = {};
+    for (const definition of declarations) {
+      const raw = await this.extensionSettingsRepo.getRawValue(userId, definition.key);
+      if (definition.type === "encrypted") {
+        // Match the built-in settings contract: only a persisted encrypted value is exposed, and
+        // it is exposed as a mask. A manifest default must never become plaintext in an API/MCP
+        // response merely because no user row exists yet.
+        if (raw !== null) values[definition.key] = maskEncryptedValue(raw);
+        continue;
+      }
+      if (raw === null) {
+        if (definition.defaultValue !== null && definition.defaultValue !== undefined) {
+          values[definition.key] = convertSettingValue(definition.defaultValue, definition.type);
+        }
+        continue;
+      }
+      values[definition.key] = convertSettingValue(raw, definition.type);
+    }
+    return values;
   }
 
   async getSettingDefinition(key: string): Promise<SettingDefinition | null> {
+    // The declaration wins, as it does in the merged list and in every value path: one key must not
+    // be described by one source and stored by another.
+    const declared = extensionSettingDefinition(key);
+    if (declared) return declared;
     return await this.settingsRepo.getSettingDefinition(key);
   }
 
   async getSettingDefinitions(category?: string): Promise<SettingDefinition[]> {
-    return await this.settingsRepo.getSettingDefinitions(category);
+    const stored = await this.settingsRepo.getSettingDefinitions(category);
+    return mergeSettingDefinitions(stored, undefined, category);
   }
 
   async createSettingDefinition(
     definition: Omit<SettingDefinition, "createdAt" | "updatedAt">,
   ): Promise<void> {
+    const declared = extensionSettingDefinition(definition.key);
+    if (declared) {
+      // The key is already declared by an installed extension. Storing a row of the same name would
+      // give the key two definitions of different lifetimes — one that disappears with the bundle
+      // and one that does not — and the merged list would have to pick a winner every time it is
+      // read.
+      throw new ValidationError(
+        `Setting '${definition.key}' is declared by extension '${declared.extensionName}' and cannot also be defined in the database`,
+        { key: definition.key, extensionName: declared.extensionName },
+      );
+    }
     // Note: createSettingDefinition requires adminUserId for audit
     // This method is called from MCP tools which have user context
     // For now, keep direct repository call - admin audit handled at higher level
@@ -320,6 +487,15 @@ export class DatabaseRepository implements IDataRepository {
   }
 
   async deleteSettingDefinition(key: string): Promise<void> {
+    const declared = extensionSettingDefinition(key);
+    if (declared) {
+      // Refused by name rather than deleting nothing and reporting success: an extension's
+      // definition is not in the database, and it goes away by removing the bundle.
+      throw new ValidationError(
+        `Setting '${key}' is declared by extension '${declared.extensionName}'; remove the extension to remove the setting`,
+        { key, extensionName: declared.extensionName },
+      );
+    }
     // Note: deleteSettingDefinition requires adminUserId for audit
     // This method is called from MCP tools which have user context
     // For now, keep direct repository call - admin audit handled at higher level
@@ -327,6 +503,20 @@ export class DatabaseRepository implements IDataRepository {
   }
 
   async deleteUserSettingValue(userId: string, key: string): Promise<void> {
+    const declaredForDelete = extensionSettingDefinition(key);
+    if (declaredForDelete) {
+      await this.extensionSettingsRepo.deleteValueWithAudit(userId, key, {
+        action: AuditAction.SETTINGS_DELETE,
+        resource: "setting",
+        resourceId: key,
+        source: getAuditSource(),
+        metadata: JSON.stringify({
+          category: declaredForDelete.category,
+          extensionName: declaredForDelete.extensionName,
+        }),
+      });
+      return;
+    }
     // Use SettingsService for automatic audit
     await this.settingsService.delete(userId, key);
   }

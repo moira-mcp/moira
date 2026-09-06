@@ -19,6 +19,7 @@ import {
   settingNamespaceOf,
 } from "./extension-contract.js";
 import { declaredSchemaProblem } from "./declared-schema.js";
+import { prepareExtensionSettingValue } from "./extension-setting-values.js";
 
 const MAX_NAME_LENGTH = 64;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -205,8 +206,11 @@ export function validateExtensionManifest(candidate: unknown): ExtensionManifest
             );
           }
         }
-        const allowedTypes = ["string", "number", "boolean", "json", "encrypted"];
-        if (typeof declaration.type !== "string" || !allowedTypes.includes(declaration.type)) {
+        const allowedTypes = ["string", "number", "boolean", "json", "encrypted"] as const;
+        const hasValidType =
+          typeof declaration.type === "string" &&
+          (allowedTypes as readonly string[]).includes(declaration.type);
+        if (!hasValidType) {
           reasons.push(`${where}.type must be one of ${allowedTypes.join(", ")}`);
         }
         if (typeof declaration.label !== "string" || declaration.label.length === 0) {
@@ -232,6 +236,24 @@ export function validateExtensionManifest(candidate: unknown): ExtensionManifest
             reasons.push(`${where}.validation must be a JSON Schema object when present`);
           } else {
             collectSchemaProblem(reasons, `${where}.validation`, declaration.validation);
+          }
+        }
+        if (
+          declaration.defaultValue !== undefined &&
+          typeof declaration.defaultValue === "string" &&
+          hasValidType &&
+          (declaration.validation === undefined || isPlainObject(declaration.validation))
+        ) {
+          const prepared = prepareExtensionSettingValue(
+            {
+              key: typeof declaration.key === "string" ? declaration.key : `${where}.defaultValue`,
+              type: declaration.type as ExtensionSettingDeclaration["type"],
+              validation: declaration.validation,
+            },
+            declaration.defaultValue,
+          );
+          if (prepared.problem) {
+            reasons.push(`${where}.defaultValue ${prepared.problem}`);
           }
         }
       });

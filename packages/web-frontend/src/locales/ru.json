@@ -5,6 +5,7 @@
     "reset": "Сбросить",
     "setting": "настройка",
     "settings": "настроек",
+    "extensionCategory": "Расширение: {{extensionName}}",
     "inheritance": {
       "default": "По умолчанию",
       "agent": "Переопределение агента",

@@ -221,15 +221,24 @@ export class ExtensionNodeHandler implements INodeHandler {
         continue;
       }
       const value = await repository.getSetting<unknown>(context.userId, alias);
+      const storedJsonNull =
+        declared.type === "json" &&
+        value === null &&
+        (declared.defaultValue !== null && declared.defaultValue !== undefined
+          ? true
+          : (await repository.getRawSettingValue(context.userId, alias)) !== null);
       // Serialised, not stringified: a structural setting reads back as an object, and `String`
       // would hand the handler `[object Object]` with no error to notice. The transport carries
       // text, so an object crosses as its JSON.
-      resolved[alias] =
-        value === null || value === undefined
+      resolved[alias] = storedJsonNull
+        ? "null"
+        : value === null || value === undefined
           ? null
-          : typeof value === "object"
+          : declared.type === "json"
             ? JSON.stringify(value)
-            : String(value);
+            : typeof value === "object"
+              ? JSON.stringify(value)
+              : String(value);
     }
     return resolved;
   }

@@ -9,12 +9,14 @@
  * everywhere.
  */
 
-import * as AjvModule from "ajv";
 import type { SettingDefinition } from "../interfaces/data-repository.js";
 import type { ExtensionSettingDeclaration } from "./extension-contract.js";
-import { DECLARED_SCHEMA_AJV_OPTIONS, declaredSchemaProblem } from "./declared-schema.js";
 import { ExtensionRegistry } from "./extension-registry.js";
 import { getActiveExtensionRegistry } from "./extension-registry-provider.js";
+export {
+  prepareExtensionSettingValue,
+  validateExtensionSettingValue,
+} from "./extension-setting-values.js";
 
 /** Category an extension's settings appear under on the settings screen. */
 export function extensionSettingsCategory(extensionName: string): string {
@@ -89,84 +91,4 @@ export function extensionSettingDefinition(
   registry: ExtensionRegistry | null = getActiveExtensionRegistry(),
 ): SettingDefinition | null {
   return extensionSettingDefinitions(registry).find((definition) => definition.key === key) ?? null;
-}
-
-// Ajv ships as CommonJS; the engine constructs it through the module default elsewhere too.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ajv = new (AjvModule as any).default(DECLARED_SCHEMA_AJV_OPTIONS);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const validators = new Map<string, any>();
-
-/**
- * Check a value against the schema its declaration carries, returning a readable list of problems
- * or null when the value matches.
- *
- * The schema is applied in full, not as a handful of familiar keywords: an extension may declare a
- * structural setting, and a check that understood only `type` and `enum` would accept any object
- * whatsoever while appearing to validate it.
- */
-export function validateExtensionSettingValue(
-  definition: SettingDefinition,
-  value: unknown,
-): string | null {
-  if (!definition.validation) return null;
-
-  // Keyed by the schema itself, not by the setting key: a new version of an extension replaces its
-  // declarations under the same keys, so a cache keyed by key would go on applying the schema of
-  // the version that has been removed.
-  const cacheKey = `${definition.key}\u0000${definition.validation}`;
-  let validate = validators.get(cacheKey);
-  if (!validate) {
-    let schema: unknown;
-    try {
-      schema = JSON.parse(definition.validation);
-    } catch (error) {
-      // A schema that cannot be parsed is a defect of the manifest, and skipping the check would
-      // turn it into a setting that only looks validated.
-      return `declared validation schema is not valid JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-    // A manifest whose schema does not compile is refused when the bundle is loaded, so reaching
-    // this line means the declaration arrived by some other path — a registry snapshot from another
-    // Moira, a build with a different Ajv. It stays a named refusal rather than an exception, for
-    // the same reason as the unparsable case above: from outside, an exception here is Moira
-    // breaking, not the bundle being wrong.
-    const problem = declaredSchemaProblem(schema);
-    if (problem) return `declared validation schema is not a usable JSON Schema: ${problem}`;
-
-    try {
-      validate = ajv.compile(schema);
-    } catch (error) {
-      // Nothing known can reach this line — the manifest check compiles with the same options, and
-      // a schema that compiles there compiles here. It stays a named refusal rather than an
-      // exception because the alternative, from outside, is Moira breaking on a value an
-      // administrator typed.
-      return `declared validation schema could not be compiled: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
-    }
-    validators.set(cacheKey, validate);
-  }
-
-  if (validate(value)) return null;
-  const errors = (validate.errors ?? []) as Array<{
-    instancePath?: string;
-    message?: string;
-    params?: Record<string, unknown>;
-  }>;
-  return errors
-    .map((issue) => {
-      // The offending property is carried in `params` for keywords that do not put it in the path
-      // (`additionalProperties`, `required`); without it the message names only the parent object,
-      // which is exactly the case an administrator needs help with.
-      const named =
-        issue.params && typeof issue.params.additionalProperty === "string"
-          ? ` '${issue.params.additionalProperty}'`
-          : issue.params && typeof issue.params.missingProperty === "string"
-            ? ` '${issue.params.missingProperty}'`
-            : "";
-      return `${issue.instancePath || "/"} ${issue.message ?? "is invalid"}${named}`;
-    })
-    .join("; ");
 }

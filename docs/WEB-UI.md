@@ -270,10 +270,11 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 - Active Sessions (`SessionsSettings.tsx`): DataListView with session cards, Current Session badge, revoke disabled for current session
 - API Tokens (`ApiTokensSettings.tsx`): DataListView with token cards showing name, prefix (monospace), dates, status badge (Active/Expired/Revoked). Create dialog with name input and expiration select (30d/90d/365d/never). One-time token display dialog with copy button and warning. Revoke with ConfirmDialog (variant="destructive").
 
-**Dynamic Sections (Notifications):**
+**Dynamic Settings Section (Notifications):**
 
-- Categories loaded from `settingDefinition` table (category: "notifications")
-- Telegram settings rendered inline without category subgroups
+- Definitions combine database-backed settings with settings declared by installed extension manifests
+- Telegram settings use the `notifications` category; extension settings use `extension:<extension-name>` and display localized ownership headings
+- Structural values are shown as editable formatted JSON, encrypted values remain masked, and a refused save stays editable while its server reason is shown
 - Uses SettingsEditor with `collapsible={false}` for flat Card rendering
 - Test notification button shown when telegram settings detected
 
@@ -288,6 +289,8 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 
 - Loads user profile via GET /api/user/profile
 - Fetches dynamic settings definitions via GET /api/settings/definitions
+- Fetches masked current values via GET /api/settings
+- Saves one edited dynamic value through bulk PUT /api/settings and applies the returned saved/refused result
 - Updates profile via PATCH /api/user/profile
 - Changes password via POST /api/user/change-password
 - Resends verification via POST /api/user/resend-verification
@@ -729,6 +732,7 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 **Features:**
 
 - CRUD operations for setting definitions (schema)
+- Definitions declared by installed extension manifests are visible as protected, read-only definitions and are changed only through the extension bundle
 - Protected definitions cannot be deleted (marked with lock icon)
 - Export schema to JSON file
 - Import schema from JSON file with preview

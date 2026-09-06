@@ -5,6 +5,7 @@
     "reset": "Reset",
     "setting": "setting",
     "settings": "settings",
+    "extensionCategory": "Extension: {{extensionName}}",
     "inheritance": {
       "default": "Default",
       "agent": "Agent Override",

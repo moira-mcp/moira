@@ -157,7 +157,23 @@ describe("Both repository implementations agree about extension settings", () =>
     const registry = new ExtensionRegistry();
     registry.register({
       ...MANIFEST,
-      settings: [{ key: "corporate-messenger.token", type: "string", label: "Token" }],
+      settings: [
+        { key: "corporate-messenger.token", type: "string", label: "Token" },
+        {
+          key: "corporate-messenger.empty-default",
+          type: "string",
+          label: "Empty default",
+          defaultValue: "",
+        },
+        {
+          key: "corporate-messenger.default-null",
+          type: "json",
+          label: "Default null",
+          defaultValue: "null",
+        },
+        { key: "corporate-messenger.stored-null", type: "json", label: "Stored null" },
+        { key: "corporate-messenger.unset", type: "json", label: "Unset" },
+      ],
     });
     setActiveExtensionRegistry(registry);
 
@@ -168,6 +184,23 @@ describe("Both repository implementations agree about extension settings", () =>
     expect(await repository.getSetting("user-1", "corporate-messenger.token")).toBe(
       "value-from-admin",
     );
+
+    await repository.setSetting("user-1", "corporate-messenger.stored-null", null);
+    expect(await repository.getSetting("user-1", "corporate-messenger.empty-default")).toBe("");
+    expect(await repository.getSetting("user-1", "corporate-messenger.default-null")).toBeNull();
+    expect(await repository.getSetting("user-1", "corporate-messenger.stored-null")).toBeNull();
+
+    for (const settings of [
+      await repository.getSettings("user-1"),
+      await repository.getSettingsForApi("user-1"),
+    ]) {
+      expect(settings["corporate-messenger.empty-default"]).toBe("");
+      expect(Object.hasOwn(settings, "corporate-messenger.default-null")).toBe(true);
+      expect(settings["corporate-messenger.default-null"]).toBeNull();
+      expect(Object.hasOwn(settings, "corporate-messenger.stored-null")).toBe(true);
+      expect(settings["corporate-messenger.stored-null"]).toBeNull();
+      expect(Object.hasOwn(settings, "corporate-messenger.unset")).toBe(false);
+    }
   });
 });
 

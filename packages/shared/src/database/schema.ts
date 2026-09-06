@@ -394,6 +394,31 @@ export const noteVersion = sqliteTable(
 // Only admins can view and modify
 // Metadata stored in table for dynamic UI generation
 
+/**
+ * Values of settings declared by extension manifests.
+ *
+ * A separate table on purpose. `userSettingValue.settingKey` is a foreign key into
+ * `settingDefinition`, and an extension's definition never enters the database — it lives in the
+ * manifest and disappears with the bundle. There is deliberately no foreign key here: removing an
+ * extension must leave the values an administrator entered, so that reinstalling it restores a
+ * working state instead of an empty form.
+ */
+export const extensionSettingValue = sqliteTable(
+  "extensionSettingValue",
+  {
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    settingKey: text("settingKey").notNull(),
+    value: text("value").notNull(),
+    encrypted: integer("encrypted", { mode: "boolean" }).notNull().default(false),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.settingKey] }),
+  }),
+);
+
 export const globalSetting = sqliteTable("globalSetting", {
   key: text("key").primaryKey(),
   value: text("value"), // Nullable - set default in migration

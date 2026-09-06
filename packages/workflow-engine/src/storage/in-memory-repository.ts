@@ -8,6 +8,7 @@ import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/
 import {
   extensionSettingDefinition,
   mergeSettingDefinitions,
+  prepareExtensionSettingValue,
 } from "../extensions/extension-settings.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
@@ -602,7 +603,7 @@ export class InMemoryRepository implements IDataRepository {
     let rawValue: string;
 
     if (!userValue) {
-      if (!definition.defaultValue) {
+      if (definition.defaultValue === null || definition.defaultValue === undefined) {
         return null;
       }
       rawValue = definition.defaultValue;
@@ -625,13 +626,25 @@ export class InMemoryRepository implements IDataRepository {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async setSetting(userId: string, key: string, value: any): Promise<void> {
-    const definition = extensionSettingDefinition(key) ?? this.settingDefinitions.get(key);
+    const declared = extensionSettingDefinition(key);
+    const definition = declared ?? this.settingDefinitions.get(key);
     if (!definition) {
       throw new Error(`Setting definition not found: ${key}`);
     }
 
+    if (declared) {
+      const prepared = prepareExtensionSettingValue(declared, value);
+      if (prepared.problem) {
+        throw new ValidationError(
+          `Value for setting '${key}' does not satisfy type '${declared.type}' and the schema declared by extension '${declared.extensionName}': ${prepared.problem}`,
+          { key, extensionName: declared.extensionName },
+        );
+      }
+      value = prepared.value;
+    }
+
     let stringValue: string;
-    if (typeof value === "object" && value !== null) {
+    if (declared?.type === "json") {
       stringValue = JSON.stringify(value);
     } else {
       stringValue = String(value);
@@ -660,9 +673,10 @@ export class InMemoryRepository implements IDataRepository {
     const result: Record<string, any> = {};
 
     for (const def of definitions) {
-      const value = await this.getSetting(userId, def.key);
-      if (value !== null) {
-        result[def.key] = value;
+      const hasStoredValue = this.settingValues.get(userId)?.has(def.key) ?? false;
+      const hasDefault = def.defaultValue !== null && def.defaultValue !== undefined;
+      if (hasStoredValue || hasDefault) {
+        result[def.key] = await this.getSetting(userId, def.key);
       }
     }
 
@@ -687,9 +701,10 @@ export class InMemoryRepository implements IDataRepository {
           result[def.key] = "[encrypted]";
         }
       } else {
-        const value = await this.getSetting(userId, def.key);
-        if (value !== null) {
-          result[def.key] = value;
+        const hasStoredValue = this.settingValues.get(userId)?.has(def.key) ?? false;
+        const hasDefault = def.defaultValue !== null && def.defaultValue !== undefined;
+        if (hasStoredValue || hasDefault) {
+          result[def.key] = await this.getSetting(userId, def.key);
         }
       }
     }
