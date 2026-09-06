@@ -343,8 +343,11 @@ Bearer token received
 OAuth access tokens and persistent API tokens use the same catalog lifecycle after their existing
 credential-validity and account-admission checks:
 
-- New and migrated credentials may have a null `toolsVersion`; token issuance does not mark the
-  catalog initialized.
+- A new OAuth authorization, a new persistent token, or a migrated credential may have a null
+  `toolsVersion`; issuance does not mark a catalog initialized.
+- OAuth refresh rotates the access-token row and copies the predecessor's exact `toolsVersion` to
+  the successor before returning it. Current remains current, stale remains stale, and null remains
+  uninitialized.
 - A matching `toolsVersion` permits ordinary MCP requests.
 - A null or stale `toolsVersion` returns HTTP 426 for ordinary requests.
 - An SDK-valid singleton JSON-RPC `initialize` request may proceed with a null or stale revision. The
@@ -353,9 +356,11 @@ credential-validity and account-admission checks:
 - Error responses, notification-shaped input, malformed JSON-RPC, and batches do not write the
   revision. The conditional update also rechecks credential identity, revocation, and expiry.
 
-Reconnect uses the same still-valid OAuth or persistent token. Catalog refresh neither creates nor
-rotates a credential. Authentication failures and blocked, pending, or otherwise denied accounts
-retain their normal 401/403 responses and cannot use initialize to bypass admission.
+Reconnect or reinitialize with the currently valid OAuth or persistent credential. Reconnecting
+does not itself rotate credentials; automatic OAuth refresh may rotate access tokens independently
+and preserves the predecessor's catalog state. Authentication failures and blocked, pending, or
+otherwise denied accounts retain their normal 401/403 responses and cannot use initialize to bypass
+admission.
 
 **Client setup instructions:**
 

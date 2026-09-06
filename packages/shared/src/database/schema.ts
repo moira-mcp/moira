@@ -114,7 +114,7 @@ export const oauthAccessToken = sqliteTable("oauthAccessToken", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   scopes: text("scopes").notNull(),
-  // Static MCP catalog revision accepted by successful initialization.
+  // Static MCP catalog revision accepted by initialization or inherited during OAuth refresh.
   toolsVersion: text("toolsVersion"),
   createdAt: text("createdAt").notNull(),
   updatedAt: text("updatedAt").notNull(),

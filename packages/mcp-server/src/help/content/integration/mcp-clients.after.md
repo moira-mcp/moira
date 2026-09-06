@@ -20,8 +20,9 @@ Moira supports two authentication methods:
    token 6. Subsequent requests include token
 
 :::note
-OAuth token refresh is handled automatically. Catalog refresh is a separate MCP initialization
-step described below. If the credential expires, re-authentication may be required.
+OAuth token refresh is handled automatically and preserves the catalog state accepted by the
+previous access token. Catalog refresh after a server contract change is a separate MCP
+initialization step described below. If the credential expires, re-authentication may be required.
 :::
 
 ### API Tokens
@@ -61,7 +62,8 @@ tokens.
 When the catalog changes, an ordinary request made with a credential that has not initialized the
 current catalog returns HTTP 426 with `upgrade_required`. Reconnect or reinitialize the MCP server
 with the same credential. A successful initialize refreshes the catalog for that credential; it
-does not require a new API token or rotate the existing token.
+does not require a new API token. OAuth access tokens may rotate independently during automatic
+refresh without losing their current, stale, or uninitialized catalog state.
 
 :::note
 Authentication and account checks run before catalog refresh. A revoked or expired credential, or

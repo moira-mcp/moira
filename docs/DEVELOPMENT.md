@@ -673,8 +673,9 @@ Docker commands route through configured context: `tests/utils/docker-command.ts
 ### MCP Version Check
 
 Server validates the computed MCP tool-contract revision after authentication and account admission
-for both OAuth access tokens and persistent API tokens. Token issuance leaves `toolsVersion` null;
-successful MCP initialization records acceptance.
+for both OAuth access tokens and persistent API tokens. New authorization and API-token issuance
+leave `toolsVersion` null; successful MCP initialization records acceptance. OAuth refresh creates
+a successor access-token row with the predecessor's exact revision.
 
 **Behavior:**
 
@@ -688,16 +689,16 @@ successful MCP initialization records acceptance.
 **After the contract revision changes:**
 
 ```bash
-# Client receives HTTP 426 error with message:
-# "MCP tool contract changed. Run '/mcp reconnect moira' to refresh tools."
+# Client receives HTTP 426 with upgrade_required and reconnect/reinitialize guidance.
 
 # In Claude Code:
 /mcp reconnect moira-local  # Local Docker
 ```
 
-Reconnect reuses the existing still-valid OAuth or persistent credential. Catalog refresh does not
-rotate a token. Notifications, malformed requests, batches, and initialize errors do not stamp the
-credential.
+Reconnect or reinitialize with the currently valid OAuth or persistent credential. Reconnecting
+does not itself rotate a token. Automatic OAuth refresh may rotate access tokens independently; the
+successor inherits the predecessor's exact current, stale, or null revision. Notifications,
+malformed requests, batches, and initialize errors do not stamp a credential.
 
 **Revision source:** the deterministic pure contract in `tool-definitions.ts`, including every
 static default and agent/model description variant. `MCP_TOOLS_REVISION` is computed once when the

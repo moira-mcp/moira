@@ -16,7 +16,8 @@ runtime system prompt and cannot be overridden through global settings.
 
 OAuth and API-token clients accept the current static catalog during MCP `initialize`. If an
 ordinary request returns HTTP 426 with `upgrade_required`, reconnect with the same valid credential
-so the client initializes again; catalog refresh does not require token rotation.
+so the client initializes again. Automatic OAuth refresh may rotate the access token and preserves
+the predecessor's catalog state; catalog refresh itself does not require token rotation.
 
 ## Source of Truth
 

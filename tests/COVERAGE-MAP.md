@@ -472,7 +472,7 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/api/auth/mcp-blocked-user.test.ts`
 - `tests/api/auth/mcp-protection.test.ts` — unauthenticated ordinary-request rejection and invalid-bearer rejection before a valid initialize can reach catalog acceptance
-- `tests/api/auth/mcp-version-check.test.ts` — real OAuth issuance leaves credentials uninitialized; null/stale ordinary requests return 426 without mutation; successful same-token initialize stamps only the exact row; concurrent recovery converges; and refresh issuance starts uninitialized
+- `tests/api/auth/mcp-version-check.test.ts` — real OAuth issuance leaves credentials uninitialized; refresh preserves exact null, current, and stale catalog states; null/stale ordinary requests remain gated without mutation; the official SDK initializes only the exact row, continues on a refreshed current token without synthetic reinitialize, and recovers a stale successor through reconnect
 - `tests/api/mcp-spec.test.ts`
 
 **mcp-tools**

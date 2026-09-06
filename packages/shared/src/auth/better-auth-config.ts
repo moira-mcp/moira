@@ -15,7 +15,7 @@ import { getEmailDeliveryStatus, sendEmail } from "../email/index.js";
 import { AuditRepository } from "../database/repositories/audit-repository.js";
 import { AuditAction } from "../audit/actions.js";
 import { user, oauthAccessToken } from "../database/schema.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getBaseUrl, getAuthUrl, getMcpUrl, isProduction } from "../config/urls.js";
 import {
   getBetterAuthSecret,
@@ -122,6 +122,70 @@ async function assertMcpOAuthAccountAccess(userId: string): Promise<void> {
     throw new APIError("FORBIDDEN", {
       message: "Email verification required before authorizing applications",
       code: "EMAIL_NOT_VERIFIED",
+    });
+  }
+}
+
+interface McpTokenRefreshHookContext {
+  path: string;
+  method: string;
+  body?: unknown;
+  context: { returned?: unknown };
+}
+
+async function getReturnedOAuthAccessToken(returned: unknown): Promise<string | null> {
+  let body = returned;
+  if (returned instanceof Response) {
+    if (!returned.ok) return null;
+    body = await returned.clone().json();
+  }
+  if (!body || typeof body !== "object") return null;
+  const accessToken = (body as { access_token?: unknown }).access_token;
+  return typeof accessToken === "string" && accessToken.length > 0 ? accessToken : null;
+}
+
+/** Preserve catalog acceptance when Better Auth rotates an OAuth credential on refresh. */
+async function inheritMcpCatalogRevisionOnRefresh(ctx: McpTokenRefreshHookContext): Promise<void> {
+  if (!ctx.path.endsWith("/mcp/token") || ctx.method !== "POST") return;
+  const body =
+    ctx.body && typeof ctx.body === "object"
+      ? (ctx.body as { grant_type?: unknown; refresh_token?: unknown })
+      : undefined;
+  if (body?.grant_type !== "refresh_token" || typeof body.refresh_token !== "string") return;
+
+  const successorAccessToken = await getReturnedOAuthAccessToken(ctx.context.returned);
+  if (!successorAccessToken) return;
+
+  const db = getDatabase();
+  const [predecessor] = await db
+    .select({
+      userId: oauthAccessToken.userId,
+      clientId: oauthAccessToken.clientId,
+      toolsVersion: oauthAccessToken.toolsVersion,
+    })
+    .from(oauthAccessToken)
+    .where(eq(oauthAccessToken.refreshToken, body.refresh_token))
+    .limit(1);
+  if (!predecessor) {
+    throw new APIError("INTERNAL_SERVER_ERROR", {
+      message: "OAuth refresh predecessor disappeared before catalog state was inherited",
+    });
+  }
+
+  const updated = await db
+    .update(oauthAccessToken)
+    .set({ toolsVersion: predecessor.toolsVersion })
+    .where(
+      and(
+        eq(oauthAccessToken.accessToken, successorAccessToken),
+        eq(oauthAccessToken.userId, predecessor.userId),
+        eq(oauthAccessToken.clientId, predecessor.clientId),
+      ),
+    )
+    .returning({ id: oauthAccessToken.id });
+  if (updated.length !== 1) {
+    throw new APIError("INTERNAL_SERVER_ERROR", {
+      message: "OAuth refresh successor was not uniquely available for catalog state inheritance",
     });
   }
 }
@@ -689,6 +753,7 @@ const baseConfig = {
       }
     }),
     after: createAuthMiddleware(async (ctx) => {
+      await inheritMcpCatalogRevisionOnRefresh(ctx);
       try {
         const newSession = ctx.context.newSession;
         const auditRepo = new AuditRepository(getDatabase());
