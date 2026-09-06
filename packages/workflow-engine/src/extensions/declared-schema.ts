@@ -23,7 +23,9 @@ import * as AjvModule from "ajv";
  * these options, so what the manifest check accepts is what they can compile.
  */
 export const DECLARED_SCHEMA_AJV_OPTIONS = {
-  allErrors: true,
+  // Declared schemas validate request-controlled values in production. Fail fast so one adversarial
+  // value cannot force Ajv to allocate an error for every bad branch/property.
+  allErrors: false,
   strict: false,
   addUsedSchema: false,
 } as const;

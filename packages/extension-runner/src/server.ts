@@ -110,7 +110,7 @@ export class ExtensionRunnerService {
     const declaration = host.manifest.nodes.find((node) => node.type === request.nodeType);
     if (declaration?.outputSchema) {
       let validate = this.outputValidators.get(request.nodeType);
-      if (!validate) {
+      if (typeof validate !== "function") {
         try {
           validate = this.ajv.compile(declaration.outputSchema);
         } catch (error) {
@@ -125,10 +125,17 @@ export class ExtensionRunnerService {
             }`,
           };
         }
-        this.outputValidators.set(request.nodeType, validate!);
+        if (typeof validate !== "function") {
+          return {
+            ok: false,
+            kind: "invalid-output",
+            message: "declared outputSchema did not compile to a validator",
+          };
+        }
+        this.outputValidators.set(request.nodeType, validate);
       }
-      if (!validate!(response.output)) {
-        const errors = (validate!.errors ?? [])
+      if (!validate(response.output)) {
+        const errors = (validate.errors ?? [])
           .map((issue) => `${issue.instancePath || "/"} ${issue.message ?? "is invalid"}`)
           .join("; ");
         return {
