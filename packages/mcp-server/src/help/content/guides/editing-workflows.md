@@ -442,8 +442,10 @@ Fix: Add connection from another node or remove orphaned node.
 Error: Unknown node type 'custom-type'
 ```
 
-Fix: Choose a supported type from the [Nodes reference](/docs/concepts/nodes/); the validator accepts
-exactly the types documented there.
+Fix: Choose a built-in type from the [Nodes reference](/docs/concepts/nodes/). For a namespaced
+extension type, make sure its extension is installed. A validator without authoritative live
+registry data reports the type as unresolved; a live registry that does not contain it reports an
+error.
 
 ## See Also
 

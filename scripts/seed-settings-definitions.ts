@@ -18,7 +18,11 @@ setGlobalService(Service.WEB_BACKEND);
 
 const logger = createLogger({ component: "SeedSettings" });
 
-const initialDefinitions: Omit<SettingDefinition, "createdAt" | "updatedAt">[] = [
+/**
+ * Definitions the installation seeds. Exported so that checks about built-in setting namespaces
+ * compare against the real list instead of a copy that can fall behind it.
+ */
+export const initialDefinitions: Omit<SettingDefinition, "createdAt" | "updatedAt">[] = [
   // ===== Telegram / Notification Settings =====
   {
     key: "telegram.bot_token",

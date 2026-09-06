@@ -41,6 +41,7 @@ import type { WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
 import { renderWorkflowSchema } from "./workflow-schema.js";
 // Import GraphValidator directly to avoid auth dependencies from shared index
 import { GraphValidator } from "@mcp-moira/workflow-engine/validation";
+import { readExtensionRegistrySnapshot } from "@mcp-moira/workflow-engine/extensions";
 // Import directly from workflow-query-service to avoid auth dependencies
 // Uses shared functions for CLI/MCP parity (DRY principle)
 import {
@@ -1071,6 +1072,21 @@ function setDescription(workflow: WorkflowGraph, description: string): WorkflowG
   return workflow;
 }
 
+/**
+ * A validator that knows about custom node types when the server published a registry snapshot.
+ *
+ * The CLI runs outside the container and cannot ask the live registry, so the snapshot in the
+ * state directory is its only source. Its absence is not an error: without it a namespaced type is
+ * reported as unresolvable rather than invalid, which is what the validator already does when it
+ * has no registry.
+ */
+function createWorkflowValidator(): GraphValidator {
+  const snapshot = readExtensionRegistrySnapshot();
+  return snapshot
+    ? new GraphValidator(undefined, { extensionRegistry: snapshot.registry })
+    : new GraphValidator();
+}
+
 // === VALIDATE COMMAND (uses full GraphValidator with JSON Schema) ===
 async function cmdValidateWorkflow(workflow: WorkflowGraph, filePath: string): Promise<void> {
   let executableWorkflow: WorkflowGraph;
@@ -1087,7 +1103,7 @@ async function cmdValidateWorkflow(workflow: WorkflowGraph, filePath: string): P
     process.exitCode = 1;
     return;
   }
-  const validator = new GraphValidator();
+  const validator = createWorkflowValidator();
   const result = await validator.validateUnified(executableWorkflow);
 
   console.log("");
@@ -1466,7 +1482,7 @@ async function syncWorkflow(sourcePath: string, destPath: string): Promise<void>
   synchronizedWorkflow.metadata.author ??= destinationWorkflow.metadata.author;
   synchronizedWorkflow.metadata.tags ??= destinationWorkflow.metadata.tags;
 
-  const validator = new GraphValidator();
+  const validator = createWorkflowValidator();
   const validation = await validator.validateUnified(synchronizedWorkflow);
   const errors = validation.issues.filter((issue) => issue.severity === "error");
   if (errors.length > 0) {

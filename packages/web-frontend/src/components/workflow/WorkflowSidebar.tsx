@@ -29,13 +29,17 @@ import {
   BookOpen,
   ArchiveRestore,
   Files,
+  Puzzle,
+  HelpCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { displayNodeType } from "../../types/node-type-catalog";
 import type { WorkflowGraph as WorkflowGraphType } from "../../types";
+import { NodeSchemaReadout } from "./NodeSchemaReadout";
 
 interface WorkflowSidebarProps {
   /** The workflow data for workflow-level info */
@@ -54,6 +58,10 @@ interface WorkflowSidebarProps {
 // Node type icons
 const NODE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   start: Play,
+  // A type this bundle has no icon of its own for; the catalog says what it is, the icon says only
+  // that it is a node contributed to this installation.
+  catalog: Puzzle,
+  fallback: HelpCircle,
   "agent-directive": Bot,
   condition: GitBranch,
   "telegram-notification": Send,
@@ -73,6 +81,8 @@ const TYPE_COLORS: Record<string, string> = {
   end: "bg-destructive/10 text-destructive",
   expression: "bg-chart-3/10 text-chart-3",
   materialize: "bg-primary/10 text-primary",
+  catalog: "bg-chart-1/10 text-chart-1",
+  fallback: "bg-muted text-muted-foreground",
 };
 
 /**
@@ -191,7 +201,7 @@ const WorkflowInfo: React.FC<{ workflow: WorkflowGraphType }> = ({ workflow }) =
                     className="flex items-center gap-1.5 text-xs text-muted-foreground"
                   >
                     <Icon className="w-3 h-3" />
-                    <span className="truncate">{type.replace("-", " ")}</span>
+                    <span className="truncate">{displayNodeType(type)}</span>
                     <span className="ml-auto font-medium">{count}</span>
                   </div>
                 );
@@ -228,8 +238,18 @@ const NodeDetail: React.FC<{
   const { t } = useTranslation();
 
   const data = node.data as Record<string, unknown>;
-  const nodeType = (node.type || "unknown") as string;
-  const Icon = NODE_ICONS[nodeType] || Bot;
+  // A node drawn from the catalog keeps its real type in the data: `catalog` is how this bundle
+  // renders it, not what the workflow says.
+  const renderedAs = (node.type || "unknown") as string;
+  const nodeType =
+    renderedAs === "catalog" || renderedAs === "fallback"
+      ? ((data.originalType as string) ?? renderedAs)
+      : renderedAs;
+  const Icon = NODE_ICONS[renderedAs] || NODE_ICONS[nodeType] || Bot;
+  const extensionName = data.extensionName as string | undefined;
+  const extensionVersion = data.extensionVersion as string | undefined;
+  const nodeSchema = data.schema as Record<string, unknown> | null | undefined;
+  const nodeConfig = data.config as Record<string, unknown> | undefined;
 
   const directive = data.directive as string | undefined;
   const completionCondition = data.completionCondition as string | undefined;
@@ -251,7 +271,7 @@ const NodeDetail: React.FC<{
           <div
             className={cn(
               "w-9 h-9 rounded-md flex items-center justify-center shrink-0",
-              TYPE_COLORS[nodeType] || "bg-muted text-muted-foreground",
+              TYPE_COLORS[renderedAs] || TYPE_COLORS[nodeType] || "bg-muted text-muted-foreground",
             )}
           >
             <Icon className="w-4.5 h-4.5" />
@@ -261,10 +281,20 @@ const NodeDetail: React.FC<{
               {(data.label as string) || node.id}
             </h3>
             <span
-              className={cn("text-xs px-1.5 py-0.5 rounded font-medium", TYPE_COLORS[nodeType])}
+              className={cn(
+                "text-xs px-1.5 py-0.5 rounded font-medium",
+                TYPE_COLORS[renderedAs] || TYPE_COLORS[nodeType],
+              )}
             >
-              {nodeType.replace("-", " ")}
+              {displayNodeType(nodeType)}
             </span>
+            {extensionName && (
+              <div className="text-xs text-muted-foreground mt-1">
+                {`${t("components.workflowSidebar.providedBy", "Provided by extension")} ${extensionName}${
+                  extensionVersion ? ` ${extensionVersion}` : ""
+                }`}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -375,6 +405,16 @@ const NodeDetail: React.FC<{
           <pre className="text-xs bg-muted p-3 rounded-md overflow-auto max-h-64">
             {JSON.stringify(inputSchema, null, 2)}
           </pre>
+        </Section>
+      )}
+
+      {/* Configuration of a node drawn from the catalog, read against the schema Moira published */}
+      {nodeConfig !== undefined && (
+        <Section
+          title={t("components.workflowSidebar.configuration", "Configuration")}
+          icon={FileJson}
+        >
+          <NodeSchemaReadout schema={nodeSchema ?? null} value={nodeConfig} />
         </Section>
       )}
 

@@ -1,0 +1,22 @@
+{
+  "name": "@mcp-moira/extension-runner",
+  "version": "0.1.0",
+  "description": "Out-of-process runtime that executes Moira extension node handlers",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
+  },
+  "bin": {
+    "moira-extension-runner": "./bin/moira-extension-runner.js"
+  },
+  "dependencies": {
+    "@mcp-moira/extension-sdk": "*",
+    "@mcp-moira/workflow-engine": "*",
+    "ajv": "^8.17.1",
+    "tsx": "^4.20.6"
+  },
+  "private": true
+}

@@ -161,7 +161,12 @@ export const Settings: React.FC = () => {
                   }))}
                   values={values}
                   onSave={async (key, value) => {
-                    await apiClient.updateUserSettings({ [key]: value });
+                    // The endpoint saves what it may and reports the rest, so a refusal arrives as
+                    // a normal response. Treating it as success would leave the screen showing a
+                    // value the server does not hold.
+                    const result = await apiClient.updateUserSettings({ [key]: value });
+                    const refusal = result.refused.find((entry) => entry.key === key);
+                    if (refusal) throw new Error(refusal.reason);
                     setValues((prev) => ({ ...prev, [key]: value }));
                   }}
                   loading={loading}

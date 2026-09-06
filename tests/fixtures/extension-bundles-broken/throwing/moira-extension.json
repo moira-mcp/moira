@@ -1,0 +1,7 @@
+{
+  "apiVersion": "moira.extensions/v1",
+  "name": "throwing",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [{ "type": "throwing.go", "title": "Go", "configSchema": {}, "outputSchema": {} }]
+}

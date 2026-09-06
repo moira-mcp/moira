@@ -5,6 +5,11 @@
 
 import { randomUUID } from "node:crypto";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
+import {
+  extensionSettingDefinition,
+  mergeSettingDefinitions,
+  prepareExtensionSettingValue,
+} from "../extensions/extension-settings.js";
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
   WorkflowExecution,
@@ -587,7 +592,7 @@ export class InMemoryRepository implements IDataRepository {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async getSetting<T = any>(userId: string, key: string): Promise<T | null> {
-    const definition = this.settingDefinitions.get(key);
+    const definition = extensionSettingDefinition(key) ?? this.settingDefinitions.get(key);
     if (!definition) {
       return null;
     }
@@ -598,7 +603,7 @@ export class InMemoryRepository implements IDataRepository {
     let rawValue: string;
 
     if (!userValue) {
-      if (!definition.defaultValue) {
+      if (definition.defaultValue === null || definition.defaultValue === undefined) {
         return null;
       }
       rawValue = definition.defaultValue;
@@ -621,12 +626,27 @@ export class InMemoryRepository implements IDataRepository {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async setSetting(userId: string, key: string, value: any): Promise<void> {
-    const definition = this.settingDefinitions.get(key);
+    const declared = extensionSettingDefinition(key);
+    const definition = declared ?? this.settingDefinitions.get(key);
     if (!definition) {
       throw new Error(`Setting definition not found: ${key}`);
     }
 
+    if (declared) {
+      const prepared = prepareExtensionSettingValue(declared, value);
+      if (prepared.problem) {
+        throw new ValidationError(
+          `Value for setting '${key}' does not satisfy type '${declared.type}' and the schema declared by extension '${declared.extensionName}': ${prepared.problem}`,
+          { key, extensionName: declared.extensionName },
+        );
+      }
+      value = prepared.value;
+    }
+
     let stringValue: string;
+    // Match the production repository's storage boundary: structural values are serialized before
+    // type conversion reads them back. Limiting this to manifest-declared JSON would make ordinary
+    // stored JSON definitions become "[object Object]" only in the in-memory implementation.
     if (typeof value === "object" && value !== null) {
       stringValue = JSON.stringify(value);
     } else {
@@ -656,9 +676,10 @@ export class InMemoryRepository implements IDataRepository {
     const result: Record<string, any> = {};
 
     for (const def of definitions) {
-      const value = await this.getSetting(userId, def.key);
-      if (value !== null) {
-        result[def.key] = value;
+      const hasStoredValue = this.settingValues.get(userId)?.has(def.key) ?? false;
+      const hasDefault = def.defaultValue !== null && def.defaultValue !== undefined;
+      if (hasStoredValue || hasDefault) {
+        result[def.key] = await this.getSetting(userId, def.key);
       }
     }
 
@@ -683,9 +704,10 @@ export class InMemoryRepository implements IDataRepository {
           result[def.key] = "[encrypted]";
         }
       } else {
-        const value = await this.getSetting(userId, def.key);
-        if (value !== null) {
-          result[def.key] = value;
+        const hasStoredValue = this.settingValues.get(userId)?.has(def.key) ?? false;
+        const hasDefault = def.defaultValue !== null && def.defaultValue !== undefined;
+        if (hasStoredValue || hasDefault) {
+          result[def.key] = await this.getSetting(userId, def.key);
         }
       }
     }
@@ -694,11 +716,15 @@ export class InMemoryRepository implements IDataRepository {
   }
 
   async getSettingDefinition(key: string): Promise<SettingDefinition | null> {
-    return this.settingDefinitions.get(key) || null;
+    // Settings declared by installed extensions are visible here for the same reason they are in
+    // the database repository: two implementations of the same interface that disagree about which
+    // settings exist would make a test green while the product refuses the very same key. The
+    // declaration wins over a stored row of the same key, as it does there.
+    return extensionSettingDefinition(key) ?? this.settingDefinitions.get(key) ?? null;
   }
 
   async getSettingDefinitions(category?: string): Promise<SettingDefinition[]> {
-    const all = Array.from(this.settingDefinitions.values());
+    const all = mergeSettingDefinitions(Array.from(this.settingDefinitions.values()));
 
     if (category) {
       return all.filter((d) => d.category === category);

@@ -162,6 +162,13 @@
       "when": 1788516000000,
       "tag": "0021_static_tool_descriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1788602400000,
+      "tag": "0022_extension_setting_values",
+      "breakpoints": true
     }
   ]
 }

@@ -15,6 +15,7 @@ describe("MCP tools revision contract", () => {
         serverVersion: "1.3.0",
         toolsRevision: MCP_TOOLS_REVISION,
         clientVersion: "unknown",
+        hint: "Reconnect or reinitialize this Moira MCP connection to refresh tools.",
       }),
     });
 

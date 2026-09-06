@@ -7,7 +7,10 @@ Nodes are the building blocks of Moira workflows. Each node represents a step in
 
 ## Node Types
 
-Moira supports interactive node types and automatic node types:
+The list below is Moira's built-in set. An installation may also expose namespaced node types such
+as `extension-name.node-name` from installed extensions. The live extension registry supplies their
+configuration schemas to validation, while Moira's node-type catalog describes them to the workflow
+viewer.
 
 ### Start
 
@@ -448,6 +451,18 @@ run or the download fails, report the blocker instead of copying file contents t
 
 See [Materialize Files](/docs/reference/materialize/) for the complete archive, path, grant, error,
 and Workflow Management Flow contracts.
+
+## Extension nodes
+
+Installed extensions contribute namespaced types such as `corporate-messenger.send`. Their
+manifest supplies the configuration form and validation schemas; the browser renders those schemas
+with its generic editor and never loads extension frontend code. A successful result is stored under
+the node ID. Input, handler, timeout, runner and output failures follow `connections.error` when it
+exists; otherwise Moira records the diagnostic and pauses on the node for retry.
+
+The live node-type catalogue distinguishes an unavailable extension runner from a live registry in
+which one extension is not installed. See [Writing an Extension](/docs/guides/writing-extensions/)
+for the manifest, SDK and execution contracts.
 
 ## Input Schema
 

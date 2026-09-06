@@ -23,7 +23,17 @@ import {
   WorkflowValidationRequest,
   AdminStatsResponse,
   AdminSystemStatusResponse,
+  NodeTypeCatalog,
 } from "../types";
+
+/**
+ * What a bulk settings save did: the values that were stored, and the keys that were not, each with
+ * the reason. Both fields are always present, so a caller reads one shape either way.
+ */
+export interface BulkSettingsUpdateResult {
+  saved: Record<string, unknown>;
+  refused: Array<{ key: string; reason: string }>;
+}
 
 export interface ExecutionVariableAccess {
   variables: Array<{ name: string; editable: boolean }>;
@@ -397,6 +407,18 @@ export class MoiraApiClient {
   }
 
   /**
+   * Which node types this installation knows, with their titles, origin and schemas.
+   *
+   * The visualization asks Moira instead of consulting a list compiled into this bundle: a type
+   * contributed by an extension exists only in the installation's registry, and a built-in type
+   * added after this bundle was built would otherwise be drawn as unknown.
+   */
+  async getNodeTypes(): Promise<NodeTypeCatalog> {
+    const response = await this.client.get<ApiResponse<NodeTypeCatalog>>("/node-types");
+    return response.data.data!;
+  }
+
+  /**
    * Validate specific workflow
    */
   async validateWorkflow(
@@ -436,15 +458,19 @@ export class MoiraApiClient {
   }
 
   /**
-   * Update user settings
+   * Update user settings.
+   *
+   * The endpoint applies what the user may write and reports the rest: a key requiring the
+   * administrator role is refused by name instead of cancelling the whole request, so the caller
+   * must look at `refused` rather than assume everything landed.
    */
-  async updateUserSettings(settings: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async updateUserSettings(settings: Record<string, unknown>): Promise<BulkSettingsUpdateResult> {
     try {
-      const response = await this.client.put<ApiResponse<Record<string, unknown>>>(
+      const response = await this.client.put<ApiResponse<BulkSettingsUpdateResult>>(
         "/settings",
         settings,
       );
-      return response.data.data || {};
+      return response.data.data ?? { saved: {}, refused: [] };
     } catch (error) {
       if (error instanceof ApiClientError) {
         throw error;

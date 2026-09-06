@@ -15,6 +15,7 @@ export { WorkflowRepository, MAX_WORKFLOW_SIZE_BYTES } from "./repositories/work
 export { ExecutionRepository } from "./repositories/execution-repository.js";
 export type { ExecutionFilter, ExecutionListResult } from "./repositories/execution-repository.js";
 export { SettingsRepository } from "./repositories/settings-repository.js";
+export { ExtensionSettingsRepository } from "./repositories/extension-settings-repository.js";
 export { AuditRepository } from "./repositories/audit-repository.js";
 export { GlobalSettingsRepository } from "./repositories/global-settings-repository.js";
 export { UserRepository } from "./repositories/user-repository.js";

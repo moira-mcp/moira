@@ -1,0 +1,7 @@
+{
+  "apiVersion": "moira.extensions/v99",
+  "name": "future",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [{ "type": "future.send", "title": "Send", "configSchema": {}, "outputSchema": {} }]
+}

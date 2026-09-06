@@ -5,6 +5,7 @@
 import { BaseNode } from "./base-types.js";
 import { StructuredCondition } from "./structured-condition.js";
 import { TelegramNodeConfig } from "./telegram-types.js";
+import { EXTENSION_NODE_TYPE_PATTERN } from "../extensions/extension-contract.js";
 
 /**
  * Variable definition with required description
@@ -285,6 +286,28 @@ export interface MaterializeNode extends BaseNode {
   };
 }
 
+// 14. Extension Node - custom node type contributed by an installed extension.
+// Its `type` is namespaced (`<extension>.<node>`), which is what keeps it disjoint from every
+// built-in type: no built-in type contains a dot. The engine never executes extension code —
+// it sends a serialisable call to the extension runner and stores the returned result in this
+// node's own scope, exactly like any other node.
+export interface ExtensionNode extends BaseNode {
+  type: `${string}.${string}`;
+  /**
+   * Authoring-time configuration. Template-processed and then checked against the declaration's
+   * configSchema at the call, so the values the handler receives are the ones that were checked.
+   */
+  config?: Record<string, unknown>;
+  /** Values mapped into the call; template-processed and checked against the declared inputSchema. */
+  input?: Record<string, unknown>;
+  /** Call deadline in milliseconds; the registry default applies when absent. */
+  timeout?: number;
+  connections: {
+    success: string;
+    error?: string;
+  };
+}
+
 // Union type for all node types
 export type GraphNode =
   | StartNode
@@ -299,7 +322,38 @@ export type GraphNode =
   | UpsertNoteNode
   | LockNode
   | TeleportNode
-  | MaterializeNode;
+  | MaterializeNode
+  | ExtensionNode;
+
+/** Built-in node types — the union without extension-contributed types. */
+export type BuiltinGraphNode = Exclude<GraphNode, ExtensionNode>;
+
+/**
+ * Every built-in node type, as data. Consumers that need to ask "is this type known?" — the
+ * backend's visualization check, tooling, editors — read this instead of keeping their own copy,
+ * because a private copy drifts silently: it is exactly how `materialize` came to be reported as
+ * an unsupported type long after it shipped.
+ */
+export const BUILTIN_NODE_TYPES: readonly BuiltinGraphNode["type"][] = [
+  "start",
+  "end",
+  "agent-directive",
+  "condition",
+  "subgraph",
+  "telegram-notification",
+  "expression",
+  "read-note",
+  "write-note",
+  "upsert-note",
+  "lock",
+  "teleport",
+  "materialize",
+] as const;
+
+/** True when the type is one of the built-in node types. */
+export function isBuiltinNodeType(type: string): type is BuiltinGraphNode["type"] {
+  return (BUILTIN_NODE_TYPES as readonly string[]).includes(type);
+}
 
 // Type guards for node types
 export function isStartNode(node: GraphNode): node is StartNode {
@@ -352,6 +406,15 @@ export function isTeleportNode(node: GraphNode): node is TeleportNode {
 
 export function isMaterializeNode(node: GraphNode): node is MaterializeNode {
   return node.type === "materialize";
+}
+
+/**
+ * A node whose type is namespaced belongs to an extension. Shape alone decides this — whether the
+ * extension is currently installed is a separate question the registry answers, so an unplugged
+ * extension stays distinguishable from an unknown type.
+ */
+export function isExtensionNode(node: GraphNode): node is ExtensionNode {
+  return EXTENSION_NODE_TYPE_PATTERN.test(node.type);
 }
 
 /**
@@ -447,6 +510,15 @@ export function getNextNodeId(node: GraphNode, outputPath: string): string | nul
 // Validation helpers
 export function validateNodeConnections(node: GraphNode): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
+
+  // Extension nodes are handled before the switch so that narrowing removes them from the union
+  // and the exhaustiveness check below keeps protecting the built-in types.
+  if (isExtensionNode(node)) {
+    if (!node.connections?.success) {
+      errors.push('Extension node must have "success" connection');
+    }
+    return { valid: errors.length === 0, errors };
+  }
 
   // Check required connections based on node type
   switch (node.type) {

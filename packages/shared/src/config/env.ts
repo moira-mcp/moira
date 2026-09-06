@@ -374,6 +374,17 @@ class ConfigSingleton {
     return port ? parseInt(port, 10) : 9090;
   }
 
+  /**
+   * Base URL of the extension runner service, or null when this installation runs without
+   * extensions. Absent is an ordinary state, not a misconfiguration: the runner is an optional
+   * companion container.
+   */
+  getExtensionRunnerUrl(): string | null {
+    this.ensureInitialized();
+    const raw = process.env.MOIRA_EXTENSION_RUNNER_URL?.trim();
+    return raw && raw.length > 0 ? raw : null;
+  }
+
   // ============================================================================
   // Logging
   // ============================================================================
@@ -682,6 +693,9 @@ export function getMcpPort(): number {
 }
 export function getMetricsPort(): number {
   return config.getMetricsPort();
+}
+export function getExtensionRunnerUrl(): string | null {
+  return config.getExtensionRunnerUrl();
 }
 export function getLogLevelEnv(): string {
   return config.getLogLevelEnv();

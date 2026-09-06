@@ -39,6 +39,11 @@ import { UpsertNoteHandler } from "../handlers/upsert-note-handler.js";
 import { LockHandler } from "../handlers/lock-handler.js";
 import { TeleportHandler } from "../handlers/teleport-handler.js";
 import { MaterializeHandler } from "../handlers/materialize-handler.js";
+import { ExtensionNodeHandler } from "../handlers/extension-node-handler.js";
+import { getActiveExtensionRunnerClient } from "../extensions/extension-registry-provider.js";
+import { ExtensionRegistry } from "../extensions/extension-registry.js";
+import { IExtensionRunnerClient } from "../extensions/extension-runner-client.js";
+import { isExtensionNode } from "../types/graph-nodes.js";
 import { GraphTemplateProcessor } from "../templates/graph-template-processor.js";
 import { SchemaValidator } from "../utils/schema-validator.js";
 
@@ -50,11 +55,31 @@ import { workflowStepDurationSeconds } from "@mcp-moira/shared";
 
 export class GraphExecutionEngine implements IGraphExecutionEngine {
   private nodeHandlers: Map<string, INodeHandler> = new Map();
+  /** Custom node types known to this instance; null when no extensions are configured. */
+  private extensionRegistry: ExtensionRegistry | null = null;
+  private extensionHandler: ExtensionNodeHandler | null = null;
   private repository: IDataRepository;
   private logger: WorkflowLogger;
 
-  constructor(repository: IDataRepository) {
+  constructor(
+    repository: IDataRepository,
+    options: {
+      extensionRegistry?: ExtensionRegistry;
+      extensionRunnerClient?: IExtensionRunnerClient;
+    } = {},
+  ) {
     this.repository = repository;
+    // Without a registry the engine behaves exactly as before: no custom types exist.
+    this.extensionRegistry = options.extensionRegistry ?? null;
+    this.extensionHandler = this.extensionRegistry
+      ? // The client falls back to the process default for the same reason the registry does, and
+        // it is done here because this is the single place the extension handler is constructed:
+        // an engine built without it would refuse exactly the nodes validation accepted.
+        new ExtensionNodeHandler(
+          this.extensionRegistry,
+          options.extensionRunnerClient ?? getActiveExtensionRunnerClient(),
+        )
+      : null;
     this.logger = createLogger({ component: "GraphExecutionEngine" });
     this.logger.info("Graph Execution Engine initialized - factory pattern");
     try {
@@ -87,6 +112,35 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
     this.logger.info("All handlers initialized inside engine", {
       handlerCount: this.nodeHandlers.size,
     });
+  }
+
+  /**
+   * Built-in types come from the handler map. A namespaced type is also served by the extension
+   * handler while a configured registry is unreachable, so that state can follow the node's normal
+   * error route instead of being misreported as an absent installation.
+   */
+  private resolveHandler(node: GraphNode): INodeHandler | undefined {
+    const builtin = this.nodeHandlers.get(node.type);
+    if (builtin) return builtin;
+    if (
+      isExtensionNode(node) &&
+      this.extensionHandler &&
+      (this.extensionRegistry?.has(node.type) || this.extensionRegistry?.origin === "unreachable")
+    ) {
+      return this.extensionHandler;
+    }
+    return undefined;
+  }
+
+  /**
+   * A node type that looks like an extension type is a different situation from a typo, and the
+   * message must say so — otherwise an installation without the extension reads as a broken graph.
+   */
+  private describeMissingHandler(node: GraphNode): string {
+    if (isExtensionNode(node)) {
+      return `Node type '${node.type}' belongs to an extension that is not currently installed`;
+    }
+    return `No handler for node type: ${node.type}`;
   }
 
   /**
@@ -201,9 +255,9 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
       });
 
       // Execute node
-      const handler = this.nodeHandlers.get(currentNode.type);
+      const handler = this.resolveHandler(currentNode);
       if (!handler) {
-        throw new ConfigurationError(`No handler for node type: ${currentNode.type}`, {
+        throw new ConfigurationError(this.describeMissingHandler(currentNode), {
           executionId: context.executionId,
           workflowId: context.workflowId,
           nodeId: currentNode.id,

@@ -1,0 +1,80 @@
+{
+  "apiVersion": "moira.extensions/v1",
+  "name": "webhook-notify",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [
+    {
+      "type": "webhook-notify.post-message",
+      "title": "Post a message to a webhook",
+      "description": "Sends a text message to an installation-configured HTTP endpoint and returns its assigned id.",
+      "configSchema": {
+        "type": "object",
+        "required": ["text"],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Message body. Supports template variables."
+          },
+          "channel": { "type": "string", "minLength": 1, "description": "Channel recipient." },
+          "recipient": { "type": "string", "minLength": 1, "description": "Direct recipient." },
+          "threadId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional thread identifier."
+          }
+        },
+        "oneOf": [
+          { "required": ["channel"], "not": { "required": ["recipient"] } },
+          { "required": ["recipient"], "not": { "required": ["channel"] } }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": ["messageId"],
+        "additionalProperties": false,
+        "properties": { "messageId": { "type": "string" } }
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "webhook-notify.token",
+      "type": "encrypted",
+      "label": "Endpoint token",
+      "description": "Token sent in the Authorization header."
+    },
+    {
+      "key": "webhook-notify.base_url",
+      "type": "string",
+      "label": "Endpoint base URL",
+      "description": "Base URL of the receiving service.",
+      "required": true
+    },
+    {
+      "key": "webhook-notify.message_path",
+      "type": "string",
+      "label": "Message path",
+      "description": "Path accepting a message.",
+      "defaultValue": "/api/v1/messages"
+    },
+    {
+      "key": "webhook-notify.auth_scheme",
+      "type": "string",
+      "label": "Authorization scheme",
+      "description": "Scheme used in the Authorization header.",
+      "defaultValue": "Bearer"
+    }
+  ],
+  "permissions": {
+    "network": ["example.com"],
+    "secrets": [
+      "webhook-notify.token",
+      "webhook-notify.base_url",
+      "webhook-notify.message_path",
+      "webhook-notify.auth_scheme"
+    ]
+  }
+}

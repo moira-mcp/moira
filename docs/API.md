@@ -118,9 +118,68 @@ test log and does not deliver them.
 
 Authentication: Not required.
 
+## Node Types API
+
+### GET /api/node-types
+
+Returns the node-type catalogue used by validation and the generic workflow editor. Built-in types
+carry their complete node schema; installed extension types carry the `configSchema` from their
+manifest. The response contains no setting definitions or values.
+
+```typescript
+{
+  success: true;
+  data: {
+    extensionsAvailable: boolean;
+    nodeTypes: Array<{
+      type: string;
+      title: string;
+      description: string;
+      origin: "builtin" | "extension";
+      extensionName?: string;
+      extensionVersion?: string;
+      schema: Record<string, unknown> | null;
+      schemaScope: "node" | "config";
+    }>;
+  }
+  timestamp: string;
+}
+```
+
+`extensionsAvailable` is true only when this process has a live runner-backed registry. False does
+not prove that a namespaced type is invalid; it means the installation cannot currently verify
+extension availability. `extensionName` and `extensionVersion` exist only when `origin` is
+`extension`.
+
+Authentication: Required.
+
 ## Settings API
 
 User settings management with authentication and validation.
+
+Definitions are resolved from the database together with settings declared by installed extension manifests. Manifest definitions are not inserted into the database. Their per-user values are stored separately, remain after an extension is removed, and become accessible again if the declaration is reinstalled.
+
+### GET /api/settings
+
+Get all non-administrative settings visible on the user settings page.
+
+Response:
+
+```typescript
+{
+  success: boolean;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+```
+
+Behavior:
+
+- Omits every `adminOnly=true` definition and value, including for an administrator using this user-facing endpoint
+- Returns persisted values or non-encrypted defaults from database and installed-extension definitions
+- Masks encrypted values as a bullet string retaining the last four characters; an encrypted manifest default is never returned as plaintext
+
+Authentication: Required
 
 ### GET /api/settings/definitions
 
@@ -158,6 +217,9 @@ interface SettingDefinition {
   required: boolean;
   validation?: string; // JSON Schema
   adminOnly: boolean;
+  protected: boolean;
+  source?: "database" | "extension";
+  extensionName?: string; // Present for an extension declaration
   createdAt: number;
   updatedAt: number;
 }
@@ -167,6 +229,7 @@ Behavior:
 
 - Always filters out `adminOnly=true` definitions
 - This endpoint is for user settings page — admin settings are managed via `/api/admin/*` routes
+- Includes definitions declared by currently installed extensions; their category is `extension:<extension-name>`
 
 Authentication: Required (401 if not authenticated)
 
@@ -190,8 +253,39 @@ Response:
 
 Behavior:
 
-- Returns user values if set, otherwise default from definition
+- Returns user values if set, otherwise a non-encrypted default from the definition
 - Encrypted values masked: `"●●●●last4"`
+- Omits `adminOnly=true` values
+
+Authentication: Required
+
+### PUT /api/settings
+
+Update multiple settings with explicit partial-success reporting.
+
+Request body:
+
+```typescript
+Record<string, unknown>;
+```
+
+Response data:
+
+```typescript
+{
+  saved: Record<string, unknown>;
+  refused: Array<{ key: string; reason: string }>;
+}
+```
+
+Behavior:
+
+- Classifies every submitted key and stores each permitted valid value independently
+- Commits each extension value together with its audit event; an audit failure leaves the prior value unchanged and lists the key in `refused`
+- Returns HTTP 200 when no key is refused and HTTP 207 when at least one key is refused
+- Names unknown, unauthorized and schema-invalid keys in `refused` without undoing values already listed in `saved`
+- Enforces the manifest's declared primitive type and then its optional complete JSON Schema; editable JSON text is parsed before validation, and structured input must round-trip through JSON without omitted or transformed values
+- Registers the Telegram webhook only when `telegram.bot_token` is present in `saved`, never when that key was refused
 
 Authentication: Required
 
@@ -279,6 +373,7 @@ Validation:
 - Enum validation (value in allowed list)
 - String length (minLength, maxLength)
 - Required field check
+- Installed-extension settings are validated against the complete JSON Schema from the active manifest; JSON settings accept either losslessly JSON-serializable structured values or JSON text
 
 Response:
 
@@ -293,7 +388,7 @@ Response:
 Errors:
 
 - 400: Validation failed
-- 403: Admin-only setting (non-admin user)
+- 401: Admin-only setting (non-admin user)
 - 404: Setting definition not found
 
 Authentication: Required
@@ -318,11 +413,12 @@ Response:
 
 Behavior:
 
-- Deletes user value from database
+- Deletes the user's value from the database-backed or extension value store selected by the active definition
 - Subsequent GET returns default value
 
 Errors:
 
+- 401: Admin-only setting (non-admin user)
 - 404: Setting definition not found
 
 Authentication: Required
@@ -1753,6 +1849,7 @@ Response:
 Errors:
 
 - 400: Missing required fields
+- 400: Key is already declared by an installed extension manifest
 - 403: Non-admin user
 
 Authentication: Required (admin role)
@@ -1779,6 +1876,7 @@ Response:
 
 Errors:
 
+- 400: Definition is owned by an installed extension manifest
 - 404: Definition not found
 - 403: Non-admin user
 
@@ -1805,10 +1903,12 @@ Response:
 Behavior:
 
 - Cascades to user values (all deleted)
+- Definitions owned by installed extension manifests are removed only by removing the extension
 - Protected definitions cannot be deleted (returns 500)
 
 Errors:
 
+- 400: Definition is owned by an installed extension manifest
 - 404: Definition not found
 - 403: Non-admin user
 - 500: Definition is protected
@@ -3739,6 +3839,7 @@ Webhook URL auto-registered with Telegram Bot API when bot token is saved. Three
 - MCP `manage-settings` tool
 
 Each generates a 32-byte random secret (`crypto.randomBytes(32).toString('hex')`) stored as `telegram.webhook_secret`.
+Bulk registration occurs only when the token is listed in the response's `saved` map; a refused token has no webhook side effect.
 
 ## Encryption
 
@@ -3752,6 +3853,8 @@ Encryption:
 
 Masking in responses:
 
-- Encrypted values returned as `"[encrypted]"` in API/MCP responses
+- User-facing HTTP settings responses use a bullet mask that retains only the last four characters
+- MCP reads represent database-backed encrypted values as `"[encrypted]"`; manifest-declared extension values are masked with bullets and the last four characters
+- Encrypted defaults declared by extension manifests are available only to trusted internal consumers and are omitted from public responses when no value is stored
 - Prevents leaking sensitive data to clients
 - Internal services access real decrypted values via `getSetting()` method

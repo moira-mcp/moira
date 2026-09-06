@@ -88,6 +88,9 @@
           },
           {
             "$ref": "#/$defs/materializeNode"
+          },
+          {
+            "$ref": "#/$defs/extensionNode"
           }
         ]
       }
@@ -925,6 +928,32 @@
             "additionalProperties": false
           }
         },
+        "connections": {
+          "type": "object",
+          "required": ["success"],
+          "properties": {
+            "success": { "type": "string", "minLength": 1 },
+            "error": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "extensionNode": {
+      "type": "object",
+      "description": "Custom node contributed by an installed extension. The namespaced type keeps this branch disjoint from every built-in branch, whose types never contain a dot, so built-in node bodies stay fully validated.",
+      "required": ["type", "id", "connections"],
+      "properties": {
+        "type": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$" },
+        "id": { "type": "string", "minLength": 1 },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
+        "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
+        "config": { "type": "object" },
+        "input": { "type": "object" },
+        "timeout": { "type": "number", "minimum": 1000, "maximum": 600000 },
         "connections": {
           "type": "object",
           "required": ["success"],

@@ -301,6 +301,45 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/executions-navigation.spec.ts`
 - `tests/e2e/executions-page.spec.ts`
 
+### extension-runtime
+
+**unit**
+
+- `tests/unit/extension-runner/bundle-loader.test.ts` — manifest-only bundle discovery, canonical entrypoint containment, isolated refusal, namespace conflicts and missing-directory behavior
+- `tests/unit/workflow-engine/extension-node-execution.test.ts` — custom-node graph dispatch, node-scoped result storage, downstream template access, startup-unreachable error traversal versus live catalog absence, process-default registry/client composition, and in-memory extension-setting parity for empty defaults plus stored/default/unset JSON null
+- `tests/unit/workflow-engine/extension-node-handler.test.ts` — template/config/input/output boundaries, normalized error routing, explicit-registry secret grants and schema refresh on long-lived handlers
+- `tests/unit/workflow-engine/extension-node-validation.test.ts` — registered/unresolvable/missing custom types, declared config schemas, registry refresh and unchanged built-in validation
+- `tests/unit/workflow-engine/extension-registry-reach.test.ts` — process registry propagation, schema-bearing data-only snapshots, corrupt/legacy snapshot refusal, registry-origin distinctions, failure-preserving startup synchronization and publication, and built-in type authority
+- `tests/unit/workflow-engine/extension-registry.test.ts` — versioned manifest, bounded schema dialect, settings/permission declarations, conflicts, registry lifecycle and snapshots
+- `tests/unit/workflow-engine/extension-runner-client-http.test.ts` — transport deadlines, metadata status/envelope/version authority, and mapping of HTTP/network responses to extension failure classes
+- `tests/unit/workflow-engine/node-type-catalog.test.ts` — complete engine-owned built-in catalog, live/unconfigured/unreachable/snapshot registry distinctions, extension declarations and schema exposure without settings leakage
+- `tests/unit/workflow-engine/validator-node-diagnostics.test.ts` — complete missing-field diagnostics with bounded nested schema-error volume
+- `tests/unit/web-backend/node-types-route.test.ts` — node-type endpoint delegates to the active process registry rather than rebuilding a private catalog
+- `tests/unit/web-backend/settings-route-extension-values.test.ts` — public settings HTTP state for per-key save/reset, structural values, mixed 207 outcomes, unknown keys and admin-only mutation/read boundaries
+- `tests/unit/web-backend/validation-service-node-types.test.ts` — visualization compatibility shares engine built-ins and extension classification instead of a drifting backend allowlist
+- `tests/unit/web-frontend/settings-editor-structural-value.test.tsx` — extension-category ownership in EN/RU, editable structural/unset values and visible refusal that preserves a dirty edit
+- `tests/unit/web-frontend/workflow-transformer-node-catalog.test.ts` — catalog-driven generic cards preserve real type, declaration, origin, owner, schema and configuration; missing, unavailable and unknown fallbacks remain semantic presentation states; dedicated built-ins keep their renderer
+- `tests/unit/web-frontend/workflow-sidebar-schema-readout.test.tsx` — extension ownership plus English and Russian presentation of declared, unset and undeclared configuration fields in the generic node detail panel
+
+**integration**
+
+- `tests/integration/extension-runner-contract.test.ts` — real HTTP/child-process execution, startup and queue deadlines, cancellation/shutdown, crash recovery, redirect/secret/artifact permissions, malformed IPC containment and node-scoped error routing
+- `tests/integration/webhook-notify-example.test.ts` — shipped reference bundle loaded by the real runner and isolated child handler against a loopback receiver, with exact configured request/result and named rate-limit failure without external network access
+- `tests/integration/extension-registry-consumers.test.ts` — MCP process registry and separate CLI snapshot consumption validate the same custom-node workflow and its declared configuration schema consistently
+- `tests/integration/extension-settings-migration.test.ts` — migration 0022 upgrades an existing schema without changing prior tables or rows and creates the extension value-store shape
+- `tests/integration/extension-settings-repository-seam.test.ts` — production repository merges manifest definitions without stored rows, enforces declared primitive types and lossless JSON round trips including array serialization hooks, persists encrypted/typed per-user values, separates trusted and masked projections, audits mutation and supplies only granted values to handlers
+- `tests/integration/extension-settings-audit-atomicity.test.ts` — real settings HTTP routes inject audit-insert failure and prove save/reset value rows, audit rows and bulk saved/refused output remain one atomic result; also covers HTTP refusal of malformed primitive values
+- `tests/integration/extension-settings.test.ts` — manifest definition lifetime, typed and schema-valid defaults, extension value repository encryption/isolation, complete declared-schema validation and handler least-authority cases
+- `tests/integration/node-types-endpoint.test.ts` — real HTTP route exposes built-in and live extension types from the process registry without extension setting keys
+
+**api**
+
+- `tests/api/settings-api.test.ts` — authenticated settings CRUD plus explicit mixed bulk 207 results, unknown-key continuation and admin-only definition/value visibility rules on the real container
+
+**docker**
+
+- `tests/docker/extensions-profile.sh` — default-off service selection, optional healthy runner dependency, current runner-image build, shipped example discovery and read-only bundle mount
+
 ### expressions
 
 **api**
@@ -448,7 +487,7 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/api/auth/mcp-blocked-user.test.ts`
 - `tests/api/auth/mcp-protection.test.ts` — unauthenticated ordinary-request rejection and invalid-bearer rejection before a valid initialize can reach catalog acceptance
-- `tests/api/auth/mcp-version-check.test.ts` — real OAuth issuance leaves credentials uninitialized; null/stale ordinary requests return 426 without mutation; successful same-token initialize stamps only the exact row; concurrent recovery converges; and refresh issuance starts uninitialized
+- `tests/api/auth/mcp-version-check.test.ts` — real OAuth issuance leaves credentials uninitialized; refresh preserves exact null, current, and stale catalog states; null/stale ordinary requests remain gated without mutation; the official SDK initializes only the exact row, continues on a refreshed current token without synthetic reinitialize, and recovers a stale successor through reconnect
 - `tests/api/mcp-spec.test.ts`
 
 **mcp-tools**
@@ -715,13 +754,15 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text, and subgraph navigation callback
+- `tests/unit/web-frontend/compact-node.test.tsx` — same-node refresh of materialize tooltip, validation text and subgraph callback; English and Russian missing-extension, unavailable-registry and unknown-type tooltip explanations
 - `tests/unit/web-frontend/backend-health.test.ts` — a reconciliation-degraded backend remains operable/connected while a hard health error disconnects
 - `tests/unit/web-frontend/admin-reconciliation-status.test.tsx` — self-host administrator dashboard makes no disabled analytics request and renders managed-workflow conflict identity, classification, all candidate references, WMF instruction, and clear state
 - `tests/unit/web-frontend/quick-start-card.test.ts` — i18n completeness, config/deeplink generation, setupType consistency, + resolveMcpUrl deployment-mode gating: self-host runtime, self-host baked fallback, saas baked, null mode baked
 
 **e2e**
 
+- `tests/e2e/node-type-catalog.spec.ts` — anonymous catalog denial plus a real authenticated browser workflow whose custom catalog node renders its non-derivable title, exact type, extension owner/version and config-scoped schema, with screenshot evidence
+- `tests/e2e/extension-settings.spec.ts` — authenticated generic settings page renders extension ownership, editable structural JSON and a masked encrypted value from distinctive HTTP-boundary declarations, with screenshot evidence
 - `tests/e2e/dashboard.spec.ts`
 - `tests/e2e/mobile-navigation.spec.ts`
 - `tests/e2e/sidebar.spec.ts`

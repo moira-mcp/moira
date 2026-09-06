@@ -7,6 +7,8 @@
  */
 
 import { beforeAll, describe, expect, test } from "@jest/globals";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { MCP_TOOLS_REVISION } from "@mcp-moira/mcp-server/tool-contract";
 import { getAdminCredentials, getTestBaseUrl } from "../../utils/test-config.js";
 import { signInUser } from "../../utils/mcp-auth.js";
@@ -14,17 +16,6 @@ import { execSqliteInDocker } from "../../utils/docker-command.js";
 
 const BASE_URL = getTestBaseUrl();
 const OAUTH_REDIRECT_URI = "http://localhost:3333/oauth/callback";
-
-const initializeBody = (id: number) => ({
-  jsonrpc: "2.0",
-  id,
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-06-18",
-    capabilities: {},
-    clientInfo: { name: "oauth-revision-test", version: "1.0.0" },
-  },
-});
 
 async function mcpRequest(accessToken: string, body: unknown): Promise<Response> {
   return fetch(`${BASE_URL}/mcp`, {
@@ -36,6 +27,17 @@ async function mcpRequest(accessToken: string, body: unknown): Promise<Response>
     },
     body: JSON.stringify(body),
   });
+}
+
+function createSdkClient(accessTokenHeaders: Headers): {
+  client: Client;
+  transport: StreamableHTTPClientTransport;
+} {
+  const client = new Client({ name: "oauth-revision-test", version: "1.0.0" });
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/mcp`), {
+    requestInit: { headers: accessTokenHeaders },
+  });
+  return { client, transport };
 }
 
 interface OAuthCredential {
@@ -104,6 +106,36 @@ async function createOAuthToken(email: string, password: string): Promise<OAuthC
   };
 }
 
+async function refreshOAuthToken(credential: OAuthCredential): Promise<OAuthCredential> {
+  const response = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      grant_type: "refresh_token",
+      refresh_token: credential.refreshToken,
+      client_id: credential.clientId,
+      client_secret: credential.clientSecret,
+    }),
+  });
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as {
+    access_token?: string;
+    refresh_token?: string;
+  };
+  expect(body).toEqual(
+    expect.objectContaining({
+      access_token: expect.any(String),
+      refresh_token: expect.any(String),
+    }),
+  );
+  return {
+    accessToken: body.access_token!,
+    refreshToken: body.refresh_token!,
+    clientId: credential.clientId,
+    clientSecret: credential.clientSecret,
+  };
+}
+
 describe("MCP OAuth tools revision", () => {
   let adminCredentials: { email: string; password: string };
 
@@ -111,7 +143,7 @@ describe("MCP OAuth tools revision", () => {
     adminCredentials = getAdminCredentials();
   });
 
-  test("initializes only the exact OAuth credential with the same access token", async () => {
+  test("keeps an initialized SDK client usable across OAuth refresh and stale across reconnect", async () => {
     const firstCredential = await createOAuthToken(
       adminCredentials.email,
       adminCredentials.password,
@@ -135,7 +167,26 @@ describe("MCP OAuth tools revision", () => {
         `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken = '${first}'`,
       ),
     ).toBe("null");
-    expect((await mcpRequest(first, initializeBody(2))).status).toBe(200);
+
+    const uninitializedRefresh = await refreshOAuthToken(siblingCredential);
+    expect(
+      execSqliteInDocker(
+        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken = '${uninitializedRefresh.accessToken}'`,
+      ),
+    ).toBe("null");
+    expect(
+      (
+        await mcpRequest(uninitializedRefresh.accessToken, {
+          jsonrpc: "2.0",
+          method: "tools/list",
+          id: 2,
+        })
+      ).status,
+    ).toBe(426);
+
+    const authorizationHeaders = new Headers({ Authorization: `Bearer ${first}` });
+    const initialized = createSdkClient(authorizationHeaders);
+    await initialized.client.connect(initialized.transport);
     expect(
       execSqliteInDocker(
         `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${first}'`,
@@ -150,63 +201,49 @@ describe("MCP OAuth tools revision", () => {
       200,
     );
 
-    execSqliteInDocker(
-      `UPDATE oauthAccessToken SET toolsVersion = 'stale-revision' WHERE accessToken = '${first}'`,
-    );
-    expect((await mcpRequest(first, { jsonrpc: "2.0", method: "tools/list", id: 4 })).status).toBe(
-      426,
-    );
+    const refreshed = await refreshOAuthToken(firstCredential);
+    expect(refreshed.accessToken).not.toBe(first);
     expect(
       execSqliteInDocker(
-        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${first}'`,
-      ),
-    ).toBe("stale-revision");
-    const concurrent = await Promise.all([
-      mcpRequest(first, initializeBody(5)),
-      mcpRequest(first, initializeBody(6)),
-    ]);
-    expect(concurrent.map(({ status }) => status)).toEqual([200, 200]);
-    expect(
-      execSqliteInDocker(
-        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${first}'`,
+        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${refreshed.accessToken}'`,
       ),
     ).toBe(MCP_TOOLS_REVISION);
+    authorizationHeaders.set("Authorization", `Bearer ${refreshed.accessToken}`);
+    const listed = await initialized.client.listTools();
+    expect(listed.tools.some(({ name }) => name === "help")).toBe(true);
+    const helpResult = await initialized.client.callTool({ name: "help", arguments: {} });
+    expect(helpResult.content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "text" })]),
+    );
+    await initialized.client.close();
 
-    const refreshResponse = await fetch(`${BASE_URL}/api/auth/mcp/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_type: "refresh_token",
-        refresh_token: firstCredential.refreshToken,
-        client_id: firstCredential.clientId,
-        client_secret: firstCredential.clientSecret,
-      }),
-    });
-    const refreshBody = (await refreshResponse.json()) as {
-      access_token?: string;
-      error?: string;
-      error_description?: string;
-    };
-    expect({ status: refreshResponse.status, body: refreshBody }).toEqual({
-      status: 200,
-      body: expect.objectContaining({ access_token: expect.any(String) }),
-    });
-    const refreshed = { access_token: refreshBody.access_token! };
-    expect(refreshed.access_token).not.toBe(first);
+    execSqliteInDocker(
+      `UPDATE oauthAccessToken SET toolsVersion = 'stale-revision' WHERE accessToken = '${uninitializedRefresh.accessToken}'`,
+    );
+    const staleRefreshed = await refreshOAuthToken(uninitializedRefresh);
     expect(
       execSqliteInDocker(
-        `SELECT COALESCE(toolsVersion, 'null') FROM oauthAccessToken WHERE accessToken = '${refreshed.access_token}'`,
+        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${staleRefreshed.accessToken}'`,
       ),
-    ).toBe("null");
+    ).toBe("stale-revision");
     expect(
       (
-        await mcpRequest(refreshed.access_token, {
+        await mcpRequest(staleRefreshed.accessToken, {
           jsonrpc: "2.0",
           method: "tools/list",
-          id: 7,
+          id: 8,
         })
       ).status,
     ).toBe(426);
-    expect((await mcpRequest(refreshed.access_token, initializeBody(8))).status).toBe(200);
+    const reconnect = createSdkClient(
+      new Headers({ Authorization: `Bearer ${staleRefreshed.accessToken}` }),
+    );
+    await reconnect.client.connect(reconnect.transport);
+    expect(
+      execSqliteInDocker(
+        `SELECT toolsVersion FROM oauthAccessToken WHERE accessToken = '${staleRefreshed.accessToken}'`,
+      ),
+    ).toBe(MCP_TOOLS_REVISION);
+    await reconnect.client.close();
   });
 });

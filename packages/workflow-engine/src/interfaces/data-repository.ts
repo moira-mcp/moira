@@ -34,6 +34,14 @@ export interface SettingDefinition {
   protected: boolean; // Cannot be deleted via UI/API
   createdAt: number;
   updatedAt: number;
+  /**
+   * Where the definition came from. Absent means the ordinary case — a row in the database.
+   * `extension` marks a definition read from an installed extension's manifest: it is never stored,
+   * disappears with the bundle, and its value lives in the extension value store.
+   */
+  source?: "database" | "extension";
+  /** Extension that declared this setting; set only when `source` is `extension`. */
+  extensionName?: string;
 }
 
 /**

@@ -25,7 +25,7 @@ export function evaluateMcpToolsRevision(
     body: {
       error: "upgrade_required",
       error_description: `MCP tool contract changed. Your client has cached revision ${displayedClientRevision}.`,
-      hint: "Run '/mcp reconnect moira' in Claude Code to refresh tools.",
+      hint: "Reconnect or reinitialize this Moira MCP connection to refresh tools.",
       serverVersion,
       toolsRevision: MCP_TOOLS_REVISION,
       clientVersion: displayedClientRevision,

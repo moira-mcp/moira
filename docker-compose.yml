@@ -50,6 +50,16 @@ services:
       - WORKFLOWS_DIR=./workflows/production
       - METRICS_PORT=9090
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Empty keeps extensions disabled. When the optional profile is enabled, point this at the
+      # runner service over the Compose network.
+      - MOIRA_EXTENSION_RUNNER_URL=${MOIRA_EXTENSION_RUNNER_URL:-}
+
+    # The dependency is optional because the runner profile is off by default. When the profile is
+    # selected, wait for its catalog endpoint before Moira performs its one-time registry sync.
+    depends_on:
+      moira-extension-runner:
+        condition: service_healthy
+        required: false
 
     # Host port (left) → container nginx port 80 (right). Change MOIRA_PORT in .env
     # to use a different host port. Keep it consistent with MOIRA_HOST.
@@ -66,4 +76,28 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 40s
+      retries: 3
+
+  # Extension handlers run in a companion process. The profile is deliberately disabled by
+  # default, and the local bundle directory is visible only to this service.
+  moira-extension-runner:
+    profiles: ["extensions"]
+    build:
+      context: .
+      dockerfile: config/Dockerfile.extension-runner
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - MOIRA_EXTENSIONS_DIR=/app/extensions
+      - MOIRA_EXTENSION_RUNNER_PORT=9110
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ./extensions:/app/extensions:ro
+    expose:
+      - "9110"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9110/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
       retries: 3

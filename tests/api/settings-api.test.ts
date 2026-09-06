@@ -336,6 +336,105 @@ describe("Settings Definitions adminOnly Filtering", () => {
     expect(keys).not.toContain(adminOnlyKey);
   });
 
+  test("Bulk PUT saves what a non-admin may write and names what it refused", async () => {
+    // Required state: one request, and the caller knows from its answer what landed. Plausible wrong
+    // states, all of which also answer non-200 or 200: the whole body is refused (the ordinary key
+    // is not saved), the admin key is written anyway, or the answer complains without naming the
+    // key so the caller must diff the settings to find out. The storage is read for both keys and
+    // the body is read for the name, which is what tells these apart.
+    const ordinaryKey = "profile.display_name";
+    const ordinaryValue = `saved-alongside-a-refusal-${Date.now()}`;
+
+    const res = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      // The refused key comes first: what is saved must not depend on the order of the body.
+      body: JSON.stringify({
+        [adminOnlyKey]: "written-by-a-regular-user",
+        [ordinaryKey]: ordinaryValue,
+      }),
+    });
+
+    expect(res.status).toBe(207);
+    const body = (await res.json()) as any;
+    expect(body.success).toBe(true);
+    expect(body.data.saved).toEqual({ [ordinaryKey]: ordinaryValue });
+    expect(body.data.refused).toEqual([
+      { key: adminOnlyKey, reason: "Admin permission required for this setting" },
+    ]);
+
+    const stored = await fetch(`${BASE_URL}/api/settings`, { headers: { Cookie: authCookie } });
+    const storedJson = (await stored.json()) as any;
+    expect(storedJson.data[ordinaryKey]).toBe(ordinaryValue);
+    expect(storedJson.data[adminOnlyKey]).toBeUndefined();
+  });
+
+  test("Bulk PUT without a refused key answers as an ordinary save", async () => {
+    // The 207 must mean "part of this was refused", not "this endpoint changed": a body the caller
+    // may write entirely still answers 200 with an empty refusal list.
+    const value = `plain-save-${Date.now()}`;
+    const res = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ "profile.display_name": value }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data.refused).toEqual([]);
+    expect(body.data.saved).toEqual({ "profile.display_name": value });
+
+    const stored = await fetch(`${BASE_URL}/api/settings`, { headers: { Cookie: authCookie } });
+    expect(((await stored.json()) as any).data["profile.display_name"]).toBe(value);
+  });
+
+  test("Bulk PUT keeps saving after a key that cannot be stored, and names it", async () => {
+    // The refusal class is wider than the admin flag: an unknown key throws inside the repository.
+    // Required state: the rest of the body is still saved and the failing key is named. Plausible
+    // wrong state: the write loop abandons the request at the first throw, so what survived depends
+    // on the position of the bad key and the caller is told nothing about either group. The failing
+    // key is sent first, so a loop that stops would save nothing at all.
+    const goodKey = "profile.display_name";
+    const goodValue = `saved-after-a-bad-key-${Date.now()}`;
+    const unknownKey = `test.not_a_defined_setting_${Date.now()}`;
+
+    const res = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: authCookie },
+      body: JSON.stringify({ [unknownKey]: "whatever", [goodKey]: goodValue }),
+    });
+
+    expect(res.status).toBe(207);
+    const body = (await res.json()) as any;
+    expect(body.data.saved).toEqual({ [goodKey]: goodValue });
+    expect(body.data.refused.map((entry: { key: string }) => entry.key)).toEqual([unknownKey]);
+    expect(body.data.refused[0].reason).toContain(unknownKey);
+
+    const stored = await fetch(`${BASE_URL}/api/settings`, { headers: { Cookie: authCookie } });
+    const storedJson = (await stored.json()) as any;
+    expect(storedJson.data[goodKey]).toBe(goodValue);
+    expect(storedJson.data[unknownKey]).toBeUndefined();
+  });
+
+  test("Bulk PUT stores the adminOnly key for an administrator", async () => {
+    const value = `written-by-admin-${Date.now()}`;
+    const res = await fetch(`${BASE_URL}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: adminCookie },
+      body: JSON.stringify({ [adminOnlyKey]: value }),
+    });
+
+    expect(res.status).toBe(200);
+    const response = (await res.json()) as any;
+    expect(response.data.refused).toEqual([]);
+    expect(response.data.saved).toEqual({ [adminOnlyKey]: value });
+
+    // The user settings surface omits admin-only definitions for administrators too, so it must
+    // not leak the otherwise writable value in the page's bulk read response.
+    const stored = await fetch(`${BASE_URL}/api/settings`, { headers: { Cookie: adminCookie } });
+    expect(((await stored.json()) as any).data[adminOnlyKey]).toBeUndefined();
+  });
+
   test("Admin CAN see adminOnly definitions via admin endpoint", async () => {
     // Admin settings are available via /api/admin/settings/definitions
     const res = await fetch(`${BASE_URL}/api/admin/settings/definitions`, {

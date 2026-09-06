@@ -176,9 +176,10 @@ If authentication fails, diagnose the cause — do not silently switch servers.
 
 The MCP tool catalog is accepted during authenticated `initialize`. After changing tool
 names, parameters, descriptions, or other generated catalog facts, an ordinary request from a
-credential that has not accepted the current revision receives HTTP 426. Reconnect with the same
-still-valid OAuth or persistent token so the client initializes again; catalog refresh does not
-rotate the credential.
+credential that has not accepted the current revision receives HTTP 426. Reconnect or reinitialize
+the client with its valid credential so it accepts the new catalog. OAuth refresh may rotate access
+tokens independently; the successor inherits the predecessor's exact accepted revision, while a
+new authorization or API token remains uninitialized until `initialize` succeeds.
 
 ## Standard Flows
 

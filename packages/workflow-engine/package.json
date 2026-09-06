@@ -11,6 +11,8 @@
     "./handlers": "./src/handlers/index.ts",
     "./types": "./src/types/index.ts",
     "./validation": "./src/validation/graph-validator.ts",
+    "./extensions": "./src/extensions/index.ts",
+    "./extensions/contract": "./src/extensions/extension-contract.ts",
     "./progress-visual": "./src/utils/execution-progress-visual.ts"
   },
   "scripts": {},

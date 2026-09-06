@@ -68,6 +68,8 @@ export const nodeTypes: NodeTypes = {
   "upsert-note": CompactNode,
   materialize: CompactNode,
   end: CompactNode,
+  // Types Moira knows and this bundle has no dedicated rendering for; drawn from the catalog.
+  catalog: CompactNode,
 };
 
 /**

@@ -1,0 +1,90 @@
+import { defineExtension, defineNode } from "@mcp-moira/extension-sdk";
+
+const TOKEN = "webhook-notify.token";
+const BASE_URL = "webhook-notify.base_url";
+const MESSAGE_PATH = "webhook-notify.message_path";
+const AUTH_SCHEME = "webhook-notify.auth_scheme";
+
+function retryAfterSeconds(header: string | null): number | null {
+  if (!header) return null;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value);
+  const until = Date.parse(value);
+  if (Number.isNaN(until)) return null;
+  return Math.max(0, Math.round((until - Date.now()) / 1000));
+}
+
+const postMessage = defineNode({
+  type: "webhook-notify.post-message",
+  async handler({ config, services }) {
+    const recipients = [
+      { field: "channel", value: config.channel },
+      { field: "recipient", value: config.recipient },
+    ].filter(
+      (candidate): candidate is { field: string; value: string } =>
+        typeof candidate.value === "string" && candidate.value.length > 0,
+    );
+
+    if (recipients.length !== 1) {
+      throw new Error(
+        recipients.length === 0
+          ? "no recipient: set exactly one of channel or recipient"
+          : "more than one recipient: set exactly one of channel or recipient",
+      );
+    }
+
+    const [token, baseUrl, messagePath, authScheme] = await Promise.all([
+      services.secret(TOKEN),
+      services.secret(BASE_URL),
+      services.secret(MESSAGE_PATH),
+      services.secret(AUTH_SCHEME),
+    ]);
+    if (!token) throw new Error(`setting '${TOKEN}' is not set`);
+    if (!baseUrl) throw new Error(`setting '${BASE_URL}' is not set`);
+
+    const url = `${baseUrl.replace(/\/+$/, "")}${messagePath ?? "/api/v1/messages"}`;
+    const recipient = recipients[0]!;
+    const body: Record<string, string> = {
+      text: String(config.text),
+      [recipient.field]: recipient.value,
+    };
+    if (typeof config.threadId === "string") body.thread_id = config.threadId;
+
+    services.log("posting a message to the configured endpoint", {
+      url,
+      recipientField: recipient.field,
+      hasThread: typeof config.threadId === "string",
+    });
+    const response = await services.fetch(url, {
+      method: "POST",
+      headers: {
+        authorization: `${authScheme ?? "Bearer"} ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 429) {
+      const retryAfter = retryAfterSeconds(response.headers.get("retry-after"));
+      throw new Error(
+        retryAfter === null
+          ? "rate limited by the endpoint; it gave no retry delay"
+          : `rate limited by the endpoint; retry after ${retryAfter} s`,
+      );
+    }
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 300);
+      throw new Error(
+        `the endpoint refused the message with status ${response.status}${detail ? `: ${detail}` : ""}`,
+      );
+    }
+
+    const payload = (await response.json()) as { message_id?: number | string };
+    if (payload.message_id === undefined || payload.message_id === null) {
+      throw new Error("the endpoint accepted the message but returned no message id");
+    }
+    return { messageId: String(payload.message_id) };
+  },
+});
+
+export default defineExtension({ nodes: [postMessage] });

@@ -42,13 +42,16 @@ import {
   WriteNoteNodeData,
   UpsertNoteNodeData,
   MaterializeNodeData,
+  CatalogNodeData,
   FallbackNodeData,
   LayoutOptions,
   DEFAULT_LAYOUT_OPTIONS,
   DEFAULT_NODE_STYLES,
   DEFAULT_EDGE_STYLES,
   WorkflowValidationStatus,
+  NodeTypeIndex,
 } from "../types";
+import { extensionNameOfNodeType } from "../types/node-type-catalog";
 
 /**
  * Main transformer class for MCP workflow to React Flow conversion
@@ -61,9 +64,16 @@ export class WorkflowTransformer {
     workflow: WorkflowGraph,
     validation?: WorkflowValidationStatus,
     layoutOptions: LayoutOptions = DEFAULT_LAYOUT_OPTIONS,
+    /**
+     * What Moira says about node types. Without it a type this bundle has no branch for can only be
+     * drawn as unknown; with it the node is drawn from the server's description of its type.
+     */
+    nodeTypes: NodeTypeIndex = {},
+    /** True only when the server's live registry can prove an extension is absent. */
+    extensionsAvailable = false,
   ): WorkflowVisualizationData {
     // Transform nodes to React Flow format
-    const nodes = this.transformNodes(workflow.nodes, validation);
+    const nodes = this.transformNodes(workflow.nodes, validation, nodeTypes, extensionsAvailable);
 
     // Transform connections to React Flow edges
     const edges = this.transformEdges(workflow.nodes);
@@ -91,6 +101,8 @@ export class WorkflowTransformer {
   private static transformNodes(
     mcpNodes: WorkflowNode[],
     validation?: WorkflowValidationStatus,
+    nodeTypes: NodeTypeIndex = {},
+    extensionsAvailable = false,
   ): MoiraReactFlowNode[] {
     return mcpNodes.map((node) => {
       const nodeValidation = validation?.nodeValidation[node.id];
@@ -100,7 +112,13 @@ export class WorkflowTransformer {
           ? "invalid"
           : "warning";
 
-      const transformedData = this.transformNodeData(node, validationStatus, nodeValidation);
+      const transformedData = this.transformNodeData(
+        node,
+        validationStatus,
+        nodeValidation,
+        nodeTypes,
+        extensionsAvailable,
+      );
       // Use nodeType from transformed data - it may be "fallback" for unknown types
       return {
         id: node.id,
@@ -121,6 +139,8 @@ export class WorkflowTransformer {
     node: WorkflowNode,
     validationStatus: "valid" | "invalid" | "warning",
     nodeValidation?: { errors: string[]; warnings: string[] },
+    nodeTypes: NodeTypeIndex = {},
+    extensionsAvailable = false,
   ): MoiraNodeDataUnion {
     const baseData = {
       nodeId: node.id,
@@ -313,18 +333,53 @@ export class WorkflowTransformer {
     const _exhaustive: never = node;
     // Runtime fallback for untyped data (e.g. telegram-notification) - graceful degradation instead of crash
     const unknownNode = _exhaustive as unknown as WorkflowNode;
+
+    // What this bundle has no branch for is not automatically unknown: Moira publishes the types it
+    // knows, and a node whose type is in that catalog is drawn from the server's description of it.
+    const described = nodeTypes[unknownNode.type];
+    if (described) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const body = unknownNode as any;
+      return {
+        ...baseData,
+        nodeType: "catalog",
+        label: unknownNode.metadata?.displayName || described.title,
+        description: described.description || `Node type ${unknownNode.type}`,
+        validationStatus,
+        originalType: unknownNode.type,
+        origin: described.origin,
+        extensionName: described.extensionName,
+        extensionVersion: described.extensionVersion,
+        schema: described.schema,
+        schemaScope: described.schemaScope,
+        config:
+          described.schemaScope === "node"
+            ? (body as Record<string, unknown>)
+            : ((body.config as Record<string, unknown>) ?? {}),
+        connections: unknownNode.connections,
+        color: DEFAULT_NODE_STYLES.catalog.colors.primary,
+        icon: DEFAULT_NODE_STYLES.catalog.icon,
+      } as CatalogNodeData;
+    }
+
     // eslint-disable-next-line no-console
     console.warn(
-      `[WorkflowTransformer] Unknown node type "${unknownNode.type}" for node "${unknownNode.id}". Rendering as fallback.`,
+      `[WorkflowTransformer] Node type "${unknownNode.type}" for node "${unknownNode.id}" is not in the catalog served by Moira. Rendering as unknown.`,
     );
 
+    const owningExtension = extensionNameOfNodeType(unknownNode.type);
     return {
       ...baseData,
       nodeType: "fallback",
       label: unknownNode.metadata?.displayName || unknownNode.type.toUpperCase(),
-      description: `Unknown node type: ${unknownNode.type}`,
       validationStatus: "warning" as const,
       originalType: unknownNode.type,
+      fallbackReason: owningExtension
+        ? extensionsAvailable
+          ? "extension-missing"
+          : "extension-unavailable"
+        : "unknown",
+      extensionName: owningExtension ?? undefined,
       connections: unknownNode.connections,
       color: DEFAULT_NODE_STYLES.fallback.colors.primary,
       icon: DEFAULT_NODE_STYLES.fallback.icon,

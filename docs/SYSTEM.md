@@ -103,6 +103,7 @@ const transport = new StreamableHTTPServerTransport({
 // Missing/stale toolsVersion + ordinary request → HTTP 426 Upgrade Required
 // Missing/stale toolsVersion + valid singleton initialize → exact credential is stamped before
 // the successful initialize result is emitted
+// OAuth refresh → successor token row inherits the predecessor's exact toolsVersion
 ```
 
 `tool-schemas.ts` owns side-effect-free canonical Zod schemas. `tool-definitions.ts` is the pure
@@ -116,10 +117,12 @@ not stored or overridden in `globalSetting`; database-backed system prompts rema
 
 The same structured reference model renders `help({ topic: "tools" })` and the English and Russian
 public reference pages directly. `MCP_TOOLS_REVISION` is computed once from stable client-visible
-contract facts in the MCP package. New OAuth access tokens and persistent API
-tokens begin without an accepted catalog revision. After authentication and account admission, the
-MCP server permits a missing/stale credential to run one SDK-valid singleton `initialize` request
-and conditionally stamps only that credential immediately before forwarding its successful result.
+contract facts in the MCP package. New OAuth authorizations and persistent API tokens begin without
+an accepted catalog revision. OAuth refresh rotates the access-token row and makes its successor
+inherit the predecessor's exact current, stale, or null revision before the token response is
+exposed. After authentication and account admission, the MCP server permits a missing/stale
+credential to run one SDK-valid singleton `initialize` request and conditionally stamps only that
+credential immediately before forwarding its successful result.
 Errors, notifications, malformed requests, batches, revoked/expired credentials, and denied accounts
 cannot stamp acceptance. Ordinary missing/stale requests receive HTTP 426; matching credentials
 proceed without token rotation. Package version remains diagnostic release identity and is not the

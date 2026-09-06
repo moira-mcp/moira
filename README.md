@@ -37,6 +37,8 @@ consent, email verification, and the broader multi-user administration surface.
 ### Package Structure
 
 - **packages/workflow-engine/** - Core node-graph execution engine
+- **packages/extension-sdk/** - Typed authoring contract for custom node handlers
+- **packages/extension-runner/** - Isolated companion service for installed extension bundles
 - **packages/mcp-server/** - MCP protocol HTTP server with tools
 - **packages/web-backend/** - Express API for workflow management
 - **packages/web-frontend/** - React UI for workflow visualization
@@ -99,6 +101,7 @@ For contributors who want to build and run from the source tree, switch
 uncomment the `build:` block (the file documents both options inline). Then:
 
 ```bash
+nvm use
 npm install
 docker compose up -d --build   # builds the image locally from config/Dockerfile
 # Web UI: http://localhost:8080  |  MCP: http://localhost:8080/mcp
@@ -106,6 +109,27 @@ docker compose up -d --build   # builds the image locally from config/Dockerfile
 
 (The default `docker-compose.yml` uses the prebuilt public image — `docker compose
 up -d` without `--build` — which is the recommended self-host path.)
+
+### Extensions (optional)
+
+Custom node bundles run in the separate extension runner and are disabled by default. Enabling them
+requires this source checkout because the runner image is built locally; the published Moira image
+does not import or package bundle code.
+
+```bash
+mkdir -p extensions
+cp -R examples/extensions/webhook-notify extensions/
+printf '\nMOIRA_EXTENSION_RUNNER_URL=http://moira-extension-runner:9110\n' >> .env
+docker compose --profile extensions up -d --build
+```
+
+Before starting the example, replace its placeholder network permission and fill its per-user
+settings. See [Self-hosting: Enable
+extensions](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#enable-extensions)
+and [Writing an
+Extension](packages/docs/src/content/docs/docs/guides/writing-extensions.mdx) for the complete
+installation, SDK, permission and failure contracts. `npm run test:docker-extensions` verifies the
+default-off profile and read-only bundle mount.
 
 ### Testing
 
@@ -602,7 +626,7 @@ listed alongside those file-backed topics and renders directly from the typed MC
 | --------------- | --------------------------------------------------------------------------------------- | ------------------ |
 | Getting started | Introduction, quickstart, self-hosting                                                  | `getting-started/` |
 | Concepts        | Workflows, nodes, templates, notes, artifacts                                           | `concepts/`        |
-| Guides          | Writing directives, creating & editing workflows                                        | `guides/`          |
+| Guides          | Writing directives, creating & editing workflows, writing extensions                    | `guides/`          |
 | Reference       | Tools, input schema, magic variables, condition operators, validation, workflow catalog | `reference/`       |
 | Integration     | MCP clients, Claude Code, agent guide, Telegram setup, troubleshooting                  | `integration/`     |
 | Patterns        | Branching, validation loop, escalation, subagent review, workspace, and more            | `patterns/`        |

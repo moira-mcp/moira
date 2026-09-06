@@ -16,6 +16,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "../ui
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import { ChevronDown } from "lucide-react";
+import { toast } from "sonner";
 
 export interface SettingDefinition {
   key: string;
@@ -67,6 +68,20 @@ export interface SettingsEditorProps {
   canReset?: (key: string) => boolean;
   /** Whether categories are collapsible (default: true). When false, all categories render expanded without collapse controls */
   collapsible?: boolean;
+}
+
+/**
+ * A setting value as the text of an editable field.
+ *
+ * Whatever such a field shows is what a save sends, so absence must appear as an empty field rather
+ * than as a word, and a structural value must appear as the JSON a user can edit rather than as
+ * `[object Object]`. Text the user is typing is shown exactly as typed.
+ */
+export function settingFieldText(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
 }
 
 interface FullscreenModalProps {
@@ -163,6 +178,22 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
     });
   };
 
+  /**
+   * Title of a category. Settings contributed by an extension arrive in a category of their own
+   * (`extension:<name>`), which keeps them apart from the built-in ones without a second grouping
+   * mechanism; here that prefix becomes a readable heading instead of leaking into the screen.
+   */
+  const categoryTitle = (category: string): string => {
+    if (categoryLabels[category]) return categoryLabels[category];
+    if (category.startsWith("extension:")) {
+      return t("settings.extensionCategory", {
+        extensionName: category.slice("extension:".length),
+        defaultValue: "Extension: {{extensionName}}",
+      });
+    }
+    return category;
+  };
+
   // Group definitions by category
   const grouped = definitions.reduce(
     (acc, def) => {
@@ -205,6 +236,14 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
         delete next[key];
         return next;
       });
+    } catch (error) {
+      // A partial bulk response reports a refused single-key save as an ordinary response. Keep the
+      // edit dirty and surface the named reason instead of clearing a value the server did not keep.
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("pages.settings.saveFailed", "Failed to save settings"),
+      );
     } finally {
       setSavingKey(null);
     }
@@ -250,7 +289,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
         );
 
       case "json": {
-        const jsonValue = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+        const jsonValue = settingFieldText(value);
         return (
           <div className="space-y-2">
             <textarea
@@ -475,7 +514,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
           return (
             <Card key={category} data-testid={`${testIdPrefix}-category-${category}`}>
               <CardHeader>
-                <CardTitle>{categoryLabels[category] || category}</CardTitle>
+                <CardTitle>{categoryTitle(category)}</CardTitle>
                 <CardDescription>
                   {sortedDefs.length}{" "}
                   {sortedDefs.length === 1 ? t("settings.setting") : t("settings.settings")}
@@ -500,7 +539,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
                 <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
                   <div className="flex items-center justify-between">
                     <div>
-                      <CardTitle>{categoryLabels[category] || category}</CardTitle>
+                      <CardTitle>{categoryTitle(category)}</CardTitle>
                       <CardDescription>
                         {sortedDefs.length}{" "}
                         {sortedDefs.length === 1 ? t("settings.setting") : t("settings.settings")}
@@ -528,7 +567,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
         <FullscreenModal
           isOpen={!!fullscreenSetting}
           title={fullscreenSetting.label}
-          value={String(getValue(fullscreenSetting.key, fullscreenSetting.defaultValue) || "")}
+          value={settingFieldText(getValue(fullscreenSetting.key, fullscreenSetting.defaultValue))}
           onClose={() => setFullscreenSetting(null)}
           onSave={(value) => handleChange(fullscreenSetting.key, value)}
         />

@@ -3,6 +3,15 @@
  * Supporting services for workflow engine
  */
 
+export {
+  buildNodeTypeCatalog,
+  builtinNodeTypeDescriptors,
+  extensionNodeTypeDescriptors,
+  type NodeTypeCatalog,
+  type NodeTypeDescriptor,
+  type NodeTypeOrigin,
+  type NodeTypeSchemaScope,
+} from "./node-type-catalog.js";
 export { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
 export { TelegramClient } from "./telegram-client.js";
 export * from "./progress-image-service.js";
