@@ -1,0 +1,6 @@
+services:
+  moira:
+    env_file: !reset []
+  moira-extension-runner:
+    volumes:
+      - ./examples/extensions:/app/extensions:ro

@@ -295,6 +295,49 @@ health check завершились ошибкой, используйте `./se
 записывает точный образ в `.env`; чтобы вернуться в обычный release channel, после проверки задайте
 `MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest`.
 
+## Включение расширений
+
+Для расширений нужен checkout исходников: образ сопутствующего runner собирается локально, а
+опубликованный образ приложения Moira остаётся без изменений. Из корня репозитория выполните:
+
+```bash
+cp .env.example .env
+mkdir -p extensions
+cp -R examples/extensions/webhook-notify extensions/
+```
+
+В скопированном манифесте замените зарезервированный `example.com` в `permissions.network` на точный
+хост своего эндпоинта. Сам адрес и остальные значения каждый пользователь заполняет на странице
+настроек Moira. Затем добавьте адрес runner в `.env` и включите профиль:
+
+```bash
+printf '\nMOIRA_EXTENSION_RUNNER_URL=http://moira-extension-runner:9110\n' >> .env
+docker compose --profile extensions up -d --build
+```
+
+Профиль собирает runner, монтирует `./extensions` в его контейнер только для чтения, ждёт готовности
+runner и затем запускает Moira. Обычный `docker compose up -d` runner не запускает.
+
+Runner и Moira загружают каталог расширений при старте. После изменения установленных бандлов:
+
+```bash
+docker compose --profile extensions up -d --force-recreate --wait moira-extension-runner
+docker compose --profile extensions restart moira
+```
+
+Причины отказа и живой каталог можно проверить, не публикуя порт runner:
+
+```bash
+docker compose --profile extensions logs moira-extension-runner
+docker compose --profile extensions exec moira-extension-runner curl -fsS http://127.0.0.1:9110/health
+```
+
+Пустой каталог допустим. Если Moira сообщает о недоступном реестре, проверьте URL, health и логи,
+затем перезапустите обе службы в показанном порядке. Если отсутствует отдельный тип ноды, найдите
+причину отказа его манифеста. Полный контракт манифеста, SDK, разрешений, настроек, редактора,
+результатов, ошибок и безопасности описан в [Написании
+расширения](/ru/docs/guides/writing-extensions/).
+
 ## Добавление собственных workflow-флоу
 
 В образе есть встроенный каталог workflow в `./workflows/production`. Чтобы дополнительно

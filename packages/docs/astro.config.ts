@@ -233,6 +233,11 @@ export default defineConfig({
               label: "Editing Workflows",
               slug: "docs/guides/editing-workflows",
             },
+            {
+              label: "Writing Extensions",
+              translations: { ru: "Написание расширений" },
+              slug: "docs/guides/writing-extensions",
+            },
           ],
         },
         {

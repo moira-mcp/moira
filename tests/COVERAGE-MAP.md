@@ -324,6 +324,7 @@ level headings classify the tracked test paths listed beneath them.
 **integration**
 
 - `tests/integration/extension-runner-contract.test.ts` — real HTTP/child-process execution, startup and queue deadlines, cancellation/shutdown, crash recovery, redirect/secret/artifact permissions, malformed IPC containment and node-scoped error routing
+- `tests/integration/webhook-notify-example.test.ts` — shipped reference bundle loaded by the real runner and isolated child handler against a loopback receiver, with exact configured request/result and named rate-limit failure without external network access
 - `tests/integration/extension-registry-consumers.test.ts` — MCP process registry and separate CLI snapshot consumption validate the same custom-node workflow consistently
 - `tests/integration/extension-settings-migration.test.ts` — migration 0022 upgrades an existing schema without changing prior tables or rows and creates the extension value-store shape
 - `tests/integration/extension-settings-repository-seam.test.ts` — production repository merges manifest definitions without stored rows, enforces declared primitive types and lossless JSON round trips including array serialization hooks, persists encrypted/typed per-user values, separates trusted and masked projections, audits mutation and supplies only granted values to handlers
@@ -334,6 +335,10 @@ level headings classify the tracked test paths listed beneath them.
 **api**
 
 - `tests/api/settings-api.test.ts` — authenticated settings CRUD plus explicit mixed bulk 207 results, unknown-key continuation and admin-only definition/value visibility rules on the real container
+
+**docker**
+
+- `tests/docker/extensions-profile.sh` — default-off service selection, optional healthy runner dependency, current runner-image build, shipped example discovery and read-only bundle mount
 
 ### expressions
 

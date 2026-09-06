@@ -293,6 +293,48 @@ The helper retains its verified snapshot and diagnostic copy under `.moira-upgra
 path writes the exact image to `.env`, set `MOIRA_IMAGE=ghcr.io/moira-mcp/moira:latest` afterward if
 you want to rejoin the normal release channel.
 
+## Enable extensions
+
+Extensions require a source checkout because the companion runner image is built locally. The
+published Moira application image remains unchanged. From the repository root:
+
+```bash
+cp .env.example .env
+mkdir -p extensions
+cp -R examples/extensions/webhook-notify extensions/
+```
+
+Replace the placeholder `example.com` in the copied manifest's `permissions.network` with the exact
+host your endpoint uses. Set that endpoint and the other values for each user on Moira's Settings
+page. Then add the runner address to `.env` and enable the profile:
+
+```bash
+printf '\nMOIRA_EXTENSION_RUNNER_URL=http://moira-extension-runner:9110\n' >> .env
+docker compose --profile extensions up -d --build
+```
+
+The profile builds the runner, mounts `./extensions` read-only into that container, waits for runner
+health, and then starts Moira. The runner is absent from an ordinary `docker compose up -d`.
+
+Runner and Moira load the extension catalogue at startup. After changing installed bundles:
+
+```bash
+docker compose --profile extensions up -d --force-recreate --wait moira-extension-runner
+docker compose --profile extensions restart moira
+```
+
+Inspect rejected bundles and the live catalogue without exposing the runner port:
+
+```bash
+docker compose --profile extensions logs moira-extension-runner
+docker compose --profile extensions exec moira-extension-runner curl -fsS http://127.0.0.1:9110/health
+```
+
+An empty directory is valid. If Moira reports the registry unavailable, confirm the URL, runner
+health and logs, then restart both services in the order above. If one node type is missing, inspect
+the manifest rejection reasons. See [Writing an Extension](/docs/guides/writing-extensions/) for the
+manifest, SDK, permissions, settings, editor, result, failure and security contracts.
+
 ## Adding Your Own Workflow Flows
 
 The image ships a bundled workflow catalog in `./workflows/production`. To ALSO load

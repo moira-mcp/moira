@@ -118,6 +118,41 @@ test log and does not deliver them.
 
 Authentication: Not required.
 
+## Node Types API
+
+### GET /api/node-types
+
+Returns the node-type catalogue used by validation and the generic workflow editor. Built-in types
+carry their complete node schema; installed extension types carry the `configSchema` from their
+manifest. The response contains no setting definitions or values.
+
+```typescript
+{
+  success: true;
+  data: {
+    extensionsAvailable: boolean;
+    nodeTypes: Array<{
+      type: string;
+      title: string;
+      description: string;
+      origin: "builtin" | "extension";
+      extensionName?: string;
+      extensionVersion?: string;
+      schema: Record<string, unknown> | null;
+      schemaScope: "node" | "config";
+    }>;
+  }
+  timestamp: string;
+}
+```
+
+`extensionsAvailable` is true only when this process has a live runner-backed registry. False does
+not prove that a namespaced type is invalid; it means the installation cannot currently verify
+extension availability. `extensionName` and `extensionVersion` exist only when `origin` is
+`extension`.
+
+Authentication: Required.
+
 ## Settings API
 
 User settings management with authentication and validation.
