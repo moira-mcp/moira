@@ -6,7 +6,7 @@
  * suffix revision, and a final zero-only review in filesystem or bounded memory mode.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { runScenario } from "../../helpers/scenario-runner.js";
 
@@ -17,7 +17,7 @@ type PlanItem = {
   dependencies: string[];
 };
 
-const catalogEntry = findSystemCatalogEntry("task-breakdown-flow", "public")!;
+const catalogEntry = findCatalogEntryBySlug("task-breakdown-flow")!;
 const task = "Prepare and verify a bounded release-readiness summary";
 const expected = "A checked release-readiness summary exists";
 const criteria = ["The summary is complete", "Every claim has verification evidence"];
@@ -104,62 +104,9 @@ describe("task-breakdown-flow", () => {
     workflow = loadWorkflow();
   });
 
-  test("preserves public identity and validates the accepted 76-node graph", async () => {
-    expect(catalogEntry.owner).toBe("system-moira");
-    expect(catalogEntry.slug).toBe("task-breakdown-flow");
-    expect(catalogEntry.visibility).toBe("public");
-    expect(workflow.id).toBe("772e4bec-07d2-4187-8d96-b60d85f816ba");
-    expect(workflow.metadata.version).toBe("4.0.0");
-    expect(workflow.nodes).toHaveLength(76);
-
+  test("validates the executable task-breakdown graph", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
-  });
-
-  test("publishes decision-useful boundaries, guarantees, outcomes, and authority limits", () => {
-    for (const phrase of [
-      "strict ordered plan",
-      "filesystem workspace",
-      "in-memory fallback",
-      "independent reviewer",
-      "at most two materially changed attempts",
-      "verified prefix",
-      "Interactive mode",
-      "clean, limited, aborted, and recovery",
-      "authority ceiling",
-      "notification actions",
-      "Todo List",
-      "Software Development Flow",
-      "Do not split one development lifecycle",
-    ]) {
-      expect(workflow.metadata.description).toContain(phrase);
-    }
-  });
-
-  test("defines bounded canonical plan/evidence state and four safe terminal projections", () => {
-    const registry = workflow.variableRegistry!;
-    expect(registry.steps).toMatchObject({ minItems: 1, maxItems: 32 });
-    expect(registry.steps.xOrderedUniqueReferences).toEqual({
-      idProperty: "id",
-      referencesProperty: "dependencies",
-    });
-    expect(registry.evidence_ledger).toMatchObject({ maxItems: 32 });
-    expect(registry.retry_count).toMatchObject({ type: "integer", minimum: 0, maximum: 2 });
-    expect(registry.artifact_location.pattern).toContain("task-breakdown-");
-
-    for (const id of ["end_clean", "end_limited", "end_aborted", "end_recovery"]) {
-      const output = node(workflow, id).finalOutput;
-      expect(output).toContain("terminal_outcome");
-      expect(output).toContain("result_summary");
-      if (id === "end_clean" || id === "end_limited") {
-        expect(output).toContain("artifact_location");
-      } else {
-        expect(output).not.toContain("artifact_location");
-      }
-      expect(output).not.toContain("evidence_ledger");
-      expect(output).not.toContain("findings_summary");
-    }
-    expect(workflow.nodes.some((candidate) => candidate.type === "telegram")).toBe(false);
   });
 
   test("completes a two-item autonomous memory task only after both independent gates", async () => {

@@ -96,6 +96,22 @@ export interface SubgraphNode extends BaseNode {
   };
 }
 
+export interface UserNotificationNode extends BaseNode {
+  type: "user-notification";
+  message: string;
+  format?: "plain" | "markdown" | "html";
+  silent?: boolean;
+  attachProgressImage?: boolean;
+  attachment?: {
+    kind: "image" | "document";
+    data: string;
+    encoding: "base64";
+    filename: string;
+    mimeType: string;
+  };
+  connections: { default: string; error?: string };
+}
+
 // Note nodes - automatic nodes for persistent storage
 export interface ReadNoteNode extends BaseNode {
   type: "read-note";
@@ -162,6 +178,7 @@ export type WorkflowNode =
   | ConditionNode
   | ExpressionNode
   | SubgraphNode
+  | UserNotificationNode
   | ReadNoteNode
   | WriteNoteNode
   | UpsertNoteNode

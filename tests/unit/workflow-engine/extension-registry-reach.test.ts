@@ -49,6 +49,36 @@ const MANIFEST: ExtensionManifest = {
   ],
 };
 
+const CHANNEL_MANIFEST: ExtensionManifest = {
+  apiVersion: EXTENSION_API_VERSION,
+  name: "channel-snapshot",
+  version: "1.0.0",
+  entrypoint: "index.js",
+  nodes: [],
+  settings: [
+    {
+      key: "channel-snapshot.enabled",
+      type: "boolean",
+      label: "Enabled",
+      defaultValue: "true",
+    },
+  ],
+  communicationChannels: [
+    {
+      id: "channel-snapshot.notifications",
+      title: "Snapshot notifications",
+      capabilities: { text: true, image: false, document: false },
+      configurationSchema: {
+        type: "object",
+        required: ["channel-snapshot.enabled"],
+        properties: { "channel-snapshot.enabled": { type: "boolean" } },
+      },
+      enabledSetting: "channel-snapshot.enabled",
+      settings: ["channel-snapshot.enabled"],
+    },
+  ],
+};
+
 function graphWithCustomNode(): WorkflowGraph {
   return {
     metadata: { name: "Reach", version: "1.0.0", description: "test" },
@@ -134,6 +164,26 @@ describe("Snapshot for consumers outside the process", () => {
       { name: "corporate-messenger", version: "1.2.0", nodes: MANIFEST.nodes },
     ]);
     expect(restored!.registry.has("corporate-messenger.send")).toBe(true);
+  });
+
+  test("a communication declaration survives the snapshot write/read boundary", () => {
+    const registry = new ExtensionRegistry();
+    expect(registry.register(CHANNEL_MANIFEST).registered).toBe(true);
+    expect(writeExtensionRegistrySnapshot(registry, stateDir).written).toBe(true);
+
+    const restored = readExtensionRegistrySnapshot(stateDir);
+
+    expect(restored?.snapshot.extensions[0].communicationChannels).toEqual(
+      CHANNEL_MANIFEST.communicationChannels,
+    );
+    expect(restored?.snapshot.extensions[0].settings).toEqual(CHANNEL_MANIFEST.settings);
+    expect(
+      restored?.registry.getCommunicationChannel("channel-snapshot.notifications"),
+    ).toMatchObject({
+      extensionName: "channel-snapshot",
+      extensionVersion: "1.0.0",
+      declaration: CHANNEL_MANIFEST.communicationChannels![0],
+    });
   });
 
   test("a workflow validated from the snapshot is accepted, and without it is unresolved", async () => {

@@ -20,7 +20,7 @@ Flow фиксирует source-grounded требования и полномоч
 Implement, Tests, Review, Checkpoint и Finalize. Она выводится из текущей primary workflow node,
 поэтому repair, replan и обычный multi-unit loop из checkpoint снова открывают соответствующую
 раннюю фазу без отдельных status variables. Та же shared model формирует PNG для существующих
-авторизованных Telegram attention на plan/report/approval/completion; stopped notification остаётся
+авторизованных user notifications для plan/report/approval/completion; stopped notification остаётся
 текстовым, потому что у произвольного abort нет одной правдивой фазы. Progress не меняет routing SDF
 или его границы полномочий.
 
@@ -29,7 +29,7 @@ validation, independent review, repair или checkpoint node, её active-only 
 авторитетные unit, total и iteration для этой роли. Plan/replan nodes не используют stale unit
 counters.
 
-`screenshots` один раз снимает и действительно просматривает необходимые состояния. `html_report` переиспользует эти же принятые изображения в self-contained отчёте, загружает его через Moira Artifact API и отправляет публичный URL в Telegram, когда уведомления настроены; второй screenshot pass не выполняется. Сбой Artifact upload блокирует unit. Отсутствие Telegram или ошибка отправки в достигнутой notification node не блокируют работу. Interactive approval плана, выбранных units и финального результата получает attention notification и ждёт решения в обычной директиве. В autonomous mode human-approval directives отсутствуют.
+`screenshots` один раз снимает и действительно просматривает необходимые состояния. `html_report` переиспользует эти же принятые изображения в self-contained отчёте, загружает его через Moira Artifact API и отправляет публичный URL через настроенные каналы связи текущего пользователя; второй screenshot pass не выполняется. Сбой Artifact upload блокирует unit. Отсутствие настроенных каналов или ошибка отправки в достигнутой notification node не блокируют работу. Interactive approval плана, выбранных units и финального результата получает attention notification и ждёт решения в обычной директиве. В autonomous mode human-approval directives отсутствуют.
 
 Findings классифицируются как product, test/validation, evidence, documentation/projection, invalid criterion или upstream plan/process defects. Product repair возвращается через producer completion. Verification-only и gate-local repair повторяют только устаревшие evidence. Mixed или invalid causes приводят к quality-preserving replan, а не к расширению реализации по сломанному контракту.
 
@@ -37,7 +37,7 @@ Findings классифицируются как product, test/validation, evide
 
 Если исходный запрос уже разрешает последующий caller-owned push, pull request, publication, release или deployment, SDF во время intake сохраняет это намерение через revisioned `session` reminder API текущего execution. При обычном завершении standalone и child запусков reminder возвращается в `Next requested actions`. Он не становится unit плана разработки, не меняет `vcs_commits_authorized`, не выполняет действие и не даёт новых полномочий.
 
-Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Permanent documentation закрывается вместе со своим vertical unit; финальная reconciliation продолжает проверять cross-unit truth и независимо ревьюит только изменённую либо ранее не покрытую документацию. Финальный suffix включает feature-wide validation, semantic review, requirements coverage, factual report и локальную VCS reconciliation в пределах полномочий. Normal и stopped endings отправляют best-effort Telegram notification, когда он настроен.
+Runtime, browser, visual, integration, performance и full-suite checks остаются условными для конкретной фичи и репозитория. Permanent documentation закрывается вместе со своим vertical unit; финальная reconciliation продолжает проверять cross-unit truth и независимо ревьюит только изменённую либо ранее не покрытую документацию. Финальный suffix включает feature-wide validation, semantic review, requirements coverage, factual report и локальную VCS reconciliation в пределах полномочий. Normal и stopped endings отправляют best-effort уведомления через настроенные каналы пользователя.
 
 ## Когда использовать
 

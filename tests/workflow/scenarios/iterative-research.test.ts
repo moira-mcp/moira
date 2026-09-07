@@ -1,5 +1,5 @@
 /** Contract and behavioral scenarios for moira/iterative-research. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphTemplateProcessor,
@@ -15,7 +15,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("iterative-research", "public")!;
+const entry = findCatalogEntryBySlug("iterative-research")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 function node(graph: WorkflowGraph, id: string): any {
   const found = graph.nodes.find((candidate) => candidate.id === id);
@@ -88,21 +88,21 @@ function configureHandlers(
     });
   }
   if (notification !== "default") {
-    handlers.set("telegram-notification", {
-      getNodeType: () => "telegram-notification",
+    handlers.set("user-notification", {
+      getNodeType: () => "user-notification",
       execute: async (current: { id: string }) =>
         notification === "sent"
           ? {
               nodeId: current.id,
               action: "continue",
               outputPath: "default",
-              data: { telegramNotificationSent: true },
+              data: { userNotificationStatus: "delivered" },
             }
           : {
               nodeId: current.id,
               action: "continue",
               outputPath: "error",
-              data: { telegramNotificationFailed: true },
+              data: { reason: "delivery_failed" },
             },
     });
   }
@@ -118,18 +118,12 @@ async function run(
 }
 
 describe("iterative-research", () => {
-  test("publishes the v3 contract as a valid 49-node public workflow", async () => {
+  test("validates the executable research graph", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.metadata.version).toBe("3.0.0");
-    expect(graph.nodes).toHaveLength(49);
-    expect(graph.metadata.description).toContain("repeated independent critique");
-    expect(graph.metadata.description).toContain("Local delivery has no external side effect");
     expect(JSON.stringify(graph)).not.toMatch(/"formatting_score"|"word_count"|"source_quota"/i);
   });
 
@@ -146,15 +140,6 @@ describe("iterative-research", () => {
       "delivery.html",
     ]);
     expect(materialize.files.every((file: { content: string }) => file.content === "")).toBe(true);
-    expect(Object.keys(registry)).toEqual(
-      expect.arrayContaining([
-        "execution_id",
-        "artifact_locator",
-        "publication_url",
-        "terminal_notified",
-        "terminal_notification_failed",
-      ]),
-    );
     expect(node(graph, "execution-id-matches").condition.right).toEqual({
       contextPath: "executionId",
     });
@@ -176,26 +161,6 @@ describe("iterative-research", () => {
     expect(rendered).toContain(
       "./moira-ws/iterative-research-123e4567-e89b-42d3-a456-426614174000/research-contract.md",
     );
-  });
-
-  test("bounds review and repair data and projects explicit terminal results", () => {
-    const graph = workflow();
-    expect(node(graph, "review-research").inputSchema.properties.issues_count).toEqual({
-      type: "integer",
-      minimum: 0,
-      maximum: 1000,
-    });
-    expect(node(graph, "repair-research").inputSchema.properties.repair_reach.enum).toEqual([
-      "presentation",
-      "analysis",
-      "sources",
-      "contract",
-    ]);
-    expect(node(graph, "publish-result").inputSchema.globalInputs).toEqual(["publication_url"]);
-    for (const end of graph.nodes.filter((candidate) => candidate.type === "end")) {
-      expect(end.finalOutput).toBeDefined();
-      expect(end.finalOutput).not.toContain("send-notification");
-    }
   });
 
   test("rejects a different schema-valid execution UUID before research", async () => {

@@ -1,0 +1,54 @@
+{
+  "apiVersion": "moira.extensions/v1",
+  "name": "channel-probe",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [],
+  "communicationChannels": [
+    {
+      "id": "channel-probe.notifications",
+      "title": "Channel probe",
+      "capabilities": {
+        "text": true,
+        "image": true,
+        "document": true,
+        "trustedDelivery": true
+      },
+      "configurationSchema": {
+        "type": "object",
+        "required": ["channel-probe.enabled", "channel-probe.destination"],
+        "additionalProperties": false,
+        "properties": {
+          "channel-probe.enabled": { "type": "boolean" },
+          "channel-probe.destination": { "type": "string", "minLength": 1 }
+        }
+      },
+      "enabledSetting": "channel-probe.enabled",
+      "settings": ["channel-probe.enabled", "channel-probe.destination"],
+      "permissions": {
+        "network": ["allowed.example"],
+        "secrets": ["channel-probe.token"]
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "channel-probe.enabled",
+      "type": "boolean",
+      "label": "Enabled",
+      "defaultValue": "true"
+    },
+    {
+      "key": "channel-probe.destination",
+      "type": "string",
+      "label": "Destination",
+      "required": true
+    },
+    {
+      "key": "channel-probe.token",
+      "type": "encrypted",
+      "label": "Token",
+      "required": true
+    }
+  ]
+}

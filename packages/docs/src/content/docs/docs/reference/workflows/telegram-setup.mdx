@@ -9,11 +9,11 @@ Telegram Setup configures or tests the current user's Moira Telegram notificatio
 mcp__moira__start({
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
-  skipTelegramCheck: true
+  skipNotificationCheck: true
 })
 ```
 
-`skipTelegramCheck: true` is required on an unconfigured account because the workflow contains its own `telegram-notification` test node and would otherwise trigger normal Telegram preflight.
+`skipNotificationCheck: true` is required on an unconfigured account because the workflow contains its own legacy `telegram-notification` test node and would otherwise trigger ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior.
 
 ## Process
 

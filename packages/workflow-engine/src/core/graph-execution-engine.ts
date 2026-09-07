@@ -31,6 +31,7 @@ import { EndNodeHandler } from "../handlers/end-handler.js";
 import { AgentDirectiveHandler } from "../handlers/agent-directive-handler.js";
 import { ConditionHandler } from "../handlers/condition-handler.js";
 import { TelegramNotificationHandler } from "../handlers/telegram-notification-handler.js";
+import { UserNotificationHandler } from "../handlers/user-notification-handler.js";
 import { SubgraphNodeHandler } from "../handlers/subgraph-handler.js";
 import { ExpressionHandler } from "../handlers/expression-handler.js";
 import { ReadNoteHandler } from "../handlers/read-note-handler.js";
@@ -100,6 +101,7 @@ export class GraphExecutionEngine implements IGraphExecutionEngine {
     this.nodeHandlers.set("agent-directive", new AgentDirectiveHandler());
     this.nodeHandlers.set("condition", new ConditionHandler());
     this.nodeHandlers.set("telegram-notification", new TelegramNotificationHandler());
+    this.nodeHandlers.set("user-notification", new UserNotificationHandler());
     this.nodeHandlers.set("subgraph", new SubgraphNodeHandler());
     this.nodeHandlers.set("expression", new ExpressionHandler());
     this.nodeHandlers.set("read-note", new ReadNoteHandler());

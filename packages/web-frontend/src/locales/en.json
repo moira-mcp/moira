@@ -557,24 +557,49 @@
         "maxLength": "Maximum length: {{length}}"
       },
       "enable": "Enable",
-      "telegram": {
-        "testNotification": "Test Notification",
-        "sending": "Sending...",
-        "testDescription": "Send a test message to verify your Telegram configuration",
-        "setupGuide": "Need help setting up? See the",
-        "setupGuideLink": "Telegram Setup Guide",
-        "configureBotFirst": "Please configure Bot Token and Chat ID first",
-        "testSuccess": "Test notification sent successfully",
-        "testFailed": "Failed to send test notification",
+      "channels": {
+        "extension": "Extension",
+        "test": "Send test",
+        "testing": "Sending...",
+        "testAria": "Send a test through {{channel}}",
+        "testSuccess": "Test delivered through {{channel}}",
+        "testFailed": "Test delivery through {{channel}} failed",
+        "noSettings": "This channel has no user settings.",
+        "setupGuide": "Open the {{channel}} setup guide",
+        "states": {
+          "ready": "Ready",
+          "disabled": "Disabled",
+          "incomplete": "Setup required",
+          "unavailable": "Unavailable"
+        },
+        "capabilities": {
+          "label": "Supported message types",
+          "text": "Text",
+          "images": "Images",
+          "documents": "Documents"
+        },
+        "trust": {
+          "approved": "Trusted delivery is approved by an administrator.",
+          "notApproved": "Trusted delivery requires administrator approval.",
+          "ordinaryOnly": "This channel supports ordinary delivery only."
+        },
         "errors": {
-          "invalid_token": "Bot token is invalid. Please get a new token from @BotFather.",
-          "invalid_chat_id": "Chat not found. Send any message to your bot first, then try again.",
-          "network_error": "Could not connect to Telegram. Check your internet connection.",
-          "rate_limit_exceeded": "Too many requests. Please wait a moment and try again.",
-          "timeout_error": "Request to Telegram timed out. Please try again.",
-          "message_too_long": "Test message is too long.",
-          "template_error": "Message template error. Check your configuration.",
-          "api_error": "Telegram API error. Please check your configuration."
+          "rate_limit": "The channel rate limit is active. Try again later.",
+          "availability_concurrency_limit": "The channel is busy. Try again later.",
+          "deadline_exceeded": "The channel did not respond before the deadline.",
+          "configuration_invalid": "The saved channel configuration is invalid.",
+          "runner_unavailable": "The extension channel runner is unavailable.",
+          "runner_incompatible": "The extension channel runner is incompatible.",
+          "invalid_token": "The channel credential is invalid.",
+          "invalid_chat_id": "The configured destination could not be found.",
+          "network_error": "The channel provider could not be reached.",
+          "rate_limit_exceeded": "The channel provider rate limit is active. Try again later.",
+          "timeout_error": "The channel provider did not respond before the deadline.",
+          "message_too_long": "The provider rejected the test message size.",
+          "template_error": "The provider rejected the test message format.",
+          "api_error": "The channel provider rejected the test delivery.",
+          "provider_error": "The provider rejected the test delivery.",
+          "channel_error": "The channel could not deliver the test message."
         }
       },
       "saveChanges": "Save Changes",

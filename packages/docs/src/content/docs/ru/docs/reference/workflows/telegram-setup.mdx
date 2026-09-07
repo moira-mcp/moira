@@ -9,11 +9,11 @@ Telegram Setup настраивает или тестирует Telegram-уве�
 mcp__moira__start({
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
-  skipTelegramCheck: true
+  skipNotificationCheck: true
 })
 ```
 
-`skipTelegramCheck: true` обязателен для ненастроенного аккаунта: workflow содержит собственную тестовую ноду `telegram-notification` и иначе попадёт под обычный Telegram preflight.
+`skipNotificationCheck: true` обязателен для ненастроенного аккаунта: workflow содержит собственную legacy test node `telegram-notification` и иначе попадёт под preflight обычных уведомлений. `skipTelegramCheck` остаётся устаревшим alias с тем же поведением.
 
 ## Процесс
 

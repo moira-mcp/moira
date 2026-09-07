@@ -67,6 +67,8 @@ export const TOOL_BINDINGS = {
         : formatDownloadToken(result.data as Parameters<typeof formatDownloadToken>[0]);
     return { content: [{ type: "text", text }] };
   },
+  communication: async (params) =>
+    (await import("./manage-communication.js")).manageCommunication(params),
   session: async (params) => (await import("./get-session-info.js")).getSessionInfo(params),
   notes: async (params) => (await import("./manage-notes.js")).manageNotes(params),
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),

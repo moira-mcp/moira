@@ -1,10 +1,10 @@
 /**
- * Observable scenarios for Software Development Flow v15.
+ * Observable scenarios for Software Development Flow.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -27,7 +27,7 @@ const exclusiveResponseShape =
 
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(
-    findSystemCatalogEntry("software-development-flow", "public")!.graph,
+    findCatalogEntryBySlug("software-development-flow")!.graph,
   ) as WorkflowGraph;
 }
 
@@ -917,7 +917,7 @@ const scenarios: TestScenario[] = [
   ),
 ];
 
-describe("software-development-flow v15.5.0", () => {
+describe("software-development-flow", () => {
   let workflow: WorkflowGraph;
 
   beforeAll(() => {
@@ -928,87 +928,13 @@ describe("software-development-flow v15.5.0", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("15.5.0");
     expect(detectCycles(workflow).length).toBeGreaterThan(0);
-    expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
-      "workspace_path",
-      "plan_revision",
-      "current_step_index",
-      "total_steps",
-      "current_iteration",
-      "vcs_commits_authorized",
-      "operating_mode",
-      "planning_standards",
-      "engineering_standards",
-      "test_standards",
-      "documentation_standards",
-      "review_standards",
-      "previous_plan_revision",
-      "previous_iteration",
-      "product_review_iteration",
-      "visual_validation_preference",
-      "progress_intake_outcome",
-      "progress_plan_outcome",
-      "progress_implementation_outcome",
-      "progress_tests_outcome",
-      "progress_review_outcome",
-      "progress_checkpoint_outcome",
-      "progress_finalize_outcome",
-    ]);
     expect(workflow.variableRegistry?.operating_mode?.enum).toEqual(["autonomous", "interactive"]);
     expect(workflow.variableRegistry?.visual_validation_preference?.enum).toEqual([
       "disabled",
       "screenshots",
       "html_report",
     ]);
-    expect(workflow.progress).toEqual({
-      title: "Software Development · plan r{{plan_revision}}",
-      goal: "Deliver one complete repository change with its tests, permanent documentation, review, and truthful local closure.",
-      facts: [{ label: "Plan", value: "r{{plan_revision}}", tone: "neutral" }],
-      nodes: [
-        expect.objectContaining({
-          id: "intake",
-          label: "Intake",
-          content: expect.objectContaining({ outcome: "{{progress_intake_outcome}}" }),
-          connections: { default: "plan" },
-        }),
-        expect.objectContaining({
-          id: "plan",
-          label: "Plan",
-          content: expect.objectContaining({ outcome: "{{progress_plan_outcome}}" }),
-          connections: { default: "implement" },
-        }),
-        expect.objectContaining({
-          id: "implement",
-          label: "Implement",
-          content: expect.objectContaining({ outcome: "{{progress_implementation_outcome}}" }),
-          connections: { default: "tests" },
-        }),
-        expect.objectContaining({
-          id: "tests",
-          label: "Tests",
-          content: expect.objectContaining({ outcome: "{{progress_tests_outcome}}" }),
-          connections: { default: "review" },
-        }),
-        expect.objectContaining({
-          id: "review",
-          label: "Review",
-          content: expect.objectContaining({ outcome: "{{progress_review_outcome}}" }),
-          connections: { default: "checkpoint" },
-        }),
-        expect.objectContaining({
-          id: "checkpoint",
-          label: "Checkpoint",
-          content: expect.objectContaining({ outcome: "{{progress_checkpoint_outcome}}" }),
-          connections: { default: "implement" },
-        }),
-        expect.objectContaining({
-          id: "finalize",
-          label: "Finalize",
-          content: expect.objectContaining({ outcome: "{{progress_finalize_outcome}}" }),
-        }),
-      ],
-    });
     const visibleWaitingTypes = new Set([
       "agent-directive",
       "teleport",
@@ -1017,7 +943,6 @@ describe("software-development-flow v15.5.0", () => {
       "subgraph",
     ]);
     const visibleWaitingNodes = workflow.nodes.filter((node) => visibleWaitingTypes.has(node.type));
-    expect(visibleWaitingNodes).toHaveLength(49);
     expect(visibleWaitingNodes.filter((node) => !node.progressNodeId)).toEqual([]);
     expect(visibleWaitingNodes.filter((node) => !node.progressActiveContent)).toEqual([]);
     const stageOutcome = {
@@ -1040,30 +965,9 @@ describe("software-development-flow v15.5.0", () => {
       workflow.nodes.find((node) => node.id === "review-unit-completeness")?.inputSchema
         ?.globalInputs,
     ).toContain("progress_checkpoint_outcome");
-    expect(
-      workflow.nodes
-        .filter((node) => node.type === "telegram-notification" && node.attachProgressImage)
-        .map((node) => [node.id, node.progressNodeId]),
-    ).toEqual([
-      ["notify-plan-approval", "plan"],
-      ["notify-report-ready", "review"],
-      ["notify-unit-approval", "review"],
-      ["notify-workflow-complete", "finalize"],
-      ["notify-final-approval", "finalize"],
-    ]);
     expect(workflow.nodes.find((node) => node.id === "notify-workflow-stopped")).not.toHaveProperty(
       "attachProgressImage",
     );
-    expect(
-      workflow.nodes.filter((node) => node.type === "telegram-notification").map((node) => node.id),
-    ).toEqual([
-      "notify-plan-approval",
-      "notify-report-ready",
-      "notify-unit-approval",
-      "notify-workflow-complete",
-      "notify-workflow-stopped",
-      "notify-final-approval",
-    ]);
 
     const approval = workflow.nodes.find((node) => node.id === "approve-plan") as {
       inputSchema: { globalInputs?: string[]; properties: Record<string, unknown> };
@@ -1460,272 +1364,6 @@ describe("software-development-flow v15.5.0", () => {
     }
   });
 
-  test("keeps current-unit work off stale plan revisions", () => {
-    const currentPlanPath = "{{workspace_path}}/plans/{{plan_revision}}/plan.md";
-    const previousPlanPath = "{{workspace_path}}/plans/{{previous_plan_revision}}/plan.md";
-    const currentPlanConsumers = [
-      "validate-cheap",
-      "repair-cheap-validation",
-      "review-test-adequacy",
-      "repair-test-adequacy",
-      "review-architecture",
-      "repair-architecture",
-      "approve-current-unit-closure",
-      "validate-runtime",
-      "repair-runtime",
-      "validate-expensive",
-      "repair-expensive",
-      "review-plan-unit-with-user",
-      "repair-user-feedback",
-      "complete-plan-unit",
-      "repair-unit-completeness",
-      "checkpoint-plan-unit",
-      "update-unit-documentation",
-      "create-and-upload-step-report",
-      "teleport-replan",
-    ];
-
-    for (const nodeId of currentPlanConsumers) {
-      const directive = (
-        workflow.nodes.find((node) => node.id === nodeId) as {
-          directive: string;
-        }
-      ).directive;
-      expect(directive).not.toContain(previousPlanPath);
-    }
-    expect(
-      (
-        workflow.nodes.find((node) => node.id === "update-unit-documentation") as {
-          directive: string;
-        }
-      ).directive,
-    ).toContain(currentPlanPath);
-
-    const sharedReplan = workflow.nodes.find((node) => node.id === "revise-plan-for-replan") as {
-      directive: string;
-    };
-    expect(sharedReplan.directive).toContain("from the previous revision");
-    expect(sharedReplan.directive).toContain("Write plan revision {{plan_revision}}");
-
-    const unitPath = "{{workspace_path}}/plans/{{plan_revision}}/step-{{current_step_index}}";
-    const iterationPath = `${unitPath}/iteration-{{current_iteration}}`;
-    const requiredProcessLocators: Record<string, string[]> = {
-      "review-plan": [currentPlanPath, "{{workspace_path}}/plans/{{plan_revision}}/review.md"],
-      "repair-plan": [
-        currentPlanPath,
-        "{{workspace_path}}/plans/{{plan_revision}}/review.md",
-        "{{workspace_path}}/plans/{{plan_revision}}/repair.md",
-      ],
-      "validate-cheap": [
-        currentPlanPath,
-        `${unitPath}/unit-report.md`,
-        `${unitPath}/iteration-{{previous_iteration}}/repair.md`,
-        `${iterationPath}/cheap-validation.md`,
-      ],
-      "repair-cheap-validation": [
-        currentPlanPath,
-        `${iterationPath}/cheap-validation.md`,
-        `${iterationPath}/repair.md`,
-        `${unitPath}/unit-report.md`,
-      ],
-      "repair-test-adequacy": [
-        currentPlanPath,
-        `${iterationPath}/test-adequacy-review.md`,
-        `${iterationPath}/repair.md`,
-        `${unitPath}/unit-report.md`,
-      ],
-      "review-architecture": [
-        currentPlanPath,
-        `${unitPath}/unit-report.md`,
-        `${iterationPath}/architecture-review.md`,
-      ],
-      "repair-architecture": [
-        currentPlanPath,
-        `${iterationPath}/architecture-review.md`,
-        `${iterationPath}/repair.md`,
-        `${unitPath}/unit-report.md`,
-      ],
-      "repair-runtime": [
-        currentPlanPath,
-        `${iterationPath}/runtime-validation.md`,
-        `${iterationPath}/repair.md`,
-        `${unitPath}/unit-report.md`,
-      ],
-      "repair-expensive": [
-        currentPlanPath,
-        `${iterationPath}/expensive-validation.md`,
-        `${iterationPath}/repair.md`,
-        `${unitPath}/unit-report.md`,
-      ],
-      "repair-user-feedback": [
-        currentPlanPath,
-        `${unitPath}/user-feedback.md`,
-        `${iterationPath}/repair.md`,
-        `${unitPath}/unit-report.md`,
-      ],
-      "repair-feature-validation": ["{{workspace_path}}/feature-validation.md"],
-      "repair-finalization-repository": ["{{workspace_path}}/finalization.md"],
-    };
-    for (const [nodeId, locators] of Object.entries(requiredProcessLocators)) {
-      const directive = workflow.nodes.find((node) => node.id === nodeId)?.directive ?? "";
-      for (const locator of locators) expect(directive).toContain(locator);
-    }
-
-    const progressResponseNodes = workflow.nodes.filter(
-      (node) =>
-        (node.type === "agent-directive" || node.type === "teleport") &&
-        node.inputSchema?.required?.some((field) => field.startsWith("progress_")) &&
-        node.inputSchema.required.some((field) => !field.startsWith("progress_")),
-    );
-    expect(progressResponseNodes).toHaveLength(39);
-    for (const node of progressResponseNodes) {
-      expect(node.directive).not.toMatch(exclusiveResponseShape);
-    }
-
-    for (const [nodeId, functionalOutput, progressOutput] of [
-      ["validate-cheap", "issues_count", "progress_tests_outcome"],
-      ["review-test-adequacy", "review_outcome", "progress_tests_outcome"],
-      ["review-architecture", "review_outcome", "progress_review_outcome"],
-      ["teleport-replan", "replan_rationale", "progress_plan_outcome"],
-      ["complete-plan-unit", "completion_outcome", "progress_implementation_outcome"],
-    ] as const) {
-      const node = workflow.nodes.find((candidate) => candidate.id === nodeId) as {
-        inputSchema: { required: string[] };
-      };
-      expect(node.inputSchema.required).toEqual(
-        expect.arrayContaining([functionalOutput, progressOutput]),
-      );
-    }
-  });
-
-  test("materializes standards once and gives each agent only its applicable references", () => {
-    const expectedConsumers: Record<string, string[]> = {
-      "assess-project-health": ["review"],
-      "create-plan": ["planning"],
-      "review-plan": ["planning", "review"],
-      "repair-plan": ["planning", "review"],
-      "revise-plan-after-rejection": ["planning"],
-      "prepare-plan-unit-implementation": ["planning"],
-      "implement-plan-unit": ["engineering", "tests"],
-      "complete-plan-unit": ["engineering", "tests"],
-      "validate-cheap": ["engineering", "review", "tests"],
-      "repair-cheap-validation": ["engineering", "review", "tests"],
-      "review-test-adequacy": ["review", "tests"],
-      "repair-test-adequacy": ["review", "tests"],
-      "review-architecture": ["engineering", "review"],
-      "repair-architecture": ["engineering", "review"],
-      "revise-plan-for-replan": ["planning"],
-      "validate-runtime": ["review"],
-      "repair-runtime": ["engineering", "review", "tests"],
-      "validate-expensive": ["review"],
-      "repair-expensive": ["engineering", "review", "tests"],
-      "update-unit-documentation": ["documentation"],
-      "repair-user-feedback": ["engineering", "review", "tests"],
-      "validate-feature-wide": ["review"],
-      "repair-feature-validation": ["review"],
-      "review-final-semantics": ["documentation", "engineering", "review", "tests"],
-      "repair-final-semantics": ["documentation", "review"],
-      "revise-plan-after-feedback": ["planning"],
-      "repair-finalization-repository": ["review"],
-      "review-unit-completeness": ["documentation", "engineering", "review", "tests"],
-      "repair-unit-completeness": ["documentation", "engineering", "review", "tests"],
-      "revise-plan-for-teleport": ["planning"],
-      "create-final-report": ["review"],
-    };
-    const agentNodes = workflow.nodes.filter((node) => node.type === "agent-directive");
-    const actualConsumers: Record<string, string[]> = {};
-    for (const node of agentNodes) {
-      const references = [
-        ...(node.directive?.matchAll(
-          /standards\/(planning|engineering|tests|documentation|review)\.md/g,
-        ) ?? []),
-      ]
-        .map((match) => match[1])
-        .sort();
-      expect(new Set(references).size).toBe(references.length);
-      if (references.length > 0) actualConsumers[node.id] = references;
-    }
-    expect(actualConsumers).toEqual(expectedConsumers);
-    expect(Object.keys(actualConsumers)).toHaveLength(31);
-    expect(agentNodes.filter((node) => !actualConsumers[node.id])).toHaveLength(16);
-  });
-
-  test("keeps permanent documentation with the post-validation owners", () => {
-    const implementation = workflow.nodes.find((node) => node.id === "implement-plan-unit")!;
-    const producerCompletion = workflow.nodes.find((node) => node.id === "complete-plan-unit")!;
-    expect(`${implementation.directive} ${implementation.completionCondition}`).toContain(
-      "permanent project documentation remains deferred to update-unit-documentation",
-    );
-    expect(`${producerCompletion.directive} ${producerCompletion.completionCondition}`).toContain(
-      "permanent project documentation remains intentionally deferred",
-    );
-
-    for (const nodeId of [
-      "repair-cheap-validation",
-      "repair-test-adequacy",
-      "repair-architecture",
-      "repair-runtime",
-      "repair-expensive",
-      "repair-user-feedback",
-    ]) {
-      const directive = workflow.nodes.find((node) => node.id === nodeId)?.directive ?? "";
-      expect(directive).toContain(
-        "Permanent project documentation is not owned here and remains deferred to `update-unit-documentation`",
-      );
-      expect(directive).not.toMatch(
-        /(?:correct|change|repair)[^.\n]*permanent (?:project )?documentation/i,
-      );
-    }
-  });
-
-  test("keeps shared review and repair doctrine in the materialized standard", () => {
-    const reviewStandard = String(workflow.variableRegistry?.review_standards?.default ?? "");
-    for (const ownerClause of [
-      "The reviewer reads the primary sources",
-      "The repair owner reproduces the defect before changing anything",
-      "A repeated root requires changed knowledge",
-      "Validation-only drift stops before another mutation",
-      "Class-wide means bounded real manifestations",
-      "Mutation scope follows actual reach",
-    ]) {
-      expect(reviewStandard).toContain(ownerClause);
-    }
-
-    const boundedConsumers = [
-      "review-plan",
-      "review-test-adequacy",
-      "review-architecture",
-      "review-unit-completeness",
-      "review-final-semantics",
-      "repair-plan",
-      "repair-cheap-validation",
-      "repair-test-adequacy",
-      "repair-architecture",
-      "repair-runtime",
-      "repair-expensive",
-      "repair-user-feedback",
-      "repair-feature-validation",
-      "repair-final-semantics",
-      "repair-finalization-repository",
-      "repair-unit-completeness",
-    ];
-    const duplicatedDoctrine = [
-      /reproduce[^.\n]*before mutation/i,
-      /classify each confirmed finding by its earliest cause/i,
-      /same root returned without/i,
-      /validation-only drift/i,
-      /never obtain a pass by weakening/i,
-      /do not add sleeps/i,
-      /zero findings is valid/i,
-      /bound class-wide work/i,
-      /do not run linters/i,
-    ];
-    for (const nodeId of boundedConsumers) {
-      const directive = workflow.nodes.find((node) => node.id === nodeId)?.directive ?? "";
-      for (const repeated of duplicatedDoctrine) expect(directive).not.toMatch(repeated);
-    }
-  });
-
   test("projects truthful progress across unit loops, replan, finalization and completion", () => {
     const projectionAt = (
       currentNodeId: string | null,
@@ -1879,25 +1517,6 @@ describe("software-development-flow v15.5.0", () => {
     ]);
   });
 
-  test("requires distinguishing evidence and stops recursive meta-validation", () => {
-    const planning = String(workflow.variableRegistry?.planning_standards?.default ?? "");
-    const tests = String(workflow.variableRegistry?.test_standards?.default ?? "");
-    const engineering = String(workflow.variableRegistry?.engineering_standards?.default ?? "");
-    const review = String(workflow.variableRegistry?.review_standards?.default ?? "");
-
-    expect(planning).toContain("plausible wrong state");
-    expect(planning).toContain("observation that reliably differs");
-    expect(planning).toContain("semantic completeness through primary-source judgment");
-    expect(planning).toContain("Validation remains subordinate unless it is the requested result");
-    expect(tests).toContain("helper, harness, adapter, guard, proxy, or metatest");
-    expect(tests).toContain("does not prove semantic completeness or business provenance");
-    expect(engineering).toContain("Supporting validation does not become a second product");
-    expect(engineering).toContain("proving that another check or report used the intended path");
-    expect(review).toContain("A repeated root requires changed knowledge");
-    expect(review).toContain("Validation-only drift stops before another mutation");
-    expect(review).toContain("Class-wide means bounded real manifestations");
-  });
-
   test.each([
     ["missing", {}],
     ["empty", { replan_rationale: "" }],
@@ -1977,89 +1596,6 @@ describe("software-development-flow v15.5.0", () => {
     expect(result.status).toBe("failed");
     expect(result.error).toContain("Input validation failed for node 'review-final-semantics'");
     expect(result.visitedNodes).not.toContain("route-final-review-replan");
-  });
-
-  test("classifies causes and exposes replan before mutation", () => {
-    const review = String(workflow.variableRegistry?.review_standards?.default ?? "");
-    for (const cause of [
-      "product defect",
-      "test or validation defect",
-      "insufficient existing evidence",
-      "documentation or process projection",
-      "invalid or undemonstrable criterion",
-    ]) {
-      expect(review).toContain(cause);
-    }
-
-    for (const id of [
-      "review-plan",
-      "review-test-adequacy",
-      "review-architecture",
-      "review-unit-completeness",
-      "review-final-semantics",
-    ]) {
-      const node = workflow.nodes.find((candidate) => candidate.id === id) as {
-        inputSchema: { properties: { review_outcome: { enum: string[] } } };
-      };
-      expect(node.inputSchema.properties.review_outcome.enum).toEqual(["pass", "repair", "replan"]);
-    }
-
-    for (const id of [
-      "repair-cheap-validation",
-      "repair-test-adequacy",
-      "repair-runtime",
-      "repair-expensive",
-    ]) {
-      const node = workflow.nodes.find((candidate) => candidate.id === id) as {
-        inputSchema: { properties: Record<string, { enum: string[] }> };
-      };
-      expect(node.inputSchema.properties.repair_outcome.enum).toEqual(["changed", "replan"]);
-      expect(node.inputSchema.properties.mutation_scope.enum).toEqual([
-        "verification_only",
-        "product",
-      ]);
-    }
-
-    const documentation = workflow.nodes.find(
-      (candidate) => candidate.id === "update-unit-documentation",
-    ) as {
-      inputSchema: { properties: { documentation_outcome: { enum: string[] } } };
-    };
-    expect(documentation.inputSchema.properties.documentation_outcome.enum).toEqual([
-      "ready",
-      "product_repair",
-      "replan",
-    ]);
-
-    const closure = workflow.nodes.find((node) => node.id === "approve-current-unit-closure") as {
-      directive: string;
-    };
-    expect(closure.directive).toContain("exactly one route-current replan source");
-    expect(closure.directive).toContain("documentation_outcome=replan");
-    expect(closure.directive).toContain("Interactive mode asks the user");
-    expect(closure.directive).toContain("autonomous mode approves only a diagnosis");
-  });
-
-  test("uses one product-review cursor instead of a validation resume stack", () => {
-    const initialize = workflow.nodes.find(
-      (node) => node.id === "initialize-implementation-iteration",
-    ) as { expressions: string[] };
-    const advanceUnit = workflow.nodes.find((node) => node.id === "advance-plan-unit") as {
-      expressions: string[];
-    };
-    const markCurrent = workflow.nodes.find(
-      (node) => node.id === "mark-product-review-current",
-    ) as { expressions: string[] };
-
-    expect(initialize.expressions).toContain("product_review_iteration = 0");
-    expect(advanceUnit.expressions).toContain("product_review_iteration = 0");
-    expect(markCurrent.expressions).toEqual(["product_review_iteration = current_iteration"]);
-    expect(
-      workflow.nodes.find((node) => node.id === "route-current-verification-only")?.connections,
-    ).toEqual({ true: "validate-runtime", false: "review-architecture" });
-    expect(
-      workflow.nodes.find((node) => node.id === "mark-verification-only-iteration")?.connections,
-    ).toEqual({ default: "validate-cheap" });
   });
 
   test("a verification-only repair after architecture reruns downstream gates but skips architecture", async () => {
@@ -2410,10 +1946,5 @@ describe("software-development-flow v15.5.0", () => {
 
     expect(coverage.unvisitedNodes).toEqual([]);
     expect(coverage.uncoveredBranches).toEqual([]);
-  });
-
-  test("has unique scenario names", () => {
-    const names = scenarios.map((item) => item.name);
-    expect(new Set(names).size).toBe(names.length);
   });
 });

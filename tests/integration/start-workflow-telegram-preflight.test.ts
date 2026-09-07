@@ -1,24 +1,30 @@
 /**
- * Integration tests for Telegram pre-flight check in start-workflow
- * Issue #372: Pre-flight check when starting workflows with telegram nodes
+ * Integration tests for ordinary notification and trusted Telegram pre-flight checks.
  *
  * Tests with real database:
  * - Workflow with telegram nodes + no telegram settings → synthetic response (no execution created)
  * - Workflow with telegram nodes + skipTelegramCheck → normal start (execution created)
  * - Workflow without telegram nodes → normal start regardless of settings
- * - Workflow with telegram nodes + configured settings → normal start
+ * - Generic workflow with a configured non-Telegram channel → normal start
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
 import { startWorkflow } from "../../packages/mcp-server/src/tools/start-workflow.js";
 import { manageWorkflow } from "../../packages/mcp-server/src/tools/manage-workflow.js";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
-import { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  registerActiveCommunicationChannel,
+  unregisterActiveCommunicationChannel,
+  type CommunicationChannelAdapter,
+} from "@mcp-moira/workflow-engine";
 import { getDatabase, user } from "@mcp-moira/shared";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 const TEST_USER_ID = "test-telegram-preflight";
 const TEST_USER_CONFIGURED = "test-telegram-configured";
+const TEST_USER_EXTENSION = "test-extension-channel-configured";
+const TEST_EXTENSION_CHANNEL = "test-preflight-extension";
 
 /** Workflow WITH telegram-notification nodes (public so multiple users can access) */
 const workflowWithTelegram: WorkflowGraph = {
@@ -97,6 +103,25 @@ const workflowWithLock: WorkflowGraph = {
   ],
 };
 
+const workflowWithUserNotification: WorkflowGraph = {
+  id: "test-user-notification-preflight-wf",
+  metadata: {
+    name: "User Notification Preflight Test",
+    version: "1.0.0",
+    description: "Workflow with provider-neutral user notifications for pre-flight testing",
+  },
+  nodes: [
+    { id: "start", type: "start", connections: { default: "notify" } },
+    {
+      id: "notify",
+      type: "user-notification",
+      message: "Task completed",
+      connections: { default: "end" },
+    },
+    { id: "end", type: "end" },
+  ],
+};
+
 const workflowWithNotificationAndLock: WorkflowGraph = {
   ...workflowWithLock,
   id: "test-notification-lock-preflight-wf",
@@ -119,6 +144,7 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
   let noTelegramWorkflowId: string;
   let lockWorkflowId: string;
   let combinedWorkflowId: string;
+  let userNotificationWorkflowId: string;
 
   beforeAll(async () => {
     repository = new DatabaseRepository();
@@ -126,7 +152,7 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
     const now = new Date().toISOString();
 
     // Create test users
-    for (const userId of [TEST_USER_ID, TEST_USER_CONFIGURED]) {
+    for (const userId of [TEST_USER_ID, TEST_USER_CONFIGURED, TEST_USER_EXTENSION]) {
       try {
         await db.insert(user).values({
           id: userId,
@@ -149,6 +175,23 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       "123456:test-bot-token-123",
     );
     await repository.setSetting(TEST_USER_CONFIGURED, "telegram.chat_id", "123456789");
+    await repository.setSetting(TEST_USER_EXTENSION, "ui.theme", "dark");
+
+    const extensionAdapter: CommunicationChannelAdapter = {
+      id: TEST_EXTENSION_CHANNEL,
+      provider: TEST_EXTENSION_CHANNEL,
+      capabilities: { text: true, image: false, document: false, trusted: false },
+      metadata: {
+        title: "Test extension channel",
+        origin: "extension",
+        settingKeys: ["ui.theme"],
+      },
+      async isConfigured(configuration) {
+        return (await configuration.get<string>("ui.theme")) === "dark";
+      },
+      async deliver() {},
+    };
+    registerActiveCommunicationChannel(extensionAdapter);
 
     // Create test workflows
     const createResult1 = await runWithMCPContext({ userId: TEST_USER_ID }, async () => {
@@ -186,6 +229,15 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       }),
     );
     combinedWorkflowId = createResult4.data.workflowId;
+
+    const createResult5 = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
+      manageWorkflow({
+        action: "create",
+        workflow: { ...workflowWithUserNotification, visibility: "public" },
+        overwrite: true,
+      }),
+    );
+    userNotificationWorkflowId = createResult5.data.workflowId;
   });
 
   afterAll(async () => {
@@ -194,8 +246,11 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       await repository.deleteWorkflow(noTelegramWorkflowId, TEST_USER_ID);
       await repository.deleteWorkflow(lockWorkflowId, TEST_USER_ID);
       await repository.deleteWorkflow(combinedWorkflowId, TEST_USER_ID);
+      await repository.deleteWorkflow(userNotificationWorkflowId, TEST_USER_ID);
     } catch {
       // Ignore cleanup errors
+    } finally {
+      unregisterActiveCommunicationChannel(TEST_EXTENSION_CHANNEL);
     }
   });
 
@@ -212,12 +267,13 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       // Synthetic response: contains directive about telegram not configured
       expect(result.data).toContain("Telegram notification nodes");
       expect(result.data).toContain("not configured");
-      expect(result.data).toContain("skipTelegramCheck: true");
+      expect(result.data).toContain("skipNotificationCheck: true");
+      expect(result.data).not.toContain("skipTelegramCheck: true");
       // Should NOT contain a Process ID (no execution created)
       expect(result.data).not.toContain("Process ID:");
     });
 
-    test("synthetic response includes setup workflow reference", async () => {
+    test("synthetic response includes a directly usable setup workflow command", async () => {
       const result = await runWithMCPContext({ userId: TEST_USER_ID }, async () => {
         return startWorkflow({
           workflowId: telegramWorkflowId,
@@ -226,7 +282,9 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.data).toContain("moira/telegram-setup");
+      expect(result.data).toContain(
+        'start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
+      );
     });
 
     test("synthetic response includes the workflow ID for skip hint", async () => {
@@ -270,7 +328,8 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toContain("lock nodes");
-      expect(result.data).toContain("skipTelegramCheck cannot bypass");
+      expect(result.data).toContain("skipNotificationCheck");
+      expect(result.data).toContain("cannot bypass");
       expect(result.data).not.toContain("Process ID:");
     });
 
@@ -279,7 +338,7 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
         startWorkflow({
           workflowId: combinedWorkflowId,
           parentExecutionId: "none",
-          skipTelegramCheck: true,
+          skipNotificationCheck: true,
         }),
       );
 
@@ -322,6 +381,57 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
       // Should NOT contain the pre-flight directive message
       expect(result.data).not.toContain("Telegram notification nodes");
       expect(result.data).not.toContain("skipTelegramCheck");
+    });
+  });
+
+  describe("Workflow with provider-neutral notification nodes", () => {
+    test("returns channel-neutral guidance when no channel is configured", async () => {
+      const result = await runWithMCPContext({ userId: TEST_USER_ID }, () =>
+        startWorkflow({
+          workflowId: userNotificationWorkflowId,
+          parentExecutionId: "none",
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data).toContain("Settings > Notifications");
+      expect(result.data).toContain("skipNotificationCheck: true");
+      expect(result.data).not.toContain("Process ID:");
+    });
+
+    test("starts when only a non-Telegram channel is configured", async () => {
+      const result = await runWithMCPContext({ userId: TEST_USER_EXTENSION }, () =>
+        startWorkflow({
+          workflowId: userNotificationWorkflowId,
+          parentExecutionId: "none",
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data).toContain("Process ID:");
+      expect(result.data).not.toContain("Settings > Notifications");
+    });
+
+    test("accepts either skip name but rejects contradictory values", async () => {
+      const canonical = await runWithMCPContext({ userId: TEST_USER_ID }, () =>
+        startWorkflow({
+          workflowId: userNotificationWorkflowId,
+          parentExecutionId: "none",
+          skipNotificationCheck: true,
+        }),
+      );
+      expect(canonical.data).toContain("Process ID:");
+
+      const contradictory = await runWithMCPContext({ userId: TEST_USER_ID }, () =>
+        startWorkflow({
+          workflowId: userNotificationWorkflowId,
+          parentExecutionId: "none",
+          skipNotificationCheck: true,
+          skipTelegramCheck: false,
+        }),
+      );
+      expect(contradictory.success).toBe(false);
+      expect(contradictory.error).toContain("must not disagree");
     });
   });
 

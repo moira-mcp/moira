@@ -20,7 +20,11 @@ describe("Bundle discovery", () => {
     const result = scanExtensionBundles(BUNDLES_DIR);
 
     expect(result.rejected).toEqual([]);
-    expect(result.bundles.map((bundle) => bundle.manifest.name)).toEqual(["probe", "scribe"]);
+    expect(result.bundles.map((bundle) => bundle.manifest.name)).toEqual([
+      "channel-probe",
+      "probe",
+      "scribe",
+    ]);
     expect(result.bundles.every((bundle) => fs.existsSync(bundle.entrypoint))).toBe(true);
   });
 

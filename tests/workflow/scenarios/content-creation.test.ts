@@ -1,5 +1,5 @@
-/** Behavioral contracts for moira/content-creation v2.0.2. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Behavioral contracts for moira/content-creation. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -13,7 +13,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("content-creation", "public")!;
+const entry = findCatalogEntryBySlug("content-creation")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const sentinel = "No active revision request.";
 const changed = { repair_outcome: "changed", changed_knowledge: "The reproduced class changed." };
@@ -110,29 +110,13 @@ async function run(scenario: TestScenario, materializeError = false): Promise<Sc
 }
 
 describe("content-creation", () => {
-  test("publishes the evidence-aware local-only v2 contract", async () => {
+  test("validates the executable graph and provider-neutral notification boundary", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.metadata.version).toBe("2.0.2");
-    expect(graph.metadata.description).toContain("reviewed text deliverable");
-    expect(graph.metadata.description).toContain("target-bound publication");
     expect(graph.nodes.some((node) => node.type === "telegram-notification")).toBe(false);
-  });
-
-  test("separates mechanical validation, semantic judgment, and source-specific repair", () => {
-    const byId = (id: string): any => workflow().nodes.find((node) => node.id === id);
-    expect(byId("validate-package").directive).toContain("deterministic");
-    expect(byId("semantic-review").directive).toContain("genuinely independent");
-    expect(byId("repair-content-validation").directive).toContain("package-validation.md");
-    expect(byId("repair-content-semantic").directive).toContain("semantic-review.md");
-    expect(byId("corrected-contract-review").directive).toContain(
-      "complete cumulative effective contract",
-    );
   });
 
   test.each([

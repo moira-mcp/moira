@@ -7,10 +7,12 @@ import {
   TelegramConfig,
   SendMessageParams,
   SendPhotoParams,
+  SendDocumentParams,
   TelegramResponse,
   TelegramError,
   TelegramErrorType,
   TELEGRAM_PHOTO_MAX_BYTES,
+  TELEGRAM_DOCUMENT_MAX_BYTES,
 } from "../types/telegram-types.js";
 import { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
 import { createLogger, WorkflowLogger } from "@mcp-moira/shared";
@@ -30,7 +32,6 @@ export class TelegramClient {
     this.logger = createLogger({ component: "TelegramClient" });
 
     this.logger.info("Telegram client initialized", {
-      apiUrl: this.config.apiUrl,
       timeout: this.config.timeout,
       hasDefaultChatId: !!this.config.defaultChatId,
     });
@@ -48,7 +49,6 @@ export class TelegramClient {
       const response = await this.makeHttpRequest(params);
 
       this.logger.info("Message sent successfully", {
-        chatId: params.chatId,
         messageLength: params.text.length,
         parseMode: params.parseMode,
       });
@@ -102,7 +102,6 @@ export class TelegramClient {
         throw this.createError(
           TelegramErrorType.TIMEOUT_ERROR,
           `Photo request timeout after ${this.config.timeout}ms`,
-          { chatId: params.chatId },
         );
       }
       throw this.handleError(error, {
@@ -110,6 +109,61 @@ export class TelegramClient {
         text: params.caption ?? "",
         parseMode: params.parseMode,
       });
+    }
+  }
+
+  async sendDocument(params: SendDocumentParams): Promise<TelegramResponse> {
+    if (
+      params.document.byteLength === 0 ||
+      params.document.byteLength > TELEGRAM_DOCUMENT_MAX_BYTES
+    )
+      throw this.createError(
+        TelegramErrorType.API_ERROR,
+        `Document size must be between 1 and ${TELEGRAM_DOCUMENT_MAX_BYTES} bytes`,
+      );
+    if (params.caption && params.caption.length > 1024)
+      throw this.createError(
+        TelegramErrorType.MESSAGE_TOO_LONG,
+        "Document caption exceeds 1024 characters",
+      );
+    await this.rateLimiter.waitForAvailability();
+    const body = new FormData();
+    body.set("chat_id", params.chatId);
+    const documentBytes = Uint8Array.from(params.document);
+    body.set(
+      "document",
+      new Blob([documentBytes.buffer], { type: params.mimeType }),
+      params.filename,
+    );
+    if (params.caption) body.set("caption", params.caption);
+    if (params.parseMode) body.set("parse_mode", params.parseMode);
+    if (params.disableNotification !== undefined)
+      body.set("disable_notification", String(params.disableNotification));
+    if (params.replyMarkup) body.set("reply_markup", JSON.stringify(params.replyMarkup));
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.config.timeout || 5000);
+    try {
+      const response = await fetch(this.buildApiUrl("sendDocument"), {
+        method: "POST",
+        body,
+        signal: controller.signal,
+      });
+      const data = (await response.json()) as TelegramResponse;
+      if (!response.ok || !data.ok) throw this.createApiError(response, data);
+      return data;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError")
+        throw this.createError(
+          TelegramErrorType.TIMEOUT_ERROR,
+          `Document request timeout after ${this.config.timeout}ms`,
+        );
+      throw this.handleError(error, {
+        chatId: params.chatId,
+        text: params.caption ?? "",
+        parseMode: params.parseMode,
+      });
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -122,9 +176,7 @@ export class TelegramClient {
     options: Omit<SendMessageParams, "chatId" | "text"> = {},
   ): Promise<TelegramResponse> {
     if (!this.config.defaultChatId) {
-      throw this.createError(TelegramErrorType.INVALID_CHAT_ID, "No default chat ID configured", {
-        providedText: text,
-      });
+      throw this.createError(TelegramErrorType.INVALID_CHAT_ID, "No default chat ID configured");
     }
 
     return this.sendMessage({
@@ -227,7 +279,7 @@ export class TelegramClient {
         throw this.createApiError(response, responseData);
       }
 
-      this.logger.info("Webhook set successfully", { url });
+      this.logger.info("Webhook set successfully");
       return responseData;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -247,19 +299,14 @@ export class TelegramClient {
    */
   async testConnection(): Promise<boolean> {
     try {
-      const _testParams: SendMessageParams = {
-        chatId: this.config.defaultChatId || "test",
-        text: "Connection test",
-      };
-
       // Don't actually send - just test URL construction and token
-      const url = this.buildApiUrl("sendMessage");
+      this.buildApiUrl("sendMessage");
 
-      this.logger.debug("Connection test", { url: url.split("bot")[0] + "bot[REDACTED]" });
+      this.logger.debug("Connection test");
 
       return true;
-    } catch (error) {
-      this.logger.debug("Connection test failed", { error: String(error) });
+    } catch {
+      this.logger.debug("Connection test failed");
       return false;
     }
   }
@@ -316,7 +363,7 @@ export class TelegramClient {
         throw this.createError(
           TelegramErrorType.TIMEOUT_ERROR,
           `Request timeout after ${this.config.timeout}ms`,
-          { url, params },
+          {},
         );
       }
 
@@ -342,7 +389,7 @@ export class TelegramClient {
       throw this.createError(
         TelegramErrorType.MESSAGE_TOO_LONG,
         `Message too long: ${params.text.length} characters (max 4096)`,
-        { messageLength: params.text.length, chatId: params.chatId },
+        { messageLength: params.text.length },
       );
     }
 
@@ -418,7 +465,7 @@ export class TelegramClient {
   /**
    * Handle and classify errors from HTTP requests
    */
-  private handleError(error: unknown, context: SendMessageParams): TelegramError {
+  private handleError(error: unknown, _context: SendMessageParams): TelegramError {
     // Check if error is already a TelegramError (has type property)
     if (error && typeof error === "object" && "type" in error) {
       return error as TelegramError;
@@ -427,14 +474,13 @@ export class TelegramClient {
     if (error instanceof TypeError) {
       return this.createError(TelegramErrorType.NETWORK_ERROR, "Network connectivity issue", {
         originalError: error,
-        chatId: context.chatId,
       });
     }
 
     return this.createError(
       TelegramErrorType.API_ERROR,
       error instanceof Error ? error.message : "Unknown error",
-      { originalError: error, chatId: context.chatId },
+      { originalError: error },
     );
   }
 

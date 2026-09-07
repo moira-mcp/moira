@@ -240,7 +240,7 @@ in `packages/docs/`; this is the implementation view.)
 
 - **UniversalGraphExecutor** — main workflow processor.
 - **Node Handlers** — type-specific processors (start, agent-directive, condition,
-  expression, telegram-notification, end, and more).
+  expression, user-notification, deprecated telegram-notification, end, and more).
 - **AgentMessageQueue** — agent communication.
 - **GraphTemplateProcessor** — `{{variable}}` interpolation.
 - **ContextManager** — variable and state management.
@@ -262,13 +262,14 @@ interface IGraphStorage {
 ### MCP Tools (short names)
 
 `list`, `start`, `step`, `manage`, `session`, `settings`, `token`, `notes`,
-`artifacts`, `lock`, `help`. The HTTP transport is `StreamableHTTPServerTransport`
-(stateless). See `docs/SYSTEM.md` for the full tool signatures and request/response
-shapes, and `packages/mcp-server/src/server.ts` for the registrations.
+`artifacts`, `communication`, `lock`, `help`. The HTTP transport is
+`StreamableHTTPServerTransport` (stateless). See `docs/SYSTEM.md` for the full
+tool signatures and request/response shapes, and `packages/mcp-server/src/server.ts`
+for the registrations.
 
 ## Node Types
 
-`start`, `end`, `agent-directive`, `condition`, `expression`, `telegram-notification`,
+`start`, `end`, `agent-directive`, `condition`, `expression`, `user-notification`, deprecated `telegram-notification`,
 `teleport`, `subgraph`, `lock`, `materialize`, `read-note`, `write-note`, and `upsert-note`.
 Definitions and schemas: `packages/workflow-engine/src/types/graph-nodes.ts` and
 `docs/WORKFLOW.md`.

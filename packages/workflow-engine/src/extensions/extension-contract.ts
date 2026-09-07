@@ -9,6 +9,9 @@
 /** Contract version understood by this build. A manifest declaring anything else is rejected. */
 export const EXTENSION_API_VERSION = "moira.extensions/v1";
 
+/** Wire protocol version spoken between Moira and the isolated extension runner. */
+export const EXTENSION_RUNNER_API_VERSION = "moira.extension-runner/v2";
+
 /**
  * Namespaced custom node type: `<extension>.<node>`.
  * The dot is what keeps custom types disjoint from every built-in type (none contain a dot),
@@ -93,6 +96,37 @@ export interface ExtensionPermissions {
   artifacts?: boolean;
 }
 
+export interface ExtensionCommunicationChannelCapabilities {
+  text: boolean;
+  image: boolean;
+  document: boolean;
+  /** Declaration only. Effective trusted eligibility also requires independent admin approval. */
+  trustedDelivery?: boolean;
+}
+
+/** Permissions scoped to one communication handler rather than every contribution in the bundle. */
+export interface ExtensionCommunicationChannelPermissions {
+  network?: string[];
+  secrets?: string[];
+}
+
+/** One ordinary outbound communication channel contributed by an extension. */
+export interface ExtensionCommunicationChannelDeclaration {
+  /** Stable namespaced identity, for example `corporate-messenger.notifications`. */
+  id: string;
+  title: string;
+  description?: string;
+  capabilities: ExtensionCommunicationChannelCapabilities;
+  /** Schema applied to the object formed from the exact non-secret setting aliases below. */
+  configurationSchema: Record<string, unknown>;
+  /** Declared boolean setting whose false value disables ordinary delivery for this user. */
+  enabledSetting: string;
+  /** Manifest-declared setting aliases passed as ordinary JSON configuration. */
+  settings?: string[];
+  /** Network and secret grants used only while this channel handler runs. */
+  permissions?: ExtensionCommunicationChannelPermissions;
+}
+
 export interface ExtensionManifest {
   apiVersion: string;
   name: string;
@@ -100,6 +134,7 @@ export interface ExtensionManifest {
   /** Entrypoint resolved by the runner, never by Moira. */
   entrypoint: string;
   nodes: ExtensionNodeDeclaration[];
+  communicationChannels?: ExtensionCommunicationChannelDeclaration[];
   settings?: ExtensionSettingDeclaration[];
   permissions?: ExtensionPermissions;
 }
@@ -118,6 +153,14 @@ export interface RegisteredExtensionNode {
   permissions: ExtensionPermissions;
 }
 
+/** Registered communication channel together with the manifest data needed to configure it. */
+export interface RegisteredExtensionCommunicationChannel {
+  extensionName: string;
+  extensionVersion: string;
+  declaration: ExtensionCommunicationChannelDeclaration;
+  settingDeclarations: ExtensionSettingDeclaration[];
+}
+
 /** Serialisable projection of the registry: what registry-less consumers read from a snapshot. */
 export interface ExtensionRegistrySnapshot {
   apiVersion: string;
@@ -127,5 +170,8 @@ export interface ExtensionRegistrySnapshot {
     version: string;
     /** Data-only declarations required to validate configuration outside the live process. */
     nodes: ExtensionNodeDeclaration[];
+    communicationChannels?: ExtensionCommunicationChannelDeclaration[];
+    /** Definitions referenced by channel configuration; never per-user values. */
+    settings?: ExtensionSettingDeclaration[];
   }>;
 }

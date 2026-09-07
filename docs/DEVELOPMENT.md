@@ -378,6 +378,14 @@ NodeResultBuilder.error(nodeId, errorMessage); // Fail execution
 - **Error handling** - graceful degradation on failures with actionable error messages via messageQueue
 - **Error classification** - `classifyTelegramError()` and `getActionableTelegramErrorMessage()` provide structured error types and user-friendly messages
 
+### UserNotificationHandler
+
+- **Auto-execution** - renders a portable message and invokes `UserCommunicationService`
+- **Channel selection** - the service selects enabled configured adapters for the execution user
+- **Aggregate result** - stores sanitized delivery, partial, no-channel, or total-failure state under the node ID
+- **Routing** - total attempted failure follows `connections.error` when authored; other outcomes use `default`
+- **Authority boundary** - generic nodes cannot choose a provider, recipient, destination, or credential
+
 ### EndNodeHandler
 
 - **Auto-execution** - collects data and completes

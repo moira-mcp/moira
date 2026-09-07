@@ -272,13 +272,25 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 
 **Dynamic Settings Section (Notifications):**
 
-- Definitions combine database-backed settings with settings declared by installed extension manifests
-- Telegram settings use the `notifications` category; extension settings use `extension:<extension-name>` and display localized ownership headings
-- Structural values are shown as editable formatted JSON, encrypted values remain masked, and a refused save stays editable while its server reason is shown
-- Uses SettingsEditor with `collapsible={false}` for flat Card rendering
-- Test notification button shown when telegram settings detected
+- `GET /api/notifications/channels` supplies one current-user descriptor per active communication
+  adapter. The descriptor provides title, origin, capabilities, mapped setting keys,
+  `ready|disabled|incomplete|unavailable` state and read-only extension trusted-delivery state; it
+  contains no setting values, credentials or destinations.
+- Telegram and extension descriptors render through `CommunicationChannelCard`. There is no
+  Telegram key-prefix or component branch.
+- Each card maps its exact setting definitions into the existing `SettingsEditor` with
+  `categoryLayout="plain"`; structural values remain editable JSON and encrypted values remain
+  masked.
+- The test button posts no body to `/api/notifications/channels/:channelId/test`. The server uses
+  stored settings for the authenticated user and the common communication service.
+- Saving a mapped setting refreshes descriptor state from the server. Definitions not mapped to a
+  communication channel render under a separate Settings section.
+- Channel fields and test controls have accessible names; capability and state labels remain visible
+  without hover.
 
-**Section Order:** Profile → Security → Notifications (dynamic) → OAuth Authorizations → Active Sessions → API Tokens. Each section has `data-testid="settings-section-{name}"`.
+**Section Order:** Profile → Security → Notifications (when channels exist) → Settings (when
+unmapped dynamic definitions exist) → OAuth Authorizations → Active Sessions → API Tokens. Each
+section has a stable `data-testid`.
 
 **SettingsEditor `collapsible` prop:**
 
@@ -289,8 +301,10 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 
 - Loads user profile via GET /api/user/profile
 - Fetches dynamic settings definitions via GET /api/settings/definitions
+- Fetches current-user communication descriptors via GET /api/notifications/channels
 - Fetches masked current values via GET /api/settings
 - Saves one edited dynamic value through bulk PUT /api/settings and applies the returned saved/refused result
+- Tests one channel through POST /api/notifications/channels/:channelId/test with no request body
 - Updates profile via PATCH /api/user/profile
 - Changes password via POST /api/user/change-password
 - Resends verification via POST /api/user/resend-verification
@@ -1522,6 +1536,7 @@ const nodeTypes = {
   agentDirective: CompactNode,
   condition: CompactNode,
   "telegram-notification": CompactNode,
+  "user-notification": CompactNode,
   telegram: CompactNode,
   subgraph: CompactNode,
   expression: CompactNode,

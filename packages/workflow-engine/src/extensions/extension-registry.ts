@@ -9,17 +9,23 @@ import {
   EXTENSION_API_VERSION,
   ExtensionManifest,
   ExtensionManifestRejection,
+  ExtensionCommunicationChannelDeclaration,
   ExtensionNodeDeclaration,
   ExtensionPermissions,
   ExtensionRegistrySnapshot,
   ExtensionSettingDeclaration,
   RegisteredExtensionNode,
+  RegisteredExtensionCommunicationChannel,
   RESERVED_SETTING_NAMESPACES,
   isExtensionNodeType,
   settingNamespaceOf,
 } from "./extension-contract.js";
 import { declaredSchemaProblem } from "./declared-schema.js";
 import { prepareExtensionSettingValue } from "./extension-setting-values.js";
+import {
+  isCommunicationChannelIdentity,
+  MAX_COMMUNICATION_CHANNEL_IDENTITY_LENGTH,
+} from "../services/user-communication.js";
 
 const MAX_NAME_LENGTH = 64;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -32,6 +38,14 @@ function declaredSettingKeys(manifest: Partial<ExtensionManifest>): Set<string> 
     if (setting && typeof setting.key === "string") keys.add(setting.key);
   }
   return keys;
+}
+
+function declaredSettings(manifest: Partial<ExtensionManifest>): ExtensionSettingDeclaration[] {
+  return Array.isArray(manifest.settings)
+    ? manifest.settings.filter((setting): setting is ExtensionSettingDeclaration =>
+        Boolean(setting && typeof setting === "object" && !Array.isArray(setting)),
+      )
+    : [];
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -99,8 +113,8 @@ export function validateExtensionManifest(candidate: unknown): ExtensionManifest
     reasons.push("Manifest 'entrypoint' must be a non-empty string");
   }
 
-  if (!Array.isArray(manifest.nodes) || manifest.nodes.length === 0) {
-    reasons.push("Manifest 'nodes' must declare at least one node type");
+  if (!Array.isArray(manifest.nodes)) {
+    reasons.push("Manifest 'nodes' must be an array");
   } else {
     const seen = new Set<string>();
     manifest.nodes.forEach((node, index) => {
@@ -152,6 +166,193 @@ export function validateExtensionManifest(candidate: unknown): ExtensionManifest
         }
       }
     });
+  }
+
+  if (manifest.communicationChannels !== undefined) {
+    if (!Array.isArray(manifest.communicationChannels)) {
+      reasons.push("Manifest 'communicationChannels' must be an array when present");
+    } else {
+      const seenChannels = new Set<string>();
+      manifest.communicationChannels.forEach((channel, index) => {
+        const where = `communicationChannels[${index}]`;
+        if (!isPlainObject(channel)) {
+          reasons.push(`${where} must be an object`);
+          return;
+        }
+        const declaration = channel as Partial<ExtensionCommunicationChannelDeclaration>;
+        if (typeof declaration.id !== "string" || !isExtensionNodeType(declaration.id)) {
+          reasons.push(
+            `${where}.id must be namespaced as '<extension>.<channel>' using lowercase letters, digits and hyphens`,
+          );
+        } else {
+          if (!isCommunicationChannelIdentity(declaration.id)) {
+            reasons.push(
+              `${where}.id channel identity must be at most ${MAX_COMMUNICATION_CHANNEL_IDENTITY_LENGTH} characters`,
+            );
+          }
+          if (
+            typeof manifest.name === "string" &&
+            !declaration.id.startsWith(`${manifest.name}.`)
+          ) {
+            reasons.push(
+              `${where}.id '${declaration.id}' must start with the extension name '${manifest.name}.'`,
+            );
+          }
+          if (seenChannels.has(declaration.id)) {
+            reasons.push(`${where}.id '${declaration.id}' is declared twice in this manifest`);
+          }
+          seenChannels.add(declaration.id);
+        }
+        if (typeof declaration.title !== "string" || declaration.title.length === 0) {
+          reasons.push(`${where}.title must be a non-empty string`);
+        }
+        if (declaration.description !== undefined && typeof declaration.description !== "string") {
+          reasons.push(`${where}.description must be a string when present`);
+        }
+        if (!isPlainObject(declaration.capabilities)) {
+          reasons.push(`${where}.capabilities must be an object`);
+        } else {
+          const capabilities = declaration.capabilities as Record<string, unknown>;
+          for (const capability of ["text", "image", "document"] as const) {
+            if (typeof capabilities[capability] !== "boolean") {
+              reasons.push(`${where}.capabilities.${capability} must be a boolean`);
+            }
+          }
+          if (
+            capabilities.trustedDelivery !== undefined &&
+            typeof capabilities.trustedDelivery !== "boolean"
+          ) {
+            reasons.push(`${where}.capabilities.trustedDelivery must be a boolean when present`);
+          }
+          if (
+            capabilities.text === false &&
+            capabilities.image === false &&
+            capabilities.document === false
+          ) {
+            reasons.push(`${where}.capabilities must enable at least one ordinary payload kind`);
+          }
+        }
+        if (!isPlainObject(declaration.configurationSchema)) {
+          reasons.push(`${where}.configurationSchema must be a JSON Schema object`);
+        } else {
+          collectSchemaProblem(
+            reasons,
+            `${where}.configurationSchema`,
+            declaration.configurationSchema,
+          );
+        }
+        if (typeof declaration.enabledSetting !== "string") {
+          reasons.push(`${where}.enabledSetting must name a declared boolean setting`);
+        } else {
+          const enabled = declaredSettings(manifest).find(
+            (setting) => setting.key === declaration.enabledSetting,
+          );
+          if (!enabled || enabled.type !== "boolean") {
+            reasons.push(`${where}.enabledSetting must name a declared boolean setting`);
+          }
+          if (
+            !Array.isArray(declaration.settings) ||
+            !declaration.settings.includes(declaration.enabledSetting)
+          ) {
+            reasons.push(`${where}.enabledSetting must also appear in ${where}.settings`);
+          }
+        }
+
+        const secretAliases = new Set<string>();
+        const permissions = declaration.permissions;
+        if (permissions !== undefined) {
+          if (!isPlainObject(permissions)) {
+            reasons.push(`${where}.permissions must be an object when present`);
+          } else {
+            if (permissions.network !== undefined) {
+              if (!Array.isArray(permissions.network)) {
+                reasons.push(`${where}.permissions.network must be an array when present`);
+              } else {
+                for (const host of permissions.network) {
+                  if (typeof host !== "string" || !isNetworkHost(host)) {
+                    reasons.push(
+                      `${where}.permissions.network entries must be exact host names without schemes, paths, credentials, queries, fragments or wildcards`,
+                    );
+                  }
+                }
+              }
+            }
+            if (permissions.secrets !== undefined) {
+              if (!Array.isArray(permissions.secrets)) {
+                reasons.push(`${where}.permissions.secrets must be an array when present`);
+              } else {
+                for (const alias of permissions.secrets) {
+                  if (typeof alias !== "string" || alias.length === 0) {
+                    reasons.push(`${where}.permissions.secrets entries must be non-empty strings`);
+                    continue;
+                  }
+                  if (secretAliases.has(alias)) {
+                    reasons.push(`${where}.permissions.secrets entry '${alias}' is declared twice`);
+                  }
+                  secretAliases.add(alias);
+                  if (typeof manifest.name === "string" && !alias.startsWith(`${manifest.name}.`)) {
+                    reasons.push(
+                      `${where}.permissions.secrets entry '${alias}' must live in the extension namespace '${manifest.name}.'`,
+                    );
+                  } else if (!declaredSettingKeys(manifest).has(alias)) {
+                    reasons.push(
+                      `${where}.permissions.secrets entry '${alias}' is not declared in this manifest's settings`,
+                    );
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (declaration.settings !== undefined) {
+          if (!Array.isArray(declaration.settings)) {
+            reasons.push(`${where}.settings must be an array when present`);
+          } else {
+            const seenSettings = new Set<string>();
+            for (const alias of declaration.settings) {
+              if (typeof alias !== "string" || alias.length === 0) {
+                reasons.push(`${where}.settings entries must be non-empty strings`);
+                continue;
+              }
+              if (seenSettings.has(alias)) {
+                reasons.push(`${where}.settings entry '${alias}' is declared twice`);
+              }
+              seenSettings.add(alias);
+              if (typeof manifest.name === "string" && !alias.startsWith(`${manifest.name}.`)) {
+                reasons.push(
+                  `${where}.settings entry '${alias}' must live in the extension namespace '${manifest.name}.'`,
+                );
+              } else if (!declaredSettingKeys(manifest).has(alias)) {
+                reasons.push(
+                  `${where}.settings entry '${alias}' is not declared in this manifest's settings`,
+                );
+              } else if (
+                declaredSettings(manifest).find((setting) => setting.key === alias)?.type ===
+                "encrypted"
+              ) {
+                reasons.push(
+                  `${where}.settings entry '${alias}' is encrypted and must be requested through permissions.secrets`,
+                );
+              }
+              if (secretAliases.has(alias)) {
+                reasons.push(
+                  `${where}.settings entry '${alias}' cannot also be a secret permission`,
+                );
+              }
+            }
+          }
+        }
+      });
+    }
+  }
+
+  if (
+    Array.isArray(manifest.nodes) &&
+    manifest.nodes.length === 0 &&
+    (!Array.isArray(manifest.communicationChannels) || manifest.communicationChannels.length === 0)
+  ) {
+    reasons.push("Manifest must declare at least one node or communication channel");
   }
 
   if (
@@ -336,6 +537,7 @@ export interface ExtensionRegistrationResult {
 
 export class ExtensionRegistry {
   private nodesByType = new Map<string, RegisteredExtensionNode>();
+  private channelsById = new Map<string, RegisteredExtensionCommunicationChannel>();
   private manifestsByName = new Map<string, ExtensionManifest>();
 
   private knowledgeSource: ExtensionRegistryOrigin;
@@ -395,6 +597,14 @@ export class ExtensionRegistry {
         );
       }
     }
+    for (const declaration of manifest.communicationChannels ?? []) {
+      const existing = this.channelsById.get(declaration.id);
+      if (existing && existing.extensionName !== manifest.name) {
+        reasons.push(
+          `Communication channel '${declaration.id}' is already declared by extension '${existing.extensionName}'`,
+        );
+      }
+    }
 
     if (reasons.length > 0) {
       return { registered: false, rejection: { manifestName: manifest.name, reasons } };
@@ -407,6 +617,14 @@ export class ExtensionRegistry {
         extensionVersion: manifest.version,
         declaration,
         permissions,
+      });
+    }
+    for (const declaration of manifest.communicationChannels ?? []) {
+      this.channelsById.set(declaration.id, {
+        extensionName: manifest.name,
+        extensionVersion: manifest.version,
+        declaration,
+        settingDeclarations: manifest.settings ?? [],
       });
     }
     this.manifestsByName.set(manifest.name, manifest);
@@ -426,6 +644,7 @@ export class ExtensionRegistry {
     rejected: ExtensionManifestRejection[];
   } {
     this.nodesByType.clear();
+    this.channelsById.clear();
     this.manifestsByName.clear();
 
     const registered: string[] = [];
@@ -447,6 +666,9 @@ export class ExtensionRegistry {
     for (const [type, node] of this.nodesByType) {
       if (node.extensionName === extensionName) this.nodesByType.delete(type);
     }
+    for (const [id, channel] of this.channelsById) {
+      if (channel.extensionName === extensionName) this.channelsById.delete(id);
+    }
     return true;
   }
 
@@ -460,6 +682,16 @@ export class ExtensionRegistry {
 
   nodeTypes(): string[] {
     return [...this.nodesByType.keys()].sort();
+  }
+
+  getCommunicationChannel(id: string): RegisteredExtensionCommunicationChannel | undefined {
+    return this.channelsById.get(id);
+  }
+
+  communicationChannels(): RegisteredExtensionCommunicationChannel[] {
+    return [...this.channelsById.values()].sort((left, right) =>
+      left.declaration.id.localeCompare(right.declaration.id),
+    );
   }
 
   manifests(): ExtensionManifest[] {
@@ -489,6 +721,12 @@ export class ExtensionRegistry {
         name: manifest.name,
         version: manifest.version,
         nodes: manifest.nodes,
+        ...(manifest.communicationChannels?.length
+          ? {
+              communicationChannels: manifest.communicationChannels,
+              settings: manifest.settings ?? [],
+            }
+          : {}),
       })),
     };
   }

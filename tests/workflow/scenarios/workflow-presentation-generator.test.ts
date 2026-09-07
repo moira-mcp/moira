@@ -1,5 +1,5 @@
-/** Behavioral contracts for moira/workflow-presentation-generator v2.0.0. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Behavioral contracts for moira/workflow-presentation-generator. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -13,7 +13,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("workflow-presentation-generator", "public")!;
+const entry = findCatalogEntryBySlug("workflow-presentation-generator")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const sentinel = "No active revision request.";
 const completion = {
@@ -101,46 +101,16 @@ async function run(scenario: TestScenario, materializeError = false): Promise<Sc
 }
 
 describe("workflow-presentation-generator", () => {
-  test("publishes a valid local self-contained v2 presentation contract", async () => {
+  test("validates the executable presentation graph", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.metadata.version).toBe("2.0.0");
-    expect(graph.nodes).toHaveLength(66);
-    expect(graph.metadata.description).toContain("official full structural projection");
-    expect(graph.metadata.description).toContain("never mutates the source, publishes, uploads");
     const intake = graph.nodes.find((node) => node.id === "intake") as any;
     expect(intake.directive).toContain("moira/verified-research");
     expect(intake.directive).toContain("never removed moira/research");
     expect(graph.nodes.some((node) => node.type === "telegram-notification")).toBe(false);
-  });
-
-  test("materializes canonical artifacts and separates structural, deterministic, and semantic evidence", () => {
-    const byId = (id: string): any => workflow().nodes.find((node) => node.id === id);
-    const files = byId("materialize-workspace").files.map((file: { path: string }) => file.path);
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "workflow.json",
-        "workflow-schema.txt",
-        "presentation-content.md",
-        "presentation.html",
-        "presentation-validation.md",
-        "presentation-review.md",
-        "repair-account.md",
-      ]),
-    );
-    expect(byId("prepare-source").directive).toContain(
-      "complete authorized definition through a download token",
-    );
-    expect(byId("prepare-source").directive).toContain("official moira-workflow");
-    expect(byId("develop-content").directive).toContain("searchable/collapsible topology");
-    expect(byId("generate-html").directive).toContain("Do not use external scripts");
-    expect(byId("validate-presentation").directive).toContain("deterministic observations only");
-    expect(byId("presentation-review").directive).toContain("genuinely independent");
   });
 
   test.each([

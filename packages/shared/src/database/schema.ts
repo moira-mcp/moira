@@ -344,6 +344,41 @@ export const workflowTokens = sqliteTable("workflow_tokens", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+/** Digest-only, short-lived grants for authenticated communication attachment uploads. */
+export const communicationAttachmentGrant = sqliteTable(
+  "communication_attachment_grant",
+  {
+    tokenDigest: text("token_digest").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    correlationId: text("correlation_id").notNull(),
+    audience: text("audience").notNull(),
+    purpose: text("purpose").notNull(),
+    message: text("message").notNull(),
+    format: text("format").notNull(),
+    silent: integer("silent", { mode: "boolean" }).notNull().default(false),
+    kind: text("kind").notNull(),
+    filename: text("filename").notNull(),
+    mimeType: text("mime_type").notNull(),
+    declaredSize: integer("declared_size").notNull(),
+    state: text("state").notNull().default("pending"),
+    claimId: text("claim_id"),
+    claimedAt: integer("claimed_at", { mode: "timestamp_ms" }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    userStateExpiryIdx: index("communication_grant_user_state_expiry_idx").on(
+      table.userId,
+      table.state,
+      table.expiresAt,
+    ),
+    stateExpiryIdx: index("communication_grant_state_expiry_idx").on(table.state, table.expiresAt),
+  }),
+);
+
 // ===== Notes System Tables =====
 // User notes for persistent storage between workflow executions
 // Versioned content with size tracking and quota enforcement

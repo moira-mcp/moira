@@ -9,7 +9,11 @@
  */
 
 import { describe, test, expect } from "@jest/globals";
-import { HttpExtensionRunnerClient, ExtensionInvocationError } from "@mcp-moira/workflow-engine";
+import {
+  EXTENSION_API_VERSION,
+  HttpExtensionRunnerClient,
+  ExtensionInvocationError,
+} from "@mcp-moira/workflow-engine";
 
 const request = {
   nodeType: "probe.behave",
@@ -46,6 +50,10 @@ describe("Requests that carry no deadline of their own", () => {
     [
       "incompatible protocol version",
       Response.json({ apiVersion: "moira.extensions/v99", extensions: [] }),
+    ],
+    [
+      "legacy manifest version used as runner protocol",
+      Response.json({ apiVersion: EXTENSION_API_VERSION, extensions: [] }),
     ],
   ])("%s cannot become an authoritative empty catalog", async (_case, response) => {
     const client = new HttpExtensionRunnerClient({

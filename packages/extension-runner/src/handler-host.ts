@@ -11,12 +11,18 @@
 
 import { pathToFileURL } from "url";
 import type {
+  ExtensionCommunicationChannelDefinition,
+  ExtensionCommunicationServices,
   ExtensionModule,
   ExtensionNodeDefinition,
   ExtensionNodeServices,
   JsonObject,
 } from "@mcp-moira/extension-sdk";
 import type { ExtensionManifest } from "@mcp-moira/workflow-engine/extensions/contract";
+import type {
+  ExtensionCommunicationChannelPermissions,
+  ExtensionPermissions,
+} from "@mcp-moira/workflow-engine/extensions/contract";
 import { canonicalJson } from "@mcp-moira/workflow-engine/extensions";
 import type { HostRequest, HostResponse, RunnerInvokeRequest } from "./protocol.js";
 
@@ -47,8 +53,10 @@ function createServices(
   request: RunnerInvokeRequest,
   signal: AbortSignal,
   currentInvocationId: string,
+  scopedPermissions:
+    ExtensionPermissions | ExtensionCommunicationChannelPermissions = manifest.permissions ?? {},
 ): ExtensionNodeServices {
-  const permissions = manifest.permissions ?? {};
+  const permissions = scopedPermissions;
   const allowedHosts = new Set((permissions.network ?? []).map((host) => host.toLowerCase()));
   const grantedSecrets = new Set(permissions.secrets ?? []);
 
@@ -121,7 +129,7 @@ function createServices(
     },
 
     async writeArtifact(name, content) {
-      if (!permissions.artifacts) {
+      if (!("artifacts" in permissions) || !permissions.artifacts) {
         throw permissionError("artifact writing");
       }
       // The size limit is not checked here. This process runs extension code, so a check made in
@@ -146,6 +154,7 @@ function createServices(
 function compareWithManifest(
   manifest: ExtensionManifest,
   definitions: Map<string, ExtensionNodeDefinition>,
+  channels: Map<string, ExtensionCommunicationChannelDefinition>,
 ): string[] {
   const problems: string[] = [];
   for (const declared of manifest.nodes) {
@@ -168,6 +177,24 @@ function compareWithManifest(
     }
   }
 
+  for (const declared of manifest.communicationChannels ?? []) {
+    const definition = channels.get(declared.id);
+    if (!definition) {
+      problems.push(
+        `the manifest declares communication channel '${declared.id}', but no handler implements it`,
+      );
+      continue;
+    }
+    if (
+      definition.configurationSchema !== undefined &&
+      canonicalJson(definition.configurationSchema) !== canonicalJson(declared.configurationSchema)
+    ) {
+      problems.push(
+        `communication channel '${declared.id}' declares a different configurationSchema in code than in the manifest`,
+      );
+    }
+  }
+
   return problems;
 }
 
@@ -183,22 +210,31 @@ async function main(): Promise<void> {
   const manifest = JSON.parse(manifestJson) as ExtensionManifest;
 
   let definitions: Map<string, ExtensionNodeDefinition>;
+  let channels: Map<string, ExtensionCommunicationChannelDefinition>;
   try {
     const loaded = (await import(pathToFileURL(entrypoint).href)) as {
       default?: ExtensionModule;
       nodes?: ExtensionNodeDefinition[];
+      communicationChannels?: ExtensionCommunicationChannelDefinition[];
     };
-    const nodes = loaded.default?.nodes ?? loaded.nodes;
-    if (!Array.isArray(nodes) || nodes.length === 0) {
+    const nodes = loaded.default?.nodes ?? loaded.nodes ?? [];
+    const communicationChannels =
+      loaded.default?.communicationChannels ?? loaded.communicationChannels ?? [];
+    if (!Array.isArray(nodes) || !Array.isArray(communicationChannels)) {
       send({
         kind: "load-failed",
-        message: "entrypoint does not export a default extension with a 'nodes' array",
+        message: "entrypoint contributions must be arrays",
       });
       return;
     }
+    if (nodes.length === 0 && communicationChannels.length === 0) {
+      send({ kind: "load-failed", message: "entrypoint exports no extension contributions" });
+      return;
+    }
     definitions = new Map(nodes.map((node) => [node.type, node]));
+    channels = new Map(communicationChannels.map((channel) => [channel.id, channel]));
 
-    const disagreements = compareWithManifest(manifest, definitions);
+    const disagreements = compareWithManifest(manifest, definitions, channels);
     if (disagreements.length > 0) {
       send({ kind: "load-failed", message: disagreements.join("; ") });
       return;
@@ -212,7 +248,11 @@ async function main(): Promise<void> {
   }
 
   const inFlight = new Map<string, AbortController>();
-  send({ kind: "ready", nodeTypes: [...definitions.keys()] });
+  send({
+    kind: "ready",
+    nodeTypes: [...definitions.keys()],
+    communicationChannelIds: [...channels.keys()],
+  });
 
   process.on("message", (raw: HostRequest) => {
     if (raw.kind === "cancel") {
@@ -222,6 +262,79 @@ async function main(): Promise<void> {
     if (raw.kind !== "invoke") return;
 
     const { id, request } = raw;
+    if (request.communication) {
+      const definition = channels.get(request.communication.channelId);
+      if (!definition) {
+        send({
+          kind: "result",
+          id,
+          response: {
+            ok: false,
+            kind: "handler-error",
+            message: `this extension does not implement communication channel '${request.communication.channelId}'`,
+          },
+        });
+        return;
+      }
+      if (request.communication.kind === "check") {
+        send({ kind: "result", id, response: { ok: true, output: {} } });
+        return;
+      }
+
+      const controller = new AbortController();
+      inFlight.set(id, controller);
+      const attachment = request.communication.message.attachment;
+      const channelServices = createServices(
+        manifest,
+        request,
+        controller.signal,
+        id,
+        manifest.communicationChannels?.find(
+          (channel) => channel.id === request.communication?.channelId,
+        )?.permissions ?? {},
+      );
+      const services: ExtensionCommunicationServices = {
+        fetch: channelServices.fetch,
+        secret: channelServices.secret,
+      };
+      void definition
+        .handler({
+          message: {
+            text: request.communication.message.text,
+            format: request.communication.message.format,
+            silent: request.communication.message.silent,
+            ...(attachment
+              ? {
+                  attachment: {
+                    kind: attachment.kind,
+                    bytes: Uint8Array.from(Buffer.from(attachment.data, "base64")),
+                    filename: attachment.filename,
+                    mimeType: attachment.mimeType,
+                  },
+                }
+              : {}),
+          },
+          settings: (request.communication.settings ?? {}) as JsonObject,
+          signal: controller.signal,
+          services,
+        })
+        .then(() => {
+          send({ kind: "result", id, response: { ok: true, output: {} } });
+        })
+        .catch((error: unknown) => {
+          send({
+            kind: "result",
+            id,
+            response: {
+              ok: false,
+              kind: "handler-error",
+              message: error instanceof Error ? error.message : String(error),
+            },
+          });
+        })
+        .finally(() => inFlight.delete(id));
+      return;
+    }
     const definition = definitions.get(request.nodeType);
     if (!definition) {
       send({

@@ -16,6 +16,7 @@ import {
   startSchema,
   stepSchema,
   tokenSchema,
+  communicationSchema,
 } from "./tool-schemas.js";
 
 export type ToolResponsePolicy = "json" | "text" | "json-or-text" | "formatted-text";
@@ -235,6 +236,34 @@ export const TOOL_DEFINITIONS = [
       ru: {
         summary: "Создаёт временные токены загрузки или скачивания процесса.",
         result: "Ссылка и инструкция по использованию.",
+      },
+    },
+  }),
+  defineTool({
+    name: "communication",
+    schema: communicationSchema,
+    responsePolicy: "json",
+    examples: [
+      { action: "send", message: "The report is ready." },
+      {
+        action: "attachment-token",
+        message: "Report",
+        kind: "document",
+        filename: "report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 12000,
+      },
+    ],
+    documentation: {
+      en: {
+        summary:
+          "Send a message to the current user or mint a one-time authenticated attachment upload grant.",
+        result: "A channel-safe delivery summary or a short-lived upload grant and endpoint.",
+      },
+      ru: {
+        summary:
+          "Отправляет сообщение текущему пользователю или создаёт одноразовый grant для авторизованной загрузки вложения.",
+        result: "Безопасная сводка доставки либо временный grant и адрес загрузки.",
       },
     },
   }),

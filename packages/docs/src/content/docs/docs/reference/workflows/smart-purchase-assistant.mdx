@@ -3,17 +3,17 @@ title: Smart Purchase Assistant
 description: Evidence-linked product selection with durable research, reviewed recommendations, a self-contained buyer report, and separately authorized delivery.
 ---
 
-Smart Purchase Assistant turns one product need into a durable, evidence-linked purchase decision package. It captures intended use, region and currency, budget, constraints, deadline, research depth, privacy limits, operating mode, and separate publication and Telegram authority before researching the market.
+Smart Purchase Assistant turns one product need into a durable, evidence-linked purchase decision package. It captures intended use, region and currency, budget, constraints, deadline, research depth, privacy limits, operating mode, and separate publication and notification authority before researching the market.
 
 ```bash
 mcp__moira__start({
   workflowId: "moira/smart-purchase-assistant",
   parentExecutionId: "none",
-  skipTelegramCheck: true
+  skipNotificationCheck: true
 })
 ```
 
-`skipTelegramCheck: true` bypasses only Moira's graph-level preflight for the optional Telegram node. It does not authorize a notification. Actual Telegram configuration is observed only after the local result passes review and only when notification authority was explicitly granted.
+`skipNotificationCheck: true` bypasses only Moira's graph-level preflight for the optional `user-notification` node. It does not authorize a notification. Actual channel delivery is attempted only after the local result passes review and only when notification authority was explicitly granted.
 
 ## Result and evidence
 
@@ -27,7 +27,7 @@ The buyer package contains profile-specific recommendations, direct observed lin
 
 A genuinely independent reviewer reads the complete current contract, evidence, report, HTML, mechanical observations, bounded terminal summaries, and changed-knowledge account. Evidence defects return through research and every dependent stage; report-only defects refresh Markdown, HTML, validation observations, and summaries before the same review. Mixed causes, invalid criteria, or non-discriminating evidence methods enter independently reviewed contract reassessment.
 
-Outcomes distinguish reviewed complete and reviewed-limited local results, factual blockers, and explicit interactive abort. Artifact upload and Telegram are independent optional effects. Upload, not-sent, or transport-error outcomes remain visible but never invalidate the accepted local report.
+Outcomes distinguish reviewed complete and reviewed-limited local results, factual blockers, and explicit interactive abort. Artifact upload and user notification are independent optional effects. Upload, not-sent, or transport-error outcomes remain visible but never invalidate the accepted local report.
 
 The workflow is advisory. It never buys or reserves a product, contacts sellers, submits forms, spends money, changes settings, commits, deploys, or mutates production.
 

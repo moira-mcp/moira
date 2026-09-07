@@ -25,6 +25,7 @@ import {
   WriteNoteNode,
   UpsertNoteNode,
   MaterializeNode,
+  UserNotificationNode,
 } from "../types";
 
 import {
@@ -42,6 +43,7 @@ import {
   WriteNoteNodeData,
   UpsertNoteNodeData,
   MaterializeNodeData,
+  UserNotificationNodeData,
   CatalogNodeData,
   FallbackNodeData,
   LayoutOptions,
@@ -326,6 +328,23 @@ export class WorkflowTransformer {
         chatId: telegramNode.chatId,
         parseMode: telegramNode.parseMode,
       };
+    }
+
+    if (node.type === "user-notification") {
+      const notificationNode = node as UserNotificationNode;
+      return {
+        ...baseData,
+        nodeType: "user-notification",
+        label: node.metadata?.displayName || "User Notification",
+        description: notificationNode.message.substring(0, 80),
+        message: notificationNode.message,
+        format: notificationNode.format,
+        attachmentKind: notificationNode.attachProgressImage
+          ? "image"
+          : notificationNode.attachment?.kind,
+        color: DEFAULT_NODE_STYLES["user-notification"].colors.primary,
+        icon: DEFAULT_NODE_STYLES["user-notification"].icon,
+      } as UserNotificationNodeData;
     }
 
     // Exhaustive check: TypeScript verifies all WorkflowNode types are handled above.

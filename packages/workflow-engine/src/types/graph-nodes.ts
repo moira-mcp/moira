@@ -120,11 +120,31 @@ export interface SubgraphNode extends BaseNode {
 }
 
 // 6. Telegram Notification Node - Automated external notifications
+/** @deprecated Use UserNotificationNode. Explicit chatId keeps legacy Telegram-only semantics. */
 export interface TelegramNotificationNode extends BaseNode, TelegramNodeConfig {
   type: "telegram-notification";
   connections: {
     default: string; // Next node after sending notification (required)
     error?: string; // Next node on telegram API failure (optional)
+  };
+}
+
+export interface UserNotificationNode extends BaseNode {
+  type: "user-notification";
+  message: string;
+  format?: "plain" | "markdown" | "html";
+  silent?: boolean;
+  attachProgressImage?: boolean;
+  attachment?: {
+    kind: "image" | "document";
+    data: string;
+    encoding: "base64";
+    filename: string;
+    mimeType: string;
+  };
+  connections: {
+    default: string;
+    error?: string;
   };
 }
 
@@ -316,6 +336,7 @@ export type GraphNode =
   | ConditionNode
   | SubgraphNode
   | TelegramNotificationNode
+  | UserNotificationNode
   | ExpressionNode
   | ReadNoteNode
   | WriteNoteNode
@@ -341,6 +362,7 @@ export const BUILTIN_NODE_TYPES: readonly BuiltinGraphNode["type"][] = [
   "condition",
   "subgraph",
   "telegram-notification",
+  "user-notification",
   "expression",
   "read-note",
   "write-note",
@@ -378,6 +400,10 @@ export function isSubgraphNode(node: GraphNode): node is SubgraphNode {
 
 export function isTelegramNotificationNode(node: GraphNode): node is TelegramNotificationNode {
   return node.type === "telegram-notification";
+}
+
+export function isUserNotificationNode(node: GraphNode): node is UserNotificationNode {
+  return node.type === "user-notification";
 }
 
 export function isExpressionNode(node: GraphNode): node is ExpressionNode {
@@ -549,6 +575,12 @@ export function validateNodeConnections(node: GraphNode): { valid: boolean; erro
     case "telegram-notification":
       if (!node.connections?.default) {
         errors.push('Telegram notification node must have "default" connection');
+      }
+      break;
+
+    case "user-notification":
+      if (!node.connections?.default) {
+        errors.push('User notification node must have "default" connection');
       }
       break;
 

@@ -14,6 +14,39 @@ import {
 } from "../../../packages/web-frontend/src/utils/node-factory";
 
 describe("WorkflowTransformer", () => {
+  describe("User Notification Node", () => {
+    test("uses the dedicated renderer and preserves only portable presentation fields", () => {
+      expect(nodeTypes["user-notification"]).toBe(CompactNode);
+      const result = NodeFactory.createReactFlowNode({
+        type: "user-notification",
+        id: "notify",
+        message: "Build complete",
+        format: "markdown",
+        attachment: {
+          kind: "document",
+          data: "cHJpdmF0ZQ==",
+          encoding: "base64",
+          filename: "report.txt",
+          mimeType: "text/plain",
+        },
+        connections: { default: "end", error: "failed" },
+      });
+      expect(result).toMatchObject({
+        id: "notify",
+        type: "user-notification",
+        data: {
+          nodeType: "user-notification",
+          label: "User Notification",
+          message: "Build complete",
+          format: "markdown",
+          attachmentKind: "document",
+        },
+      });
+      expect(result.data).not.toHaveProperty("data");
+      expect(result.data).not.toHaveProperty("filename");
+    });
+  });
+
   describe("Materialize Node", () => {
     test("registers materialize on the shared CompactNode renderer", () => {
       expect(nodeTypes.materialize).toBe(CompactNode);

@@ -20,7 +20,7 @@ Every execution also exposes one always-visible static progress strip: Intake, P
 Tests, Review, Checkpoint, and Finalize. It is derived from the current primary workflow node, so
 repair, replan, and the normal multi-unit checkpoint loop reopen the corresponding earlier phase
 without separate status variables. The same shared model renders the PNG attached to existing
-authorized plan/report/approval/completion Telegram attention; stopped notifications remain text-only
+authorized plan/report/approval/completion user notifications; stopped notifications remain text-only
 because an arbitrary abort has no truthful single phase. Progress never changes SDF routing or its
 authority boundary.
 
@@ -28,7 +28,7 @@ The stable inactive labels stay short. While an exact implementation, validation
 review, repair, or checkpoint node is current, its active-only label adds the authoritative unit,
 total, and iteration values for that role. Plan/replan nodes never reuse stale unit counters.
 
-`screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through Telegram when notifications are configured; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Telegram absence or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives.
+`screenshots` captures and actually inspects the required states once. `html_report` reuses those same accepted images in a self-contained report, uploads it through Moira's Artifact API, and sends the public URL through the current user's configured communication channels; it never performs a second screenshot pass. Artifact upload failure blocks the unit. Missing channels or send failure at a reached notification node is non-blocking. Interactive plan, selected-unit, and final approvals receive attention notifications and wait in ordinary directives. Autonomous mode has no human-approval directives.
 
 Findings are classified as product, test/validation, evidence, documentation/projection, invalid criterion, or upstream plan/process defects. Product repair returns through producer completion. Verification-only or gate-local repair reruns only stale evidence. Mixed or invalid causes trigger quality-preserving replan rather than expanding implementation against a broken contract.
 
@@ -36,7 +36,7 @@ Every current-unit producer, validator, reviewer, repair role, checkpoint, and r
 
 When the originating request already authorizes a later caller-owned push, pull request, publication, release, or deployment, SDF records that intent through the execution's revisioned `session` reminder API during intake. The reminder is returned under `Next requested actions` on ordinary completion for both standalone and child runs. It never becomes a development-plan unit, changes `vcs_commits_authorized`, performs the effect, or grants new authority.
 
-Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit; final reconciliation still checks cross-unit truth and independently reviews only changed or previously uncovered documentation. The final suffix covers feature-wide validation, semantic review, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. Normal and stopped endings send best-effort Telegram notifications when configured.
+Runtime, browser, visual, integration, performance, and full-suite checks remain conditional on the feature and repository. Permanent documentation closes with its vertical unit; final reconciliation still checks cross-unit truth and independently reviews only changed or previously uncovered documentation. The final suffix covers feature-wide validation, semantic review, requirements coverage, factual reporting, and authority-bound local VCS reconciliation. Normal and stopped endings send best-effort notifications through configured user channels.
 
 ## When to use it
 

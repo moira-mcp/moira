@@ -19,6 +19,8 @@ import * as path from "path";
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const NEW_TABLE = "extensionSettingValue";
 const NEW_MIGRATION_TAG = "0022_extension_setting_values";
+const LATER_TABLE = "communication_attachment_grant";
+const LATEST_MIGRATION_TAG = "0023_communication_attachment_grants";
 
 function tableNames(sqlite: ReturnType<typeof Database>): string[] {
   return (
@@ -40,8 +42,8 @@ describe("Migrating a database created before the extension value store", () => 
     const journal = JSON.parse(
       fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
     ) as { entries: Array<{ tag: string }> };
-    expect(journal.entries.at(-1)?.tag).toBe(NEW_MIGRATION_TAG);
-    expect(journal.entries.map((entry) => entry.tag)).toContain("0021_static_tool_descriptions");
+    expect(journal.entries.at(-1)?.tag).toBe(LATEST_MIGRATION_TAG);
+    expect(journal.entries.map((entry) => entry.tag)).toContain(NEW_MIGRATION_TAG);
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-migration-"));
     const file = path.join(dir, "moira.db");
@@ -51,10 +53,11 @@ describe("Migrating a database created before the extension value store", () => 
     try {
       // A database as it was before this change: everything applied except the new migration.
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
+      sqlite.exec(`DROP TABLE ${LATER_TABLE}`);
       sqlite.exec(`DROP TABLE ${NEW_TABLE}`);
       sqlite
         .prepare(
-          "DELETE FROM __drizzle_migrations WHERE hash IN (SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1)",
+          "DELETE FROM __drizzle_migrations WHERE hash IN (SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)",
         )
         .run();
       expect(tableNames(sqlite)).not.toContain(NEW_TABLE);
@@ -78,6 +81,7 @@ describe("Migrating a database created before the extension value store", () => 
       const schemaAfter = tableSchemas(sqlite);
       delete schemaAfter.__drizzle_migrations;
       delete schemaAfter[NEW_TABLE];
+      delete schemaAfter[LATER_TABLE];
       // Every other table is byte-for-byte the definition it had before.
       expect(schemaAfter).toEqual(schemaBefore);
 

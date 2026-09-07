@@ -5,16 +5,28 @@
  * Moira, and a shape that could not survive serialisation would quietly break that guarantee.
  */
 
-import type { ExtensionNodeDeclaration } from "@mcp-moira/workflow-engine/extensions/contract";
+import type {
+  ExtensionCommunicationChannelDeclaration,
+  ExtensionNodeDeclaration,
+} from "@mcp-moira/workflow-engine/extensions/contract";
 
 /** Contract version this runner speaks; mismatches are refused rather than adapted. */
-export { EXTENSION_API_VERSION } from "@mcp-moira/workflow-engine/extensions/contract";
+export {
+  EXTENSION_API_VERSION,
+  EXTENSION_RUNNER_API_VERSION,
+} from "@mcp-moira/workflow-engine/extensions/contract";
 
 /** GET /health */
 export interface RunnerHealthResponse {
   apiVersion: string;
   ready: boolean;
-  extensions: Array<{ name: string; version: string; nodeTypes: string[]; healthy: boolean }>;
+  extensions: Array<{
+    name: string;
+    version: string;
+    nodeTypes: string[];
+    communicationChannelIds: string[];
+    healthy: boolean;
+  }>;
   rejected: Array<{ directory: string; reasons: string[] }>;
 }
 
@@ -26,9 +38,36 @@ export interface RunnerNodesResponse {
     version: string;
     entrypoint: string;
     nodes: ExtensionNodeDeclaration[];
+    communicationChannels?: ExtensionCommunicationChannelDeclaration[];
     settings?: unknown[];
     permissions?: unknown;
   }>;
+}
+
+export interface RunnerCommunicationAttachment {
+  kind: "image" | "document";
+  data: string;
+  encoding: "base64";
+  filename: string;
+  mimeType: string;
+}
+
+export interface RunnerCommunicationMessage {
+  text: string;
+  format?: "plain" | "markdown" | "html";
+  silent?: boolean;
+  attachment?: RunnerCommunicationAttachment;
+}
+
+export interface RunnerChannelCheckRequest {
+  channelId: string;
+  timeoutMs: number;
+}
+
+export interface RunnerChannelDeliverRequest extends RunnerChannelCheckRequest {
+  message: RunnerCommunicationMessage;
+  settings?: Record<string, unknown>;
+  secrets?: Record<string, string | null>;
 }
 
 /** POST /invoke */
@@ -42,6 +81,15 @@ export interface RunnerInvokeRequest {
   timeoutMs: number;
   /** Secret values Moira resolved for the aliases the manifest was granted. */
   secrets?: Record<string, string | null>;
+  /** Internal child-host projection used by the runner's channel endpoints. */
+  communication?:
+    | { kind: "check"; channelId: string }
+    | {
+        kind: "deliver";
+        channelId: string;
+        message: RunnerCommunicationMessage;
+        settings?: Record<string, unknown>;
+      };
 }
 
 /** Failure classes; identical to the ones Moira's handler routes to `error`. */
@@ -81,7 +129,7 @@ export type HostRequest =
   { kind: "invoke"; id: string; request: RunnerInvokeRequest } | { kind: "cancel"; id: string };
 
 export type HostResponse =
-  | { kind: "ready"; nodeTypes: string[] }
+  | { kind: "ready"; nodeTypes: string[]; communicationChannelIds: string[] }
   | { kind: "load-failed"; message: string }
   | { kind: "result"; id: string; response: RunnerInvokeResponse }
   | { kind: "log"; id: string; message: string; fields?: Record<string, unknown> }

@@ -83,6 +83,13 @@ const NODE_CONFIG: Record<
     bgColor: "bg-chart-3/10",
     textColor: "text-chart-3",
   },
+  "user-notification": {
+    icon: Send,
+    label: "NOTIFY",
+    borderColor: "border-chart-3",
+    bgColor: "bg-chart-3/10",
+    textColor: "text-chart-3",
+  },
   subgraph: {
     icon: Workflow,
     label: "SUBGRAPH",
@@ -173,6 +180,9 @@ function getTooltipDescription(data: MoiraNodeDataUnion, t: TFunction): string {
   }
   if (data.nodeType === "telegram-notification" && "message" in data) {
     return data.message?.substring(0, 100) || "Telegram notification";
+  }
+  if (data.nodeType === "user-notification" && "message" in data) {
+    return data.message?.substring(0, 100) || "User notification";
   }
   if (data.nodeType === "subgraph" && "graphId" in data) {
     return `Subgraph: ${data.graphId}`;

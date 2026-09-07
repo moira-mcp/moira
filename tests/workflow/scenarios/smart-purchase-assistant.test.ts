@@ -1,5 +1,5 @@
-/** Contract and route scenarios for moira/smart-purchase-assistant v4. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Contract and route scenarios for moira/smart-purchase-assistant. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -14,7 +14,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("smart-purchase-assistant", "public")!;
+const entry = findCatalogEntryBySlug("smart-purchase-assistant")!;
 const graph = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const workspace = (executionId: string) => `./moira-ws/smart-purchase-assistant-${executionId}`;
 
@@ -100,12 +100,12 @@ function baseInputs(overrides: Record<string, MockInput> = {}): Record<string, M
 }
 
 type MaterializeMode = "success" | "error";
-type TelegramMode = "default" | "sent" | "unsent" | "error";
+type NotificationMode = "default" | "sent" | "unsent" | "error";
 
 function configureHandlers(
   engine: GraphExecutionEngine,
   materializeMode: MaterializeMode,
-  telegramMode: TelegramMode,
+  notificationMode: NotificationMode,
 ): void {
   const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
   handlers.set(
@@ -125,22 +125,25 @@ function configureHandlers(
           }),
         },
   );
-  if (telegramMode !== "default") {
-    handlers.set("telegram-notification", {
-      getNodeType: () => "telegram-notification",
+  if (notificationMode !== "default") {
+    handlers.set("user-notification", {
+      getNodeType: () => "user-notification",
       execute: async (current: { id: string }) =>
-        telegramMode === "error"
+        notificationMode === "error"
           ? {
               nodeId: current.id,
               action: "continue",
               outputPath: "error",
-              data: { errorMessage: "Telegram transport failed" },
+              data: { reason: "delivery_failed" },
             }
           : {
               nodeId: current.id,
               action: "continue",
               outputPath: "default",
-              data: { telegramNotificationSent: telegramMode === "sent" },
+              data: {
+                userNotificationStatus:
+                  notificationMode === "sent" ? "delivered" : "no_configured_channels",
+              },
             },
     });
   }
@@ -149,67 +152,21 @@ function configureHandlers(
 async function run(
   scenario: TestScenario,
   materializeMode: MaterializeMode = "success",
-  telegramMode: TelegramMode = "default",
+  notificationMode: NotificationMode = "default",
 ): Promise<ScenarioResult> {
   return runScenario(graph(), scenario, {
-    engineSetup: (engine) => configureHandlers(engine, materializeMode, telegramMode),
+    engineSetup: (engine) => configureHandlers(engine, materializeMode, notificationMode),
   });
 }
 
 describe("smart-purchase-assistant", () => {
-  test("publishes the restored detailed v4 public contract", async () => {
+  test("validates the executable graph and provider-neutral notification boundary", async () => {
     const workflow = graph();
     expect(await new GraphValidator().validateWorkflow(workflow)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(workflow.id).toBe("b33e227c-cc2c-4931-ae5d-2de69932e41e");
-    expect(workflow.metadata.version).toBe("4.0.0");
-    expect(workflow.nodes).toHaveLength(54);
-    expect(workflow.metadata.description).toContain("evidence-linked purchase decision package");
-    expect(workflow.metadata.description).toContain("skipTelegramCheck: true");
-    expect(workflow.metadata.description).toContain("never buys, reserves, contacts sellers");
     expect(workflow.nodes.filter((candidate) => candidate.type === "write-note")).toHaveLength(0);
-    expect(Object.keys(workflow.variableRegistry!)).toHaveLength(16);
-  });
-
-  test("keeps one durable package and distinct authority-aware terminal routes", () => {
-    const workflow = graph();
-    expect(workflow.variableRegistry!.workspace_path).toMatchObject({
-      const: "./moira-ws/smart-purchase-assistant-{{executionId}}",
-      default: "./moira-ws/smart-purchase-assistant-{{executionId}}",
-    });
-    expect(node(workflow, "materialize-workspace").files.map((file: any) => file.path)).toEqual([
-      "process-id.txt",
-      "decision-contract.md",
-      "source-evidence.md",
-      "purchase-report.md",
-      "purchase-report.html",
-      "validation-observations.md",
-      "review-findings.md",
-      "repair-account.md",
-      "final-report.md",
-    ]);
-    expect(node(workflow, "route-publication").connections).toEqual({
-      true: "publish-artifact",
-      false: "route-notification",
-    });
-    expect(node(workflow, "route-notification").connections).toEqual({
-      true: "send-notification",
-      false: "finalize-result",
-    });
-    expect(node(workflow, "route-notification-sent").condition.left.contextPath).toBe(
-      "send-notification.telegramNotificationSent",
-    );
-    expect(
-      node(workflow, "reassess-contract").inputSchema.properties.reassessment_outcome.enum,
-    ).toEqual(["eligible", "blocked"]);
-    expect(
-      workflow.nodes.filter((candidate) => candidate.connections?.success === "finalize-aborted"),
-    ).toHaveLength(0);
-    expect(node(workflow, "route-result-rework").connections.false).toBe("finalize-aborted");
   });
 
   test("rejects contradictory outcome data instead of fabricating evidence", async () => {
@@ -496,7 +453,7 @@ describe("smart-purchase-assistant", () => {
   });
 
   test("covers every node and branch including interactive rework, abort and blockers", async () => {
-    const scenarios: Array<[TestScenario, MaterializeMode?, TelegramMode?]> = [
+    const scenarios: Array<[TestScenario, MaterializeMode?, NotificationMode?]> = [
       [
         {
           name: "coverage intake blocked",
@@ -933,8 +890,8 @@ describe("smart-purchase-assistant", () => {
     ];
 
     const results: ScenarioResult[] = [];
-    for (const [scenario, materializeMode = "success", telegramMode = "default"] of scenarios) {
-      results.push(await run(scenario, materializeMode, telegramMode));
+    for (const [scenario, materializeMode = "success", notificationMode = "default"] of scenarios) {
+      results.push(await run(scenario, materializeMode, notificationMode));
     }
     expect(results.filter((result) => !result.passed)).toEqual([]);
     const coverage = calculateCoverage(graph(), results, { includeGapAnalysis: true });

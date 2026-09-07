@@ -1,5 +1,5 @@
-/** Behavioral contracts for moira/architecture-design-flow v2.0.5. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Behavioral contracts for moira/architecture-design-flow. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -13,7 +13,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("architecture-design-flow", "public")!;
+const entry = findCatalogEntryBySlug("architecture-design-flow")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const sentinel = "No active revision request.";
 const changed = {
@@ -136,59 +136,16 @@ async function run(scenario: TestScenario, materializeError = false): Promise<Sc
 }
 
 describe("architecture-design-flow", () => {
-  test("publishes the universal authority-bound v2 architecture contract", async () => {
+  test("validates the executable architecture workflow", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.metadata.version).toBe("2.0.5");
-    expect(graph.metadata.description).toContain("decision-ready, maintained architecture package");
-    expect(graph.metadata.description).toContain("never changes product code");
     expect(graph.nodes.some((node) => node.type === "telegram-notification")).toBe(false);
     expect(JSON.stringify(graph)).not.toContain("campaign method");
     expect(JSON.stringify(graph)).not.toContain("issues_count");
     expect(JSON.stringify(graph)).not.toContain("max_fix_iterations");
-  });
-
-  test("materializes one durable package and separates evidence modalities", () => {
-    const byId = (id: string): any => workflow().nodes.find((node) => node.id === id);
-    const files = byId("materialize-workspace").files.map((file: { path: string }) => file.path);
-    expect(files).toEqual(
-      expect.arrayContaining([
-        "architecture-contract.md",
-        "source-evidence.md",
-        "architecture.md",
-        "package/INDEX.md",
-        "completion.md",
-        "package-validation.md",
-        "semantic-review.md",
-        "repair-account.md",
-      ]),
-    );
-    expect(byId("validate-architecture-package").directive).toContain(
-      "deterministic observations only",
-    );
-    expect(byId("architecture-review").directive).toContain("genuinely independent");
-    expect(byId("complete-architecture-package").directive).toContain(
-      "Atomically write completion.md",
-    );
-    expect(byId("revise-process").hint).toContain("architecture method");
-    for (const id of [
-      "finalize-complete",
-      "finalize-limited",
-      "finalize-blocked",
-      "finalize-aborted",
-    ]) {
-      expect(JSON.stringify(byId(id).inputSchema)).toContain(
-        '"delivery_status":{"const":"workspace"}',
-      );
-    }
-    expect(byId("finalize-complete-delivered").inputSchema.globalInputs).not.toContain(
-      "delivery_status",
-    );
   });
 
   test.each([

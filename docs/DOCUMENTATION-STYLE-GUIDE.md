@@ -318,7 +318,7 @@ changes ship without doc updates.
 A change triggers a required public-docs update when it touches any of:
 
 - The variable model (`variableRegistry`, `globalInputs`, node-local `node-id.name` resolution, variable scoping/validation).
-- Node types or their schema/fields (e.g. `agent-directive`, `condition`, `expression`, `telegram-notification`, note nodes).
+- Node types or their schema/fields (e.g. `agent-directive`, `condition`, `expression`, `user-notification`, note nodes).
 - The workflow-definition schema (top-level fields, `inputSchema` shape).
 - MCP tools (names, parameters, actions, descriptions) and the agent-facing contract.
 - Template syntax, magic variables, or condition operators.

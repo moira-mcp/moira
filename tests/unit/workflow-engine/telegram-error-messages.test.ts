@@ -46,22 +46,23 @@ describe("Telegram Error Messages", () => {
       expect(message).toContain("4096");
     });
 
-    it("TEMPLATE_ERROR includes original message when provided", () => {
+    it("TEMPLATE_ERROR omits original message while retaining guidance", () => {
       const original = "Variable {{foo}} not found";
       const message = getActionableTelegramErrorMessage(TelegramErrorType.TEMPLATE_ERROR, original);
-      expect(message).toContain(original);
-      expect(message).toContain("Template processing error");
+      expect(message).not.toContain(original);
+      expect(message).toContain("template variables");
     });
 
     it("TEMPLATE_ERROR uses fallback when no original message", () => {
       const message = getActionableTelegramErrorMessage(TelegramErrorType.TEMPLATE_ERROR);
-      expect(message).toContain("unknown");
+      expect(message).toContain("template variables");
     });
 
-    it("API_ERROR includes original message when provided", () => {
+    it("API_ERROR omits original provider message", () => {
       const original = "Bad Request: can't parse entities";
       const message = getActionableTelegramErrorMessage(TelegramErrorType.API_ERROR, original);
-      expect(message).toContain(original);
+      expect(message).toBe("Telegram notification failed");
+      expect(message).not.toContain(original);
     });
 
     it("API_ERROR uses generic fallback when no original message", () => {
@@ -130,7 +131,7 @@ describe("Telegram Error Messages", () => {
 
       const result = classifyTelegramError(error);
       expect(result.errorType).toBe(TelegramErrorType.API_ERROR);
-      expect(result.message).toContain("Something unexpected happened");
+      expect(result.message).toBe("Telegram notification failed");
     });
 
     it("classifies non-Error value as API_ERROR with generic message", () => {

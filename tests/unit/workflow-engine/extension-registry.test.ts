@@ -77,6 +77,42 @@ describe("Manifest validation", () => {
     expect(validateExtensionManifest(manifest())).toBeNull();
   });
 
+  test("accepts a channel-only v1 bundle and rejects undeclared or overlapping channel settings", () => {
+    const channelOnly = manifest({
+      nodes: [],
+      settings: [
+        { key: "corporate-messenger.enabled", type: "boolean", label: "Enabled" },
+        { key: "corporate-messenger.destination", type: "string", label: "Destination" },
+        { key: "corporate-messenger.token", type: "encrypted", label: "Token" },
+      ],
+      communicationChannels: [
+        {
+          id: "corporate-messenger.notifications",
+          title: "Corporate messages",
+          capabilities: { text: true, image: false, document: false, trustedDelivery: true },
+          configurationSchema: { type: "object" },
+          enabledSetting: "corporate-messenger.enabled",
+          settings: ["corporate-messenger.enabled", "corporate-messenger.destination"],
+          permissions: { secrets: ["corporate-messenger.token"] },
+        },
+      ],
+    });
+    expect(validateExtensionManifest(channelOnly)).toBeNull();
+
+    const rejection = validateExtensionManifest({
+      ...channelOnly,
+      communicationChannels: [
+        {
+          ...channelOnly.communicationChannels![0],
+          settings: ["corporate-messenger.token", "corporate-messenger.missing"],
+          permissions: { secrets: ["corporate-messenger.token"] },
+        },
+      ],
+    });
+    expect(rejection?.reasons.join(" ")).toContain("cannot also be a secret permission");
+    expect(rejection?.reasons.join(" ")).toContain("is not declared in this manifest's settings");
+  });
+
   test("a manifest for another contract version is rejected with the version named", () => {
     const rejection = validateExtensionManifest(manifest({ apiVersion: "moira.extensions/v2" }));
     expect(rejection).not.toBeNull();
@@ -218,6 +254,7 @@ describe("Manifest validation", () => {
     const duplicate = validateExtensionManifest(
       manifest({
         settings: [
+          { key: "corporate-messenger.enabled", type: "boolean", label: "Enabled" },
           { key: "corporate-messenger.token", type: "encrypted", label: "Token" },
           { key: "corporate-messenger.token", type: "encrypted", label: "Token again" },
         ],
@@ -417,7 +454,7 @@ describe("Manifest validation", () => {
     // fixtures the runner is exercised on are what currently distinguishes those two states, so
     // they are read from disk rather than restated here. The reference-example unit extends this
     // set when it adds the user-facing bundles.
-    const roots = ["tests/fixtures/extension-bundles"];
+    const roots = ["tests/fixtures/extension-bundles", "examples/extensions"];
     const manifests: Array<{ where: string; content: unknown }> = [];
     for (const root of roots) {
       const dir = path.resolve(process.cwd(), root);
@@ -467,6 +504,38 @@ describe("ExtensionRegistry", () => {
     expect(registry.has("corporate-messenger.send")).toBe(true);
     expect(registry.nodeTypes()).toEqual(["corporate-messenger.send"]);
     expect(registry.get("corporate-messenger.send")!.extensionName).toBe("corporate-messenger");
+  });
+
+  test("registers and removes communication contributions with their configuration authority", () => {
+    const contributed = manifest({
+      settings: [
+        { key: "corporate-messenger.enabled", type: "boolean", label: "Enabled" },
+        { key: "corporate-messenger.destination", type: "string", label: "Destination" },
+      ],
+      communicationChannels: [
+        {
+          id: "corporate-messenger.notifications",
+          title: "Corporate messages",
+          capabilities: { text: true, image: false, document: false },
+          configurationSchema: { type: "object" },
+          enabledSetting: "corporate-messenger.enabled",
+          settings: ["corporate-messenger.enabled", "corporate-messenger.destination"],
+        },
+      ],
+    });
+    expect(registry.register(contributed).registered).toBe(true);
+    expect(registry.communicationChannels()).toEqual([
+      expect.objectContaining({
+        extensionName: "corporate-messenger",
+        declaration: expect.objectContaining({ id: "corporate-messenger.notifications" }),
+        settingDeclarations: contributed.settings,
+      }),
+    ]);
+    expect(registry.snapshot().extensions[0].communicationChannels).toEqual(
+      contributed.communicationChannels,
+    );
+    expect(registry.unregister("corporate-messenger")).toBe(true);
+    expect(registry.communicationChannels()).toEqual([]);
   });
 
   test("an invalid manifest contributes nothing at all", () => {

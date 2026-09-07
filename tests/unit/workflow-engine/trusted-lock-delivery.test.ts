@@ -1,8 +1,9 @@
-import { describe, expect, it } from "@jest/globals";
+import { describe, expect, it, jest } from "@jest/globals";
 import type { IDataRepository } from "@mcp-moira/workflow-engine";
 import {
   checkTrustedLockDeliveryConfiguration,
   createTrustedExecutionLock,
+  getActiveCommunicationChannelRegistry,
   TrustedLockDeliveryError,
   type TrustedLockDeliveryDependencies,
 } from "@mcp-moira/workflow-engine";
@@ -27,6 +28,49 @@ function options() {
 }
 
 describe("trusted agent-path lock delivery", () => {
+  it("does not consult or invoke an ordinary registered communication adapter", async () => {
+    const registry = getActiveCommunicationChannelRegistry();
+    const isConfigured = jest.fn(async () => true);
+    const deliver = jest.fn(async () => undefined);
+    registry.register({
+      id: "test.ordinary-lock-boundary",
+      provider: "test.ordinary-lock-boundary",
+      capabilities: { text: true, image: true, document: true, trusted: false },
+      isConfigured,
+      deliver,
+    });
+    let telegramCalls = 0;
+    try {
+      await createTrustedExecutionLock(
+        repositoryWithSettings({
+          "telegram.bot_token": "123:valid-shape",
+          "telegram.chat_id": "42",
+        }),
+        options(),
+        {
+          clientFactory: () => ({
+            sendMessage: async () => {
+              telegramCalls += 1;
+              return { ok: true } as never;
+            },
+          }),
+          lockService: {
+            createLockWithDelivery: async (_lockOptions, deliverSecret) => {
+              await deliverSecret({ lockId: "trusted-lock", pin: PIN });
+              return { lockId: "trusted-lock" };
+            },
+          },
+        },
+      );
+    } finally {
+      registry.unregister("test.ordinary-lock-boundary");
+    }
+
+    expect(telegramCalls).toBe(1);
+    expect(isConfigured).not.toHaveBeenCalled();
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
   it("turns setting-storage failures into a fixed safe configuration error", async () => {
     const repository = {
       getSetting: async () => {

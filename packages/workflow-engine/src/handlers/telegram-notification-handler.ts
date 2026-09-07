@@ -156,7 +156,7 @@ export class TelegramNotificationHandler implements INodeHandler {
     if (!botToken) {
       messageQueue.addNotification(
         node.id,
-        'Telegram notifications are not configured. Set up in Settings → Telegram or use the guided setup workflow: start({ workflowId: "moira/telegram-setup", parentExecutionId: "none" })',
+        'Telegram notifications are not configured. Set up in Settings > Notifications or use the guided setup workflow: start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
         "configuration_error",
       );
 
@@ -202,10 +202,7 @@ export class TelegramNotificationHandler implements INodeHandler {
 
     this.logger.debug("Sending telegram notification", {
       nodeId: node.id,
-      chatId: targetChatId,
       messageLength: processedMessage.length,
-      originalMessage: node.message.substring(0, 50) + "...",
-      processedMessage: processedMessage.substring(0, 50) + "...",
       templatesProcessed: processedMessage !== node.message,
     });
 

@@ -8,6 +8,7 @@ export { EndNodeHandler } from "./end-handler.js";
 export { AgentDirectiveHandler } from "./agent-directive-handler.js";
 export { ConditionHandler } from "./condition-handler.js";
 export { TelegramNotificationHandler } from "./telegram-notification-handler.js";
+export { UserNotificationHandler } from "./user-notification-handler.js";
 export { SubgraphNodeHandler } from "./subgraph-handler.js";
 export { ExpressionHandler } from "./expression-handler.js";
 export { ReadNoteHandler } from "./read-note-handler.js";

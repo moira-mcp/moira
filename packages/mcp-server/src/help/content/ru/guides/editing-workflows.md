@@ -56,9 +56,9 @@ moira-workflow ./workflow.json set-variable-schema result --file ./result-schema
 ```
 
 Статический progress исполнения использует тот же файловый authoring surface. Задайте полный граф
-отображения из JSON, затем сопоставьте каждую пользовательскую waiting node. Вложение в Telegram
-доступно только для `telegram-notification`; значения `none` и `false` удаляют соответствующие
-опциональные поля.
+отображения из JSON, затем сопоставьте каждую пользовательскую waiting node. Вложение прогресса
+доступно для `user-notification` и устаревшей `telegram-notification`; значения `none` и `false`
+удаляют соответствующие опциональные поля.
 
 ```bash
 moira-workflow ./workflow.json set-progress --file ./progress.json

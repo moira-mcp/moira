@@ -17,11 +17,40 @@ through MCP initialization and never alter a tool description.
 
 The typed catalog defines what clients can send. The following notes describe authorization, state changes, and operational behavior that is not encoded in JSON Schema.
 
+### User communication
+
+`communication` delivers only to the authenticated user's enabled channels. The server selects
+providers and recipients; callers cannot supply a user, provider, destination, credential, local
+path, remote URL, or arbitrary request header. `send` accepts a non-empty message of at most 4096
+characters and returns a sanitized aggregate status for all configured channels.
+
+For an image or document, call `attachment-token` with the message, attachment kind, filename, MIME
+type, and exact byte size. The returned grant expires after five minutes and can authorize at most
+one provider attempt. Keep the grant out of the URL and send the bytes with an OAuth or persistent
+MCP Bearer credential belonging to the user who minted it:
+
+```bash
+curl --request POST "$uploadUrl" \
+  --header "Authorization: Bearer $MOIRA_MCP_TOKEN" \
+  --header "X-Moira-Communication-Grant: $grant" \
+  --header "Content-Type: application/pdf" \
+  --header "Content-Length: $(wc -c < report.pdf)" \
+  --data-binary @report.pdf
+```
+
+The declared size must equal both `Content-Length` and the received byte count. Each attachment is
+limited to 20 MiB; images accept PNG or JPEG and documents reject image MIME types. Before provider
+delivery begins, a failed MIME, size, image-signature, or in-flight admission check releases the
+grant for another corrected request until expiry. After any provider attempt, success or failure is
+terminal and replay returns the same non-specific invalid-grant response. Each user may have ten
+live grants and two simultaneous upload buffers totalling at most 40 MiB; the installation accepts
+one thousand live grants. Expired and completed grants do not consume issuance capacity.
+
 ### Workflow discovery and execution
 
 `list` returns only workflows accessible to the authenticated user. Search, visibility, ordering, and pagination filters are combined; `total` describes all matches, not only the returned page. Every response includes the effective `offset` and `limit`, `returnedCount`, and `hasMore`. When another page exists, pass `nextOffset` as the next request's `offset`; the terminal page returns `nextOffset: null`.
 
-`start` resolves an authorized workflow and creates an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. When a workflow needs Telegram notifications and Telegram is not configured, preflight returns setup instructions. `skipTelegramCheck` bypasses only that optional notification preflight. A workflow containing a lock node always requires a valid Telegram bot token and chat ID for the current user; the skip flag cannot bypass trusted PIN delivery. Setup guidance without a Process ID means no execution was created. A successful start returns the process identifier and the first directive.
+`start` resolves an authorized workflow and creates an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. A `user-notification` workflow with no configured channel returns channel-neutral Settings guidance; a legacy `telegram-notification` workflow returns Telegram setup guidance. `skipNotificationCheck` bypasses only this optional ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected. A workflow containing a lock node always requires a valid Telegram bot token and chat ID for the current user; neither field bypasses trusted PIN delivery. Setup guidance without a Process ID means no execution was created. A successful start returns the process identifier and the first directive.
 
 `step` advances the process only when its input satisfies the current node contract. A workflow may expose named teleport entries; teleporting and ordinary node input are mutually exclusive. If input contains the reserved `execution_note` field, Moira updates the execution note shown in execution lists. Tool failures remain failures and are not rendered as successful steps.
 

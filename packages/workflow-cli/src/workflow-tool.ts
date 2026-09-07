@@ -124,6 +124,7 @@ function getTypeColor(type: string): ColorName {
     "agent-directive": "blue",
     condition: "yellow",
     "telegram-notification": "magenta",
+    "user-notification": "magenta",
   };
   return typeColors[type] || "white";
 }
@@ -526,9 +527,12 @@ function updateNode(
   }
 
   if (options.attachProgressImage !== undefined) {
-    if (node.type !== "telegram-notification") {
+    if (node.type !== "telegram-notification" && node.type !== "user-notification") {
       console.error(
-        c("red", "ERROR: --attach-progress-image is valid only for telegram-notification nodes"),
+        c(
+          "red",
+          "ERROR: --attach-progress-image is valid only for user-notification or telegram-notification nodes",
+        ),
       );
       process.exit(1);
     }
@@ -1590,7 +1594,7 @@ ${c("cyan", "Update Options:")}
   --progress-node-id <id|none>          Set or clear the node's progress milestone
   --progress-active-label <text|none>   Set or clear its active-only milestone label
   --progress-active-content <json|none> Set or clear its active-only structured content
-  --attach-progress-image <true|false>  Toggle progress image on Telegram nodes
+  --attach-progress-image <true|false>  Toggle progress image on notification nodes
   --condition "expression"             Update condition
   --message "text"                     Update message
   --connections '{"key":"target"}'     Update connections

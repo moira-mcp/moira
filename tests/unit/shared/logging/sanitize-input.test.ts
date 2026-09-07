@@ -89,6 +89,11 @@ describe("sanitizeInput", () => {
       const { inputData } = sanitizeInput(input);
       expect(inputData).toEqual({ data: "test" });
     });
+
+    it("removes communication content and attachment filenames", () => {
+      const input = { message: "private report", filename: "customer.pdf", kind: "document" };
+      expect(sanitizeInput(input).inputData).toEqual({ kind: "document" });
+    });
   });
 
   describe("email masking", () => {

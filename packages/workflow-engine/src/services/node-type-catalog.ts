@@ -104,7 +104,12 @@ const BUILTIN_NODE_DESCRIPTIONS: Record<
   },
   "telegram-notification": {
     title: "Telegram Notification",
-    description: "Sends a Telegram message and continues; a send failure does not stop execution.",
+    description:
+      "Deprecated Telegram-only notification; use User Notification for ordinary delivery.",
+  },
+  "user-notification": {
+    title: "User Notification",
+    description: "Sends a notification through the user's configured communication channels.",
   },
   expression: {
     title: "Expression",

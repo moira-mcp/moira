@@ -33,10 +33,14 @@ import {
   createLogger,
   resolveArtifactUuidFromHost,
   getArtifactUrl,
-  getSettingsService,
   getUserService,
 } from "@mcp-moira/shared";
-import { getTelegramClient } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  getActiveUserCommunicationService,
+  type IDataRepository,
+  type UserCommunicationService,
+} from "@mcp-moira/workflow-engine";
 
 const router = Router();
 const logger = createLogger({ component: "StaticArtifacts" });
@@ -497,23 +501,47 @@ router.get(
   }),
 );
 
+export interface ArtifactReportNotificationDependencies {
+  communicationService: Pick<UserCommunicationService, "deliver">;
+  createRepository(): IDataRepository;
+  getAdminUserIds(): Promise<string[]>;
+  getOwnerId(uuid: string): Promise<string | null>;
+  getArtifactUrl(uuid: string): string;
+  getBaseUrl(): string;
+  logger: Pick<ReturnType<typeof createLogger>, "info" | "warn">;
+}
+
+function getArtifactReportNotificationDependencies(): ArtifactReportNotificationDependencies {
+  return {
+    communicationService: getActiveUserCommunicationService(),
+    createRepository: () => new DatabaseRepository(),
+    getAdminUserIds: () => getUserService().getAdminUserIds(),
+    getOwnerId: (uuid) => getArtifactService().getOwnerId(uuid),
+    getArtifactUrl,
+    getBaseUrl,
+    logger,
+  };
+}
+
 /**
- * Best-effort Telegram notification to every administrator that an artifact was
- * reported. Each admin who has Telegram configured in their settings
- * (telegram.enabled not false, plus bot_token + chat_id) receives a message.
- * Reuses the per-user Telegram settings and the project's TelegramClient. Never
- * throws — a report must succeed even if no admin has Telegram or a send fails
- * (graceful degradation). Individual admin send failures do not stop the others.
+ * Best-effort ordinary notification to every administrator that an artifact was reported.
+ * Channel selection and configuration remain inside the common communication service. Never
+ * throws: absence or failure of delivery cannot change the public report result, and one
+ * administrator's attempt cannot stop later administrators.
  */
-async function notifyAdminsOfReport(uuid: string, reportCount: number): Promise<void> {
+export async function notifyAdminsOfReport(
+  uuid: string,
+  reportCount: number,
+  dependencies: ArtifactReportNotificationDependencies,
+): Promise<void> {
   try {
-    const adminIds = await getUserService().getAdminUserIds();
+    const adminIds = await dependencies.getAdminUserIds();
     if (adminIds.length === 0) return;
 
-    const settings = getSettingsService();
-    const ownerId = await getArtifactService().getOwnerId(uuid);
-    const url = getArtifactUrl(uuid);
-    const adminUrl = `${getBaseUrl()}/admin/artifacts/reported`;
+    const repository = dependencies.createRepository();
+    const ownerId = await dependencies.getOwnerId(uuid);
+    const url = dependencies.getArtifactUrl(uuid);
+    const adminUrl = `${dependencies.getBaseUrl()}/admin/artifacts/reported`;
     const text =
       `⚑ *Artifact reported*\n\n` +
       `An artifact has been reported by a viewer and needs review.\n` +
@@ -523,39 +551,52 @@ async function notifyAdminsOfReport(uuid: string, reportCount: number): Promise<
       `View: ${url}\n` +
       `Admin: ${adminUrl}`;
 
-    let sent = 0;
+    let delivered = 0;
+    let unavailable = 0;
+    let failed = 0;
     for (const adminId of adminIds) {
       try {
-        const enabled = await settings.get<boolean>(adminId, "telegram.enabled");
-        if (enabled === false) continue;
-        const botToken = await settings.get<string>(adminId, "telegram.bot_token");
-        const chatId = await settings.get<string>(adminId, "telegram.chat_id");
-        if (!botToken || !chatId) continue;
-
-        const client = getTelegramClient(botToken, chatId);
-        if (!client) continue;
-
-        await client.sendMessage({ chatId, text, parseMode: "Markdown" });
-        sent++;
-      } catch (adminError) {
-        // One admin's failure must not block notifications to the others.
-        logger.warn("Report Telegram notification to admin failed (non-blocking)", {
+        const result = await dependencies.communicationService.deliver(
+          {
+            userId: adminId,
+            text,
+            format: "markdown",
+            purpose: "notification",
+          },
+          repository,
+        );
+        if (result.status === "delivered" || result.status === "partial") delivered++;
+        else if (result.status === "no_configured_channels") unavailable++;
+        else failed++;
+        dependencies.logger.info("Artifact report admin notification attempted", {
           uuid,
           adminId,
-          error: (adminError as Error).message,
+          status: result.status,
+          configuredChannels: result.configuredChannels,
+          deliveredChannels: result.deliveredChannels,
+        });
+      } catch {
+        // One admin's failure must not block notifications to the others.
+        failed++;
+        dependencies.logger.warn("Artifact report admin notification failed (non-blocking)", {
+          uuid,
+          adminId,
+          status: "failed",
         });
       }
     }
-    logger.info("Sent report Telegram notifications to admins", {
+    dependencies.logger.info("Artifact report admin notifications completed", {
       uuid,
       admins: adminIds.length,
-      sent,
+      delivered,
+      unavailable,
+      failed,
     });
-  } catch (error) {
+  } catch {
     // Never let notification failure affect the report response.
-    logger.warn("Report Telegram notification failed (non-blocking)", {
+    dependencies.logger.warn("Artifact report admin notification failed (non-blocking)", {
       uuid,
-      error: (error as Error).message,
+      status: "failed",
     });
   }
 }
@@ -565,7 +606,7 @@ async function notifyAdminsOfReport(uuid: string, reportCount: number): Promise<
  * (POST — a state-changing action must not be a GET, which would be triggerable
  * via <img>/prefetch/crawlers and allow report-bombing). Notifies via audit log
  * (ARTIFACT_REPORT, surfaced in the admin reported-artifacts view) AND a
- * best-effort Telegram push to every admin who has Telegram configured.
+ * best-effort ordinary notification to every admin through configured user channels.
  */
 router.post(
   "/__report/:uuid",
@@ -582,7 +623,7 @@ router.post(
     try {
       const reportCount = await artifactService.report(uuid);
       reported = true;
-      await notifyAdminsOfReport(uuid, reportCount);
+      await notifyAdminsOfReport(uuid, reportCount, getArtifactReportNotificationDependencies());
     } catch {
       // Not found / unavailable — show a neutral confirmation regardless to
       // avoid leaking which uuids exist.

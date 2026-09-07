@@ -36,6 +36,8 @@ const SENSITIVE_PATTERNS = [
   "otp",
   "cvv",
   "passphrase",
+  "message",
+  "filename",
 ];
 
 /**

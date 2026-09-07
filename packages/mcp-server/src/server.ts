@@ -41,6 +41,8 @@ import {
   getSqliteInstance,
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
+  CommunicationAttachmentGrantService,
+  logAuditEvent,
 } from "@mcp-moira/shared";
 
 // Get monorepo version from root package.json (#196)
@@ -53,6 +55,8 @@ import {
   initializeExtensionsForProcess,
   getExtensionRunnerUrl,
   HttpExtensionRunnerClient,
+  DatabaseRepository,
+  getActiveUserCommunicationService,
 } from "@mcp-moira/workflow-engine";
 import { runWithMCPContext } from "./core/request-context.js";
 import { auth } from "./auth.js";
@@ -66,6 +70,8 @@ import {
 } from "./auth/mcp-catalog-lifecycle.js";
 import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
 import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
+import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
+import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -133,6 +139,223 @@ interface AuthenticatedCatalogCredential {
   stampRevision: () => Promise<boolean>;
 }
 
+interface AuthenticatedPrincipal {
+  identity: { userId: string; email: string };
+  credential: AuthenticatedCatalogCredential;
+}
+
+async function authenticatePrincipal(
+  req: Request,
+  res: Response,
+  method?: string,
+): Promise<AuthenticatedPrincipal | null> {
+  const bearerToken = parseBearerToken(req.headers.authorization);
+  if (bearerToken && isPersistentToken(bearerToken)) {
+    const db = getDatabase();
+    const tokenHash = hashToken(bearerToken);
+    const [tokenRecord] = await db
+      .select({
+        id: apiToken.id,
+        userId: apiToken.userId,
+        toolsVersion: apiToken.toolsVersion,
+        expiresAt: apiToken.expiresAt,
+        revokedAt: apiToken.revokedAt,
+      })
+      .from(apiToken)
+      .where(eq(apiToken.tokenHash, tokenHash))
+      .limit(1);
+    if (!tokenRecord) {
+      res.status(401).json({ error: "invalid_token", error_description: "Invalid API token." });
+      return null;
+    }
+    const validationError = validateTokenRecord(tokenRecord);
+    if (validationError) {
+      res.status(401).json({
+        error: "invalid_token",
+        error_description:
+          validationError === "token_revoked"
+            ? "API token has been revoked."
+            : "API token has expired.",
+      });
+      return null;
+    }
+    const [userData] = await db
+      .select({
+        blocked: user.blocked,
+        blockedReason: user.blockedReason,
+        email: user.email,
+        approvedAt: user.approvedAt,
+        emailVerified: user.emailVerified,
+      })
+      .from(user)
+      .where(eq(user.id, tokenRecord.userId))
+      .limit(1);
+    if (!userData) {
+      res.status(401).json({ error: "invalid_token", error_description: "Token owner not found." });
+      return null;
+    }
+    const denial = getAccountAccessDenial({
+      userId: tokenRecord.userId,
+      blocked: !!userData.blocked,
+      approvedAt: userData.approvedAt,
+      emailVerified: !!userData.emailVerified,
+    });
+    if (denial === "blocked") {
+      const reason = userData.blockedReason ? `: ${userData.blockedReason}` : "";
+      res.status(403).json({
+        error: "access_denied",
+        error_description: `Account is blocked${reason}`,
+        hint: `Contact support at ${getContactEmail()} if you believe this is an error.`,
+      });
+      return null;
+    }
+    if (denial === "approval") {
+      res.status(403).json({
+        error: "access_denied",
+        error_code: ACCOUNT_APPROVAL_REQUIRED_CODE,
+        error_description: "Account is awaiting administrator approval.",
+      });
+      return null;
+    }
+    db.update(apiToken)
+      .set({ lastUsedAt: new Date().toISOString() })
+      .where(eq(apiToken.id, tokenRecord.id))
+      .then(() => {})
+      .catch(() => {});
+    return {
+      identity: { userId: tokenRecord.userId, email: userData.email },
+      credential: {
+        kind: "persistent",
+        id: tokenRecord.id,
+        toolsVersion: tokenRecord.toolsVersion,
+        stampRevision: async () => {
+          const now = new Date().toISOString();
+          const updated = await db
+            .update(apiToken)
+            .set({ toolsVersion: MCP_TOOLS_REVISION })
+            .where(
+              and(
+                eq(apiToken.id, tokenRecord.id),
+                eq(apiToken.tokenHash, tokenHash),
+                isNull(apiToken.revokedAt),
+                or(isNull(apiToken.expiresAt), gt(apiToken.expiresAt, now)),
+              ),
+            )
+            .returning({ id: apiToken.id });
+          return updated.length === 1;
+        },
+      },
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const session = await (auth.api as any).getMcpSession({ headers: req.headers as any });
+  if (!session) {
+    const baseUrl = getBaseUrl();
+    res
+      .status(401)
+      .header(
+        "WWW-Authenticate",
+        `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`,
+      )
+      .json({
+        error: "invalid_token",
+        error_description: "Authorization required. Please authenticate via OAuth.",
+        hint: "Re-authorize MCP server in client settings. Token may have expired.",
+      });
+    return null;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userId = (session as any).userId || "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const email = (session as any).email || "";
+  const db = getDatabase();
+  const [userData] = await db
+    .select({
+      blocked: user.blocked,
+      blockedReason: user.blockedReason,
+      approvedAt: user.approvedAt,
+      emailVerified: user.emailVerified,
+    })
+    .from(user)
+    .where(eq(user.id, userId))
+    .limit(1);
+  const denial = userData
+    ? getAccountAccessDenial(
+        {
+          userId,
+          blocked: !!userData.blocked,
+          approvedAt: userData.approvedAt,
+          emailVerified: !!userData.emailVerified,
+        },
+        { requireEmailVerified: true },
+      )
+    : "approval";
+  if (denial === "blocked") {
+    const reason = userData?.blockedReason ? `: ${userData.blockedReason}` : "";
+    res.status(403).json({
+      error: "access_denied",
+      error_code: "ACCOUNT_BLOCKED",
+      error_description: `Account is blocked${reason}`,
+      hint: `Contact support at ${getContactEmail()} if you believe this is an error.`,
+    });
+    return null;
+  }
+  if (denial === "approval" || denial === "email-verification") {
+    res.status(403).json({
+      error: "access_denied",
+      error_code: denial === "approval" ? ACCOUNT_APPROVAL_REQUIRED_CODE : "EMAIL_NOT_VERIFIED",
+      error_description:
+        denial === "approval"
+          ? "Account is awaiting administrator approval."
+          : "Email verification is required before accessing MCP.",
+    });
+    return null;
+  }
+  if (!bearerToken) {
+    res
+      .status(401)
+      .json({ error: "invalid_token", error_description: "OAuth access token is required." });
+    return null;
+  }
+  const [tokenData] = await db
+    .select({ id: oauthAccessToken.id, toolsVersion: oauthAccessToken.toolsVersion })
+    .from(oauthAccessToken)
+    .where(and(eq(oauthAccessToken.accessToken, bearerToken), eq(oauthAccessToken.userId, userId)))
+    .limit(1);
+  if (!tokenData) {
+    res.status(401).json({
+      error: "invalid_token",
+      error_description: "OAuth credential has been revoked or is invalid.",
+    });
+    return null;
+  }
+  logger.debug("Authenticated principal", { method, credentialKind: "oauth" });
+  return {
+    identity: { userId, email },
+    credential: {
+      kind: "oauth",
+      id: tokenData.id,
+      toolsVersion: tokenData.toolsVersion,
+      stampRevision: async () => {
+        const updated = await db
+          .update(oauthAccessToken)
+          .set({ toolsVersion: MCP_TOOLS_REVISION })
+          .where(
+            and(
+              eq(oauthAccessToken.id, tokenData.id),
+              eq(oauthAccessToken.accessToken, bearerToken),
+              eq(oauthAccessToken.userId, userId),
+              gt(oauthAccessToken.accessTokenExpiresAt, new Date().toISOString()),
+            ),
+          )
+          .returning({ id: oauthAccessToken.id });
+        return updated.length === 1;
+      },
+    },
+  };
+}
+
 async function handleAuthenticatedMcpRequest(
   req: Request,
   res: Response,
@@ -157,6 +380,26 @@ async function handleAuthenticatedMcpRequest(
   const mcpParams = req.body?.params;
   const toolName = mcpMethod === "tools/call" && mcpParams?.name ? mcpParams.name : undefined;
   const toolArgs = toolName ? mcpParams.arguments || {} : undefined;
+  if (toolName === "communication" && toolArgs && typeof toolArgs === "object") {
+    const allowed = new Set([
+      "action",
+      "message",
+      "format",
+      "silent",
+      "kind",
+      "filename",
+      "mimeType",
+      "sizeBytes",
+    ]);
+    if (Object.keys(toolArgs).some((key) => !allowed.has(key))) {
+      res.status(400).json({
+        jsonrpc: "2.0",
+        id: req.body?.id ?? null,
+        error: { code: -32602, message: "Invalid communication parameters" },
+      });
+      return;
+    }
+  }
   const promptContext = await extractPromptContext(req);
   const userContext = {
     ...identity,
@@ -205,6 +448,9 @@ async function handleAuthenticatedMcpRequest(
 // Express app setup
 const app = express();
 
+const attachmentGrantService = new CommunicationAttachmentGrantService();
+const attachmentInflight = new CommunicationAttachmentInflightLimiter();
+
 // Prometheus metrics middleware FIRST
 app.use(metricsMiddleware());
 
@@ -218,6 +464,20 @@ app.use(requestLogger({ logger: httpLogger }));
 
 // GeoIP logging for request origins
 app.use(geoipLogger({ logger: httpLogger }));
+
+// This endpoint must precede JSON parsing because a declared document may itself use application/json.
+app.post(
+  "/api/communication/attachments",
+  createCommunicationAttachmentHandler({
+    authenticate: authenticatePrincipal,
+    grantService: attachmentGrantService,
+    inflight: attachmentInflight,
+    communicationService: getActiveUserCommunicationService(),
+    createRepository: () => new DatabaseRepository(),
+    audit: logAuditEvent,
+    logger,
+  }),
+);
 
 app.use(express.json({ limit: "10mb" }));
 const mcpOriginAllowlist = getBrowserOriginAllowlist();
@@ -253,273 +513,10 @@ app.post("/mcp", mcpLimiter, async (req: Request, res: Response) => {
       hasAuthHeader: !!req.headers.authorization,
     });
 
-    // Extract Bearer token for auth routing
-    const bearerToken = parseBearerToken(req.headers.authorization);
-
-    // --- Persistent API token authentication (moira_ prefix) ---
-    // Persistent tokens use direct authentication, then the shared catalog gate.
-    if (bearerToken && isPersistentToken(bearerToken)) {
-      const db = getDatabase();
-      const tokenHash = hashToken(bearerToken);
-
-      // Look up token by hash
-      const [tokenRecord] = await db
-        .select({
-          id: apiToken.id,
-          userId: apiToken.userId,
-          toolsVersion: apiToken.toolsVersion,
-          expiresAt: apiToken.expiresAt,
-          revokedAt: apiToken.revokedAt,
-        })
-        .from(apiToken)
-        .where(eq(apiToken.tokenHash, tokenHash))
-        .limit(1);
-
-      if (!tokenRecord) {
-        logger.info("Persistent token not found", { method: mcpMethod });
-        return res.status(401).json({
-          error: "invalid_token",
-          error_description: "Invalid API token.",
-        });
-      }
-
-      // Validate token not expired/revoked
-      const validationError = validateTokenRecord(tokenRecord);
-      if (validationError) {
-        logger.info("Persistent token rejected", {
-          reason: validationError,
-          tokenId: tokenRecord.id,
-        });
-        return res.status(401).json({
-          error: "invalid_token",
-          error_description:
-            validationError === "token_revoked"
-              ? "API token has been revoked."
-              : "API token has expired.",
-        });
-      }
-
-      // Check if user is blocked
-      const [userData] = await db
-        .select({
-          blocked: user.blocked,
-          blockedReason: user.blockedReason,
-          email: user.email,
-          approvedAt: user.approvedAt,
-          emailVerified: user.emailVerified,
-        })
-        .from(user)
-        .where(eq(user.id, tokenRecord.userId))
-        .limit(1);
-
-      if (!userData) {
-        return res.status(401).json({
-          error: "invalid_token",
-          error_description: "Token owner not found.",
-        });
-      }
-
-      const denial = getAccountAccessDenial({
-        userId: tokenRecord.userId,
-        blocked: !!userData.blocked,
-        approvedAt: userData.approvedAt,
-        emailVerified: !!userData.emailVerified,
-      });
-
-      if (denial === "blocked") {
-        logger.warn("Blocked user attempted MCP access via persistent token", {
-          userId: tokenRecord.userId,
-        });
-        const reason = userData?.blockedReason ? `: ${userData.blockedReason}` : "";
-        return res.status(403).json({
-          error: "access_denied",
-          error_description: `Account is blocked${reason}`,
-          hint: `Contact support at ${getContactEmail()} if you believe this is an error.`,
-        });
-      }
-
-      if (denial === "approval") {
-        logger.warn("Pending user attempted MCP access via persistent token", {
-          userId: tokenRecord.userId,
-        });
-        return res.status(403).json({
-          error: "access_denied",
-          error_code: ACCOUNT_APPROVAL_REQUIRED_CODE,
-          error_description: "Account is awaiting administrator approval.",
-        });
-      }
-
-      // Update lastUsedAt fire-and-forget
-      db.update(apiToken)
-        .set({ lastUsedAt: new Date().toISOString() })
-        .where(eq(apiToken.id, tokenRecord.id))
-        .then(() => {})
-        .catch(() => {});
-
-      await handleAuthenticatedMcpRequest(
-        req,
-        res,
-        { userId: tokenRecord.userId, email: userData.email },
-        {
-          kind: "persistent",
-          id: tokenRecord.id,
-          toolsVersion: tokenRecord.toolsVersion,
-          stampRevision: async () => {
-            const now = new Date().toISOString();
-            const updated = await db
-              .update(apiToken)
-              .set({ toolsVersion: MCP_TOOLS_REVISION })
-              .where(
-                and(
-                  eq(apiToken.id, tokenRecord.id),
-                  eq(apiToken.tokenHash, tokenHash),
-                  isNull(apiToken.revokedAt),
-                  or(isNull(apiToken.expiresAt), gt(apiToken.expiresAt, now)),
-                ),
-              )
-              .returning({ id: apiToken.id });
-            return updated.length === 1;
-          },
-        },
-      );
-      return;
-    }
-
-    // --- OAuth authentication (existing flow) ---
-
-    // Validate MCP session via Better Auth MCP plugin
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const session = await (auth.api as any).getMcpSession({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      headers: req.headers as any,
-    });
-
-    // Return HTTP 401 if no valid session (includes initialize requests)
-    if (!session) {
-      const baseUrl = getBaseUrl();
-      const wwwAuthHeader = `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`;
-
-      logger.info("MCP request without valid session - returning 401", {
-        method: req.body?.method,
-        hasAuthHeader: !!req.headers.authorization,
-      });
-
-      return res.status(401).header("WWW-Authenticate", wwwAuthHeader).json({
-        error: "invalid_token",
-        error_description: "Authorization required. Please authenticate via OAuth.",
-        hint: "Re-authorize MCP server in client settings. Token may have expired.",
-      });
-    }
-
-    // Extract user context from Better Auth session
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const userId = (session as any).userId || "";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const email = (session as any).email || "";
-
-    // Check if user is blocked - SECURITY: blocked users cannot access MCP
-    if (userId) {
-      const db = getDatabase();
-      const [userData] = await db
-        .select({
-          blocked: user.blocked,
-          blockedReason: user.blockedReason,
-          approvedAt: user.approvedAt,
-          emailVerified: user.emailVerified,
-        })
-        .from(user)
-        .where(eq(user.id, userId))
-        .limit(1);
-
-      const denial = userData
-        ? getAccountAccessDenial(
-            {
-              userId,
-              blocked: !!userData.blocked,
-              approvedAt: userData.approvedAt,
-              emailVerified: !!userData.emailVerified,
-            },
-            { requireEmailVerified: true },
-          )
-        : "approval";
-
-      if (denial === "blocked") {
-        logger.warn("Blocked user attempted MCP access", { userId, email });
-        const reason = userData?.blockedReason ? `: ${userData.blockedReason}` : "";
-        return res.status(403).json({
-          error: "access_denied",
-          error_code: "ACCOUNT_BLOCKED",
-          error_description: `Account is blocked${reason}`,
-          hint: `Contact support at ${getContactEmail()} if you believe this is an error.`,
-        });
-      }
-
-      if (denial === "approval") {
-        logger.warn("Pending user attempted MCP access", { userId, email });
-        return res.status(403).json({
-          error: "access_denied",
-          error_code: ACCOUNT_APPROVAL_REQUIRED_CODE,
-          error_description: "Account is awaiting administrator approval.",
-        });
-      }
-
-      if (denial === "email-verification") {
-        logger.warn("Unverified user attempted MCP access", { userId, email });
-        return res.status(403).json({
-          error: "access_denied",
-          error_code: "EMAIL_NOT_VERIFIED",
-          error_description: "Email verification is required before accessing MCP.",
-        });
-      }
-    }
-
-    if (!bearerToken) {
-      return res.status(401).json({
-        error: "invalid_token",
-        error_description: "OAuth access token is required.",
-      });
-    }
-
-    const database = getDatabase();
-    const [tokenData] = await database
-      .select({ id: oauthAccessToken.id, toolsVersion: oauthAccessToken.toolsVersion })
-      .from(oauthAccessToken)
-      .where(
-        and(eq(oauthAccessToken.accessToken, bearerToken), eq(oauthAccessToken.userId, userId)),
-      )
-      .limit(1);
-    if (!tokenData) {
-      return res.status(401).json({
-        error: "invalid_token",
-        error_description: "OAuth credential has been revoked or is invalid.",
-      });
-    }
-
-    await handleAuthenticatedMcpRequest(
-      req,
-      res,
-      { userId, email },
-      {
-        kind: "oauth",
-        id: tokenData.id,
-        toolsVersion: tokenData.toolsVersion,
-        stampRevision: async () => {
-          const updated = await database
-            .update(oauthAccessToken)
-            .set({ toolsVersion: MCP_TOOLS_REVISION })
-            .where(
-              and(
-                eq(oauthAccessToken.id, tokenData.id),
-                eq(oauthAccessToken.accessToken, bearerToken),
-                eq(oauthAccessToken.userId, userId),
-                gt(oauthAccessToken.accessTokenExpiresAt, new Date().toISOString()),
-              ),
-            )
-            .returning({ id: oauthAccessToken.id });
-          return updated.length === 1;
-        },
-      },
-    );
+    const principal = await authenticatePrincipal(req, res, mcpMethod);
+    if (!principal) return;
+    await handleAuthenticatedMcpRequest(req, res, principal.identity, principal.credential);
+    return;
   } catch (error) {
     logger.error("MCP request failed", error);
     if (!res.headersSent) {

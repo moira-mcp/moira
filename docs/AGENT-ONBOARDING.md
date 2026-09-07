@@ -80,7 +80,8 @@ curl http://localhost:${DOCKER_PORT}/api/health        # Backend API health
 - **agent-directive** - Pauses for user input, validates response
 - **condition** - Auto-executes, branches on true/false
 - **expression** - Auto-executes, computes values using arithmetic
-- **telegram-notification** - Auto-executes, sends message, continues
+- **user-notification** - Auto-executes through the current user's configured channels
+- **telegram-notification** - Deprecated Telegram-only compatibility node
 - **teleport** - Jump target only reachable via explicit teleport, behaves like agent-directive
 - **subgraph** - Delegates to another workflow, maps input/output context
 - **lock** - Pauses at a PIN/Telegram approval gate until unlocked

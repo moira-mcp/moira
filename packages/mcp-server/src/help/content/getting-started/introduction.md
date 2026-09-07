@@ -98,15 +98,15 @@ A workflow is a directed graph of nodes. Each node represents a step in the proc
 Common node types are shown below. This table is representative, not exhaustive; see
 [Nodes](/docs/concepts/nodes/) for every supported type and its current contract.
 
-| Type                    | Purpose                                                |
-| ----------------------- | ------------------------------------------------------ |
-| `start`                 | Entry point for workflow execution                     |
-| `end`                   | Terminal node marking completion                       |
-| `agent-directive`       | Task for agent with directive and completion condition |
-| `condition`             | Branch execution based on structured conditions        |
-| `expression`            | Compute values using arithmetic expressions            |
-| `subgraph`              | Delegate to another workflow                           |
-| `telegram-notification` | Send notifications via Telegram                        |
+| Type                | Purpose                                                |
+| ------------------- | ------------------------------------------------------ |
+| `start`             | Entry point for workflow execution                     |
+| `end`               | Terminal node marking completion                       |
+| `agent-directive`   | Task for agent with directive and completion condition |
+| `condition`         | Branch execution based on structured conditions        |
+| `expression`        | Compute values using arithmetic expressions            |
+| `subgraph`          | Delegate to another workflow                           |
+| `user-notification` | Notify through the current user's configured channels  |
 
 ### Templates
 

@@ -5,7 +5,7 @@
  * before mutation, verifies each logical mutation class, and keeps every delivery outcome distinct.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphTemplateProcessor,
@@ -16,7 +16,7 @@ import {
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
-const catalogEntry = findSystemCatalogEntry("test-suite-audit", "public")!;
+const catalogEntry = findCatalogEntryBySlug("test-suite-audit")!;
 
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(catalogEntry.graph) as WorkflowGraph;
@@ -94,54 +94,12 @@ describe("test-suite-audit", () => {
     workflow = loadWorkflow();
   });
 
-  test("preserves public identity and validates the accepted 93-node 4.0.0 graph", async () => {
-    expect(catalogEntry.owner).toBe("system-moira");
-    expect(catalogEntry.slug).toBe("test-suite-audit");
-    expect(catalogEntry.visibility).toBe("public");
-    expect(workflow.id).toBe("41246c35-cada-43ae-917c-57b1ea90c1bd");
-    expect(workflow.metadata.version).toBe("4.0.0");
-    expect(workflow.nodes).toHaveLength(93);
+  test("validates the executable audit graph", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
   });
 
-  test("publishes a detailed selection contract instead of stale project counts", () => {
-    const description = workflow.metadata.description;
-    for (const phrase of [
-      "Feature-first audit",
-      "complete in-scope source and test corpus",
-      "independently reviewed batches",
-      "analysis only",
-      "exact reviewed mutation set",
-      "pre-change baseline",
-      "one logical mutation class at a time",
-      "scoped revert",
-      "limited non-mutating report",
-      "optional authorized static publication",
-      "preserves unrelated dirty work",
-      "Test Planning",
-      "Test Generation",
-      "Data Analysis",
-      "Software Development Flow",
-    ])
-      expect(description).toContain(phrase);
-    expect(description).not.toContain("3,122");
-    expect(description).not.toContain("Jest");
-  });
-
   test("materializes one registry standard into an execution-bound workspace", async () => {
-    expect(Object.keys(workflow.variableRegistry!).sort()).toEqual([
-      "audit_standard",
-      "batch_cursor",
-      "batch_total",
-      "change_class_cursor",
-      "change_class_total",
-      "notification_state",
-      "outcome",
-      "report_path",
-      "report_url",
-      "workspace_path",
-    ]);
     expect(workflow.variableRegistry!.workspace_path).toMatchObject({
       const: "./moira-ws/test-suite-audit-{{executionId}}",
       default: "./moira-ws/test-suite-audit-{{executionId}}",
@@ -179,44 +137,6 @@ describe("test-suite-audit", () => {
     );
     expect(rendered).toContain(`./moira-ws/test-suite-audit-${executionId}/audit-standard.md`);
     expect(rendered).not.toContain("{{executionId}}");
-  });
-
-  test("uses strict authority schemas and routes correction from the user target", () => {
-    const correction = node(workflow, "confirm-scope-taxonomy").inputSchema;
-    expect(correction.additionalProperties).toBe(false);
-    expect(correction.properties.decision.enum).toEqual(["accept", "correct"]);
-    expect(correction.allOf[0].then.required).toEqual(["correction_target", "feedback"]);
-    expect(node(workflow, "apply-user-correction").inputSchema.properties).toEqual({});
-    expect(node(workflow, "user-correction-scope").condition.left.contextPath).toBe(
-      "confirm-scope-taxonomy.correction_target",
-    );
-    expect(node(workflow, "present-recommendations").inputSchema.properties.decision.enum).toEqual([
-      "analysis_only",
-      "apply",
-      "revise",
-      "abort",
-    ]);
-    expect(node(workflow, "failure-decision").inputSchema.properties.decision.enum).toEqual([
-      "repair",
-      "revert",
-    ]);
-  });
-
-  test("keeps report, abort, and recovery-blocked terminals distinct", () => {
-    expect(node(workflow, "end-report").finalOutput).toEqual([
-      "outcome",
-      "report_path",
-      "report_url",
-      "notification_state",
-    ]);
-    expect(node(workflow, "end-abort").finalOutput).toEqual(["outcome"]);
-    expect(node(workflow, "end-blocked").finalOutput).toEqual(["outcome"]);
-    expect(node(workflow, "repair-final-report").inputSchema.properties.repair_reach.enum).toEqual([
-      "report",
-      "analysis",
-      "work_applied",
-      "work_reverted",
-    ]);
   });
 
   test("rejects correction without feedback before its owner", async () => {

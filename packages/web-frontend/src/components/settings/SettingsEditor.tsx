@@ -68,6 +68,8 @@ export interface SettingsEditorProps {
   canReset?: (key: string) => boolean;
   /** Whether categories are collapsible (default: true). When false, all categories render expanded without collapse controls */
   collapsible?: boolean;
+  /** Render only the setting fields when a parent surface already owns the category card. */
+  categoryLayout?: "cards" | "plain";
 }
 
 /**
@@ -120,6 +122,7 @@ const FullscreenModal: React.FC<FullscreenModalProps> = ({
           <textarea
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
+            aria-label={title}
             className="w-full h-full p-3 font-mono text-sm border border-border rounded-lg bg-background text-foreground resize-none"
             data-testid="fullscreen-textarea"
           />
@@ -158,6 +161,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
   onResetClick,
   canReset,
   collapsible = true,
+  categoryLayout = "cards",
 }) => {
   const { t } = useTranslation();
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -268,6 +272,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
               type="checkbox"
               checked={Boolean(value)}
               onChange={(e) => handleChange(def.key, e.target.checked)}
+              aria-label={def.label}
               className="w-4 h-4 rounded border-border"
               data-testid={`${testIdPrefix}-${def.key}-input`}
             />
@@ -283,6 +288,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             type="number"
             value={value as number}
             onChange={(e) => handleChange(def.key, Number(e.target.value))}
+            aria-label={def.label}
             className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
             data-testid={`${testIdPrefix}-${def.key}-input`}
           />
@@ -295,6 +301,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             <textarea
               value={jsonValue}
               onChange={(e) => handleChange(def.key, e.target.value)}
+              aria-label={def.label}
               rows={4}
               className="w-full px-3 py-2 font-mono text-sm border border-border rounded-lg bg-background text-foreground"
               data-testid={`${testIdPrefix}-${def.key}-input`}
@@ -326,6 +333,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             type="password"
             value={(value as string) || ""}
             onChange={(e) => handleChange(def.key, e.target.value)}
+            aria-label={def.label}
             placeholder="••••••••"
             className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
             data-testid={`${testIdPrefix}-${def.key}-input`}
@@ -340,6 +348,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             <textarea
               value={textValue}
               onChange={(e) => handleChange(def.key, e.target.value)}
+              aria-label={def.label}
               rows={6}
               className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
               data-testid={`${testIdPrefix}-${def.key}-input`}
@@ -374,6 +383,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
               <textarea
                 value={strValue}
                 onChange={(e) => handleChange(def.key, e.target.value)}
+                aria-label={def.label}
                 rows={4}
                 className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
                 data-testid={`${testIdPrefix}-${def.key}-input`}
@@ -403,6 +413,7 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
             type="text"
             value={strValue}
             onChange={(e) => handleChange(def.key, e.target.value)}
+            aria-label={def.label}
             className="w-full px-3 py-2 border border-border rounded-lg bg-background text-foreground"
             data-testid={`${testIdPrefix}-${def.key}-input`}
           />
@@ -509,6 +520,18 @@ export const SettingsEditor: React.FC<SettingsEditorProps> = ({
         const sortedDefs = [...categoryDefs].sort(
           (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0),
         );
+
+        if (categoryLayout === "plain") {
+          return (
+            <div
+              key={category}
+              className="space-y-4"
+              data-testid={`${testIdPrefix}-category-${category}`}
+            >
+              {sortedDefs.map(renderSettingItem)}
+            </div>
+          );
+        }
 
         if (!collapsible) {
           return (

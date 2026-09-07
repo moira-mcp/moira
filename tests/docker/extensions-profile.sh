@@ -51,11 +51,13 @@ fi
 docker exec "$container" node --input-type=module -e '
   const response = await fetch("http://127.0.0.1:9110/health");
   const health = await response.json();
+  if (health.apiVersion !== "moira.extension-runner/v2") process.exit(1);
   if (!health.ready || health.rejected.length !== 0) process.exit(1);
   if (health.extensions.length !== 1) process.exit(1);
   const extension = health.extensions[0];
   if (extension.name !== "webhook-notify") process.exit(1);
   if (!extension.nodeTypes.includes("webhook-notify.post-message")) process.exit(1);
+  if (!extension.communicationChannelIds.includes("webhook-notify.notifications")) process.exit(1);
 '
 
 if docker exec "$container" touch /app/extensions/write-probe 2>/dev/null; then

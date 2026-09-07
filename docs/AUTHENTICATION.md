@@ -362,6 +362,12 @@ and preserves the predecessor's catalog state. Authentication failures and block
 otherwise denied accounts retain their normal 401/403 responses and cannot use initialize to bypass
 admission.
 
+The binary communication endpoint accepts the same OAuth access tokens and persistent MCP tokens
+through the shared principal resolver. Its one-time communication grant is additional request
+authority, not authentication: the Bearer credential must belong to the user that minted the grant.
+This endpoint does not register MCP tools or read, accept, or stamp `toolsVersion`; catalog revision
+negotiation remains exclusive to the MCP JSON-RPC endpoint.
+
 **Client setup instructions:**
 
 All client setup pages (landing QuickStart, docs quickstart, docs MCP clients) include a collapsible "Authentication without OAuth" section per non-GUI client tab. Config examples use `moira_YOUR_TOKEN` placeholder with Bearer token in the Authorization header.

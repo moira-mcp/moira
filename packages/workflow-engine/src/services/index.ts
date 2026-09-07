@@ -14,6 +14,9 @@ export {
 } from "./node-type-catalog.js";
 export { RateLimiter, createTelegramRateLimiter } from "./rate-limiter.js";
 export { TelegramClient } from "./telegram-client.js";
+export * from "./user-communication.js";
+export * from "./telegram-communication-adapter.js";
+export * from "./user-communication-provider.js";
 export * from "./progress-image-service.js";
 export {
   AgentMessageQueue,
