@@ -57,14 +57,6 @@ beforeAll(async () => {
     method: "POST",
     headers: { Cookie: adminCookie },
   });
-  const approveResA = await fetch(`${BASE_URL}/api/admin/users/${signUpDataA.user.id}/approve`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  if (!approveResA.ok) {
-    throw new Error(`Failed to approve test user A: ${approveResA.status}`);
-  }
-
   const loginResA = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -87,14 +79,6 @@ beforeAll(async () => {
     method: "POST",
     headers: { Cookie: adminCookie },
   });
-  const approveResB = await fetch(`${BASE_URL}/api/admin/users/${signUpDataB.user.id}/approve`, {
-    method: "POST",
-    headers: { Cookie: adminCookie },
-  });
-  if (!approveResB.ok) {
-    throw new Error(`Failed to approve test user B: ${approveResB.status}`);
-  }
-
   const loginResB = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
