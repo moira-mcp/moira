@@ -86,7 +86,9 @@ describe("MCP Lock Step Integration", () => {
       skipTelegramCheck: true,
     });
 
-    expect(response).toContain("skipTelegramCheck cannot bypass");
+    expect(response).toContain("skipNotificationCheck");
+    expect(response).toContain("skipTelegramCheck alias");
+    expect(response).toContain("cannot bypass trusted lock PIN delivery");
     expect(response).not.toContain("skipTelegramCheck: true");
     expect(response).not.toContain("Process ID:");
   });
