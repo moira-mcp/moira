@@ -408,8 +408,9 @@ cards into deterministic left-to-right rows for the requested viewport, and rout
 backward, and cross-row display edges without affecting execution. `session progress-image-token`
 and the matching HTTP endpoint render that model as a
 bounded light/dark PNG behind a short-lived, revision-bound, single-use URL. A
-`telegram-notification` node can set `attachProgressImage: true`; it must map to a progress milestone
-and sends the rendered PNG with its normal message as the caption.
+`user-notification` node can set `attachProgressImage: true`; it must map to a progress milestone
+and sends the rendered PNG through the current user's configured channels with its normal message.
+The deprecated `telegram-notification` compatibility node retains the same progress attachment.
 
 Engine callers that hold a workflow and execution use
 `renderExecutionProgressImage(workflow, execution, options?)`. It returns `null` when no progress
@@ -447,7 +448,7 @@ display honest without adding conditional progress edges or duplicating SDF rout
 
 **All Nodes:**
 
-- `type` - One of: start, agent-directive, condition, expression, subgraph, telegram-notification, teleport, lock, materialize, read-note, write-note, upsert-note, end
+- `type` - One of: start, agent-directive, condition, expression, subgraph, user-notification, deprecated telegram-notification, teleport, lock, materialize, read-note, write-note, upsert-note, end
 - `id` - Unique within workflow
 - `connections` - Required (except end nodes)
 
@@ -537,28 +538,31 @@ JSON Schema.
 **Error handling:** Invalid arithmetic, paths, indexes, targets, or registry values route to the
 `error` connection without publishing earlier assignments from the same node.
 
-### Telegram Notification Node
+### User Notification Node
 
 ```json
 {
-  "type": "telegram-notification",
+  "type": "user-notification",
   "id": "notify-id",
   "message": "Message with {{variables}}",
-  "chatId": "{{user_chat_id}}",
-  "parseMode": "Markdown",
-  "replyMarkup": {
-    "inline_keyboard": [
-      [
-        { "text": "✅ Approve", "callback_data": "approve" },
-        { "text": "❌ Reject", "callback_data": "reject" }
-      ]
-    ]
-  },
+  "format": "markdown",
+  "silent": false,
   "connections": { "default": "next-node" }
 }
 ```
 
-`replyMarkup` is optional. When provided, sends an inline keyboard with the message. Each button has `text` (display label) and `callback_data` (payload, max 64 bytes per Telegram API).
+The node selects every valid enabled channel belonging to the execution user. It does not accept a
+provider, recipient, credential, Telegram parse mode, or reply markup. `format` is `plain`,
+`markdown`, or `html`. Optional portable image/document attachments and the current progress PNG
+are bounded and mutually exclusive. Full, partial, no-eligible-channel and total-attempted-failure
+results are stored under the node ID with sanitized channel statuses. A configured channel that
+does not support the requested attachment is reported as `unsupported` and skipped; it does not by
+itself make delivery fail. Total attempted failure uses `connections.error` when it exists and
+otherwise continues through `default`.
+
+`telegram-notification` is deprecated but remains executable for existing Telegram-specific
+workflows. Its explicit `chatId`, `parseMode`, and `replyMarkup` keep their original meanings and
+never fan out to other channels.
 
 ### Subgraph Node
 
@@ -655,7 +659,7 @@ PIN-based execution gate. It delivers a generated PIN to the current user's conf
 
 **Behavior:**
 
-1. `start()` requires a valid-shaped Telegram bot token and chat ID for the current user before creating an execution whose graph contains a lock node. `skipTelegramCheck` cannot bypass this check.
+1. `start()` requires a valid-shaped Telegram bot token and chat ID for the current user before creating an execution whose graph contains a lock node. Neither `skipNotificationCheck` nor its deprecated `skipTelegramCheck` alias can bypass this check.
 2. On first visit, `LockHandler` asks the trusted-delivery service to create a hashed pending PIN, send the plaintext PIN to that configured chat, and activate the exact lock. It stores `_lockId` and pauses only after the service succeeds.
 3. Missing or malformed settings fail before PIN generation. Send or activation failure publishes no `_lockId`; pending and `delivery_failed` records are not active or public and re-entry starts a fresh delivery attempt.
 4. Subsequent visits check the referenced lock or validate a user-supplied PIN and route through `connections.unlocked` after resolution.
@@ -1026,7 +1030,8 @@ Templates processed in:
 
 - `directive` field of agent-directive nodes
 - `completionCondition` field of agent-directive nodes
-- `message` field of telegram-notification nodes
+- `message` and `attachment.data` fields of user-notification nodes
+- `message` field of deprecated telegram-notification nodes
 - `basePath` and `files[].path` fields of materialize nodes
 - registry-backed materialize file contents when the archive is requested
 

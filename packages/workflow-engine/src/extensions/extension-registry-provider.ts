@@ -28,6 +28,7 @@ import {
   EXTENSION_API_VERSION,
   ExtensionRegistrySnapshot,
   ExtensionNodeDeclaration,
+  ExtensionCommunicationChannelDeclaration,
   ExtensionManifestRejection,
 } from "./extension-contract.js";
 
@@ -118,6 +119,12 @@ export function removeExtensionRegistrySnapshot(stateDir: string = getExtensionS
  */
 export function setActiveExtensionRegistry(registry: ExtensionRegistry | null): void {
   activeRegistry = registry;
+}
+
+async function communicationReconciler() {
+  return (
+    await import("./extension-communication-reconciler.js")
+  ).getActiveExtensionCommunicationChannelReconciler();
 }
 
 /**
@@ -211,6 +218,9 @@ export function readExtensionRegistrySnapshot(
       version: extension.version,
       entrypoint: "(from snapshot)",
       nodes: extension.nodes as ExtensionNodeDeclaration[],
+      communicationChannels: extension.communicationChannels as
+        ExtensionCommunicationChannelDeclaration[] | undefined,
+      settings: extension.settings,
     });
     if (!registration.registered) return null;
   }
@@ -226,7 +236,7 @@ export function readExtensionRegistrySnapshot(
  * unreachable runner must not silently erase the custom types an installation already had.
  */
 export async function syncExtensionRegistryFromRunner(
-  client: { listExtensions(): Promise<unknown[]> },
+  client: { listExtensions(): Promise<unknown[]> } & Partial<IExtensionRunnerClient>,
   options: { stateDir?: string; publish?: boolean; log?: ExtensionDiagnosticLog } = {},
 ): Promise<{
   synced: boolean;
@@ -254,6 +264,9 @@ export async function syncExtensionRegistryFromRunner(
   // extension", which is the only state in which a consumer may say so.
   registry.noteKnowledgeSource("live");
   const result = registry.replaceAll(manifests);
+  if (typeof client.invoke === "function") {
+    (await communicationReconciler()).reconcile(registry, client as IExtensionRunnerClient);
+  }
   reportRejections(result.rejected, options.log ?? defaultDiagnosticLog);
   if (options.publish !== false) {
     publishExtensionRegistry(options.stateDir ?? getExtensionStateDir());
@@ -300,6 +313,7 @@ export async function initializeExtensionsForProcess(options: {
     new ExtensionRegistry(options.runnerUrl ? "unreachable" : "unconfigured"),
   );
   setActiveExtensionRunnerClient(null);
+  (await communicationReconciler()).clear();
 
   if (!options.runnerUrl) {
     const publication = options.publishSnapshot ? publishExtensionRegistry(stateDir) : undefined;

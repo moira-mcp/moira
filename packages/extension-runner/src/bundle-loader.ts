@@ -103,6 +103,7 @@ export function scanExtensionBundles(extensionsDir: string): BundleScanResult {
   }
 
   const claimedTypes = new Map<string, string>();
+  const claimedCommunicationChannels = new Map<string, string>();
   const claimedNames = new Map<string, string>();
   const claimedSettingKeys = new Map<string, string>();
 
@@ -131,6 +132,14 @@ export function scanExtensionBundles(extensionsDir: string): BundleScanResult {
         reasons.push(`node type '${node.type}' is already provided by '${owner}'`);
       }
     }
+    for (const channel of Array.isArray(manifest.communicationChannels)
+      ? manifest.communicationChannels
+      : []) {
+      const owner = claimedCommunicationChannels.get(channel?.id ?? "");
+      if (owner) {
+        reasons.push(`communication channel '${channel.id}' is already provided by '${owner}'`);
+      }
+    }
 
     for (const setting of Array.isArray(manifest.settings) ? manifest.settings : []) {
       const owner = claimedSettingKeys.get(setting?.key ?? "");
@@ -148,6 +157,9 @@ export function scanExtensionBundles(extensionsDir: string): BundleScanResult {
 
     claimedNames.set(manifest.name, directory);
     for (const node of manifest.nodes) claimedTypes.set(node.type, directory);
+    for (const channel of manifest.communicationChannels ?? []) {
+      claimedCommunicationChannels.set(channel.id, directory);
+    }
     for (const setting of manifest.settings ?? []) claimedSettingKeys.set(setting.key, directory);
 
     bundles.push({

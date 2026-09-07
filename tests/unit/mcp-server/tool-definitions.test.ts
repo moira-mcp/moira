@@ -91,11 +91,48 @@ describe("MCP tool definitions", () => {
       "help",
       "settings",
       "token",
+      "communication",
       "session",
       "notes",
       "artifacts",
       "lock",
     ]);
+  });
+
+  it("publishes a strict communication contract without authority controls", () => {
+    const communication = TOOL_DEFINITIONS.find(
+      (definition) => definition.name === "communication",
+    )!;
+    expect(communication.descriptions.default).toContain(
+      "a valid MCP Bearer credential for the same user",
+    );
+    expect(communication.descriptions.default).not.toContain("the same MCP Bearer credential");
+    expect(communication.schema.safeParse({ action: "send", message: "ready" }).success).toBe(true);
+    expect(
+      communication.schema.safeParse({ action: "send", message: "ready", recipient: "123" })
+        .success,
+    ).toBe(false);
+    const schema = getToolJsonSchema(communication) as { properties: Record<string, unknown> };
+    for (const forbidden of [
+      "recipient",
+      "provider",
+      "credential",
+      "url",
+      "path",
+      "headers",
+      "ttl",
+    ])
+      expect(schema.properties).not.toHaveProperty(forbidden);
+    expect(
+      communication.schema.safeParse({
+        action: "attachment-token",
+        message: "report",
+        kind: "document",
+        filename: "../report.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 10,
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps every documented example valid against its runtime schema", () => {
@@ -108,6 +145,23 @@ describe("MCP tool definitions", () => {
 
     const start = TOOL_DEFINITIONS.find((definition) => definition.name === "start")!;
     expect(start.schema.safeParse({ workflowId: "moira/quick-task" }).success).toBe(false);
+    expect(
+      start.schema.safeParse({
+        workflowId: "moira/quick-task",
+        parentExecutionId: "none",
+        skipNotificationCheck: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      start.schema.safeParse({
+        workflowId: "moira/quick-task",
+        parentExecutionId: "none",
+        skipTelegramCheck: true,
+      }).success,
+    ).toBe(true);
+    expect(start.descriptions.default).toContain("skipNotificationCheck");
+    expect(start.descriptions.default).toContain("deprecated alias");
+    expect(start.descriptions.default).toContain("trusted Telegram");
 
     const settings = TOOL_DEFINITIONS.find((definition) => definition.name === "settings")!;
     expect(settings.examples).toContainEqual({ action: "get", key: "ui.theme" });

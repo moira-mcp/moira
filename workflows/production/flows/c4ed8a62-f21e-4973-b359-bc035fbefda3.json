@@ -5,8 +5,8 @@
   "id": "c4ed8a62-f21e-4973-b359-bc035fbefda3",
   "metadata": {
     "name": "Iterative Research",
-    "version": "3.0.0",
-    "description": "Iterative external research for questions that need a durable evidence record, a current report, and repeated independent critique with changed repair. Captures the question, audience, language, depth, scope, constraints, source/privacy/licensing limits, and delivery authority; writes an execution-bound contract, typed source evidence, report, review, repair account, and self-contained delivery artifact; and allows authoritative completion only after an independent reviewer reports exactly zero blocking issues. Repairs re-enter at the earliest stale contract, source, analysis, or presentation boundary, while insufficient evidence, blocked repair, and exhausted bounded review remain explicit limited outcomes. Local delivery has no external side effect; static publication and Telegram notification require separate caller authority and expose observed success or failure. Choose Verified Research for a bounded one-pass verification, Deep Corpus Research for corpus-first collection, Data Analysis for supplied datasets, Content Creation for drafting, and software-development workflows for repository changes."
+    "version": "3.0.1",
+    "description": "Iterative external research for questions that need a durable evidence record, a current report, and repeated independent critique with changed repair. Captures the question, audience, language, depth, scope, constraints, source/privacy/licensing limits, and delivery authority; writes an execution-bound contract, typed source evidence, report, review, repair account, and self-contained delivery artifact; and allows authoritative completion only after an independent reviewer reports exactly zero blocking issues. Repairs re-enter at the earliest stale contract, source, analysis, or presentation boundary, while insufficient evidence, blocked repair, and exhausted bounded review remain explicit limited outcomes. Local delivery has no external side effect; static publication and configured user notification require separate caller authority and expose observed success or failure. Choose Verified Research for a bounded one-pass verification, Deep Corpus Research for corpus-first collection, Data Analysis for supplied datasets, Content Creation for drafting, and software-development workflows for repository changes."
   },
   "nodes": [
     {
@@ -474,7 +474,7 @@
     {
       "id": "choose-delivery",
       "type": "agent-directive",
-      "directive": "The local result has an exact zero-issue independent review. Ask once whether to keep it local, publish delivery.html through the current Moira static-artifact file/archive interface, publish and then notify through Telegram, or abort delivery. State that publication and notification are separate external side effects; neither is implied by tool availability or configuration.",
+      "directive": "The local result has an exact zero-issue independent review. Ask once whether to keep it local, publish delivery.html through the current Moira static-artifact file/archive interface, publish and then notify through configured user communication channels, or abort delivery. State that publication and notification are separate external side effects; neither is implied by tool availability or configuration.",
       "completionCondition": "One explicit delivery decision is recorded without performing a side effect",
       "inputSchema": {
         "type": "object",
@@ -721,8 +721,9 @@
     },
     {
       "id": "send-notification",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "Iterative Research completed and was published after an independent zero-issue review: {{publication_url}}",
+      "format": "plain",
       "connections": {
         "default": "notification-sent",
         "error": "end-notification-error"
@@ -732,11 +733,23 @@
       "id": "notification-sent",
       "type": "condition",
       "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "send-notification.telegramNotificationSent"
-        },
-        "right": true
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "send-notification.userNotificationStatus"
+            },
+            "right": "delivered"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "send-notification.userNotificationStatus"
+            },
+            "right": "partial"
+          }
+        ]
       },
       "connections": {
         "true": "end-notified",

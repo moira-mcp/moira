@@ -169,6 +169,13 @@
       "when": 1788602400000,
       "tag": "0022_extension_setting_values",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1788688800000,
+      "tag": "0023_communication_attachment_grants",
+      "breakpoints": true
     }
   ]
 }

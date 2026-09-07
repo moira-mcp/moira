@@ -19,11 +19,14 @@ import {
   HttpExtensionRunnerClient,
   ExtensionInvocationError,
   ExtensionRegistry,
+  CommunicationChannelRegistry,
+  ExtensionCommunicationChannelReconciler,
+  UserCommunicationService,
   setActiveExtensionRegistry,
   getActiveExtensionRegistry,
   syncExtensionRegistryFromRunner,
 } from "@mcp-moira/workflow-engine";
-import type { ExecutionContext, WorkflowGraph } from "@mcp-moira/workflow-engine";
+import type { ExecutionContext, IDataRepository, WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 const BUNDLES_DIR = path.resolve(process.cwd(), "tests/fixtures/extension-bundles");
 
@@ -84,6 +87,11 @@ describe("The runner provides what the bundle declares", () => {
     const probe = extensions.find((extension) => extension.name === "probe")!;
     expect(probe.nodes.map((node) => node.type)).toEqual(["probe.behave"]);
     expect(probe.nodes[0].outputSchema).toMatchObject({ required: ["observed"] });
+    const channelProbe = extensions.find((extension) => extension.name === "channel-probe")!;
+    expect(channelProbe.nodes).toEqual([]);
+    expect(channelProbe.communicationChannels?.map((channel) => channel.id)).toEqual([
+      "channel-probe.notifications",
+    ]);
     // Code never crosses the boundary: only the entrypoint's name does.
     expect(JSON.stringify(probe)).not.toContain("defineNode");
   });
@@ -92,6 +100,116 @@ describe("The runner provides what the bundle declares", () => {
     const result = await client.invoke(invocation("succeed"));
 
     expect(result.output).toEqual({ observed: "succeeded" });
+  });
+
+  test("a declared communication channel loads and receives only its portable call", async () => {
+    await expect(
+      client.checkCommunicationChannel!("channel-probe.notifications", 5_000),
+    ).resolves.toBeUndefined();
+    await expect(
+      client.deliverCommunicationChannel!({
+        channelId: "channel-probe.notifications",
+        timeoutMs: 5_000,
+        message: {
+          text: "portable text",
+          attachment: {
+            kind: "document",
+            bytes: new TextEncoder().encode("report"),
+            filename: "report.txt",
+            mimeType: "text/plain",
+          },
+        },
+        settings: {
+          "channel-probe.destination": "configured",
+          "other-extension.destination": "must-not-cross",
+        },
+        secrets: {
+          "channel-probe.token": "channel-secret",
+          "other-extension.token": "must-not-cross",
+        },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  test("channel permissions, timeout and recovery use the existing isolated host boundary", async () => {
+    const channelRequest = (text: string, timeoutMs = 5_000) => ({
+      channelId: "channel-probe.notifications",
+      timeoutMs,
+      message: { text },
+      settings: { "channel-probe.destination": "configured" },
+      secrets: { "channel-probe.token": "channel-secret" },
+    });
+
+    await expect(
+      client.deliverCommunicationChannel!(channelRequest("forbidden-network")),
+    ).rejects.toMatchObject({
+      kind: "handler-error",
+      message: expect.stringContaining("not granted"),
+    });
+    await expect(
+      client.deliverCommunicationChannel!(channelRequest("forbidden-secret")),
+    ).rejects.toMatchObject({
+      kind: "handler-error",
+      message: expect.stringContaining("not granted"),
+    });
+    await expect(
+      client.deliverCommunicationChannel!(channelRequest("hang", 300)),
+    ).rejects.toMatchObject({ kind: "timeout" });
+    await expect(
+      client.deliverCommunicationChannel!({
+        ...channelRequest("portable text"),
+        message: {
+          text: "portable text",
+          attachment: {
+            kind: "document",
+            bytes: new TextEncoder().encode("report"),
+            filename: "report.txt",
+            mimeType: "text/plain",
+          },
+        },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  test("a discovered fixture channel participates in generic service fan-out through the runner", async () => {
+    const extensionRegistry = new ExtensionRegistry();
+    expect(extensionRegistry.replaceAll(await client.listExtensions()).rejected).toEqual([]);
+    const communicationRegistry = new CommunicationChannelRegistry();
+    new ExtensionCommunicationChannelReconciler(communicationRegistry).reconcile(
+      extensionRegistry,
+      client,
+    );
+    const repository = {
+      getSetting: async (_userId: string, key: string) =>
+        key === "channel-probe.enabled"
+          ? true
+          : key === "channel-probe.destination"
+            ? "configured"
+            : key === "channel-probe.token"
+              ? "channel-secret"
+              : null,
+    } as unknown as IDataRepository;
+
+    const result = await new UserCommunicationService(communicationRegistry).deliver(
+      {
+        userId: "runner-user",
+        text: "portable text",
+        attachment: {
+          kind: "document",
+          bytes: new TextEncoder().encode("report"),
+          filename: "report.txt",
+          mimeType: "text/plain",
+        },
+      },
+      repository,
+    );
+
+    expect(result).toEqual({
+      status: "delivered",
+      configuredChannels: 1,
+      deliveredChannels: 1,
+      channels: [{ channelId: "channel-probe.notifications", status: "delivered" }],
+    });
   });
 });
 
@@ -433,6 +551,9 @@ describe("One extension cannot occupy the host without limit", () => {
     });
 
     try {
+      // Warm the disposable child so this case measures invocation concurrency rather than the
+      // TypeScript fixture's cold-start time.
+      await limitedClient.invoke(invocation("succeed"));
       // The first call occupies the only slot until its deadline kills it. What separates waiting
       // from running side by side is *when the second call finishes*: total elapsed time cannot
       // show it, because the first call takes its whole deadline either way.
@@ -488,6 +609,8 @@ describe("One extension cannot occupy the host without limit", () => {
     });
 
     try {
+      await limitedClient.invoke(invocation("succeed"));
+      logs.length = 0;
       const blocker = limitedClient.invoke(invocation("hang", {}, 500)).catch(() => undefined);
       await started;
 
@@ -525,6 +648,8 @@ describe("One extension cannot occupy the host without limit", () => {
       const limitedClient = new HttpExtensionRunnerClient({
         baseUrl: `http://127.0.0.1:${limited.port}`,
       });
+      await limitedClient.invoke(invocation("succeed"));
+      logs.length = 0;
       const blocker = limitedClient.invoke(invocation("hang", {}, 500)).catch(() => undefined);
       await started;
 
@@ -664,6 +789,7 @@ describe("A bundle that fails while loading is contained too", () => {
   test("all broken-behavior fixtures pass manifest checks, so failure is not a refusal", () => {
     expect(broken.scan.rejected).toEqual([]);
     expect(broken.scan.bundles.map((bundle) => bundle.manifest.name).sort()).toEqual([
+      "channel-disagreeing",
       "disagreeing",
       "exiting",
       "hanging",
@@ -702,6 +828,19 @@ describe("A bundle that fails while loading is contained too", () => {
     };
     expect(health.body.extensions).toContainEqual(
       expect.objectContaining({ name: "disagreeing", healthy: false }),
+    );
+  }, 30_000);
+
+  test("a communication schema disagreement is refused instead of silently using either copy", async () => {
+    await expect(
+      brokenClient.checkCommunicationChannel!("channel-disagreeing.notifications", 5_000),
+    ).rejects.toMatchObject({ kind: "handler-error" });
+
+    const health = (await brokenClient.health()) as {
+      body: { extensions: Array<{ name: string; healthy: boolean }> };
+    };
+    expect(health.body.extensions).toContainEqual(
+      expect.objectContaining({ name: "channel-disagreeing", healthy: false }),
     );
   }, 30_000);
 

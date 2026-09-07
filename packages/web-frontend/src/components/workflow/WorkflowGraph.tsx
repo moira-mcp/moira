@@ -61,6 +61,7 @@ const nodeTypes = {
   agentDirective: CompactNode,
   condition: CompactNode,
   "telegram-notification": CompactNode,
+  "user-notification": CompactNode,
   telegram: CompactNode,
   subgraph: CompactNode,
   expression: CompactNode,

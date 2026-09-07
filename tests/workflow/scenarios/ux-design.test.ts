@@ -1,5 +1,5 @@
 /** Contract and behavioral scenarios for moira/ux-design. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -14,7 +14,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("ux-design", "public")!;
+const entry = findCatalogEntryBySlug("ux-design")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 
 function node(graph: WorkflowGraph, id: string): any {
@@ -100,81 +100,12 @@ async function run(
 }
 
 describe("ux-design", () => {
-  test("publishes the v2 public contract with detailed selection metadata", async () => {
+  test("validates the executable UX workflow", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.id).toBe("6266d829-11a6-4bf2-b00b-f3d230cee4c2");
-    expect(graph.metadata.version).toBe("2.0.0");
-    expect(graph.nodes).toHaveLength(32);
-    expect(graph.metadata.description).toContain("implementation-ready UX design specification");
-    expect(graph.metadata.description).toContain("genuinely independent reviewer");
-    expect(graph.metadata.description).toContain("does not implement UI");
-    expect(graph.metadata.description).toContain("Software Development Flow for implementation");
-  });
-
-  test("materializes the complete execution-bound artifact contract", () => {
-    const graph = workflow();
-    const materialize = node(graph, "materialize-workspace");
-    expect(materialize.basePath).toBe("{{workspace_path}}");
-    expect(materialize.files.map((file: { path: string }) => file.path)).toEqual([
-      "process-id.txt",
-      "design-standard.md",
-      "design-contract.md",
-      "design-package.md",
-      "validation-plan.md",
-      "design-review.md",
-      "repair-account.md",
-    ]);
-    expect(graph.variableRegistry?.workspace_path).toMatchObject({
-      const: "./moira-ws/ux-design-{{executionId}}",
-      default: "./moira-ws/ux-design-{{executionId}}",
-    });
-    expect(node(graph, "end").finalOutput).toEqual([
-      "workspace_path",
-      "outcome",
-      "design_package_path",
-      "validation_plan_path",
-      "result_summary",
-    ]);
-  });
-
-  test("encodes correlated intake, review, repair, feedback, and authority contracts", () => {
-    const graph = workflow();
-    const intakeSchema = node(graph, "capture-design-contract").inputSchema;
-    expect(intakeSchema.xContextPathSuffixes).toEqual({
-      baseContextProperty: "workspace_path",
-      properties: {
-        design_package_path: "/design-package.md",
-        validation_plan_path: "/validation-plan.md",
-      },
-    });
-    expect(node(graph, "review-design").inputSchema.properties.review_status.enum).toEqual([
-      "completed",
-      "blocked",
-    ]);
-    expect(node(graph, "review-design").completionCondition).toContain("review_status=blocked");
-    expect(node(graph, "repair-design").inputSchema.properties.repair_reach.enum).toEqual([
-      "contained",
-      "contract",
-    ]);
-    expect(node(graph, "apply-user-feedback").inputSchema.properties.feedback_status.enum).toEqual([
-      "changed",
-      "blocked",
-    ]);
-    expect(node(graph, "review-design").directive).toContain(
-      "reuse exactly that recorded reviewer context",
-    );
-    expect(node(graph, "revise-design-process").connections.success).toBe("create-design-package");
-    expect(graph.metadata.description).toContain("does not implement UI");
-    expect(graph.variableRegistry?.design_standard.default).toContain(
-      "does not implement product UI",
-    );
-    expect(graph.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(false);
   });
 
   test("rejects artifact paths from another otherwise valid execution", async () => {

@@ -26,8 +26,16 @@ import {
   AuditAction,
   isExecutionParentReference,
 } from "@mcp-moira/shared";
-import { checkTrustedLockDeliveryConfiguration } from "@mcp-moira/workflow-engine";
-import type { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import {
+  checkTrustedLockDeliveryConfiguration,
+  getActiveCommunicationChannelRegistry,
+  probeCommunicationChannelConfiguration,
+} from "@mcp-moira/workflow-engine";
+import type {
+  CommunicationChannelRegistry,
+  DatabaseRepository,
+  IDataRepository,
+} from "@mcp-moira/workflow-engine";
 
 const logger = createLogger({ component: "StartWorkflow" });
 
@@ -37,7 +45,8 @@ interface StartWorkflowParams extends WorkflowSpecificParams {
   workflowId: string;
   note?: string;
   parentExecutionId: string; // Required: "none" for standalone, UUID for child workflows
-  skipTelegramCheck?: boolean; // Skip pre-flight Telegram configuration check
+  skipNotificationCheck?: boolean;
+  skipTelegramCheck?: boolean; // Deprecated alias for skipNotificationCheck
 }
 
 /**
@@ -142,6 +151,10 @@ export function workflowHasTelegramNodes(nodes: Array<{ type: string }>): boolea
   return nodes.some((node) => node.type === "telegram-notification");
 }
 
+export function workflowHasUserNotificationNodes(nodes: Array<{ type: string }>): boolean {
+  return nodes.some((node) => node.type === "user-notification");
+}
+
 export function workflowHasLockNodes(nodes: Array<{ type: string }>): boolean {
   return nodes.some((node) => node.type === "lock");
 }
@@ -158,6 +171,48 @@ export function formatTelegramPreflightResponse(workflowIdentifier: string): str
   );
 }
 
+export function formatCommunicationPreflightResponse(workflowIdentifier: string): string {
+  return (
+    `Your next task: Configure at least one communication channel before starting workflow "${workflowIdentifier}". ` +
+    `Open Settings > Notifications and complete an available channel. Telegram can also be configured through moira/telegram-setup. ` +
+    `To start without optional ordinary notifications, use start({ workflowId: "${workflowIdentifier}", skipNotificationCheck: true, parentExecutionId: "none" }).\n\n` +
+    `Success criteria: At least one channel is ready for the authenticated user, or the workflow is restarted with skipNotificationCheck: true.\n\n` +
+    `No specific input format required. Send any data that fulfills the success criteria.`
+  );
+}
+
+export async function hasConfiguredCommunicationChannel(
+  registry: CommunicationChannelRegistry,
+  repository: IDataRepository,
+  userId: string,
+  channelId?: string,
+): Promise<boolean> {
+  const selected = channelId ? registry.get(channelId) : undefined;
+  const adapters = channelId ? (selected ? [selected] : []) : registry.list();
+  const configuration = { get: <T>(key: string) => repository.getSetting<T>(userId, key) };
+  const checks = await Promise.all(
+    adapters.map(
+      async (adapter) =>
+        (await probeCommunicationChannelConfiguration(adapter, configuration)) === "configured",
+    ),
+  );
+  return checks.some(Boolean);
+}
+
+export function resolveSkipNotificationCheck(params: {
+  skipNotificationCheck?: boolean;
+  skipTelegramCheck?: boolean;
+}): boolean {
+  if (
+    params.skipNotificationCheck !== undefined &&
+    params.skipTelegramCheck !== undefined &&
+    params.skipNotificationCheck !== params.skipTelegramCheck
+  ) {
+    throw new Error("skipNotificationCheck and skipTelegramCheck must not disagree");
+  }
+  return params.skipNotificationCheck ?? params.skipTelegramCheck ?? false;
+}
+
 export function formatLockTelegramPreflightResponse(
   workflowIdentifier: string,
   reason: "missing" | "invalid",
@@ -166,7 +221,7 @@ export function formatLockTelegramPreflightResponse(
   return (
     `Your next task: Configure Telegram before starting workflow "${workflowIdentifier}". ` +
     `This workflow contains lock nodes whose PIN delivery is mandatory, and the current Telegram configuration is ${configurationState}. ` +
-    `Run moira/telegram-setup or configure a valid bot token and chat ID. skipTelegramCheck cannot bypass trusted lock PIN delivery.\n\n` +
+    `Run moira/telegram-setup or configure a valid bot token and chat ID. skipNotificationCheck and its deprecated skipTelegramCheck alias cannot bypass trusted lock PIN delivery.\n\n` +
     `Success criteria: Telegram is configured for the authenticated user and the workflow can deliver lock PINs to that user's chat.\n\n` +
     `No specific input format required. Send any data that fulfills the success criteria.`
   );
@@ -187,6 +242,8 @@ export async function startWorkflow(params: StartWorkflowParams): Promise<ToolRe
     const sanitizedNote = sanitizeNote(params.note);
 
     const engine = MCPEngine.getInstance();
+
+    const skipNotificationCheck = resolveSkipNotificationCheck(params);
 
     // Resolve once so lock delivery can remain mandatory even when ordinary
     // notification pre-flight is explicitly skipped.
@@ -211,20 +268,41 @@ export async function startWorkflow(params: StartWorkflowParams): Promise<ToolRe
             ),
           };
         }
-      } else if (!params.skipTelegramCheck && workflowHasTelegramNodes(resolved.workflow.nodes)) {
-        const botToken = await engine.repository.getSetting<string>(userId, "telegram.bot_token");
-        const chatId = await engine.repository.getSetting<string>(userId, "telegram.chat_id");
-
-        if (!botToken || !chatId) {
+      }
+      if (!skipNotificationCheck) {
+        if (
+          workflowHasTelegramNodes(resolved.workflow.nodes) &&
+          !(await hasConfiguredCommunicationChannel(
+            getActiveCommunicationChannelRegistry(),
+            engine.repository,
+            userId,
+            "telegram",
+          ))
+        ) {
           logger.info("Telegram pre-flight check: not configured", {
             workflowId: params.workflowId,
             userId,
-            hasBotToken: !!botToken,
-            hasChatId: !!chatId,
           });
           return {
             success: true,
             data: formatTelegramPreflightResponse(params.workflowId),
+          };
+        }
+        if (
+          workflowHasUserNotificationNodes(resolved.workflow.nodes) &&
+          !(await hasConfiguredCommunicationChannel(
+            getActiveCommunicationChannelRegistry(),
+            engine.repository,
+            userId,
+          ))
+        ) {
+          logger.info("Communication pre-flight check: no configured channel", {
+            workflowId: params.workflowId,
+            userId,
+          });
+          return {
+            success: true,
+            data: formatCommunicationPreflightResponse(params.workflowId),
           };
         }
       }

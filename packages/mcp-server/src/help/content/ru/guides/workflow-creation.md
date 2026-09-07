@@ -682,9 +682,9 @@ flowchart TD
 },
 {
   "id": "notify-escalation",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "⚠️ *Требуется эскалация*\n\nШаг не удался после {{step_retry}} попыток.\n\nВарианты:\n- revise_plan\n- ask_user\n- skip",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
 },
 {
@@ -881,7 +881,7 @@ flowchart LR
 }
 ```
 
-### Telegram уведомления
+### Уведомления пользователя
 
 Уведомления держат пользователя в курсе во время долгих workflows. Используйте их стратегически — слишком много уведомлений становятся шумом.
 
@@ -908,9 +908,9 @@ flowchart LR
 ```json
 {
   "id": "notify-step-start",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "🚀 *Шаг {{current_step}}/{{total_steps}}*\n\n{{current_step_description}}",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "execute-step",
     "error": "execute-step"
@@ -925,9 +925,9 @@ flowchart LR
 ```json
 {
   "id": "notify-approval-needed",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "⏳ *Ожидаю подтверждения*\n\nПлан готов к ревью. Подтвердите для продолжения.",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "present-plan-to-user",
     "error": "present-plan-to-user"
@@ -942,9 +942,9 @@ flowchart LR
 ```json
 {
   "id": "notify-escalation",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "⚠️ *Требуется действие*\n\nШаг {{current_step}} не удался после {{max_retries}} попыток.\n\nВарианты:\n- Пропустить этот шаг\n- Выполнить вручную",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "ask-user-decision",
     "error": "ask-user-decision"
@@ -959,9 +959,9 @@ flowchart LR
 ```json
 {
   "id": "notify-completion",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "✅ *Задача выполнена*\n\n{{task_name}}\n\nРезультат: {{deliverable_summary}}",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "end",
     "error": "end"
@@ -970,8 +970,9 @@ flowchart LR
 ```
 
 :::tip
-Всегда устанавливайте `connections.error` → то же что `default` для graceful degradation при
-ошибках Telegram.
+Укажите для `connections.error` ту же цель, что и для `default`, если сбой уведомления не должен
+блокировать workflow. Без error connection полный сбой уже продолжает выполнение через `default`
+с явным результатом `all_failed`.
 :::
 
 :::note
@@ -1173,7 +1174,7 @@ flowchart LR
 6. **Счетчики итераций** — предотвращайте бесконечные циклы
 7. **Gate подтверждения** — для критических действий
 8. **Самодокументирование** — объявляйте знания как значения по умолчанию в variableRegistry
-9. **Graceful уведомления** — ошибки Telegram не должны блокировать workflow
+9. **Graceful уведомления** — ошибки каналов связи не должны блокировать workflow
 
 ## Связанное
 

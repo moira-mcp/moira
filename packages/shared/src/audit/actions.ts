@@ -99,6 +99,9 @@ export enum AuditAction {
   MCP_TOKEN_CREATE = "mcp:token_create",
   MCP_HELP_REQUEST = "mcp:help_request",
   MCP_NOTES_LIST = "mcp:notes_list",
+  MCP_COMMUNICATION_SEND = "mcp:communication_send",
+  MCP_COMMUNICATION_GRANT_CREATE = "mcp:communication_grant_create",
+  MCP_COMMUNICATION_ATTACHMENT_DELIVER = "mcp:communication_attachment_deliver",
 
   // User token events
   TOKEN_CREATE = "token:create",

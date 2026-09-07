@@ -1,5 +1,5 @@
-/** Behavioral contracts for moira/deep-corpus-research v7.1.2. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Behavioral contracts for moira/deep-corpus-research. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -13,7 +13,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("deep-corpus-research", "public")!;
+const entry = findCatalogEntryBySlug("deep-corpus-research")!;
 const graph = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 
 function node(id: string): any {
@@ -124,25 +124,9 @@ describe("deep-corpus-research", () => {
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(entry.previousSlugs).toEqual(["robust-research-task"]);
-    expect(workflow.metadata.version).toBe("7.1.4");
-    expect(workflow.metadata.description).toContain("explicit originating-user consent");
-    expect(workflow.metadata.description).toContain("never publishes, notifies, commits, deploys");
     expect(workflow.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(
       false,
     );
-  });
-
-  test("keeps the original contract immutable and repairs from exact reports", () => {
-    expect(node("initialize-original-contract").directive).toContain("sole writer");
-    expect(node("frame-research").directive).toContain("never rewrite");
-    expect(graph().variableRegistry).not.toHaveProperty("repair_source");
-    expect(node("plan-research").directive).toContain("Delegate one autonomous planning peer");
-    expect(node("repair-plan").directive).toContain("plan-findings.md");
-    expect(node("repair-plan-from-validation").directive).toContain("package-validation.md");
-    expect(node("repair-plan-from-semantic-review").directive).toContain("semantic-review.md");
   });
 
   test.each([

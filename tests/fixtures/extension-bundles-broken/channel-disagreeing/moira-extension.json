@@ -1,0 +1,29 @@
+{
+  "apiVersion": "moira.extensions/v1",
+  "name": "channel-disagreeing",
+  "version": "1.0.0",
+  "entrypoint": "index.ts",
+  "nodes": [],
+  "communicationChannels": [
+    {
+      "id": "channel-disagreeing.notifications",
+      "title": "Disagreeing channel",
+      "capabilities": { "text": true, "image": false, "document": false },
+      "configurationSchema": {
+        "type": "object",
+        "required": ["channel-disagreeing.enabled"],
+        "properties": { "channel-disagreeing.enabled": { "type": "boolean" } }
+      },
+      "enabledSetting": "channel-disagreeing.enabled",
+      "settings": ["channel-disagreeing.enabled"]
+    }
+  ],
+  "settings": [
+    {
+      "key": "channel-disagreeing.enabled",
+      "type": "boolean",
+      "label": "Enabled",
+      "defaultValue": "true"
+    }
+  ]
+}

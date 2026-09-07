@@ -46,7 +46,19 @@ export interface SendPhotoParams {
   replyMarkup?: ReplyMarkup;
 }
 
+export interface SendDocumentParams {
+  chatId: string;
+  document: Uint8Array;
+  filename: string;
+  mimeType: string;
+  caption?: string;
+  parseMode?: "Markdown" | "HTML";
+  disableNotification?: boolean;
+  replyMarkup?: ReplyMarkup;
+}
+
 export const TELEGRAM_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
+export const TELEGRAM_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 /**
  * Response from Telegram Bot API
@@ -149,13 +161,13 @@ export interface RateLimitResult {
  */
 export function getActionableTelegramErrorMessage(
   type: TelegramErrorType,
-  originalMessage?: string,
+  _originalMessage?: string,
 ): string {
   switch (type) {
     case TelegramErrorType.INVALID_CHAT_ID:
       return "Chat not found. You need to send any message to your bot first, then try again.";
     case TelegramErrorType.INVALID_TOKEN:
-      return "Bot token is invalid or expired. Get a new token from @BotFather and update it in Settings → Telegram.";
+      return "Bot token is invalid or expired. Get a new token from @BotFather and update it in Settings > Notifications.";
     case TelegramErrorType.NETWORK_ERROR:
       return "Network error connecting to Telegram API. Check internet connection and try again.";
     case TelegramErrorType.RATE_LIMIT_EXCEEDED:
@@ -165,12 +177,10 @@ export function getActionableTelegramErrorMessage(
     case TelegramErrorType.MESSAGE_TOO_LONG:
       return "Message exceeds 4096 character limit. Shorten the message template.";
     case TelegramErrorType.TEMPLATE_ERROR:
-      return `Template processing error: ${originalMessage || "unknown"}`;
+      return "Template processing failed. Check the notification template variables.";
     case TelegramErrorType.API_ERROR:
     default:
-      return originalMessage
-        ? `Telegram notification failed: ${originalMessage}`
-        : "Telegram notification failed";
+      return "Telegram notification failed";
   }
 }
 
@@ -195,7 +205,7 @@ export function classifyTelegramError(error: unknown): {
   if (error instanceof Error) {
     return {
       errorType: TelegramErrorType.API_ERROR,
-      message: getActionableTelegramErrorMessage(TelegramErrorType.API_ERROR, error.message),
+      message: getActionableTelegramErrorMessage(TelegramErrorType.API_ERROR),
     };
   }
 

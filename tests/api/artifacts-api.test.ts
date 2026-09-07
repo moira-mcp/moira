@@ -57,7 +57,6 @@ beforeAll(async () => {
     method: "POST",
     headers: { Cookie: adminCookie },
   });
-
   const loginResA = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -80,7 +79,6 @@ beforeAll(async () => {
     method: "POST",
     headers: { Cookie: adminCookie },
   });
-
   const loginResB = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -946,11 +944,10 @@ describe("Artifacts API - Abuse Controls (report + takedown)", () => {
     expect(res.status).toBe(404);
   });
 
-  test("report succeeds even when no admin has Telegram configured (graceful)", async () => {
-    // The report endpoint sends a best-effort Telegram push to every admin who
-    // has Telegram configured. In this test no admin has telegram.bot_token/
-    // chat_id set, so the notification is skipped — but the report itself must
-    // still succeed (notification absence or failure must never block a report).
+  test("report succeeds when no admin communication channel is configured", async () => {
+    // The report endpoint sends a best-effort ordinary notification to each admin
+    // through configured user channels. This environment has no configured admin
+    // channel, but notification absence must never block a persisted report.
     const res = await fetch(`${sub(abuseUuid)}/__report/${abuseUuid}`, { method: "POST" });
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("Thanks for the report");

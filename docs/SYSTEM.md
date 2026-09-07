@@ -140,6 +140,30 @@ prompt. The no-argument topic catalog adds the special `tools` entry from MCP-ow
 and that topic renders directly from the typed tool contract rather than a Markdown copy.
 Presentation-only Astro components remain in the shells, and runtime never parses or removes MDX/JSX.
 
+The `communication` MCP tool uses the same authenticated request context as every other tool. Text
+delivery calls the process-wide `UserCommunicationService` directly. Attachment minting stores only
+a SHA-256 digest of a five-minute grant with its owner, portable message metadata, exact media
+policy, correlation ID, purpose, audience, expiry, and claim state. The raw grant is returned once.
+
+`POST /api/communication/attachments` runs in the MCP process before the JSON body parser. It first
+authenticates an OAuth or persistent MCP Bearer credential through the shared principal resolver,
+then atomically claims a pending grant for that user. Required length and MIME headers, process-local
+per-user buffer admission, exact byte count, and PNG/JPEG signatures are checked before the common
+delivery service is invoked. Pre-provider failures release the claim; any provider attempt completes
+it terminally. Accepted bytes exist only in the bounded request buffer and are released on every exit.
+The nginx `location = /api/communication/attachments` routes raw bodies to this MCP handler with
+request buffering disabled rather than through the web backend's broad `/api/` proxy.
+
+Each communication adapter also supplies provider-safe presentation metadata through the same
+registry: title, origin, exact setting keys, optional enable key/help link, extension identity and
+trusted-delivery declaration. `GET /api/notifications/channels` evaluates those adapters with only
+the authenticated user's repository-backed configuration and projects sanitized
+`ready|disabled|incomplete|unavailable` state. `POST
+/api/notifications/channels/:channelId/test` accepts no body and invokes the registry-selected
+adapter through `UserCommunicationService.testChannel()`, retaining shared limits and result
+normalization without ordinary fan-out. Administrator trust approval is read-only in this user
+projection and remains writable only through the admin boundary.
+
 `renderPortableHelpTokens()` in `packages/shared/src/utils/portable-help.ts` is the shared resolver
 for configured MCP, Moira and static-artifact URLs and MCP client deeplinks. The MCP runtime applies
 it to complete Markdown, and the Astro remark adapter applies the same function to Markdown values
@@ -224,23 +248,24 @@ step({ processId: "abc-123", teleportTo: "replan-node" });
 - Error: `ValidationError` if target doesn't exist or is not a teleport node
 - When workflows contain teleport nodes, hints are appended to every step response
 
-### Telegram Pre-flight Check
+### Notification and Lock Pre-flight Checks
 
-`start()` resolves the workflow before execution creation and applies two Telegram checks:
+`start()` resolves the workflow before execution creation and applies three checks:
 
-- A workflow with `telegram-notification` nodes returns a synthetic setup directive when the current user has no bot token or chat ID. `skipTelegramCheck` may bypass this optional-notification check.
-- A workflow with a `lock` node always requires a valid-shaped bot token and chat ID for the current user. `skipTelegramCheck` does not bypass this requirement. Missing or malformed configuration returns a synthetic setup directive without a Process ID or execution record.
+- A workflow with `user-notification` nodes returns channel-neutral Settings guidance when the current user has no configured communication adapter.
+- A workflow with legacy `telegram-notification` nodes checks only the built-in Telegram adapter and returns Telegram setup guidance when it is unavailable.
+- A workflow with a `lock` node always requires a valid-shaped bot token and chat ID for the current user. Missing or malformed configuration returns a synthetic setup directive without a Process ID or execution record.
 
 ```typescript
-// Bypass only the optional telegram-notification check
+// Bypass only optional ordinary-notification preflight
 start({
   workflowId: "moira/software-development-flow",
   parentExecutionId: "none",
-  skipTelegramCheck: true,
+  skipNotificationCheck: true,
 });
 ```
 
-Preflight checks configuration shape, not Telegram network reachability. `LockHandler` repeats the authoritative check and performs trusted delivery when execution reaches the lock node, so a later send failure still creates no usable active lock.
+`skipTelegramCheck` is a deprecated alias for `skipNotificationCheck`; conflicting values are rejected. Neither field bypasses the lock check. Ordinary channel discovery uses the shared bounded configuration probe, which normalizes provider failure or timeout as unavailable without exposing diagnostics. Lock preflight checks configuration shape, not Telegram network reachability. `LockHandler` repeats the authoritative check and performs trusted delivery when execution reaches the lock node, so a later send failure still creates no usable active lock.
 
 ### Parent-Child Workflow Linking
 
@@ -562,6 +587,7 @@ type GraphNode =
   | AgentDirectiveNode
   | ConditionNode
   | SubgraphNode
+  | UserNotificationNode
   | TelegramNotificationNode
   | ExpressionNode
   | ReadNoteNode
@@ -599,6 +625,24 @@ interface ConditionNode {
   connections: { true: string; false: string };
 }
 
+interface UserNotificationNode {
+  type: "user-notification";
+  id: string;
+  message: string;
+  format?: "plain" | "markdown" | "html";
+  silent?: boolean;
+  attachProgressImage?: boolean;
+  attachment?: {
+    kind: "image" | "document";
+    data: string;
+    encoding: "base64";
+    filename: string;
+    mimeType: string;
+  };
+  connections: { default: string; error?: string };
+}
+
+/** @deprecated Use UserNotificationNode. */
 interface TelegramNotificationNode {
   type: "telegram-notification";
   id: string;
@@ -728,12 +772,12 @@ interface UnifiedValidationResult {
 - **Unique IDs** — All node IDs must be unique
 - **Connection targets** — All references must exist
 - **Node types** — exactly the `GraphNode` union: start, end, agent-directive, condition,
-  expression, subgraph, telegram-notification, teleport, lock, materialize, read-note, write-note,
+  expression, subgraph, user-notification, deprecated telegram-notification, teleport, lock, materialize, read-note, write-note,
   and upsert-note
 - **Unreachable nodes** — Warning for disconnected nodes
 - **Node limits** — Max 200 nodes per workflow
 - **Subgraph references** — Self-referencing circular dependencies rejected as error
-- **Declared-variable references** — Blocking error. Every `{{variable}}` in an agent-directive/teleport `directive` or `completionCondition`, a telegram-notification `message`, and every `contextPath` root in a condition must be one of: a global declared in `variableRegistry`, a `node-id.name` local (root segment is a node id), or a system variable (`executionId`, `workflowId`, `userId`). An undeclared reference fails with: `references undeclared variable '<name>'. Declare it in the workflow variableRegistry or reference a node-local value as 'node-id.name'.`
+- **Declared-variable references** — Blocking error. Every `{{variable}}` in an agent-directive/teleport `directive` or `completionCondition`, a user-notification/telegram-notification `message`, user-notification `attachment.data`, and every `contextPath` root in a condition must be one of: a global declared in `variableRegistry`, a `node-id.name` local (root segment is a node id), or a system variable (`executionId`, `workflowId`, `userId`). An undeclared reference fails with: `references undeclared variable '<name>'. Declare it in the workflow variableRegistry or reference a node-local value as 'node-id.name'.`
 
 ### Node-Type Semantic Validation
 
@@ -861,6 +905,14 @@ interface ValidationError {
 - **Graceful degradation** - continues workflow on send failures
 - **Actionable error messages** - pushes classified error guidance to messageQueue (invalid token, chat not found, rate limit, etc.)
 - **Error classification** - uses `getActionableTelegramErrorMessage()` and `classifyTelegramError()` from `telegram-types.ts`
+
+### UserNotificationHandler
+
+- **Auto-execution** - renders the portable message and invokes the shared user communication service
+- **Channel selection** - fans out only to enabled configured adapters for the execution user
+- **Results** - stores sanitized full, partial, no-channel, or total-failure outcomes under the node ID
+- **Routing** - total attempted failure uses `connections.error` when present; other outcomes continue through `default`
+- **Authority** - accepts no provider, recipient, destination, or credential selection
 
 ### Telegram Webhook (Callback Query Handling)
 

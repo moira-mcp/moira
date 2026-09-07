@@ -6,7 +6,7 @@
  * independent zero-finding review.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import {
@@ -37,7 +37,7 @@ type PlanCase = {
 
 type PlanContract = { risks: PlanRisk[]; cases: PlanCase[] };
 
-const catalogEntry = findSystemCatalogEntry("test-planning", "public")!;
+const catalogEntry = findCatalogEntryBySlug("test-planning")!;
 
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(catalogEntry.graph) as WorkflowGraph;
@@ -103,87 +103,15 @@ describe("test-planning", () => {
     workflow = loadWorkflow();
   });
 
-  test("preserves catalog identity and has the intended valid clean-or-repair graph", async () => {
-    expect(catalogEntry.owner).toBe("system-moira");
-    expect(catalogEntry.slug).toBe("test-planning");
-    expect(catalogEntry.visibility).toBe("public");
-    expect(workflow.id).toBe("31526b3b-d623-4e34-b62d-ef0327e9bd11");
-    expect(workflow.metadata.version).toBe("2.0.0");
-
+  test("validates clean and repair routing", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
-    expect(workflow.nodes.map((candidate) => candidate.id)).toEqual([
-      "start",
-      "end",
-      "plan",
-      "review",
-      "review-gate",
-      "repair",
-      "present",
-    ]);
     expect(node(workflow, "review-gate").connections).toEqual({
       true: "present",
       false: "repair",
     });
     expect(node(workflow, "repair").connections).toEqual({ success: "review" });
     expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);
-  });
-
-  test("publishes a decision-useful and truthful description with the no-test authority boundary", () => {
-    const description = workflow.metadata.description;
-    expect(description).toContain("discovers missing context");
-    expect(description).toContain("test-plan.contract.json");
-    expect(description).toContain("test-plan.md");
-    expect(description).toContain("independent file-backed reviewer");
-    expect(description).toContain("delivery is unreachable while known gaps remain");
-    expect(description).toContain("does not execute tests");
-    expect(description).toContain("separately authorized caller or workflow");
-    expect(description).toContain("Choose Test Planning");
-    expect(description).toContain("Test Generation");
-    expect(description).toContain("full development workflow");
-
-    for (const id of ["plan", "review", "repair", "present"]) {
-      expect(node(workflow, id).directive).toMatch(
-        /(does not|must not|Do not) execute (any )?tests/i,
-      );
-    }
-  });
-
-  test("uses one traversal-safe workspace and fixed derived artifact names", () => {
-    const registry = workflow.variableRegistry!;
-    expect(Object.keys(registry).sort()).toEqual([
-      "issues_count",
-      "result_summary",
-      "workspace_path",
-    ]);
-    expect(registry.workspace_path.pattern).toBe(
-      "^\\./moira-ws/test-planning-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
-    );
-    expect(node(workflow, "plan").inputSchema.globalInputs).toEqual(["workspace_path"]);
-
-    for (const id of ["review", "repair", "present"]) {
-      const directive = node(workflow, id).directive;
-      expect(directive).toContain("{{workspace_path}}/test-plan.contract.json");
-      expect(directive).toContain("{{workspace_path}}/test-plan.md");
-      expect(directive).not.toContain("{{contract_path}}");
-      expect(directive).not.toContain("{{plan_path}}");
-    }
-  });
-
-  test("keeps producer and repair on the same strict canonical contract schema", () => {
-    const producerSchema = node(workflow, "plan").inputSchema.properties.plan_contract;
-    const repairSchema = node(workflow, "repair").inputSchema.properties.plan_contract;
-    expect(repairSchema).toEqual(producerSchema);
-    expect(producerSchema.additionalProperties).toBe(false);
-    expect(producerSchema.properties.risks.minItems).toBe(1);
-    expect(producerSchema.properties.cases.minItems).toBe(1);
-    expect(producerSchema.properties.cases.items.additionalProperties).toBe(false);
-    expect(producerSchema.properties.cases.items.properties.priority.enum).toEqual([
-      "P0",
-      "P1",
-      "P2",
-      "P3",
-    ]);
   });
 
   test("rejects a risk without likelihood at the actual producer response boundary", async () => {

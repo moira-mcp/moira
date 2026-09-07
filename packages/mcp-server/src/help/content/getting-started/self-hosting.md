@@ -304,9 +304,11 @@ mkdir -p extensions
 cp -R examples/extensions/webhook-notify extensions/
 ```
 
-Replace the placeholder `example.com` in the copied manifest's `permissions.network` with the exact
-host your endpoint uses. Set that endpoint and the other values for each user on Moira's Settings
-page. Then add the runner address to `.env` and enable the profile:
+Replace the placeholder `example.com` in both the copied manifest's top-level
+`permissions.network` and its communication channel's `permissions.network` with the exact host
+your endpoint uses. Node and channel permissions are separate. Set the endpoint, default
+notification recipient, and other values for each user on Moira's Settings page. Then add the
+runner address to `.env` and enable the profile:
 
 ```bash
 printf '\nMOIRA_EXTENSION_RUNNER_URL=http://moira-extension-runner:9110\n' >> .env
@@ -330,10 +332,11 @@ docker compose --profile extensions logs moira-extension-runner
 docker compose --profile extensions exec moira-extension-runner curl -fsS http://127.0.0.1:9110/health
 ```
 
-An empty directory is valid. If Moira reports the registry unavailable, confirm the URL, runner
-health and logs, then restart both services in the order above. If one node type is missing, inspect
-the manifest rejection reasons. See [Writing an Extension](/docs/guides/writing-extensions/) for the
-manifest, SDK, permissions, settings, editor, result, failure and security contracts.
+An empty directory is valid. The health response lists loaded node types and communication channel
+IDs. If Moira reports the registry unavailable, confirm the URL, runner health and logs, then
+restart both services in the order above. If one contribution is missing, inspect the manifest
+rejection reasons. See [Writing an Extension](/docs/guides/writing-extensions/) for the manifest,
+SDK, permissions, settings, editor, delivery, failure and security contracts.
 
 ## Adding Your Own Workflow Flows
 

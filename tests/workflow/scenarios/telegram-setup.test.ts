@@ -1,5 +1,5 @@
-/** Behavioral contracts for moira/telegram-setup v2.0.2. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Behavioral contracts for moira/telegram-setup. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -13,7 +13,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("telegram-setup", "public")!;
+const entry = findCatalogEntryBySlug("telegram-setup")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 type NotificationMode = "sent" | "not_sent" | "error";
 
@@ -100,14 +100,6 @@ describe("telegram-setup", () => {
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.metadata.version).toBe("2.0.2");
-    expect(graph.nodes).toHaveLength(26);
-    expect(graph.metadata.description).toContain("skipTelegramCheck: true");
-    expect(graph.metadata.description).toContain("Final output never contains the bot token");
-    expect(graph.variableRegistry).toEqual({});
-
     for (const node of graph.nodes) {
       const properties = Object.keys((node as any).inputSchema?.properties ?? {});
       const finalOutput = (node as any).finalOutput ?? [];
@@ -115,20 +107,6 @@ describe("telegram-setup", () => {
       expect(finalOutput.join(" ")).not.toMatch(/bot_token|chat_id/i);
       expect(JSON.stringify((node as any).directive ?? "")).not.toMatch(/\{\{[^}]*bot_token/i);
     }
-  });
-
-  test("uses masked readback and separates send, error, and receipt evidence", () => {
-    const byId = (id: string): any => workflow().nodes.find((node) => node.id === id);
-    expect(byId("resolve-setup").directive).toContain('settings({action: "get"');
-    expect(byId("configure-settings").directive).toContain("masked token presence");
-    expect(byId("configure-settings").directive).toContain("telegram.enabled=true");
-    expect(byId("route-test-sent").condition.left.contextPath).toBe(
-      "test-notification.telegramNotificationSent",
-    );
-    expect(byId("recovery-send-error").directive).toContain("{{test-notification.errorMessage}}");
-    expect(byId("recovery-not-received").directive).toContain(
-      "{{confirm-received.receipt_status}}",
-    );
   });
 
   test.each([

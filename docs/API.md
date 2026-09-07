@@ -423,6 +423,67 @@ Errors:
 
 Authentication: Required
 
+## Notification Channels API
+
+### GET /api/notifications/channels
+
+List the active communication channels and their state for the authenticated user's stored
+settings.
+
+```typescript
+{
+  success: true;
+  data: Array<{
+    id: string;
+    title: string;
+    description: string | null;
+    origin: "builtin" | "extension";
+    extensionName: string | null;
+    extensionVersion: string | null;
+    settingKeys: string[];
+    helpUrl: string | null;
+    capabilities: { text: boolean; image: boolean; document: boolean };
+    enabled: boolean;
+    configured: boolean;
+    available: boolean;
+    state: "ready" | "disabled" | "incomplete" | "unavailable";
+    trustedDelivery: {
+      declared: boolean;
+      approved: boolean;
+      eligible: boolean;
+    } | null;
+  }>;
+  timestamp: string;
+}
+```
+
+`settingKeys` maps the descriptor to definitions returned by `/api/settings/definitions`. The
+response contains no setting values, credentials, destinations or provider diagnostics.
+`trustedDelivery` exists only for extension channels and is read-only on the user surface.
+
+Authentication: Required
+
+### POST /api/notifications/channels/:channelId/test
+
+Send the fixed test message through one registered channel using the authenticated user's stored
+settings and the common communication service. The request has no body. An empty JSON object is
+accepted for clients that always send JSON; every non-empty object, array or scalar is rejected.
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: UserCommunicationResult;
+  timestamp: string;
+}
+```
+
+The aggregate distinguishes delivered, no configured channel and failed/rate-limited/unavailable
+delivery without returning secrets or destinations. An unknown or removed channel returns 404.
+
+Authentication: Required
+
 ## Notes API
 
 User notes management with authentication. All operations scoped to authenticated user.
@@ -957,6 +1018,46 @@ Errors:
 - 401: Invalid, expired, or already used token
 
 Authentication: Via token (no session required)
+
+## Communication Attachment API
+
+### POST /api/communication/attachments
+
+Redeem a grant returned by MCP `communication({ action: "attachment-token", ... })` and deliver one
+binary image or document through the authenticated user's configured communication channels.
+
+Required headers:
+
+```http
+Authorization: Bearer <the user's OAuth access token or persistent MCP token>
+X-Moira-Communication-Grant: <grant returned by the MCP tool>
+Content-Type: <the exact MIME type declared while minting>
+Content-Length: <the exact declared byte count>
+```
+
+The request body is the raw file bytes. The independent Bearer credential must identify the same
+user that minted the grant. Missing, expired, claimed, completed, random, and foreign-user grants
+all return the same `401 { "error": "invalid_grant" }` response.
+
+An attachment is limited to 20 MiB. A user may hold at most ten unexpired pending or claimed grants
+and may buffer at most two concurrent uploads totalling 40 MiB. The installation admits at most one
+thousand outstanding grants. Grant creation prunes expired state before checking those issuance
+quotas.
+
+Validation happens before provider delivery. Missing `Content-Length` returns 411; an incorrect
+declared or received size, MIME mismatch, or invalid PNG/JPEG signature returns 400 or 413; exhausted
+in-flight capacity returns 429. These pre-delivery failures release the reservation, so a corrected
+request may reuse the grant until its five-minute expiry. Once provider delivery begins, the grant
+is terminal even if every channel fails or the provider result is ambiguous; a replay cannot start a
+second provider attempt.
+
+Success returns the grant correlation ID and the same sanitized aggregate delivery result as the
+common communication service. A total attempted delivery failure returns 502 with that aggregate;
+full or partial delivery returns 200. The route stores no uploaded bytes and fetches or executes no
+remote content.
+
+Authentication: Required through an OAuth or persistent MCP Bearer credential; the grant alone is
+not authentication.
 
 ## User Profile API
 
@@ -1795,6 +1896,64 @@ families also require a deployment capability before their handlers read data or
 Administrator user management, settings, audit, tokens, database maintenance, and
 `/api/admin/system-status` are capability-neutral. A disabled named capability returns
 `403 ACCESS_DENIED` before the protected handler runs.
+
+### GET /api/admin/communication/trusted-channels
+
+List the communication channels contributed by the currently active extension registry and their
+installation-wide trust decisions.
+
+```typescript
+{
+  success: true;
+  data: Array<{
+    channelId: string;
+    extensionName: string;
+    extensionVersion: string;
+    declared: boolean; // manifest requests trusted-delivery eligibility
+    approved: boolean; // persisted administrator decision
+  }>;
+  timestamp: string;
+}
+```
+
+An approval does not make an undeclared, unhealthy, or unconfigured channel eligible. A channel
+must also declare `capabilities.trustedDelivery: true`, be present in the live registry, pass its
+configuration schema, and have a healthy runner adapter. This endpoint does not return settings or
+secret values.
+
+Authentication: Required (admin role)
+
+### PUT /api/admin/communication/trusted-channels/:channelId
+
+Persist or revoke the installation-wide administrator approval for a namespaced extension channel.
+
+Request body:
+
+```typescript
+{
+  approved: boolean;
+}
+```
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: {
+    channelId: string;
+    approved: boolean;
+  }
+  timestamp: string;
+}
+```
+
+The decision is stored through the audited global-settings service. It is independent of the
+extension bundle, survives registry restarts, and does not grant network or secret permissions.
+The channel ID must use the extension's namespaced identity form and contain at most 128 characters.
+Malformed or overlong IDs and a non-boolean `approved` value return 400.
+
+Authentication: Required (admin role)
 
 ### GET /api/admin/settings/definitions
 
@@ -3773,15 +3932,18 @@ returns `404`. Returns a confirmation page (`200`) and increments
 `artifact.reportCount`; surfaced to admins via the `ARTIFACT_REPORT` audit action
 and `GET /api/admin/artifacts/reported`.
 
-Admin notification: after recording the report, every administrator who has
-Telegram configured in settings (`telegram.enabled` not `false`, plus
-`telegram.bot_token` and `telegram.chat_id`) is notified via Telegram
-(best-effort). The notification (`notifyAdminsOfReport`) resolves admin user IDs
-via `UserService.getAdminUserIds`, includes the artifact uuid, owner, report
-count, view link, and admin reported-artifacts link, and sends through the
-project `TelegramClient`. It is non-blocking: one admin's send failure does not
-stop the others, and no admin having Telegram (or any failure) never affects the
-report response.
+Admin notification: after recording the report, each administrator receives an
+ordinary Markdown alert through their configured user communication channels
+(best-effort). The notification resolves administrator IDs through
+`UserService.getAdminUserIds`, includes the artifact UUID, owner, report count,
+view link, and admin reported-artifacts link, and sends through the active
+`UserCommunicationService`. The service selects configured built-in and extension
+channels, applies the shared delivery limits, and returns sanitized aggregate
+outcomes. The route processes administrators independently: no configured channel,
+partial or failed provider delivery, or one thrown attempt never stops later
+administrators and never changes the report response. Logs contain only safe
+identifiers, aggregate status, and counts—not alert content, provider diagnostics,
+destinations, or credentials.
 
 Rate limiting: serving routes use a per-artifact view limiter
 (`artifactViewLimiter`, keyed by uuid) so a single artifact cannot be served at

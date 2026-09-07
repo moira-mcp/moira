@@ -4,7 +4,11 @@
  */
 
 import { Router, Request, Response } from "express";
-import { DatabaseRepository } from "@mcp-moira/workflow-engine";
+import {
+  DatabaseRepository,
+  getActiveExtensionRegistry,
+  TrustedExtensionChannelApprovalService,
+} from "@mcp-moira/workflow-engine";
 import { asyncHandler, createApiError } from "../middleware/error-middleware.js";
 import { apiLimiter } from "../middleware/rate-limit-middleware.js";
 import type { AuthenticatedRequest } from "../types/express-types.js";
@@ -1191,6 +1195,50 @@ router.post(
       fs2.unlink(tempBackupPath, () => {});
       throw error;
     }
+  }),
+);
+
+/** Installation-wide extension channel trust approvals. The router is admin-protected. */
+router.get(
+  "/communication/trusted-channels",
+  asyncHandler(async (_req: Request, res: Response) => {
+    const approvals = new TrustedExtensionChannelApprovalService(getGlobalSettingsService());
+    const channels = getActiveExtensionRegistry()?.communicationChannels() ?? [];
+    const data = await Promise.all(
+      channels.map(async ({ extensionName, extensionVersion, declaration }) => ({
+        channelId: declaration.id,
+        extensionName,
+        extensionVersion,
+        declared: declaration.capabilities.trustedDelivery === true,
+        approved: await approvals.isApproved(declaration.id),
+      })),
+    );
+    res.json({ success: true, data, timestamp: new Date().toISOString() });
+  }),
+);
+
+router.put(
+  "/communication/trusted-channels/:channelId",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { approved } = req.body;
+    if (typeof approved !== "boolean") {
+      throw createApiError.validationFailed("approved must be a boolean");
+    }
+    const channelId = req.params.channelId;
+    const approvals = new TrustedExtensionChannelApprovalService(getGlobalSettingsService());
+    try {
+      await approvals.setApproved(channelId, approved, (req as AuthenticatedRequest).userId);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("identity is invalid")) {
+        throw createApiError.validationFailed(error.message);
+      }
+      throw error;
+    }
+    res.json({
+      success: true,
+      data: { channelId, approved },
+      timestamp: new Date().toISOString(),
+    });
   }),
 );
 

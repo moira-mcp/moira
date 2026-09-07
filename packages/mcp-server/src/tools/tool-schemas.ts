@@ -358,11 +358,17 @@ export const startSchema = z.object({
     .describe(
       'Required. Use "none" for standalone workflows, or provide parent execution UUID to link child workflows. Child completion will remind to continue parent.',
     ),
+  skipNotificationCheck: z
+    .boolean()
+    .optional()
+    .describe(
+      "Skip the optional ordinary communication-channel pre-flight check. Lock nodes still require trusted Telegram PIN delivery.",
+    ),
   skipTelegramCheck: z
     .boolean()
     .optional()
     .describe(
-      "Skip the optional Telegram notification pre-flight check. Lock nodes still require trusted Telegram PIN delivery.",
+      "Deprecated alias for skipNotificationCheck. Lock nodes still require trusted Telegram PIN delivery.",
     ),
 });
 
@@ -423,3 +429,40 @@ export const tokenSchema = z.object({
     .default(60)
     .describe("Token expiration time in minutes (default: 60)"),
 });
+
+const communicationFilename = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine(
+    (value) =>
+      !value.includes("/") &&
+      !value.includes("\\") &&
+      [...value].every((character) => {
+        const code = character.charCodeAt(0);
+        return code >= 32 && code !== 127;
+      }),
+    "Filename must not contain paths or control characters",
+  );
+const communicationMimeType = z
+  .string()
+  .max(127)
+  .regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i);
+
+export const communicationSchema = z
+  .object({
+    action: z.enum(["send", "attachment-token"]),
+    message: z.string().min(1).max(4096),
+    format: z.enum(["plain", "markdown", "html"]).optional(),
+    silent: z.boolean().optional(),
+    kind: z.enum(["image", "document"]).optional(),
+    filename: communicationFilename.optional(),
+    mimeType: communicationMimeType.optional(),
+    sizeBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(20 * 1024 * 1024)
+      .optional(),
+  })
+  .strict();

@@ -112,21 +112,21 @@ export const TELEGRAM = {
     `To receive Telegram notifications from this workflow, you need to:\n` +
     `1. Create a Telegram bot via @BotFather\n` +
     `2. Send any message to your bot (so it can message you back)\n` +
-    `3. Configure your bot token and chat ID in Settings → Telegram\n\n` +
-    `You can use the guided setup workflow: start({ workflowId: "moira/telegram-setup", parentExecutionId: "none" })\n\n` +
+    `3. Configure your bot token and chat ID in Settings > Notifications\n\n` +
+    `You can use the guided setup workflow: start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })\n\n` +
     `Or skip this check and start the workflow without Telegram notifications:\n` +
-    `start({ workflowId: "${workflowId}", skipTelegramCheck: true, parentExecutionId: "none" })`,
+    `start({ workflowId: "${workflowId}", skipNotificationCheck: true, parentExecutionId: "none" })`,
 
   preflight_completion_condition:
-    "Configure Telegram integration via Settings or the telegram-setup workflow, then start this workflow again. Or use skipTelegramCheck: true to proceed without Telegram notifications.",
+    "Configure Telegram integration via Settings > Notifications or the telegram-setup workflow, then start this workflow again. Or use skipNotificationCheck: true to proceed without Telegram notifications.",
 
   /** Handler error messages - shown to agents during workflow execution via messageQueue */
   handler_not_configured:
-    'Telegram notifications are not configured. Set up in Settings → Telegram or use the guided setup workflow: start({ workflowId: "moira/telegram-setup", parentExecutionId: "none" })',
+    'Telegram notifications are not configured. Set up in Settings > Notifications or use the guided setup workflow: start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
   handler_chat_not_found:
     "Chat not found. You need to send any message to your bot first, then try again.",
   handler_invalid_token:
-    "Bot token is invalid or expired. Get a new token from @BotFather and update it in Settings → Telegram.",
+    "Bot token is invalid or expired. Get a new token from @BotFather and update it in Settings > Notifications.",
   handler_network_error:
     "Network error connecting to Telegram API. Check internet connection and try again.",
   handler_rate_limited: "Telegram API rate limit reached. Please wait a moment and try again.",

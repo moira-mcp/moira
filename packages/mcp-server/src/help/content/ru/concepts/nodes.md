@@ -35,9 +35,13 @@ description: Понимание типов узлов и конфигураци�
 
 Делегирование другому воркфлоу.
 
-### Telegram Notification
+### User Notification
 
-Отправка уведомлений через Telegram.
+Отправка уведомления через все включённые каналы связи, настроенные текущим пользователем.
+
+### Telegram Notification (устаревшая)
+
+Telegram-only нода совместимости для существующих provider-specific workflow.
 
 ### Teleport
 
@@ -291,16 +295,18 @@ Expression node может завершиться с ошибкой в двух 
 дочернего workflow или ошибок mapping. Такие ошибки записываются, а выполнение приостанавливается
 на subgraph node, чтобы агент исправил причину и повторил шаг.
 
-## Telegram Notification Node
+## User Notification Node
 
-Отправка автоматических уведомлений через Telegram:
+Отправляет сообщение через все корректные включённые каналы пользователя выполнения. Workflow не
+может выбирать provider, получателя или credential:
 
 ```json
 {
   "id": "notify-complete",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "Воркфлоу {{workflowName}} успешно завершен",
-  "parseMode": "Markdown",
+  "format": "markdown",
+  "silent": false,
   "connections": {
     "default": "next-step",
     "error": "notification-failed"
@@ -308,12 +314,36 @@ Expression node может завершиться с ошибкой в двух 
 }
 ```
 
-| Свойство              | Обязательно | Описание                                 |
-| --------------------- | ----------- | ---------------------------------------- |
-| `message`             | Да          | Текст уведомления (поддерживает шаблоны) |
-| `parseMode`           | Нет         | Формат сообщения: "Markdown" или "HTML"  |
-| `connections.default` | Да          | Следующий узел после отправки            |
-| `connections.error`   | Нет         | Следующий узел при ошибке API            |
+| Свойство              | Обязательно | Описание                                                              |
+| --------------------- | ----------- | --------------------------------------------------------------------- |
+| `message`             | Да          | Текст уведомления с поддержкой шаблонов                               |
+| `format`              | Нет         | Переносимый формат: `plain`, `markdown` или `html`                    |
+| `silent`              | Нет         | Запрос тихой доставки, если provider её поддерживает                  |
+| `attachProgressImage` | Нет         | Приложить текущий ограниченный PNG прогресса workflow                 |
+| `attachment`          | Нет         | Одно bounded base64-вложение `image` или `document` с именем/MIME     |
+| `connections.default` | Да          | Путь при полной, частичной доставке или отсутствии подходящих каналов |
+| `connections.error`   | Нет         | Путь при полном провале попыток; иначе используется `default`         |
+
+`attachment` и включённый `attachProgressImage` взаимоисключающие. Имя вложения должно
+соответствовать безопасному переносимому allowlist, а MIME — форме `type/subtype`. До provider
+delivery сервис применяет общие per-user/provider rate limits, ограничения concurrency пользователя
+и provider, deadlines, пределы текста и байтов. Настроенный канал Telegram поддерживает текст,
+PNG/JPEG-изображения и документы.
+
+Результат ноды хранится под её ID. `userNotificationStatus` принимает `delivered`, `partial`,
+`no_configured_channels` или `all_failed`; `configuredChannels`, `deliveredChannels` и `channels`
+содержат счётчики и очищенные per-channel status/reason. Настроенный канал, который не поддерживает
+тип запрошенного вложения, получает статус `unsupported` и пропускается; если другого подходящего
+канала или ошибки проверки доступности нет, общий результат — `no_configured_channels`, а не
+`all_failed`. Credentials, получатели, тело сообщения и байты вложения в результаты и ошибки не
+попадают.
+
+### Устаревшая Telegram-specific нода
+
+`telegram-notification` остаётся исполняемой для существующих workflow. Она отправляет только через
+Telegram, а заданный `chatId` сохраняет точное provider-specific значение получателя. Для новых
+обычных уведомлений используйте `user-notification`; переход explicit legacy recipient к generic
+fan-out требует намеренной миграции workflow.
 
 ## Teleport Node
 
@@ -389,7 +419,7 @@ PIN-блокировка выполнения. Она доставляет PIN �
 
 **Поведение:**
 
-1. Для запуска любого workflow с lock node текущему пользователю нужны корректные bot token и chat ID. `skipTelegramCheck` не обходит это требование.
+1. Для запуска любого workflow с lock node текущему пользователю нужны корректные bot token и chat ID. Ни `skipNotificationCheck`, ни его устаревший alias `skipTelegramCheck` не обходят это требование.
 2. При первом посещении Moira сохраняет только хеш ожидающего доставки PIN, отправляет открытый PIN в настроенный chat, активирует блокировку, сохраняет `_lockId` и приостанавливает выполнение.
 3. При отсутствующих или некорректных настройках и при ошибке доставки не возникает доступной активной блокировки или context reference. Повторное посещение запускает новую попытку доставки с новым PIN.
 4. Следующие посещения проверяют активную блокировку или введённый пользователем PIN и после разблокировки переходят через `connections.unlocked`.

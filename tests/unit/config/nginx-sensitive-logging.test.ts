@@ -16,11 +16,19 @@ describe("nginx configuration", () => {
     expect(source).not.toMatch(/^\s*access_log \/var\/log\/nginx\/access\.log;\s*$/m);
   });
 
-  test.each(configs)("%s accepts requests up to the backend parser limit", (config) => {
-    const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
+  test.each(configs)(
+    "%s routes bounded communication uploads to MCP without rewriting MIME",
+    (config) => {
+      const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
 
-    expect(source).toMatch(
-      /server_name localhost _;\s+# Keep the proxy transport limit aligned with the backend JSON parser\.\s+# Artifact content is limited separately to 5 MiB by the application\.\s+client_max_body_size 10m;/,
-    );
-  });
+      expect(source).toContain("client_max_body_size 20m;");
+      const location = source.slice(source.indexOf("location = /api/communication/attachments"));
+      expect(location).toContain("proxy_pass http://localhost:3000/api/communication/attachments;");
+      expect(location).toContain("proxy_set_header Authorization $http_authorization;");
+      expect(location).toContain(
+        "proxy_set_header X-Moira-Communication-Grant $http_x_moira_communication_grant;",
+      );
+      expect(location.split("}", 1)[0]).not.toContain('Content-Type "application/json"');
+    },
+  );
 });

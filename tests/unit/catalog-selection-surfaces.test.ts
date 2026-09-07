@@ -56,6 +56,55 @@ function read(relativePath: string): string {
 }
 
 describe("public workflow selection surfaces", () => {
+  it("keeps ordinary bundled automatic notifications provider-neutral", () => {
+    const notificationNodes = fs
+      .readdirSync(workflowsDir)
+      .filter((file) => file.endsWith(".json"))
+      .flatMap((file) => {
+        const workflow = JSON.parse(fs.readFileSync(path.join(workflowsDir, file), "utf8"));
+        return workflow.nodes
+          .filter(
+            (node: { type: string }) =>
+              node.type === "user-notification" || node.type === "telegram-notification",
+          )
+          .map((node: Record<string, unknown>) => ({ slug: workflow.slug, ...node }));
+      });
+
+    expect(
+      notificationNodes
+        .filter((node) => node.type === "telegram-notification")
+        .map((node) => [node.slug, node.id]),
+    ).toEqual([["telegram-setup", "test-notification"]]);
+
+    const genericNodes = notificationNodes.filter((node) => node.type === "user-notification");
+    expect(
+      genericNodes
+        .map((node) => [node.slug, node.id])
+        .sort(([leftSlug, leftId], [rightSlug, rightId]) =>
+          `${leftSlug}/${leftId}`.localeCompare(`${rightSlug}/${rightId}`),
+        ),
+    ).toEqual([
+      ["iterative-research", "send-notification"],
+      ["robust-task", "notify-completion"],
+      ["robust-task", "notify-escalation"],
+      ["robust-task", "notify-plan-ready"],
+      ["smart-purchase-assistant", "send-notification"],
+      ["software-development-flow", "notify-final-approval"],
+      ["software-development-flow", "notify-plan-approval"],
+      ["software-development-flow", "notify-report-ready"],
+      ["software-development-flow", "notify-unit-approval"],
+      ["software-development-flow", "notify-workflow-complete"],
+      ["software-development-flow", "notify-workflow-stopped"],
+      ["universal-research-workflow", "send-notification"],
+    ]);
+    for (const node of genericNodes) {
+      expect(node).not.toHaveProperty("parseMode");
+      expect(node).not.toHaveProperty("provider");
+      expect(node).not.toHaveProperty("recipient");
+      expect(node).not.toHaveProperty("chatId");
+    }
+  });
+
   it("keeps the production catalog and both documentation locales complete", () => {
     const actualSlugs = fs
       .readdirSync(workflowsDir)
@@ -92,7 +141,7 @@ describe("public workflow selection surfaces", () => {
     expect(help).toContain(
       "product selection with current prices/terms, profile-specific recommendations",
     );
-    expect(help).toContain("start with `skipTelegramCheck: true`");
+    expect(help).toContain("start with `skipNotificationCheck: true`");
   });
 
   it("keeps runtime English prompts identical and selection dynamic in both languages", () => {
@@ -150,7 +199,7 @@ describe("public workflow selection surfaces", () => {
       expect(guide).toContain("mcp__moira__list");
       expect(guide).toContain('workflowId: "moira/quick-task"');
       expect(guide).toContain('workflowId: "moira/smart-purchase-assistant"');
-      expect(guide).toContain("skipTelegramCheck: true");
+      expect(guide).toContain("skipNotificationCheck: true");
       expect(guide).not.toMatch(/workflowId: "(?!moira\/)/);
       expect(guide).not.toContain("Min 3 sources");
       expect(guide).not.toContain("2 tests per category");

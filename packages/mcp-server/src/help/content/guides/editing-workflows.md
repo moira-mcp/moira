@@ -55,8 +55,9 @@ moira-workflow ./workflow.json set-variable-schema result --file ./result-schema
 ```
 
 Static execution progress uses the same file-backed authoring surface. Set the complete display
-graph from JSON, then map each user-visible waiting node. Telegram attachment is available only on
-`telegram-notification` nodes; `none` and `false` clear the corresponding optional fields.
+graph from JSON, then map each user-visible waiting node. Progress attachment is available on
+`user-notification` and deprecated `telegram-notification` nodes; `none` and `false` clear the
+corresponding optional fields.
 
 ```bash
 moira-workflow ./workflow.json set-progress --file ./progress.json

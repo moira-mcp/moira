@@ -2,8 +2,8 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "15.5.0",
-    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/Telegram delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. Seven-stage progress, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
+    "version": "15.5.1",
+    "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. Seven-stage progress, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
     "author": "mcp-moira-team",
     "tags": [
       "development",
@@ -2970,9 +2970,9 @@
     },
     {
       "id": "notify-plan-approval",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "📋 *Plan approval required*\n\nReviewed development plan revision {{plan_revision}} is ready for your decision.",
-      "parseMode": "Markdown",
+      "format": "markdown",
       "connections": {
         "default": "approve-plan"
       },
@@ -3063,9 +3063,9 @@
     },
     {
       "id": "notify-report-ready",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "🖼 *Visual report ready*\n\nPlan unit {{current_step_index}} report: {{create-and-upload-step-report.report_url}}",
-      "parseMode": "Markdown",
+      "format": "markdown",
       "connections": {
         "default": "route-unit-approval-required"
       },
@@ -3089,9 +3089,9 @@
     },
     {
       "id": "notify-unit-approval",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "👤 *Unit approval required*\n\nPlan unit {{current_step_index}} is ready and the workflow is waiting for your decision.",
-      "parseMode": "Markdown",
+      "format": "markdown",
       "connections": {
         "default": "review-plan-unit-with-user"
       },
@@ -3100,9 +3100,9 @@
     },
     {
       "id": "notify-workflow-complete",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "✅ *Software Development Flow finished*\n\nThe workflow reached its normal terminal result. Review the final report for exact outcomes, limitations, and follow-up delivery intent.",
-      "parseMode": "Markdown",
+      "format": "markdown",
       "connections": {
         "default": "end"
       },
@@ -3111,9 +3111,9 @@
     },
     {
       "id": "notify-workflow-stopped",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "⛔ *Software Development Flow stopped*\n\nThe workflow ended before normal completion. Review the current workspace evidence for the exact blocker, refusal, or abort reason.",
-      "parseMode": "Markdown",
+      "format": "markdown",
       "connections": {
         "default": "end-aborted"
       }
@@ -3162,9 +3162,9 @@
     },
     {
       "id": "notify-final-approval",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "👤 *Final result approval required*\n\nThe complete Software Development Flow report is ready and the workflow is waiting for your decision.",
-      "parseMode": "Markdown",
+      "format": "markdown",
       "connections": {
         "default": "report-and-accept-feature"
       },

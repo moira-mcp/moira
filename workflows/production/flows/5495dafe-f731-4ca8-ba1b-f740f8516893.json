@@ -3,8 +3,8 @@
   "id": "5495dafe-f731-4ca8-ba1b-f740f8516893",
   "metadata": {
     "name": "Telegram Setup",
-    "version": "2.0.2",
-    "description": "Interactive, secret-safe setup and verification of the current user's Moira Telegram notifications. It inspects masked existing settings, lets the user test or explicitly replace them, guides bot and chat-ID setup without storing credentials in workflow state, writes only telegram.bot_token, telegram.chat_id and telegram.enabled through the supported settings tool, verifies masked persisted state, sends a bounded secret-free test, and distinguishes handler send, user receipt, changed-evidence retry, reconfiguration, incomplete, blocked and skipped outcomes. Final output never contains the bot token or full chat ID. On an unconfigured account, start this bootstrap workflow with skipTelegramCheck: true because its own test node would otherwise trigger Telegram preflight."
+    "version": "2.0.3",
+    "description": "Interactive, secret-safe setup and verification of the current user's Moira Telegram notifications. It inspects masked existing settings, lets the user test or explicitly replace them, guides bot and chat-ID setup without storing credentials in workflow state, writes only telegram.bot_token, telegram.chat_id and telegram.enabled through the supported settings tool, verifies masked persisted state, sends a bounded secret-free test, and distinguishes handler send, user receipt, changed-evidence retry, reconfiguration, incomplete, blocked and skipped outcomes. Final output never contains the bot token or full chat ID. On an unconfigured account, start this bootstrap workflow with skipNotificationCheck: true because its own legacy test node would otherwise trigger ordinary-notification preflight. skipTelegramCheck remains a deprecated compatibility alias."
   },
   "variableRegistry": {},
   "nodes": [

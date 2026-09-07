@@ -21,7 +21,7 @@ The workflow resolves these decisions before research:
 - scope, exclusions, constraints, deliverable, source expectations, and success criteria;
 - confidentiality, privacy, licensing, access, and data-minimization limits;
 - interactive or autonomous operation;
-- local delivery, publication, publication plus Telegram notification, or an undecided delivery choice.
+- local delivery, publication, publication plus a configured user notification, or an undecided delivery choice.
 
 Depth guides fitness and cost. It does not impose source counts, word counts, formatting scores, or a fixed tool or agent topology.
 
@@ -60,7 +60,7 @@ flowchart TD
     I -->|Blocked or budget exhausted| L
     H -->|Local| J[Clean local result]
     H -->|Publish| K[Upload delivery.html]
-    K -->|Authorized separately| N[Telegram notification]
+    K -->|Authorized separately| N[User notification]
 ```
 
 The independent reviewer diagnoses but does not modify candidate artifacts. A nonzero review must lead to a real change or a factual blocked result. Repair re-enters at the earliest stale boundary: contract, sources, analysis, or presentation. The engine allows at most three nonzero review rounds; exhaustion cannot be converted into success or publication.
@@ -69,7 +69,7 @@ The independent reviewer diagnoses but does not modify candidate artifacts. A no
 
 - `clean_local` means the six local artifacts passed an exact zero-issue independent review and no external side effect occurred.
 - `published` requires explicit publication authority and an observed successful static-artifact upload URL. Only `delivery.html` is uploaded.
-- `notified` additionally requires separate Telegram authority and an observed successful notification.
+- `notified` additionally requires separate notification authority and an observed successful send through a configured user channel.
 - `delivery_failed` and `notification_failed` preserve the zero-reviewed local result while exposing the failed external step truthfully.
 - `limited` covers insufficient evidence, blocked repair, exhausted review, unavailable workspace, or execution-identity mismatch. Limited results are non-authoritative and cannot be published or notified.
 - `aborted` records an explicit interactive choice without claiming successful delivery.

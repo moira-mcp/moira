@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { GlobalSettingsRepository } from "@mcp-moira/shared";
+import { TrustedExtensionChannelApprovalService } from "@mcp-moira/workflow-engine";
 import * as schema from "@mcp-moira/shared";
 
 describe("GlobalSettingsRepository", () => {
@@ -111,6 +112,23 @@ describe("GlobalSettingsRepository", () => {
       expect(setting).not.toBeNull();
       expect(setting?.key).toBe("test.setting");
       expect(setting?.value).toBe("test-value");
+    });
+  });
+
+  describe("trusted extension communication approval persistence", () => {
+    it("survives a new approval service and revokes without deleting its identity", async () => {
+      const approvals = new TrustedExtensionChannelApprovalService(repository);
+      await approvals.setApproved("probe.notifications", true, adminUserId);
+
+      const restarted = new TrustedExtensionChannelApprovalService(
+        new GlobalSettingsRepository(db),
+      );
+      await expect(restarted.isApproved("probe.notifications")).resolves.toBe(true);
+      await restarted.setApproved("probe.notifications", false, adminUserId);
+      await expect(approvals.isApproved("probe.notifications")).resolves.toBe(false);
+      await expect(
+        repository.get("extensions.trusted_communication_channel.probe.notifications"),
+      ).resolves.toMatchObject({ value: "false", updatedBy: adminUserId });
     });
   });
 

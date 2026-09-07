@@ -25,6 +25,125 @@ describe("Admin Settings API", () => {
     adminCookie = adminCookies || "";
   });
 
+  describe("Extension communication trust approval", () => {
+    const channelId = "api-test.notifications";
+    let regularUserCookie: string;
+
+    beforeAll(async () => {
+      const credentials = {
+        email: `channel-approval-${Date.now()}@example.com`,
+        password: "ChannelApproval123!",
+        name: "Channel Approval User",
+        acceptedTermsAt: new Date().toISOString(),
+        acceptedNotRussianResidentAt: new Date().toISOString(),
+      };
+      const signup = await fetch(`${BASE_URL}/api/auth/sign-up/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(credentials),
+      });
+      const body = (await signup.json()) as { user: { id: string } };
+      await fetch(`${BASE_URL}/api/admin/users/${body.user.id}/verify-email`, {
+        method: "POST",
+        headers: { Cookie: adminCookie },
+      });
+      const login = await fetch(`${BASE_URL}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: credentials.email, password: credentials.password }),
+      });
+      regularUserCookie = login.headers.get("set-cookie") || "";
+    });
+
+    test("an ordinary authenticated user cannot change installation trust approval", async () => {
+      const response = await fetch(
+        `${BASE_URL}/api/admin/communication/trusted-channels/${channelId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Cookie: regularUserCookie },
+          body: JSON.stringify({ approved: true }),
+        },
+      );
+      expect(response.status).toBe(403);
+    });
+
+    test("an administrator cannot persist approval for an overlong channel identity", async () => {
+      const overlongId = `api-test.${"a".repeat(120)}`;
+      const response = await fetch(
+        `${BASE_URL}/api/admin/communication/trusted-channels/${overlongId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ approved: true }),
+        },
+      );
+      expect(response.status).toBe(400);
+
+      const settingsResponse = await fetch(`${BASE_URL}/api/admin/global-settings`, {
+        headers: { Cookie: adminCookie },
+      });
+      const settingsBody = (await settingsResponse.json()) as {
+        data: { settings: Array<{ key: string }> };
+      };
+      expect(
+        settingsBody.data.settings.some(
+          ({ key }) => key === `extensions.trusted_communication_channel.${overlongId}`,
+        ),
+      ).toBe(false);
+    });
+
+    test("an administrator persists and revokes an audited channel approval", async () => {
+      const approve = await fetch(
+        `${BASE_URL}/api/admin/communication/trusted-channels/${channelId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ approved: true }),
+        },
+      );
+      expect(approve.status).toBe(200);
+      await expect(approve.json()).resolves.toMatchObject({
+        data: { channelId, approved: true },
+      });
+
+      const settingsResponse = await fetch(`${BASE_URL}/api/admin/global-settings`, {
+        headers: { Cookie: adminCookie },
+      });
+      const settingsBody = (await settingsResponse.json()) as {
+        data: { settings: Array<{ key: string; value: string | null; updatedBy: string | null }> };
+      };
+      expect(settingsBody.data.settings).toContainEqual(
+        expect.objectContaining({
+          key: `extensions.trusted_communication_channel.${channelId}`,
+          value: "true",
+        }),
+      );
+
+      const auditResponse = await fetch(
+        `${BASE_URL}/api/admin/audit-log?limit=10&action=admin:global_settings:update`,
+        { headers: { Cookie: adminCookie } },
+      );
+      const auditBody = (await auditResponse.json()) as {
+        data: { entries: Array<{ resourceId?: string }> };
+      };
+      expect(auditBody.data.entries).toContainEqual(
+        expect.objectContaining({
+          resourceId: `extensions.trusted_communication_channel.${channelId}`,
+        }),
+      );
+
+      const revoke = await fetch(
+        `${BASE_URL}/api/admin/communication/trusted-channels/${channelId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Cookie: adminCookie },
+          body: JSON.stringify({ approved: false }),
+        },
+      );
+      expect(revoke.status).toBe(200);
+    });
+  });
+
   describe("Protected Definition Deletion", () => {
     test("DELETE /api/admin/settings/definitions/:key returns 500 for protected definition (repository throws)", async () => {
       // telegram.bot_token is protected by default

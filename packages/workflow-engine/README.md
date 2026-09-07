@@ -4,7 +4,7 @@ Core node-graph execution engine for MCP Moira Agent Workflow Engine.
 
 ## Features
 
-- **Node Handlers**: 9 interactive node types (start, end, agent-directive, condition, expression, subgraph, telegram-notification, teleport, lock) + 3 automatic (read-note, write-note, upsert-note)
+- **Node handlers**: built-in graph execution including channel-neutral user notifications, deprecated Telegram compatibility, notes, locks, materialization, subgraphs, expressions, conditions, and agent tasks
 - **Storage**: File-based and in-memory workflow storage
 - **Validation**: JSON Schema validation with AJV
 - **Templates**: Variable interpolation and template processing
@@ -20,6 +20,7 @@ import {
   EndNodeHandler,
   AgentDirectiveHandler,
   ConditionHandler,
+  UserNotificationHandler,
   TelegramNotificationHandler,
 } from "@mcp-moira/workflow-engine";
 ```

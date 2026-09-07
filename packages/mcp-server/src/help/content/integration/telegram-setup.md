@@ -5,7 +5,10 @@ sidebar:
   order: 5
 ---
 
-Moira workflows can send notifications through `telegram-notification` nodes and deliver approval PINs through `lock` nodes. Both use the current user's configured Telegram bot and chat ID.
+Moira workflows send ordinary notifications through `user-notification`; when Telegram is enabled,
+its built-in adapter uses the current user's configured bot and chat ID. The deprecated
+`telegram-notification` node keeps Telegram-only compatibility, while `lock` uses a separate trusted
+Telegram path for approval PINs.
 
 ## Setup
 
@@ -30,7 +33,7 @@ Do not put the bot token into a browser URL. URLs can be retained in browser his
 ### 3. Save Settings
 
 1. Open Moira and go to **Settings**
-2. Click the **Telegram** tab
+2. Find the **Telegram** card under **Notifications**
 3. Enter your **Bot Token** in the corresponding field
 4. Enter your **Chat ID** in the corresponding field
 5. Make sure **Enabled** is toggled on
@@ -38,7 +41,9 @@ Do not put the bot token into a browser URL. URLs can be retained in browser his
 
 ### 4. Send a Test Notification
 
-On the same Telegram tab in Settings, click **Test Notification**. You should receive a message from your bot in Telegram.
+When the Telegram card shows **Ready**, click **Send test**. Moira sends a fixed test message using
+the saved settings; the browser does not resend the bot token or chat ID. You should receive the
+message from your bot in Telegram.
 
 :::caution[Important]
 You must send at least one message to your bot in Telegram before testing. The Telegram API requires this before the bot can message you.
@@ -52,11 +57,11 @@ If you're using Moira through an MCP client (Claude Code, Claude Desktop), you c
 start({
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
-  skipTelegramCheck: true
+  skipNotificationCheck: true
 })
 ```
 
-`skipTelegramCheck: true` is required for this bootstrap workflow when Telegram is not configured; otherwise the normal notification preflight prevents an execution from starting. The flag bypasses only preflight for optional `telegram-notification` nodes. It cannot bypass trusted PIN delivery for a `lock` node.
+`skipNotificationCheck: true` is required for this bootstrap workflow when Telegram is not configured; otherwise its legacy `telegram-notification` test node prevents an execution from starting. The flag bypasses only optional ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior. Neither field can bypass trusted PIN delivery for a `lock` node.
 
 The workflow inspects masked existing settings, lets you test or explicitly replace them, keeps credentials out of workflow output, verifies persisted settings, sends a secret-free test, and confirms actual receipt.
 
@@ -82,11 +87,13 @@ Temporary connectivity issue. Wait a moment and retry. If persistent, check that
 
 ### Bot Does Not Respond
 
-Bots created via @BotFather do not respond to messages by default. Moira sends through them when a workflow triggers a `telegram-notification` node or needs trusted PIN delivery for a `lock` node.
+Bots created via @BotFather do not respond to messages by default. Moira sends through them when a
+workflow triggers `user-notification` with Telegram enabled, executes a deprecated
+`telegram-notification` node, or needs trusted PIN delivery for a `lock` node.
 
 ### Notification Not Received
 
 1. Verify you sent a message to the bot (required by Telegram API)
 2. Check your chat ID is correct (use @userinfobot to confirm)
-3. Verify Telegram is enabled in Settings > Telegram tab
+3. Verify the Telegram card is enabled and shows **Ready** under Settings > Notifications
 4. Check the bot token has not been revoked

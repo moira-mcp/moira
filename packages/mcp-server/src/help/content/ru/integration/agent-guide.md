@@ -11,16 +11,17 @@ sidebar:
 
 MCP Moira предоставляет следующие инструменты:
 
-| Tool       | Назначение                             |
-| ---------- | -------------------------------------- |
-| `list`     | Список доступных workflows             |
-| `start`    | Запуск выполнения workflow             |
-| `step`     | Продвижение workflow с input           |
-| `manage`   | CRUD операции с workflows              |
-| `session`  | Информация о пользователе и executions |
-| `settings` | Настройки пользователя                 |
-| `token`    | Токены для upload/download             |
-| `help`     | Документация                           |
+| Tool            | Назначение                             |
+| --------------- | -------------------------------------- |
+| `list`          | Список доступных workflows             |
+| `start`         | Запуск выполнения workflow             |
+| `step`          | Продвижение workflow с input           |
+| `manage`        | CRUD операции с workflows              |
+| `session`       | Информация о пользователе и executions |
+| `settings`      | Настройки пользователя                 |
+| `communication` | Доставка текущему пользователю         |
+| `token`         | Токены для upload/download             |
+| `help`          | Документация                           |
 
 ## Базовое выполнение Workflow
 
@@ -30,7 +31,7 @@ MCP Moira предоставляет следующие инструменты:
 start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
 ```
 
-Если предварительная настройка Telegram не требуется, ответ содержит:
+Если настройка уведомлений или доверенной блокировки не требуется, ответ содержит:
 
 ```json
 {
@@ -47,8 +48,11 @@ start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
 }
 ```
 
-Если workflow требует настройки Telegram, `start` возвращает инструкцию настройки без создания
-execution и без `processId`. Выполните инструкцию и снова вызовите `start`.
+Если у generic notification workflow нет настроенного пользовательского канала, `start` возвращает
+инструкцию Settings > Notifications без создания execution и без `processId`. Legacy workflow с
+Telegram-notification возвращает инструкцию настройки Telegram. Используйте
+`skipNotificationCheck: true` только для пропуска опционального preflight обычных уведомлений; флаг
+не разрешает отправку и не обходит обязательную настройку Telegram для ноды `lock`.
 
 ### 2. Выполнение шага
 

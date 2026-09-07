@@ -47,7 +47,7 @@ test.describe("Settings Page — Flat Layout", () => {
     await expect(profileSection).toBeVisible();
   });
 
-  test("dynamic settings rendered inline without category subgroups", async ({ page }) => {
+  test("notification settings render inside the Telegram channel card", async ({ page }) => {
     await loginAsAdmin(page);
     await page.waitForLoadState("domcontentloaded");
 
@@ -55,18 +55,18 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForSelector('h1:has-text("Settings")');
 
-    // Notifications section contains telegram settings (not in a "telegram" subgroup)
     const dynamicSection = page.getByTestId("settings-section-dynamic");
-    if ((await dynamicSection.count()) > 0) {
-      await dynamicSection.scrollIntoViewIfNeeded();
-      // No separate "Telegram" heading — settings are flat
-      await expect(page.locator('[data-testid="user-setting-telegram.bot_token"]')).toBeVisible({
-        timeout: 5000,
-      });
-      await expect(page.locator('[data-testid="user-setting-telegram.enabled"]')).toBeVisible({
-        timeout: 5000,
-      });
-    }
+    await expect(dynamicSection).toBeVisible({ timeout: 5000 });
+    await dynamicSection.scrollIntoViewIfNeeded();
+    const channel = page.getByTestId("communication-channel-telegram");
+    await expect(channel).toBeVisible();
+    await expect(channel.getByText("Telegram", { exact: true })).toBeVisible();
+    await expect(
+      page.locator('[data-testid="user-channel-telegram-telegram.bot_token"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-testid="user-channel-telegram-telegram.enabled"]'),
+    ).toBeVisible();
   });
 
   test("encrypted fields display as masked", async ({ page }) => {
@@ -78,12 +78,13 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.waitForSelector('h1:has-text("Settings")');
 
     const dynamicSection = page.getByTestId("settings-section-dynamic");
-    if ((await dynamicSection.count()) > 0) {
-      await dynamicSection.scrollIntoViewIfNeeded();
-      const botTokenInput = page.locator('[data-testid="user-setting-telegram.bot_token-input"]');
-      await expect(botTokenInput).toBeVisible({ timeout: 5000 });
-      await expect(botTokenInput).toHaveAttribute("placeholder", "••••••••");
-    }
+    await expect(dynamicSection).toBeVisible({ timeout: 5000 });
+    await dynamicSection.scrollIntoViewIfNeeded();
+    const botTokenInput = page.locator(
+      '[data-testid="user-channel-telegram-telegram.bot_token-input"]',
+    );
+    await expect(botTokenInput).toBeVisible();
+    await expect(botTokenInput).toHaveAttribute("placeholder", "••••••••");
   });
 
   test("boolean toggle works correctly", async ({ page }) => {
@@ -95,34 +96,41 @@ test.describe("Settings Page — Flat Layout", () => {
     await page.waitForSelector('h1:has-text("Settings")');
 
     const dynamicSection = page.getByTestId("settings-section-dynamic");
-    if ((await dynamicSection.count()) > 0) {
-      await dynamicSection.scrollIntoViewIfNeeded();
+    await expect(dynamicSection).toBeVisible({ timeout: 5000 });
+    await dynamicSection.scrollIntoViewIfNeeded();
 
-      const checkbox = page.locator('[data-testid="user-setting-telegram.enabled-input"]');
-      await expect(checkbox).toBeVisible({ timeout: 5000 });
-      const initialState = await checkbox.isChecked();
+    const checkbox = page.locator('[data-testid="user-channel-telegram-telegram.enabled-input"]');
+    await expect(checkbox).toBeVisible();
+    const initialState = await checkbox.isChecked();
 
-      // Toggle
-      await checkbox.click();
+    // Toggle
+    await checkbox.click();
 
-      const saveButton = page.locator('[data-testid="user-setting-telegram.enabled-save"]');
-      await expect(saveButton).toBeEnabled({ timeout: 5000 });
-      await saveButton.click();
-      await expect(saveButton).toBeDisabled({ timeout: 15000 });
+    const saveButton = page.locator('[data-testid="user-channel-telegram-telegram.enabled-save"]');
+    await expect(saveButton).toBeEnabled({ timeout: 5000 });
+    await saveButton.click();
+    await expect(saveButton).toBeDisabled({ timeout: 15000 });
+    await expect(
+      page
+        .getByTestId("communication-channel-telegram")
+        .getByText(initialState ? "Disabled" : "Setup required", { exact: true }),
+    ).toBeVisible({ timeout: 5000 });
 
-      // Reload and verify persisted
-      await page.reload();
-      await page.waitForLoadState("domcontentloaded");
-      await page.waitForSelector('h1:has-text("Settings")');
+    // Reload and verify persisted
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    await page.waitForSelector('h1:has-text("Settings")');
 
-      const section = page.getByTestId("settings-section-dynamic");
-      await section.scrollIntoViewIfNeeded();
+    const section = page.getByTestId("settings-section-dynamic");
+    await expect(section).toBeVisible({ timeout: 5000 });
+    await section.scrollIntoViewIfNeeded();
 
-      const checkboxAfter = page.locator('[data-testid="user-setting-telegram.enabled-input"]');
-      await expect(checkboxAfter).toBeVisible({ timeout: 5000 });
-      const finalState = await checkboxAfter.isChecked();
-      expect(finalState).toBe(!initialState);
-    }
+    const checkboxAfter = page.locator(
+      '[data-testid="user-channel-telegram-telegram.enabled-input"]',
+    );
+    await expect(checkboxAfter).toBeVisible();
+    const finalState = await checkboxAfter.isChecked();
+    expect(finalState).toBe(!initialState);
   });
 
   test("settings save and persist after reload", async ({ page }) => {

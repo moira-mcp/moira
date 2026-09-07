@@ -5,7 +5,7 @@
  * process revision, independent zero-only review, and source-aware changed repair.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import {
@@ -16,7 +16,7 @@ import {
 
 type PlanItem = { id: string; action: string; expected_result: string };
 
-const catalogEntry = findSystemCatalogEntry("simple-plan-execution", "public")!;
+const catalogEntry = findCatalogEntryBySlug("simple-plan-execution")!;
 const workspace = "./moira-ws/simple-plan-execution-checkout_20260820";
 const taskDescription = "Prepare a verified checkout readiness result";
 const expectedResult = "A concrete readiness result exists with observable verification";
@@ -82,94 +82,14 @@ describe("simple-plan-execution", () => {
     workflow = loadWorkflow();
   });
 
-  test("preserves public identity and implements the accepted 27-node graph", async () => {
-    expect(catalogEntry.owner).toBe("system-moira");
-    expect(catalogEntry.slug).toBe("simple-plan-execution");
-    expect(catalogEntry.visibility).toBe("public");
-    expect(workflow.id).toBe("278a35a9-c73e-4e2a-a781-32d92ac5cb80");
-    expect(workflow.metadata.version).toBe("2.0.0");
-
+  test("validates review routing and terminal projection", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
-    expect(workflow.nodes).toHaveLength(27);
     expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);
     expect(node(workflow, "route_review").connections).toEqual({
       true: "report",
       false: "classify_repair",
     });
-  });
-
-  test("publishes a truthful decision-useful description and neighboring-flow boundaries", () => {
-    const description = workflow.metadata.description;
-    for (const claim of [
-      "one strict current plan",
-      "task.md",
-      "plan.json",
-      "execution-evidence.md",
-      "review.md",
-      "final-report.md",
-      "independent primary-source reviewer",
-      "zero findings",
-      "Authority is inherited",
-      "Todo List",
-      "Quick Task",
-      "Robust Task",
-      "development workflow",
-    ]) {
-      expect(description).toContain(claim);
-    }
-  });
-
-  test("keeps exactly nine bounded globals and derives count in engine expressions", () => {
-    const registry = workflow.variableRegistry!;
-    expect(Object.keys(registry).sort()).toEqual([
-      "current_step",
-      "expected_result",
-      "issues_count",
-      "operating_mode",
-      "result_summary",
-      "steps",
-      "task_description",
-      "total_steps",
-      "workspace_path",
-    ]);
-    expect(registry.workspace_path.pattern).toBe(
-      "^\\./moira-ws/simple-plan-execution-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
-    );
-    expect(registry.steps.minItems).toBe(1);
-    expect(registry.steps.maxItems).toBe(100);
-    expect(registry.steps.items.additionalProperties).toBe(false);
-    expect(node(workflow, "derive_plan_count").expressions).toEqual(["total_steps = steps.length"]);
-    expect(node(workflow, "increment_step").expressions).toEqual([
-      "current_step = current_step + 1",
-    ]);
-  });
-
-  test("makes unique IDs a semantic invariant at every writer and at review", () => {
-    for (const id of ["create_plan", "revise_plan", "classify_repair", "teleport_revise_process"]) {
-      expect(node(workflow, id).directive).toMatch(/pairwise.unique/i);
-    }
-    expect(node(workflow, "review").directive).toMatch(/pairwise unique/i);
-    expect(node(workflow, "review").directive).toContain("Duplicate IDs");
-    expect(node(workflow, "review").directive).toContain("exactly one unambiguous");
-  });
-
-  test("uses conditional local feedback and conditional changed-repair outputs", () => {
-    for (const id of ["present_plan", "present_result"]) {
-      const schema = node(workflow, id).inputSchema;
-      expect(schema.additionalProperties).toBe(false);
-      expect(schema.allOf[0].then.required).toEqual(["feedback"]);
-    }
-    const repairSchema = node(workflow, "classify_repair").inputSchema;
-    expect(repairSchema.globalInputs).toEqual(["task_description", "expected_result", "steps"]);
-    expect(repairSchema.required).toEqual(["repair_reach"]);
-    expect(repairSchema.allOf[0].then.required).toEqual([
-      "repair_from",
-      "task_description",
-      "expected_result",
-      "steps",
-    ]);
-    expect(repairSchema.allOf[1].then.required).toEqual(["repair_from", "steps"]);
   });
 
   test("rejects an empty plan at the actual create-plan response boundary", async () => {

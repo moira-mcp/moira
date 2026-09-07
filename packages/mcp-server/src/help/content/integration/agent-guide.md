@@ -11,16 +11,17 @@ This guide explains how AI agents use MCP Moira tools to execute workflows.
 
 MCP Moira exposes these tools:
 
-| Tool       | Purpose                       |
-| ---------- | ----------------------------- |
-| `list`     | List available workflows      |
-| `start`    | Start workflow execution      |
-| `step`     | Advance workflow with input   |
-| `manage`   | CRUD operations on workflows  |
-| `session`  | User info and execution state |
-| `settings` | User settings                 |
-| `token`    | Upload/download tokens        |
-| `help`     | Documentation                 |
+| Tool            | Purpose                       |
+| --------------- | ----------------------------- |
+| `list`          | List available workflows      |
+| `start`         | Start workflow execution      |
+| `step`          | Advance workflow with input   |
+| `manage`        | CRUD operations on workflows  |
+| `session`       | User info and execution state |
+| `settings`      | User settings                 |
+| `communication` | Authenticated user delivery   |
+| `token`         | Upload/download tokens        |
+| `help`          | Documentation                 |
 
 ## Basic Workflow Execution
 
@@ -30,7 +31,7 @@ MCP Moira exposes these tools:
 start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
 ```
 
-When Telegram pre-flight setup is not required, the response contains:
+When no notification or trusted-lock setup is required, the response contains:
 
 ```json
 {
@@ -47,8 +48,11 @@ When Telegram pre-flight setup is not required, the response contains:
 }
 ```
 
-If the workflow requires Telegram setup, `start` returns setup guidance without creating an
-execution or returning a `processId`. Complete that guidance and call `start` again.
+If a generic notification workflow has no configured user channel, `start` returns Settings >
+Notifications guidance without creating an execution or returning a `processId`. Legacy
+Telegram-notification workflows return Telegram setup guidance. Use `skipNotificationCheck: true`
+only to bypass optional ordinary-notification preflight; it never authorizes a send or bypasses the
+mandatory Telegram configuration for a `lock` node.
 
 ### 2. Execute Step
 

@@ -5,8 +5,8 @@
   "id": "b33e227c-cc2c-4931-ae5d-2de69932e41e",
   "metadata": {
     "name": "Smart Purchase Assistant",
-    "version": "4.0.0",
-    "description": "Produces a durable, evidence-linked purchase decision package for one product need: it captures use, region, currency, budget, constraints, source and privacy limits, operating mode, and separate publication/notification authority; researches current category trade-offs, relevant variants, specifications, prices, availability, seller terms and review evidence without fixed quotas or fabricated certainty; and creates a buyer guide, comparison, profile-specific recommendations, direct observed links, limitations, pre-purchase checks, readable Markdown and self-contained HTML. A filesystem workspace, deterministic HTML observations and genuinely independent semantic review precede cause-owned evidence/report repair or contract reassessment. Outcomes distinguish complete, reviewed-limited, blocked and interactive-aborted local results; optional artifact upload and Telegram transport cannot invalidate an accepted local report. The workflow never buys, reserves, contacts sellers, submits forms, spends money, changes settings, commits, publishes without authority or mutates production. Because the graph contains an optional Telegram node, start it with skipTelegramCheck: true; actual notification configuration is observed only on the authorized delivery route. Choose it for product selection; use a research workflow for evidence synthesis without purchase semantics or Data Analysis for supplied datasets."
+    "version": "4.0.1",
+    "description": "Produces a durable, evidence-linked purchase decision package for one product need: it captures use, region, currency, budget, constraints, source and privacy limits, operating mode, and separate publication/notification authority; researches current category trade-offs, relevant variants, specifications, prices, availability, seller terms and review evidence without fixed quotas or fabricated certainty; and creates a buyer guide, comparison, profile-specific recommendations, direct observed links, limitations, pre-purchase checks, readable Markdown and self-contained HTML. A filesystem workspace, deterministic HTML observations and genuinely independent semantic review precede cause-owned evidence/report repair or contract reassessment. Outcomes distinguish complete, reviewed-limited, blocked and interactive-aborted local results; optional artifact upload and configured user notification cannot invalidate an accepted local report. The workflow never buys, reserves, contacts sellers, submits forms, spends money, changes settings, commits, publishes without authority or mutates production. Because the graph contains an optional user-notification node, start it with skipNotificationCheck: true when no ordinary communication channel is configured; actual notification configuration is observed only on the authorized delivery route. Choose it for product selection; use a research workflow for evidence synthesis without purchase semantics or Data Analysis for supplied datasets."
   },
   "nodes": [
     {
@@ -19,7 +19,7 @@
     {
       "id": "intake",
       "type": "agent-directive",
-      "directive": "Reuse the originating purchase request and every explicit decision already present. Capture the bounded complete request as purchase_request, then resolve the product need, intended use, region and currency, budget, material constraints, decision deadline, desired depth, source/privacy limits, operating mode, filesystem availability, and separate artifact-publication and Telegram-notification authority. Ask only for a material unknown; in autonomous mode an unresolved prerequisite is blocked and absent external-effect authority is false. Filesystem availability comes from the actual tool set, not a guessed receipt. The workflow is advisory and has no authority to purchase, reserve, contact sellers, submit forms or spend money. Return actionable only when responsible durable research can begin.",
+      "directive": "Reuse the originating purchase request and every explicit decision already present. Capture the bounded complete request as purchase_request, then resolve the product need, intended use, region and currency, budget, material constraints, decision deadline, desired depth, source/privacy limits, operating mode, filesystem availability, and separate artifact-publication and user-notification authority. Ask only for a material unknown; in autonomous mode an unresolved prerequisite is blocked and absent external-effect authority is false. Filesystem availability comes from the actual tool set, not a guessed receipt. The workflow is advisory and has no authority to purchase, reserve, contact sellers, submit forms or spend money. Return actionable only when responsible durable research can begin.",
       "completionCondition": "The bounded purchase request, real filesystem prerequisite, mode, privacy ceiling and separate delivery authority are resolved without invented permission",
       "inputSchema": {
         "type": "object",
@@ -1297,8 +1297,9 @@
     },
     {
       "id": "send-notification",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "Smart Purchase Assistant completed independent review.\n\n{{recommendation_summary}}\n\nPublic report when available: {{public_url}}",
+      "format": "plain",
       "connections": {
         "default": "route-notification-sent",
         "error": "finalize-notification-error"
@@ -1308,11 +1309,23 @@
       "id": "route-notification-sent",
       "type": "condition",
       "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "send-notification.telegramNotificationSent"
-        },
-        "right": true
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "send-notification.userNotificationStatus"
+            },
+            "right": "delivered"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "send-notification.userNotificationStatus"
+            },
+            "right": "partial"
+          }
+        ]
       },
       "connections": {
         "true": "finalize-notified",
@@ -1361,7 +1374,7 @@
     {
       "id": "finalize-notified",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized Telegram handler returned telegramNotificationSent=true; this proves accepted send handling, not user receipt. Write final-report.md with the independently accepted local result and actual publication/notification outcomes. Preserve the accepted summaries, set notification_status sent, and return the exact final report path. Do not mutate the package.",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized user-notification node returned a delivered or partial status; this proves accepted handling by at least one configured channel, not user receipt. Write final-report.md with the independently accepted local result and actual publication/notification outcomes. Preserve the accepted summaries, set notification_status sent, and return the exact final report path. Do not mutate the package.",
       "completionCondition": "Observed notification handling and the accepted local result are truthfully projected",
       "inputSchema": {
         "type": "object",
@@ -1400,7 +1413,7 @@
     {
       "id": "finalize-notification-unsent",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized Telegram node continued with telegramNotificationSent={{send-notification.telegramNotificationSent}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status not_sent, explain the bounded unconfigured/disabled/unavailable transport state without secrets, and return the exact final report path. Do not claim send or user receipt and do not rerun research.",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}} and publication_failure={{publish-artifact.failure_reason}}{{/if}}. The authorized user-notification node continued with userNotificationStatus={{send-notification.userNotificationStatus}} without any successful channel. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status not_sent, explain the bounded unconfigured/disabled/unavailable transport state without secrets, and return the exact final report path. Do not claim send or user receipt and do not rerun research.",
       "completionCondition": "The not-sent transport observation is distinct and the accepted local result remains available",
       "inputSchema": {
         "type": "object",
@@ -1439,7 +1452,7 @@
     {
       "id": "finalize-notification-error",
       "type": "agent-directive",
-      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}}, publication_failure={{publish-artifact.failure_reason}}{{/if}}{{#if send-notification.errorMessage}}, and the bounded Telegram engine error={{send-notification.errorMessage}}{{/if}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status failed, record the non-secret factual transport reason, and return the exact final report path. Do not claim send, rerun research or mutate the package.",
+      "directive": "Work only in {{workspace_path}}. Consume publication_status={{publication_status}}{{#if publish-artifact.failure_reason}}, publication_failure={{publish-artifact.failure_reason}}{{/if}}{{#if send-notification.reason}}, and the bounded user-notification engine reason={{send-notification.reason}}{{/if}}. Write final-report.md preserving the independently accepted local result and actual publication outcome, set notification_status failed, record the non-secret factual transport reason, and return the exact final report path. Do not claim send, rerun research or mutate the package.",
       "completionCondition": "The thrown notification error remains visible without invalidating the accepted local result",
       "inputSchema": {
         "type": "object",
@@ -1668,7 +1681,7 @@
     },
     "notification_authorized": {
       "type": "boolean",
-      "description": "Separate originating authority for optional Telegram notification."
+      "description": "Separate originating authority for optional configured user notification."
     },
     "workspace_path": {
       "type": "string",
@@ -1730,7 +1743,7 @@
         "not_sent",
         "failed"
       ],
-      "description": "Observed optional Telegram handler outcome.",
+      "description": "Observed optional configured-channel notification outcome.",
       "default": "not_requested"
     },
     "public_url": {

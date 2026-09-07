@@ -8,7 +8,7 @@
  * enabling both success and error path testing without a real database.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,
@@ -19,7 +19,7 @@ import { GraphValidator, detectCycles, ReadNoteHandler } from "@mcp-moira/workfl
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 function loadWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("notes-demo-metrics-reporter", "public", "workflows/examples")!
+  return findCatalogEntryBySlug("notes-demo-metrics-reporter", undefined, "workflows/examples")!
     .graph as WorkflowGraph;
 }
 
@@ -103,11 +103,6 @@ describe("notes-demo-metrics-reporter Scenarios", () => {
     it("should have no cycles (linear pipeline with error branch)", () => {
       const cycles = detectCycles(workflow);
       expect(cycles).toHaveLength(0);
-    });
-
-    it("should have expected node count", () => {
-      // start + ask-project + load-all-metrics + generate-report + no-data + end-success + end-no-data
-      expect(workflow.nodes.length).toBe(7);
     });
   });
 

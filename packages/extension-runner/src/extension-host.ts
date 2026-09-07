@@ -103,6 +103,10 @@ export class ExtensionHost {
     return this.manifest.nodes.map((node) => node.type);
   }
 
+  get communicationChannelIds(): string[] {
+    return (this.manifest.communicationChannels ?? []).map((channel) => channel.id);
+  }
+
   /** True while the extension is usable: it loaded and has not been left in a failed state. */
   get healthy(): boolean {
     return this.loadFailure === null;
@@ -325,7 +329,9 @@ export class ExtensionHost {
           message &&
           message.kind === "ready" &&
           Array.isArray(message.nodeTypes) &&
-          message.nodeTypes.every((type) => typeof type === "string")
+          message.nodeTypes.every((type) => typeof type === "string") &&
+          Array.isArray(message.communicationChannelIds) &&
+          message.communicationChannelIds.every((id) => typeof id === "string")
         ) {
           settled = true;
           this.loadFailure = null;

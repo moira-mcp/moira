@@ -2,8 +2,8 @@
   "id": "d2164606-fbda-4b33-b6dc-572571a2dd14",
   "metadata": {
     "name": "Startup Idea Validation",
-    "version": "2.0.0",
-    "description": "Evidence-led startup idea validation from free-form input to a durable local decision package: frames the decision, researches traceable current evidence, analyzes market, demand, competitors, alternatives, technical feasibility, economics, team, regulation and risks, proposes uncertainty-reduction experiments, creates a self-contained offline HTML report, runs deterministic package checks and genuinely independent semantic review, and routes cause-owned repair or contract reassessment. Autonomous mode skips human waits only; interactive mode supports clarification and accepted-result rework. Publication and Telegram notification are separately authorized optional effects whose failure never invalidates the local package. Outcomes distinguish complete local validation, blocked prerequisites and explicit abort."
+    "version": "2.0.1",
+    "description": "Evidence-led startup idea validation from free-form input to a durable local decision package: frames the decision, researches traceable current evidence, analyzes market, demand, competitors, alternatives, technical feasibility, economics, team, regulation and risks, proposes uncertainty-reduction experiments, creates a self-contained offline HTML report, runs deterministic package checks and genuinely independent semantic review, and routes cause-owned repair or contract reassessment. Autonomous mode skips human waits only; interactive mode supports clarification and accepted-result rework. Publication and configured user notification are separately authorized optional effects whose failure never invalidates the local package. Outcomes distinguish complete local validation, blocked prerequisites and explicit abort."
   },
   "nodes": [
     {
@@ -1994,8 +1994,8 @@
         "declined",
         "undecided"
       ],
-      "description": "Originating authority for optional Telegram notification.",
-      "default": "undecided"
+      "default": "undecided",
+      "description": "Originating authority for optional configured user notification."
     },
     "workspace_path": {
       "type": "string",

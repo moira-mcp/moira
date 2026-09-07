@@ -45,6 +45,7 @@ export type MoiraNodeType =
   | "condition"
   | "subgraph"
   | "telegram-notification"
+  | "user-notification"
   | "expression"
   | "read-note"
   | "write-note"
@@ -106,6 +107,13 @@ export interface TelegramNodeData extends MoiraNodeData {
   message: string;
   chatId?: string;
   parseMode?: string;
+}
+
+export interface UserNotificationNodeData extends MoiraNodeData {
+  nodeType: "user-notification";
+  message: string;
+  format?: string;
+  attachmentKind?: "image" | "document";
 }
 
 export interface SubgraphNodeData extends MoiraNodeData {
@@ -218,6 +226,7 @@ export type MoiraNodeDataUnion =
   | ConditionNodeData
   | SubgraphNodeData
   | TelegramNodeData
+  | UserNotificationNodeData
   | ExpressionNodeData
   | ReadNoteNodeData
   | WriteNoteNodeData
@@ -352,6 +361,19 @@ export const DEFAULT_NODE_STYLES: Record<MoiraNodeType, NodeStyleConfig> = {
   },
   "telegram-notification": {
     nodeType: "telegram-notification",
+    colors: {
+      primary: "#a855f7",
+      background: "#faf5ff",
+      border: "#d8b4fe",
+      text: "#7c3aed",
+    },
+    shape: "rectangle",
+    icon: "send",
+    minWidth: 120,
+    minHeight: 40,
+  },
+  "user-notification": {
+    nodeType: "user-notification",
     colors: {
       primary: "#a855f7",
       background: "#faf5ff",
@@ -502,6 +524,10 @@ export const NODE_HANDLE_POSITIONS: Record<
     sources: [Position.Left, Position.Right],
   },
   "telegram-notification": {
+    targets: [Position.Top],
+    sources: [Position.Bottom],
+  },
+  "user-notification": {
     targets: [Position.Top],
     sources: [Position.Bottom],
   },

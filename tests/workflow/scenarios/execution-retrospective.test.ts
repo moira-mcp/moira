@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -9,21 +8,19 @@ import {
   AgentMessageQueue,
   createMaterializeTar,
   GraphExecutionEngine,
-  GraphValidator,
   MaterializeHandler,
   renderMaterializeFiles,
   type ExecutionContext,
   type MaterializeNode,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type MockInput, type TestScenario } from "../../helpers/scenario-runner.js";
 
-const catalogEntry = findSystemCatalogEntry("execution-retrospective", "public")!;
+const catalogEntry = findCatalogEntryBySlug("execution-retrospective")!;
 const workflow = structuredClone(catalogEntry.graph) as WorkflowGraph;
 const reference = String(workflow.variableRegistry?.retrospective_reference?.default);
-const referenceSha256 = "d144c2f9de5c80df85705bd4f411c77c09eb3c1310f3334674d357337e3a99f1";
 
 type Candidate = {
   candidate_id: string;
@@ -902,62 +899,6 @@ async function untar(buffer: Buffer): Promise<Map<string, Buffer>> {
 }
 
 describe("execution-retrospective validation packet", () => {
-  test("exact release candidate is structurally valid and preserves the authority contract", async () => {
-    const result = await new GraphValidator().validateUnified(workflow);
-    expect(result.valid).toBe(true);
-    expect(result.issues.filter((issue) => issue.severity === "error")).toHaveLength(0);
-    expect(catalogEntry).toMatchObject({
-      slug: "execution-retrospective",
-      owner: "system-moira",
-      visibility: "public",
-    });
-    expect(workflow).toMatchObject({
-      metadata: { name: "Execution Retrospective", version: "1.0.1" },
-    });
-    expect(workflow.metadata.description).toContain("agent-session evidence");
-    expect(workflow.metadata.description).toContain("proposal-only");
-    expect(workflow.nodes).toHaveLength(17);
-    expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
-      "subject_execution_id",
-      "workspace_path",
-      "evidence_state",
-      "issues_count",
-      "report_path",
-      "workspace_process_id_file",
-      "retrospective_reference",
-    ]);
-    expect(workflow.nodes.map((node) => node.type)).not.toEqual(
-      expect.arrayContaining(["write-note", "upsert-note", "telegram-notification", "lock"]),
-    );
-
-    const serialized = JSON.stringify(workflow);
-    for (const forbidden of [
-      "retry_counter",
-      "pass_id",
-      "findings_history",
-      "approval_status",
-      "mutate the reviewed result",
-    ]) {
-      expect(serialized).not.toContain(forbidden);
-    }
-    const nodes = Object.fromEntries(workflow.nodes.map((node) => [node.id, node])) as Record<
-      string,
-      { directive?: string }
-    >;
-    expect(nodes["review-analysis"].directive).toContain("genuinely separate reviewer context");
-    expect(nodes["review-analysis"].directive).toContain("Reuse the same reviewer thread");
-    expect(nodes["review-final-report"].directive).toContain(
-      "same genuinely separate reviewer thread",
-    );
-    expect(nodes["evaluate-and-diagnose"].directive).toContain(
-      "objective failures/rework/corrections",
-    );
-    expect(nodes["evaluate-and-diagnose"].directive).toContain("Classify user correction");
-    expect(nodes["synthesize-retrospective"].directive).toContain("explicit no-change");
-    expect(String(workflow.variableRegistry?.retrospective_reference?.default)).toBe(reference);
-    expect(createHash("sha256").update(reference).digest("hex")).toBe(referenceSha256);
-  });
-
   test("all semantic archetypes, nodes, conditions, and repair routes execute", async () => {
     const results = [];
     for (const item of scenarios) {

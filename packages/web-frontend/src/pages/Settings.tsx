@@ -13,10 +13,11 @@ import {
   SettingsEditor,
   SettingDefinition as EditorSettingDefinition,
 } from "@/components/settings/SettingsEditor";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import {
+  CommunicationChannelCard,
+  type CommunicationChannelDescriptor,
+} from "@/components/settings/CommunicationChannelCard";
 import { Separator } from "@/components/ui/separator";
-import { Loader2 } from "lucide-react";
 import { ProfileSettings, type UserProfile } from "./settings/ProfileSettings";
 import { SecuritySettings } from "./settings/SecuritySettings";
 import { OAuthSettings } from "./settings/OAuthSettings";
@@ -40,10 +41,11 @@ export const Settings: React.FC = () => {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [definitions, setDefinitions] = useState<SettingDefinition[]>([]);
+  const [channels, setChannels] = useState<CommunicationChannelDescriptor[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [values, setValues] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
-  const [testing, setTesting] = useState(false);
+  const [testingChannel, setTestingChannel] = useState<string | null>(null);
 
   useEffect(() => {
     const loadAll = async () => {
@@ -62,6 +64,10 @@ export const Settings: React.FC = () => {
         const defsData = await defsResponse.json();
         setDefinitions(defsData.data || []);
 
+        const channelsResponse = await fetch("/api/notifications/channels");
+        const channelsData = await channelsResponse.json();
+        setChannels(channelsData.data || []);
+
         const valuesData = await apiClient.getUserSettings();
         setValues(valuesData);
       } catch (error) {
@@ -76,44 +82,70 @@ export const Settings: React.FC = () => {
 
   const staticSections = ["profile", "security", "oauth", "sessions", "api-tokens"];
   const allDynamic = definitions.filter((d) => !staticSections.includes(d.category));
-  const hasTelegram = allDynamic.some((d) => d.key.startsWith("telegram."));
+  const channelSettingKeys = new Set(channels.flatMap((channel) => channel.settingKeys));
+  const unassignedDynamic = allDynamic.filter(
+    (definition) => !channelSettingKeys.has(definition.key),
+  );
 
-  const handleTestNotification = async () => {
+  const editorDefinition = (def: SettingDefinition): EditorSettingDefinition => ({
+    key: def.key,
+    type: def.type,
+    category: def.category,
+    label: def.label,
+    description: def.description || null,
+    defaultValue: def.defaultValue,
+    required: def.required,
+    validation: def.validation,
+    adminOnly: def.adminOnly,
+  });
+
+  const saveSetting = async (key: string, value: unknown) => {
+    const result = await apiClient.updateUserSettings({ [key]: value });
+    const refusal = result.refused.find((entry) => entry.key === key);
+    if (refusal) throw new Error(refusal.reason);
+    setValues((previous) => ({ ...previous, [key]: value }));
     try {
-      setTesting(true);
-      const botToken = values["telegram.bot_token"];
-      const chatId = values["telegram.chat_id"];
+      const response = await fetch("/api/notifications/channels");
+      const data = await response.json();
+      if (response.ok) setChannels(data.data || []);
+    } catch (error) {
+      console.error("Failed to refresh communication channel state:", error);
+    }
+  };
 
-      if (!botToken || !chatId) {
-        toast.warning(t("pages.settings.telegram.configureBotFirst"));
-        return;
-      }
-
-      const response = await fetch("/api/notifications/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ botToken, chatId }),
-      });
+  const handleTestNotification = async (channel: CommunicationChannelDescriptor) => {
+    try {
+      setTestingChannel(channel.id);
+      const response = await fetch(
+        `/api/notifications/channels/${encodeURIComponent(channel.id)}/test`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
 
       const data = await response.json();
-
-      if (data.success) {
-        toast.success(t("pages.settings.telegram.testSuccess"));
+      const result = data.data as
+        { status?: string; channels?: Array<{ reason?: string }> } | undefined;
+      if (response.ok && result?.status === "delivered") {
+        toast.success(t("pages.settings.channels.testSuccess", { channel: channel.title }));
       } else {
-        const errorType = data.errorType;
-        const i18nKey = `pages.settings.telegram.errors.${errorType}`;
-        const translatedError = t(i18nKey);
-        const errorMessage =
-          translatedError !== i18nKey
-            ? translatedError
-            : data.message || t("pages.settings.telegram.testFailed");
-        toast.error(errorMessage);
+        const reason = result?.channels?.[0]?.reason;
+        toast.error(
+          reason
+            ? t(`pages.settings.channels.errors.${reason}`, {
+                defaultValue: t("pages.settings.channels.testFailed", {
+                  channel: channel.title,
+                }),
+              })
+            : t("pages.settings.channels.testFailed", { channel: channel.title }),
+        );
       }
     } catch (error) {
       console.error("Failed to test notification:", error);
-      toast.error(t("pages.settings.telegram.testFailed"));
+      toast.error(t("pages.settings.channels.testFailed", { channel: channel.title }));
     } finally {
-      setTesting(false);
+      setTestingChannel(null);
     }
   };
 
@@ -139,7 +171,7 @@ export const Settings: React.FC = () => {
         </section>
 
         {/* Dynamic Settings (Notifications) */}
-        {allDynamic.length > 0 && (
+        {channels.length > 0 && (
           <>
             <Separator />
             <section data-testid="settings-section-dynamic">
@@ -147,64 +179,38 @@ export const Settings: React.FC = () => {
                 {t("pages.settings.tabs.notifications", "Notifications")}
               </h2>
               <div className="space-y-6">
-                <SettingsEditor
-                  definitions={allDynamic.map((def): EditorSettingDefinition => ({
-                    key: def.key,
-                    type: def.type,
-                    category: def.category,
-                    label: def.label,
-                    description: def.description || null,
-                    defaultValue: def.defaultValue,
-                    required: def.required,
-                    validation: def.validation,
-                    adminOnly: def.adminOnly,
-                  }))}
-                  values={values}
-                  onSave={async (key, value) => {
-                    // The endpoint saves what it may and reports the rest, so a refusal arrives as
-                    // a normal response. Treating it as success would leave the screen showing a
-                    // value the server does not hold.
-                    const result = await apiClient.updateUserSettings({ [key]: value });
-                    const refusal = result.refused.find((entry) => entry.key === key);
-                    if (refusal) throw new Error(refusal.reason);
-                    setValues((prev) => ({ ...prev, [key]: value }));
-                  }}
-                  loading={loading}
-                  testIdPrefix="user-setting"
-                  enableFullscreenEdit={true}
-                  collapsible={false}
-                />
-
-                {hasTelegram && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">
-                        {t("pages.settings.telegram.testNotification")}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Button variant="outline" onClick={handleTestNotification} disabled={testing}>
-                        {testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {testing
-                          ? t("pages.settings.telegram.sending")
-                          : t("pages.settings.telegram.testNotification")}
-                      </Button>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {t("pages.settings.telegram.testDescription")}
-                      </p>
-                      <p className="text-sm text-muted-foreground mt-2">
-                        {t("pages.settings.telegram.setupGuide")}{" "}
-                        <a
-                          href="/docs/integration/telegram-setup/"
-                          className="text-primary underline hover:text-primary/80"
-                        >
-                          {t("pages.settings.telegram.setupGuideLink")}
-                        </a>
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
+                {channels.map((channel) => (
+                  <CommunicationChannelCard
+                    key={channel.id}
+                    channel={channel}
+                    definitions={allDynamic
+                      .filter((definition) => channel.settingKeys.includes(definition.key))
+                      .map(editorDefinition)}
+                    values={values}
+                    testing={testingChannel === channel.id}
+                    onSave={saveSetting}
+                    onTest={handleTestNotification}
+                  />
+                ))}
               </div>
+            </section>
+          </>
+        )}
+
+        {unassignedDynamic.length > 0 && (
+          <>
+            <Separator />
+            <section data-testid="settings-section-other">
+              <h2 className="text-lg font-semibold mb-4">{t("pages.settings.tabs.settings")}</h2>
+              <SettingsEditor
+                definitions={unassignedDynamic.map(editorDefinition)}
+                values={values}
+                onSave={saveSetting}
+                loading={loading}
+                testIdPrefix="user-setting"
+                enableFullscreenEdit
+                collapsible={false}
+              />
             </section>
           </>
         )}

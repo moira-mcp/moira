@@ -51,6 +51,13 @@ jest.unstable_mockModule("@mcp-moira/workflow-engine", () => ({
       return getSettingDefinitions();
     }
   },
+  getActiveExtensionRegistry: () => null,
+  TrustedExtensionChannelApprovalService: class {
+    async isApproved() {
+      return false;
+    }
+    async setApproved() {}
+  },
 }));
 
 jest.unstable_mockModule("@mcp-moira/shared", () => ({

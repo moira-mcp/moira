@@ -35,6 +35,7 @@ import {
   AgentDirectiveNodeData,
   ConditionNodeData,
   TelegramNodeData,
+  UserNotificationNodeData,
   SubgraphNodeData,
   ReadNoteNodeData,
   WriteNoteNodeData,
@@ -60,6 +61,7 @@ export const nodeTypes: NodeTypes = {
   agentDirective: CompactNode,
   condition: CompactNode,
   "telegram-notification": CompactNode,
+  "user-notification": CompactNode,
   telegram: CompactNode,
   subgraph: CompactNode,
   expression: CompactNode,
@@ -114,6 +116,30 @@ export class NodeFactory {
     if ((mcpNode as any).type === "telegram-notification") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return this.createTelegramNode(mcpNode as any, baseNodeData);
+    }
+
+    if (mcpNode.type === "user-notification") {
+      const notification = mcpNode as import("../types").UserNotificationNode;
+      const nodeData = {
+        ...baseNodeData,
+        nodeType: "user-notification",
+        label: notification.metadata?.displayName || "User Notification",
+        description: this.truncateText(notification.message, 80),
+        message: notification.message,
+        format: notification.format,
+        attachmentKind: notification.attachProgressImage ? "image" : notification.attachment?.kind,
+        color: DEFAULT_NODE_STYLES["user-notification"].colors.primary,
+        icon: DEFAULT_NODE_STYLES["user-notification"].icon,
+      } as UserNotificationNodeData;
+      return {
+        id: notification.id,
+        type: "user-notification",
+        position: { x: 0, y: 0 },
+        data: nodeData,
+        draggable: true,
+        selectable: true,
+        deletable: false,
+      };
     }
 
     if (isExpressionNode(mcpNode)) {
@@ -880,6 +906,12 @@ export const NodeValidation = {
             errors.push("Materialize node must have success connection");
           }
         }
+        break;
+
+      case "user-notification":
+        if (!node.message) errors.push("User notification node must have a message");
+        if (!node.connections?.default)
+          errors.push("User notification node must have default connection");
         break;
 
       default: {

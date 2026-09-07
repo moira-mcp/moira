@@ -77,7 +77,7 @@ The workflow requires explicit closed decisions at material boundaries:
 - choose `analysis_only`, `apply`, `revise`, or `abort` for the current zero-reviewed recommendations;
 - when evidence or a safe baseline is irreducibly incomplete, choose a limited non-mutating report or abort;
 - after an audit-caused test failure, choose contained repair or scoped revert;
-- after the local reports pass independent review, choose local delivery, static publication, or publication followed by Telegram notification.
+- after the local reports pass independent review, choose local delivery, static publication, or publication followed by a configured user notification.
 
 Silence is never acceptance or mutation authority. `apply` authorizes only the exact current reviewed set. It does not authorize credentials, a wider project scope, destructive unrelated work, deployment, or external delivery that was not separately selected.
 
@@ -113,7 +113,7 @@ Report-producing outcomes are distinct:
 
 Local delivery has no external side effect. Publication uploads only the independently reviewed self-contained `report.html` through the authorized Moira static-artifact file/archive API. Raw source files, workspace evidence, and sensitive records are not uploaded. The workflow returns a URL only after observing a real successful upload; upload failure leaves an empty URL and remains visible.
 
-Telegram notification is attempted only after explicit `publish_notify` selection and a real report URL. The message states the factual outcome, limitations, and exact test summary. Notification failure does not invalidate the reviewed local report or successful upload, but remains visible in `notification_state`.
+A user notification is attempted through the authenticated `communication` tool only after explicit `publish_notify` selection and a real report URL. The message states the factual outcome, limitations, and exact test summary. Notification failure does not invalidate the reviewed local report or successful upload, but remains visible in `notification_state`.
 
 The final review checks privacy, licensing, minimization, publication safety, stale evidence, and unsupported success language. The workflow never discovers credentials or broadens access.
 

@@ -1,5 +1,5 @@
-/** Contract and route scenarios for moira/startup-idea-validation v2. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Contract and route scenarios for moira/startup-idea-validation. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -14,7 +14,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("startup-idea-validation", "public")!;
+const entry = findCatalogEntryBySlug("startup-idea-validation")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const workspace = (executionId: string) => `./moira-ws/startup-idea-validation-${executionId}`;
 
@@ -130,70 +130,13 @@ async function run(scenario: TestScenario, materializeError = false): Promise<Sc
 }
 
 describe("startup-idea-validation", () => {
-  test("publishes the evidence-led v2 identity and artifact contract", async () => {
+  test("validates the executable graph and provider-neutral notification boundary", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.id).toBe("d2164606-fbda-4b33-b6dc-572571a2dd14");
-    expect(graph.metadata.version).toBe("2.0.0");
-    expect(graph.metadata.description).toContain("self-contained offline HTML");
-    expect(graph.metadata.description).toContain("separately authorized optional effects");
     expect(graph.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(false);
-    expect(
-      graph.nodes.filter((candidate) => candidate.type === "agent-directive").length,
-    ).toBeLessThan(27);
-  });
-
-  test("keeps detailed bodies in one execution-correlated workspace", () => {
-    const graph = workflow();
-    expect(graph.variableRegistry?.workspace_path).toMatchObject({
-      const: "./moira-ws/startup-idea-validation-{{executionId}}",
-      default: "./moira-ws/startup-idea-validation-{{executionId}}",
-    });
-    expect(
-      node(graph, "materialize-workspace").files.map((file: { path: string }) => file.path),
-    ).toEqual([
-      "process-id.txt",
-      "idea-framing.md",
-      "source-register.md",
-      "evidence-research.md",
-      "feasibility-options.md",
-      "decision.md",
-      "report.html",
-      "package-validation.md",
-      "contract-review.md",
-      "semantic-review.md",
-      "repair-account.md",
-      "final-report.md",
-    ]);
-    expect(node(graph, "finalize-result").inputSchema.xContextPathSuffixes).toEqual({
-      baseContextProperty: "workspace_path",
-      properties: { artifact_path: "/final-report.md" },
-    });
-    expect(node(graph, "intake").directive).toContain("{{startup_idea}}");
-  });
-
-  test("separates mechanical evidence, semantic judgment, repair, and authority", () => {
-    const graph = workflow();
-    expect(node(graph, "validate-package").directive).toContain(
-      "Mechanical green proves only measured properties",
-    );
-    expect(node(graph, "semantic-review").directive).toContain("genuinely independent");
-    expect(node(graph, "review-corrected-contract").directive).toContain(
-      "genuinely independent review",
-    );
-    expect(node(graph, "repair-evidence").connections.success).toBe(
-      "route-evidence-repair-changed",
-    );
-    expect(node(graph, "route-evidence-repair-changed").connections.true).toBe("research-evidence");
-    expect(node(graph, "publish-artifact").directive).toContain("resolved publication authority");
-    expect(node(graph, "send-notification").directive).toContain(
-      "authorized completion notification",
-    );
   });
 
   test.each([

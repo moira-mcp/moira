@@ -5,8 +5,8 @@
   "id": "8057a74f-8ef1-4b19-b54f-0abe8a8627fe",
   "metadata": {
     "name": "Universal Research Workflow",
-    "version": "3.0.2",
-    "description": "Portable adaptive external research for a supplied topic or decision question. Captures audience, language, scope, advisory depth, constraints, success criteria, source expectations, privacy/licensing limits, storage capability, operating mode, and separate publication/notification authority. It discovers and evaluates authorized literature or web evidence without fixed source, word, tool, or formatting quotas; records truthful provenance, access outcomes, claim support, contradictions, uncertainty, currency, and limitations; and produces either six execution-bound filesystem artifacts or a bounded self-contained memory result. A genuinely independent reviewer must report exactly zero current blockers before authoritative or reviewed-limited delivery, and changed repair re-enters at the earliest stale contract, source, analysis, or presentation boundary. Local delivery is the default; static publication and Telegram notification require separate explicit authority and observed success, while failures preserve the accepted local result. Choose this portable workflow when the method must adapt to the question and filesystem access may be unavailable; use Verified Research for bounded mostly linear verification, Iterative Research for filesystem-first bounded review cycles, Deep Corpus Research for separately authorized corpus-scale work, Data Analysis for supplied datasets, Content Creation for drafting, and Software Development Flow for repository implementation."
+    "version": "3.0.3",
+    "description": "Portable adaptive external research for a supplied topic or decision question. Captures audience, language, scope, advisory depth, constraints, success criteria, source expectations, privacy/licensing limits, storage capability, operating mode, and separate publication/notification authority. It discovers and evaluates authorized literature or web evidence without fixed source, word, tool, or formatting quotas; records truthful provenance, access outcomes, claim support, contradictions, uncertainty, currency, and limitations; and produces either six execution-bound filesystem artifacts or a bounded self-contained memory result. A genuinely independent reviewer must report exactly zero current blockers before authoritative or reviewed-limited delivery, and changed repair re-enters at the earliest stale contract, source, analysis, or presentation boundary. Local delivery is the default; static publication and configured user notification require separate explicit authority and observed success, while failures preserve the accepted local result. Choose this portable workflow when the method must adapt to the question and filesystem access may be unavailable; use Verified Research for bounded mostly linear verification, Iterative Research for filesystem-first bounded review cycles, Deep Corpus Research for separately authorized corpus-scale work, Data Analysis for supplied datasets, Content Creation for drafting, and Software Development Flow for repository implementation."
   },
   "nodes": [
     {
@@ -2062,7 +2062,7 @@
     {
       "id": "choose-delivery",
       "type": "agent-directive",
-      "directive": "The authoritative result has an exact zero-blocker independent review. Ask once whether to keep it local, publish delivery.html, publish and then notify by Telegram, or abort. Explain that publication and notification use their separately captured authority flags and this decision cannot grant missing authority. Do not perform any side effect here.",
+      "directive": "The authoritative result has an exact zero-blocker independent review. Ask once whether to keep it local, publish delivery.html, publish and then notify through configured user communication channels, or abort. Explain that publication and notification use their separately captured authority flags and this decision cannot grant missing authority. Do not perform any side effect here.",
       "completionCondition": "The interactive caller chooses one delivery outcome without a side effect",
       "inputSchema": {
         "type": "object",
@@ -2344,8 +2344,9 @@
     },
     {
       "id": "send-notification",
-      "type": "telegram-notification",
+      "type": "user-notification",
       "message": "Universal Research completed, passed an independent zero-blocker review, and was published: {{publication_url}}",
+      "format": "plain",
       "connections": {
         "default": "notification-sent",
         "error": "record-notification-error"
@@ -2355,11 +2356,23 @@
       "id": "notification-sent",
       "type": "condition",
       "condition": {
-        "operator": "eq",
-        "left": {
-          "contextPath": "send-notification.telegramNotificationSent"
-        },
-        "right": true
+        "operator": "or",
+        "conditions": [
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "send-notification.userNotificationStatus"
+            },
+            "right": "delivered"
+          },
+          {
+            "operator": "eq",
+            "left": {
+              "contextPath": "send-notification.userNotificationStatus"
+            },
+            "right": "partial"
+          }
+        ]
       },
       "connections": {
         "true": "record-notified",
@@ -2626,7 +2639,7 @@
     {
       "id": "record-notified",
       "type": "agent-directive",
-      "directive": "Record only the observed successful Telegram outcome; do not copy the full tool response.",
+      "directive": "Record only the observed successful configured-channel notification outcome; do not copy the full tool response.",
       "completionCondition": "The observed sent outcome is represented minimally",
       "inputSchema": {
         "type": "object",
@@ -2647,7 +2660,7 @@
     {
       "id": "record-notification-unsent",
       "type": "agent-directive",
-      "directive": "Record only that Telegram did not report a successful send. Preserve the published result and do not invent success or rerun research.",
+      "directive": "Record only that no configured communication channel reported a successful send. Preserve the published result and do not invent success or rerun research.",
       "completionCondition": "The observed unsent outcome is represented minimally",
       "inputSchema": {
         "type": "object",
@@ -2657,7 +2670,7 @@
             "const": "notification_failed"
           },
           "reason": {
-            "const": "telegram_unsent"
+            "const": "notification_unsent"
           }
         },
         "required": [
@@ -3020,7 +3033,7 @@
     },
     "notification_authorized": {
       "type": "boolean",
-      "description": "Explicit caller authority for Telegram notification after successful publication"
+      "description": "Explicit caller authority for configured user notification after successful publication"
     },
     "storage_limitation": {
       "type": "string",

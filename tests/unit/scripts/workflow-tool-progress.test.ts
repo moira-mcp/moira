@@ -33,6 +33,12 @@ function fixture(): string {
           id: "notify",
           type: "telegram-notification",
           message: "Ready",
+          connections: { default: "user-notify" },
+        },
+        {
+          id: "user-notify",
+          type: "user-notification",
+          message: "Ready",
           connections: { default: "end" },
         },
         { id: "end", type: "end" },
@@ -76,7 +82,7 @@ describe("workflow-tool progress authoring", () => {
     expect(JSON.parse(fs.readFileSync(file, "utf8"))).not.toHaveProperty("progress");
   });
 
-  test("sets and clears node mappings and Telegram attachments", () => {
+  test("sets and clears node mappings and legacy plus portable notification attachments", () => {
     run([
       file,
       "update",
@@ -97,6 +103,15 @@ describe("workflow-tool progress authoring", () => {
       "--attach-progress-image",
       "true",
     ]);
+    run([
+      file,
+      "update",
+      "user-notify",
+      "--progress-node-id",
+      "work",
+      "--attach-progress-image",
+      "true",
+    ]);
     let workflow = JSON.parse(fs.readFileSync(file, "utf8"));
     expect(workflow.nodes.find((node: { id: string }) => node.id === "task")).toMatchObject({
       progressNodeId: "work",
@@ -107,11 +122,16 @@ describe("workflow-tool progress authoring", () => {
       progressNodeId: "work",
       attachProgressImage: true,
     });
+    expect(workflow.nodes.find((node: { id: string }) => node.id === "user-notify")).toMatchObject({
+      progressNodeId: "work",
+      attachProgressImage: true,
+    });
 
     run([file, "update", "task", "--progress-active-label", "none"]);
     run([file, "update", "task", "--progress-active-content", "none"]);
     run([file, "update", "task", "--progress-node-id", "none"]);
     run([file, "update", "notify", "--attach-progress-image", "false"]);
+    run([file, "update", "user-notify", "--attach-progress-image", "false"]);
     workflow = JSON.parse(fs.readFileSync(file, "utf8"));
     expect(workflow.nodes.find((node: { id: string }) => node.id === "task")).not.toHaveProperty(
       "progressNodeId",
@@ -125,6 +145,9 @@ describe("workflow-tool progress authoring", () => {
     expect(workflow.nodes.find((node: { id: string }) => node.id === "notify")).not.toHaveProperty(
       "attachProgressImage",
     );
+    expect(
+      workflow.nodes.find((node: { id: string }) => node.id === "user-notify"),
+    ).not.toHaveProperty("attachProgressImage");
   });
 
   test("rejects progress image attachment on a non-Telegram node", () => {

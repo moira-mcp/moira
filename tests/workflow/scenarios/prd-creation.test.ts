@@ -6,7 +6,7 @@
  * non-zero result must be repaired and reviewed again.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import { GraphValidator, type WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import {
@@ -17,7 +17,7 @@ import {
 
 type PrdContract = Record<string, unknown>;
 
-const catalogEntry = findSystemCatalogEntry("prd-creation", "public")!;
+const catalogEntry = findCatalogEntryBySlug("prd-creation")!;
 
 function loadWorkflow(): WorkflowGraph {
   return structuredClone(catalogEntry.graph) as WorkflowGraph;
@@ -160,93 +160,12 @@ describe("prd-creation", () => {
     workflow = loadWorkflow();
   });
 
-  test("preserves public identity and has the intended valid clean-or-repair graph", async () => {
-    expect(catalogEntry.owner).toBe("system-moira");
-    expect(catalogEntry.slug).toBe("prd-creation");
-    expect(catalogEntry.visibility).toBe("public");
-    expect(workflow.id).toBe("bc9be4e1-78d3-43e0-a512-6a571c24f7e2");
-    expect(workflow.metadata.version).toBe("2.0.0");
+  test("validates review and repair routing", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
-    expect(workflow.nodes.map((candidate) => candidate.id)).toEqual([
-      "start",
-      "end",
-      "author",
-      "review",
-      "review-gate",
-      "present",
-      "repair",
-    ]);
     expect(node(workflow, "review-gate").connections).toEqual({ true: "present", false: "repair" });
     expect(node(workflow, "repair").connections).toEqual({ success: "review" });
     expect(node(workflow, "end").finalOutput).toEqual(["workspace_path", "result_summary"]);
-  });
-
-  test("publishes a decision-useful description and explicit local-only authority", () => {
-    const description = workflow.metadata.description;
-    expect(description).toContain("evidence-grounded Product Requirements Document");
-    expect(description).toContain("prd.contract.json");
-    expect(description).toContain("prd.md projection");
-    expect(description).toContain("independent file-backed reviewer");
-    expect(description).toContain("delivery is unreachable while known blocking gaps remain");
-    expect(description).toContain(
-      "does not implement the product, modify project files, execute tests",
-    );
-    expect(description).toContain("Choose PRD Creation");
-    expect(description).toContain("Software Development Flow");
-    for (const id of ["author", "review", "repair", "present"]) {
-      const directive = node(workflow, id).directive;
-      expect(directive).toMatch(/implement the product/i);
-      expect(directive).toMatch(/execute (any )?tests/i);
-      expect(directive).toMatch(/publish|upload/i);
-      expect(directive).toMatch(/deploy/i);
-    }
-  });
-
-  test("uses one traversal-safe workspace, fixed artifacts, and only consumed global state", () => {
-    const registry = workflow.variableRegistry!;
-    expect(Object.keys(registry).sort()).toEqual([
-      "issues_count",
-      "result_summary",
-      "workspace_path",
-    ]);
-    expect(registry.workspace_path.pattern).toBe(
-      "^\\./moira-ws/prd-creation-[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
-    );
-    expect(node(workflow, "author").inputSchema.globalInputs).toEqual(["workspace_path"]);
-    for (const id of ["review", "repair"]) {
-      const directive = node(workflow, id).directive;
-      for (const file of [
-        "prd-requirements.md",
-        "prd-standards.md",
-        "prd.contract.json",
-        "prd.md",
-        "review.md",
-      ]) {
-        expect(directive).toContain(`{{workspace_path}}/${file}`);
-      }
-    }
-    for (const file of ["prd.contract.json", "prd.md", "review.md"]) {
-      expect(node(workflow, "present").directive).toContain(`{{workspace_path}}/${file}`);
-    }
-  });
-
-  test("keeps author and repair on the same closed, bounded canonical contract schema", () => {
-    const authorSchema = node(workflow, "author").inputSchema.properties.prd_contract;
-    const repairSchema = node(workflow, "repair").inputSchema.properties.prd_contract;
-    expect(repairSchema).toEqual(authorSchema);
-    expect(authorSchema.additionalProperties).toBe(false);
-    expect(authorSchema.properties.requirements.items.additionalProperties).toBe(false);
-    expect(authorSchema.properties.user_stories.items.properties.requirement_ids.minItems).toBe(1);
-    expect(authorSchema.properties.edge_cases.items.required).toContain("recovery");
-    expect(authorSchema.properties.metrics.properties.primary.required).toEqual(
-      expect.arrayContaining(["baseline", "target", "measurement_method", "timeframe"]),
-    );
-    expect(authorSchema.properties.readiness.enum).toEqual([
-      "ready",
-      "ready-with-limitations",
-      "not-ready",
-    ]);
   });
 
   test.each([

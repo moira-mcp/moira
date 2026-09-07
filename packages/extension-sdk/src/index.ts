@@ -94,6 +94,50 @@ export interface ExtensionNodeDefinition<
   handler: ExtensionNodeHandler<Config, Input, Output>;
 }
 
+export interface ExtensionCommunicationAttachment {
+  kind: "image" | "document";
+  bytes: Uint8Array;
+  filename: string;
+  mimeType: string;
+}
+
+export interface ExtensionCommunicationMessage {
+  text: string;
+  format?: "plain" | "markdown" | "html";
+  silent?: boolean;
+  attachment?: ExtensionCommunicationAttachment;
+}
+
+/** Services granted specifically to one channel declaration. */
+export interface ExtensionCommunicationServices {
+  fetch(url: string, init?: RequestInit): Promise<Response>;
+  secret(alias: string): Promise<string | null>;
+}
+
+export interface ExtensionCommunicationChannelContext<Settings extends JsonObject = JsonObject> {
+  message: ExtensionCommunicationMessage;
+  settings: Settings;
+  signal: AbortSignal;
+  services: ExtensionCommunicationServices;
+}
+
+export type ExtensionCommunicationChannelHandler<Settings extends JsonObject = JsonObject> = (
+  context: ExtensionCommunicationChannelContext<Settings>,
+) => Promise<void>;
+
+export interface ExtensionCommunicationChannelDefinition<Settings extends JsonObject = JsonObject> {
+  id: string;
+  configurationSchema?: JsonObject;
+  handler: ExtensionCommunicationChannelHandler<Settings>;
+}
+
+/** Declare an outbound communication channel without registering or executing it in-process. */
+export function defineChannel<Settings extends JsonObject = JsonObject>(
+  definition: ExtensionCommunicationChannelDefinition<Settings>,
+): ExtensionCommunicationChannelDefinition<Settings> {
+  return definition;
+}
+
 /**
  * Declare a node type. The function exists so that authoring is typed and so that a bundle exports
  * a recognisable shape; it performs no registration and has no side effects.
@@ -110,7 +154,8 @@ export function defineNode<
 
 /** What a bundle's entrypoint must export as its default value. */
 export interface ExtensionModule {
-  nodes: ExtensionNodeDefinition[];
+  nodes?: ExtensionNodeDefinition[];
+  communicationChannels?: ExtensionCommunicationChannelDefinition[];
 }
 
 /** Declare the bundle's set of node types. */

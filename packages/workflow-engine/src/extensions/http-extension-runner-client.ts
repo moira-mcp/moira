@@ -13,10 +13,11 @@ import {
   type ExtensionFailureKind,
   type ExtensionInvocationRequest,
   type ExtensionInvocationResult,
+  type ExtensionCommunicationChannelRequest,
   type IExtensionRunnerClient,
 } from "./extension-runner-client.js";
 import type { ExtensionManifest } from "./extension-contract.js";
-import { EXTENSION_API_VERSION } from "./extension-contract.js";
+import { EXTENSION_API_VERSION, EXTENSION_RUNNER_API_VERSION } from "./extension-contract.js";
 
 export interface HttpExtensionRunnerClientOptions {
   /** Base URL of the runner service, for example `http://moira-extension-runner:9110`. */
@@ -81,10 +82,10 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
       apiVersion?: unknown;
       extensions?: unknown;
     };
-    if (envelope.apiVersion !== EXTENSION_API_VERSION) {
+    if (envelope.apiVersion !== EXTENSION_RUNNER_API_VERSION) {
       throw new ExtensionInvocationError(
         "runner-unavailable",
-        `the extension runner metadata uses incompatible apiVersion '${String(envelope.apiVersion ?? "missing")}', expected '${EXTENSION_API_VERSION}'`,
+        `the extension runner metadata uses incompatible apiVersion '${String(envelope.apiVersion ?? "missing")}', expected '${EXTENSION_RUNNER_API_VERSION}'`,
       );
     }
     if (!Array.isArray(envelope.extensions)) {
@@ -151,6 +152,99 @@ export class HttpExtensionRunnerClient implements IExtensionRunnerClient {
     // Read through an explicit type rather than relying on narrowing: this file is also compiled by
     // the frontend project, whose compiler options narrow the union less eagerly.
     const failure = body as RunnerFailureBody;
+    throw new ExtensionInvocationError(failure.kind, failure.message);
+  }
+
+  async checkCommunicationChannel(
+    channelId: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.callCommunicationEndpoint(
+      "/channels/check",
+      { channelId, timeoutMs },
+      timeoutMs,
+      signal,
+    );
+  }
+
+  async deliverCommunicationChannel(
+    request: ExtensionCommunicationChannelRequest,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.callCommunicationEndpoint(
+      "/channels/deliver",
+      {
+        ...request,
+        message: {
+          ...request.message,
+          ...(request.message.attachment
+            ? {
+                attachment: {
+                  kind: request.message.attachment.kind,
+                  data: Buffer.from(request.message.attachment.bytes).toString("base64"),
+                  encoding: "base64",
+                  filename: request.message.attachment.filename,
+                  mimeType: request.message.attachment.mimeType,
+                },
+              }
+            : {}),
+        },
+      },
+      request.timeoutMs,
+      signal,
+    );
+  }
+
+  private async callCommunicationEndpoint(
+    pathname: string,
+    body: unknown,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (signal?.aborted) {
+      throw new ExtensionInvocationError("runner-unavailable", "communication call was cancelled");
+    }
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const grace = this.options.transportGraceMs ?? 5_000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs + grace);
+    let response: Response;
+    try {
+      response = await this.request(pathname, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new ExtensionInvocationError(
+        signal?.aborted
+          ? "runner-unavailable"
+          : controller.signal.aborted
+            ? "timeout"
+            : "runner-unavailable",
+        signal?.aborted
+          ? "communication call was cancelled"
+          : controller.signal.aborted
+            ? `the runner did not answer within ${timeoutMs + grace} ms`
+            : `the extension runner could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+
+    if (!response.ok) {
+      throw new ExtensionInvocationError(
+        "runner-unavailable",
+        `the extension runner answered with HTTP ${response.status}`,
+      );
+    }
+    const result = (await response.json()) as RunnerSuccessBody | RunnerFailureBody;
+    if (result.ok) return;
+    const failure = result as RunnerFailureBody;
     throw new ExtensionInvocationError(failure.kind, failure.message);
   }
 

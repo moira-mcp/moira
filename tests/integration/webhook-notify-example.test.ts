@@ -63,6 +63,10 @@ beforeAll(async () => {
   const manifestPath = path.join(installed, "moira-extension.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as ExtensionManifest;
   manifest.permissions = { ...manifest.permissions, network: [`127.0.0.1:${port}`] };
+  manifest.communicationChannels![0].permissions = {
+    ...manifest.communicationChannels![0].permissions,
+    network: [`127.0.0.1:${port}`],
+  };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
   runner = await startExtensionRunner({
@@ -118,6 +122,32 @@ describe("the installable webhook example", () => {
     await expect(invoke("rate-limited")).rejects.toMatchObject({
       kind: "handler-error",
       message: "rate limited by the endpoint; retry after 17 s",
+    });
+  });
+
+  test("the generic channel uses its configured recipient without caller selection", async () => {
+    const receiverAddress = receiver.address();
+    if (!receiverAddress || typeof receiverAddress === "string")
+      throw new Error("receiver stopped");
+    await expect(
+      client.deliverCommunicationChannel!({
+        channelId: "webhook-notify.notifications",
+        timeoutMs: 5_000,
+        message: { text: "generic notification" },
+        settings: {
+          "webhook-notify.enabled": true,
+          "webhook-notify.base_url": `http://127.0.0.1:${receiverAddress.port}`,
+          "webhook-notify.message_path": "/messages",
+          "webhook-notify.auth_scheme": "Token",
+          "webhook-notify.default_recipient": "configured-notifications",
+        },
+        secrets: { "webhook-notify.token": "local-test-token" },
+      }),
+    ).resolves.toBeUndefined();
+    expect(received).toEqual({
+      url: "/messages",
+      authorization: "Token local-test-token",
+      body: { text: "generic notification", channel: "configured-notifications" },
     });
   });
 });

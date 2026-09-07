@@ -271,6 +271,7 @@ export class GraphValidator {
         condition: "conditionNode",
         subgraph: "subgraphNode",
         "telegram-notification": "telegramNotificationNode",
+        "user-notification": "userNotificationNode",
         expression: "expressionNode",
         "read-note": "readNoteNode",
         "write-note": "writeNoteNode",
@@ -698,13 +699,16 @@ export class GraphValidator {
     const mappedNodes = workflow.nodes.filter((node) => node.progressNodeId);
     if (!progress) {
       for (const node of workflow.nodes) {
-        if (node.type === "telegram-notification" && node.attachProgressImage) {
+        if (
+          (node.type === "telegram-notification" || node.type === "user-notification") &&
+          node.attachProgressImage
+        ) {
           issues.push({
             type: "structure",
             severity: "error",
             nodeId: node.id,
             field: "attachProgressImage",
-            message: `Telegram node '${node.id}' cannot attach progress without a progress graph.`,
+            message: `Notification node '${node.id}' cannot attach progress without a progress graph.`,
           });
         }
       }
@@ -805,7 +809,7 @@ export class GraphValidator {
         });
       }
       if (
-        node.type === "telegram-notification" &&
+        (node.type === "telegram-notification" || node.type === "user-notification") &&
         node.attachProgressImage &&
         !node.progressNodeId
       ) {
@@ -814,7 +818,7 @@ export class GraphValidator {
           severity: "error",
           nodeId: node.id,
           field: "progressNodeId",
-          message: `Telegram node '${node.id}' must declare progressNodeId when attachProgressImage is enabled.`,
+          message: `Notification node '${node.id}' must declare progressNodeId when attachProgressImage is enabled.`,
         });
       }
     }
@@ -965,6 +969,7 @@ export class GraphValidator {
       case "end":
       case "subgraph":
       case "telegram-notification":
+      case "user-notification":
       case "read-note":
       case "write-note":
       case "upsert-note":
@@ -1763,16 +1768,26 @@ export class GraphValidator {
         }
       }
 
-      if (node.type === "telegram-notification") {
-        const telegramNode = node as { message?: string };
+      if (node.type === "telegram-notification" || node.type === "user-notification") {
+        const notificationNode = node as { message?: string; attachment?: { data?: string } };
 
         // Check message field
-        if (telegramNode.message) {
+        if (notificationNode.message) {
           issues.push(
             ...this.validateTemplateField(
-              telegramNode.message,
+              notificationNode.message,
               node.id,
               "message",
+              definedVariables,
+            ),
+          );
+        }
+        if (notificationNode.attachment?.data) {
+          issues.push(
+            ...this.validateTemplateField(
+              notificationNode.attachment.data,
+              node.id,
+              "attachment.data",
               definedVariables,
             ),
           );

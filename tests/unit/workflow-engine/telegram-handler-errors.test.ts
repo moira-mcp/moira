@@ -23,6 +23,7 @@ import type {
 } from "@mcp-moira/workflow-engine";
 import type { IDataRepository } from "@mcp-moira/workflow-engine";
 import type { IGraphExecutionEngine } from "@mcp-moira/workflow-engine";
+import { ServiceLogger } from "@mcp-moira/shared/logging/logger";
 
 // Helper to create a minimal telegram notification node
 function createTelegramNode(
@@ -204,6 +205,57 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(failureQueue.flush("test-process").messages).toHaveLength(1);
   });
 
+  test("keeps an explicit legacy chatId as the Telegram recipient", async () => {
+    const recipients: string[] = [];
+    setTestClientFactory(
+      () =>
+        ({
+          getDefaultChatId: () => "default-chat",
+          sendMessage: async ({ chatId }: { chatId: string }) => {
+            recipients.push(chatId);
+            return { ok: true };
+          },
+        }) as any,
+    );
+    mockRepository.getWorkflow = jest.fn(async () => null);
+    const result = await handler.execute(
+      createTelegramNode({ chatId: "legacy-explicit-chat" }),
+      createContext({ userId: "user-1" }),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    expect(result.data?.telegramNotificationSent).toBe(true);
+    expect(recipients).toEqual(["legacy-explicit-chat"]);
+  });
+
+  test("does not emit legacy destination or message content in log metadata", async () => {
+    const debug = jest.spyOn(ServiceLogger.prototype, "debug").mockImplementation(() => undefined);
+    setTestClientFactory(
+      () =>
+        ({
+          getDefaultChatId: () => "default-chat",
+          sendMessage: async () => ({ ok: true }),
+        }) as any,
+    );
+    mockRepository.getWorkflow = jest.fn(async () => null);
+    await handler.execute(
+      createTelegramNode({
+        chatId: "private-legacy-destination",
+        message: "private legacy message {{status}}",
+      }),
+      createContext({ userId: "user-1" }),
+      messageQueue,
+      mockRepository,
+      mockEngine,
+    );
+    const emitted = JSON.stringify(debug.mock.calls);
+    expect(emitted).toContain("messageLength");
+    expect(emitted).not.toContain("private-legacy-destination");
+    expect(emitted).not.toContain("private legacy message");
+    expect(emitted).not.toContain("completed");
+  });
+
   test("adds notification with actionable message when INVALID_TOKEN error occurs", async () => {
     setTestClientFactory(
       () =>
@@ -230,6 +282,7 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(result.action).toBe("continue");
     expect(result.data?.errorType).toBe(TelegramErrorType.INVALID_TOKEN);
     expect(result.data?.errorMessage).toContain("@BotFather");
+    expect(result.data?.errorMessage).toContain("Settings > Notifications");
 
     const flushed = messageQueue.flush("test-process");
     expect(flushed.totalMessages).toBe(1);
@@ -301,7 +354,10 @@ describe("TelegramNotificationHandler Error Handling", () => {
     expect(flushed.totalMessages).toBe(1);
 
     const notification = flushed.messages[0] as any;
-    expect(notification.notificationText).toContain("Set up in Settings");
+    expect(notification.notificationText).toContain("Settings > Notifications");
+    expect(notification.notificationText).toContain(
+      'start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
+    );
     expect(notification.status).toBe("configuration_error");
   });
 

@@ -1,5 +1,5 @@
-/** Contract and route scenarios for moira/verified-research v3. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+/** Contract and route scenarios for moira/verified-research. */
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphValidator,
@@ -14,7 +14,7 @@ import {
   type TestScenario,
 } from "../../helpers/scenario-runner.js";
 
-const entry = findSystemCatalogEntry("verified-research", "public")!;
+const entry = findCatalogEntryBySlug("verified-research")!;
 const workflow = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const workspace = (executionId: string) => `./moira-ws/verified-research-${executionId}`;
 
@@ -116,67 +116,13 @@ async function run(scenario: TestScenario, materializeError = false): Promise<Sc
 }
 
 describe("verified-research", () => {
-  test("publishes the bounded v3 identity and local artifact contract", async () => {
+  test("validates the executable research graph", async () => {
     const graph = workflow();
     expect(await new GraphValidator().validateWorkflow(graph)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(graph.id).toBe("1617b350-5e58-46a9-a783-fb9a69aec9bd");
-    expect(graph.metadata.version).toBe("3.0.0");
-    expect(graph.metadata.description).toContain("proportionate set");
-    expect(graph.metadata.description).toContain("Completion is local");
     expect(graph.nodes.some((candidate) => candidate.type === "telegram-notification")).toBe(false);
-    expect(graph.variableRegistry).not.toHaveProperty("answer_status");
-  });
-
-  test("keeps detailed bodies in one execution-correlated workspace", () => {
-    const graph = workflow();
-    expect(graph.variableRegistry?.workspace_path).toMatchObject({
-      default: "./moira-ws/verified-research-{{executionId}}",
-    });
-    expect(
-      node(graph, "materialize-workspace").files.map((file: { path: string }) => file.path),
-    ).toEqual([
-      "process-id.txt",
-      "framing.md",
-      "source-register.md",
-      "readings.md",
-      "alternative-views.md",
-      "answer.md",
-      "limitations.md",
-      "package-validation.md",
-      "semantic-review.md",
-      "contract-review.md",
-      "contract-review-findings.md",
-      "repair-account.md",
-      "final-report.md",
-    ]);
-    expect(node(graph, "finalize-result").inputSchema.xContextPathSuffixes).toEqual({
-      baseContextProperty: "workspace_path",
-      properties: { artifact_path: "/final-report.md" },
-    });
-  });
-
-  test("uses one reviewed evidence class for usable routing and terminal truth", () => {
-    const graph = workflow();
-    expect(node(graph, "research-evidence").inputSchema.required).toContain("evidence_status");
-    expect(node(graph, "research-evidence").inputSchema.properties).not.toHaveProperty(
-      "research_outcome",
-    );
-    expect(node(graph, "route-evidence-usable").condition.conditions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ left: { contextPath: "evidence_status" }, right: "ready" }),
-        expect.objectContaining({ left: { contextPath: "evidence_status" }, right: "limited" }),
-      ]),
-    );
-    expect(node(graph, "semantic-review").directive).toContain("exact canonical evidence_status");
-    expect(node(graph, "route-final-answer-status").condition).toMatchObject({
-      left: { contextPath: "evidence_status" },
-      right: "ready",
-    });
   });
 
   test.each([

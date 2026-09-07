@@ -16,6 +16,9 @@ export * from "./handlers/index.js";
 
 // Extension support (custom node types contributed by installed extensions)
 export * from "./extensions/index.js";
+export * from "./extensions/extension-communication-channel.js";
+export * from "./extensions/extension-communication-reconciler.js";
+export * from "./extensions/trusted-extension-communication.js";
 
 // Services
 export * from "./services/index.js";

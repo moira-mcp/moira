@@ -51,9 +51,10 @@ model keeps the complete task, goal, facts, completed outcomes, current activity
 action visible without hover. Text wraps without truncation and milestones pack into deterministic
 left-to-right rows when one row does not fit.
 Agents request a short-lived, revision-bound, single-use download URL through `session
-progress-image-token`; the binary does not pass through MCP. A `telegram-notification` node may set
-`attachProgressImage: true` and use its normal message as the photo caption. Such a node must map to
-an existing progress milestone.
+progress-image-token`; the binary does not pass through MCP. A `user-notification` node may set
+`attachProgressImage: true` and use its normal message as the image caption. Such a node must map to
+an existing progress milestone. The deprecated `telegram-notification` compatibility node supports
+the same attachment for existing provider-specific workflows.
 
 Engine integrations with a workflow and execution use `renderExecutionProgressImage(...)`. It
 returns `null` when progress is absent, otherwise the PNG buffer, MIME type, dimensions, workflow
@@ -146,15 +147,16 @@ Common built-in node types are shown below. This table is representative, not ex
 extensions may add namespaced node types; their current title, origin, version, and configuration
 schema come from the installation's node-type catalog.
 
-| Type                    | Purpose                                            |
-| ----------------------- | -------------------------------------------------- |
-| `start`                 | Entry point for workflow execution                 |
-| `end`                   | Terminal node marking completion                   |
-| `agent-directive`       | Agent task with directive and completion condition |
-| `condition`             | Branch based on structured conditions              |
-| `expression`            | Compute values using arithmetic expressions        |
-| `subgraph`              | Delegate to another workflow                       |
-| `telegram-notification` | Send notifications via Telegram                    |
+| Type                    | Purpose                                               |
+| ----------------------- | ----------------------------------------------------- |
+| `start`                 | Entry point for workflow execution                    |
+| `end`                   | Terminal node marking completion                      |
+| `agent-directive`       | Agent task with directive and completion condition    |
+| `condition`             | Branch based on structured conditions                 |
+| `expression`            | Compute values using arithmetic expressions           |
+| `subgraph`              | Delegate to another workflow                          |
+| `user-notification`     | Notify through the current user's configured channels |
+| `telegram-notification` | Deprecated Telegram-only compatibility node           |
 
 ## Connections
 

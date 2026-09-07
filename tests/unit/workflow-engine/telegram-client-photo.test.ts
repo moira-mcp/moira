@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, jest, test } from "@jest/globals";
 import { TelegramClient } from "@mcp-moira/workflow-engine";
+import { ServiceLogger } from "@mcp-moira/shared/logging/logger";
 
 describe("TelegramClient photo transport", () => {
   afterEach(() => jest.restoreAllMocks());
@@ -56,5 +57,46 @@ describe("TelegramClient photo transport", () => {
       }),
     ).rejects.toThrow("Photo size must be between");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("sends a document as multipart data without altering its bytes", async () => {
+    let captured: FormData | undefined;
+    jest.spyOn(global, "fetch").mockImplementation(async (_url, init) => {
+      captured = init?.body as FormData;
+      return Response.json({ ok: true });
+    });
+    const client = new TelegramClient({ botToken: "123:token", defaultChatId: "7" });
+    await client.sendDocument({
+      chatId: "7",
+      document: Uint8Array.from([0, 1, 2, 255]),
+      filename: "report.pdf",
+      mimeType: "application/pdf",
+      caption: "Report",
+    });
+    expect(captured?.get("chat_id")).toBe("7");
+    expect(captured?.get("caption")).toBe("Report");
+    const document = captured?.get("document") as File;
+    expect(document.name).toBe("report.pdf");
+    expect(document.type).toBe("application/pdf");
+    expect([...new Uint8Array(await document.arrayBuffer())]).toEqual([0, 1, 2, 255]);
+  });
+
+  test("logs delivery metadata without token, destination, or message content", async () => {
+    const info = jest.spyOn(ServiceLogger.prototype, "info").mockImplementation(() => undefined);
+    const debug = jest.spyOn(ServiceLogger.prototype, "debug").mockImplementation(() => undefined);
+    jest.spyOn(global, "fetch").mockResolvedValue(Response.json({ ok: true }));
+    const client = new TelegramClient({
+      botToken: "123:private-token",
+      defaultChatId: "private-destination",
+      apiUrl: "https://private-api.example/embedded-secret/",
+    });
+    await client.sendMessage({ chatId: "private-destination", text: "private-message" });
+    await client.testConnection();
+    const emitted = JSON.stringify([info.mock.calls, debug.mock.calls]);
+    expect(emitted).toContain("messageLength");
+    expect(emitted).not.toContain("private-token");
+    expect(emitted).not.toContain("private-destination");
+    expect(emitted).not.toContain("private-message");
+    expect(emitted).not.toContain("embedded-secret");
   });
 });

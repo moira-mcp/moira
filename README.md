@@ -37,7 +37,7 @@ consent, email verification, and the broader multi-user administration surface.
 ### Package Structure
 
 - **packages/workflow-engine/** - Core node-graph execution engine
-- **packages/extension-sdk/** - Typed authoring contract for custom node handlers
+- **packages/extension-sdk/** - Typed authoring contract for custom nodes and communication channels
 - **packages/extension-runner/** - Isolated companion service for installed extension bundles
 - **packages/mcp-server/** - MCP protocol HTTP server with tools
 - **packages/web-backend/** - Express API for workflow management
@@ -112,7 +112,7 @@ up -d` without `--build` — which is the recommended self-host path.)
 
 ### Extensions (optional)
 
-Custom node bundles run in the separate extension runner and are disabled by default. Enabling them
+Custom node and communication-channel bundles run in the separate extension runner and are disabled by default. Enabling them
 requires this source checkout because the runner image is built locally; the published Moira image
 does not import or package bundle code.
 
@@ -123,8 +123,9 @@ printf '\nMOIRA_EXTENSION_RUNNER_URL=http://moira-extension-runner:9110\n' >> .e
 docker compose --profile extensions up -d --build
 ```
 
-Before starting the example, replace its placeholder network permission and fill its per-user
-settings. See [Self-hosting: Enable
+Before starting the example, replace both placeholder network permissions and fill its per-user
+settings. The example contributes both a workflow action node and an ordinary notification channel.
+See [Self-hosting: Enable
 extensions](packages/docs/src/content/docs/docs/getting-started/self-hosting.mdx#enable-extensions)
 and [Writing an
 Extension](packages/docs/src/content/docs/docs/guides/writing-extensions.mdx) for the complete
@@ -259,17 +260,21 @@ type and its current contract, including automatic note operations and file mate
 }
 ```
 
-### Telegram Notification Node
+### User Notification Node
 
 ```json
 {
-  "type": "telegram-notification",
+  "type": "user-notification",
   "id": "notify",
   "message": "Task completed: {{result}}",
-  "chatId": "{{user_chat_id}}",
+  "format": "plain",
   "connections": { "default": "next-node-id" }
 }
 ```
+
+The node fans out to the current user's enabled communication channels and never accepts provider,
+recipient, or credential fields. The deprecated `telegram-notification` node remains available for
+existing Telegram-specific workflows, including exact explicit `chatId` semantics.
 
 ### End Node
 
@@ -386,6 +391,10 @@ settings {"action": "list"}
 # Workflow Tokens
 token {"action": "upload", "ttlMinutes": 60}
 token {"action": "download", "workflowId": "workflow-id", "ttlMinutes": 60}
+
+# User Communication
+communication {"action": "send", "message": "The report is ready."}
+communication {"action": "attachment-token", "message": "Report", "kind": "document", "filename": "report.pdf", "mimeType": "application/pdf", "sizeBytes": 12000}
 
 # Documentation
 help

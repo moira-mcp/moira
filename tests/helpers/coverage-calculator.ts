@@ -111,6 +111,7 @@ function generateHintForBranch(
 
     case "start":
     case "expression":
+    case "user-notification":
     case "telegram-notification":
       suggestedScenarioName = `Flow through ${nodeId}`;
       mockInputHint = `Ensure scenario path includes ${nodeId}`;

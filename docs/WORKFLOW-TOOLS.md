@@ -46,7 +46,7 @@ moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan 
 # Override only the current milestone label (or clear with none)
 moira-workflow ./workflows/production/flows/<flow>.json update analyze-and-plan --progress-active-label "Implement {{unit}}/{{total}}"
 
-# Attach/clear the shared progress PNG on a telegram-notification node
+# Attach/clear the shared progress PNG on a notification node
 moira-workflow ./workflows/production/flows/<flow>.json update notify-plan-ready --progress-node-id plan --attach-progress-image true
 
 # Replace all connections
@@ -97,7 +97,7 @@ moira-workflow ./workflows/production/flows/<flow>.json move node-to-move
 - Backup format: `<filename>.backup-<timestamp>.json`
 
 `--attach-progress-image` accepts `true` or `false` and is rejected for every node type except
-`telegram-notification`. These update options persist the requested fields; they do not derive a
+`user-notification` or deprecated `telegram-notification`. These update options persist the requested fields; they do not derive a
 milestone or validate its semantic meaning.
 
 `--progress-active-label` is valid only for a mapped user-visible waiting node. It follows normal

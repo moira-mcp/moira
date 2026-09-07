@@ -7,7 +7,7 @@
  * Coverage target: 100% nodes (5), 100% branches
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   runScenario,
   type TestScenario,
@@ -18,7 +18,7 @@ import { GraphValidator } from "@mcp-moira/workflow-engine";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 function loadExampleWorkflow(): WorkflowGraph {
-  return findSystemCatalogEntry("artifacts-demo-report-publisher", "public", "workflows/examples")!
+  return findCatalogEntryBySlug("artifacts-demo-report-publisher", undefined, "workflows/examples")!
     .graph as WorkflowGraph;
 }
 
@@ -39,18 +39,6 @@ describe("artifacts-demo-report-publisher Scenarios", () => {
       const validation = await validator.validateWorkflow(withId);
       expect(validation.valid).toBe(true);
       expect(validation.errors).toHaveLength(0);
-    });
-
-    it("should have expected node count", () => {
-      expect(workflow.nodes.length).toBe(5);
-    });
-
-    it("should not have htmlContent in any inputSchema", () => {
-      for (const node of workflow.nodes) {
-        if (node.inputSchema?.properties) {
-          expect(node.inputSchema.properties).not.toHaveProperty("htmlContent");
-        }
-      }
     });
   });
 

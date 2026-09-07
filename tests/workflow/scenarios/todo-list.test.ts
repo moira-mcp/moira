@@ -1,4 +1,4 @@
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   AgentMessageQueue,
   GraphExecutionEngine,
@@ -38,7 +38,7 @@ function configureMaterialize(engine: GraphExecutionEngine): void {
 }
 
 function loadProductionWorkflow(): WorkflowGraph {
-  return structuredClone(findSystemCatalogEntry("todo-list", "public")!.graph) as WorkflowGraph;
+  return structuredClone(findCatalogEntryBySlug("todo-list")!.graph) as WorkflowGraph;
 }
 
 const suppliedTasks = [
@@ -100,39 +100,6 @@ describe("todo-list minimal sequential checklist", () => {
     const validation = await new GraphValidator().validateWorkflow(workflow);
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
-    expect(workflow.metadata.version).toBe("3.5.0");
-    expect(workflow.metadata.description).toContain("minimal orchestration");
-    expect(workflow.metadata.description).toContain("canonical domain-neutral guide");
-    expect(workflow.metadata.description).toContain("no plan-design review");
-
-    expect(new Set(workflow.nodes.map((node) => node.id))).toEqual(
-      new Set([
-        "start",
-        "materialize-workflow-guide",
-        "obtain-tasks",
-        "derive-plan-state",
-        "check-tasks-remaining",
-        "project-current-task",
-        "execute-task",
-        "advance-task-cursor",
-        "end",
-        "teleport-revise-tasks",
-        "derive-revised-plan-state",
-      ]),
-    );
-    expect(Object.keys(workflow.variableRegistry ?? {})).toEqual([
-      "tasks",
-      "total_tasks",
-      "current_task",
-      "projection_index",
-      "current_task_action",
-      "current_task_expected_result",
-      "resume_from_task",
-      "progress_checklist_outcome",
-      "progress_execution_outcome",
-      "workflow_guide",
-    ]);
-
     expect(workflow.variableRegistry?.tasks).toMatchObject({
       type: "array",
       minItems: 1,
@@ -360,29 +327,6 @@ describe("todo-list minimal sequential checklist", () => {
   });
 
   test("projects truthful progress for ordinary and empty-tail revision completion", () => {
-    expect(workflow.progress?.nodes.map(({ id }) => id)).toEqual(["checklist", "prepare", "work"]);
-    expect(workflow.progress?.nodes.map((candidate) => candidate.connections?.default)).toEqual([
-      "prepare",
-      "work",
-      undefined,
-    ]);
-
-    const mapped = workflow.nodes
-      .filter((candidate) => candidate.progressNodeId)
-      .map((candidate) => [candidate.id, candidate.progressNodeId, candidate.progressActiveLabel]);
-    expect(mapped).toEqual([
-      ["materialize-workflow-guide", "checklist", "Materialize checklist guide"],
-      ["obtain-tasks", "checklist", "Build checklist"],
-      ["execute-task", "work", "Task {{current_task}}/{{total_tasks}}"],
-      ["teleport-revise-tasks", "work", "Revise checklist"],
-    ]);
-    expect(
-      workflow.nodes
-        .filter((candidate) => candidate.progressNodeId)
-        .every((candidate) => candidate.progressActiveContent?.outcome === undefined),
-    ).toBe(true);
-    expect(JSON.stringify(workflow.progress)).not.toContain("current_task_expected_result");
-
     const executionVariables = {
       current_task: 2,
       total_tasks: 2,

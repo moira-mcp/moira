@@ -446,7 +446,7 @@ describe("execution progress projection", () => {
     });
     let result = await validator.validateWorkflow(workflow);
     expect(result.errors.map((error) => error.message)).toContain(
-      "Telegram node 'notify' must declare progressNodeId when attachProgressImage is enabled.",
+      "Notification node 'notify' must declare progressNodeId when attachProgressImage is enabled.",
     );
     workflow.nodes[1].progressNodeId = "implementation";
     expect((await validator.validateWorkflow(workflow)).valid).toBe(true);
@@ -458,7 +458,7 @@ describe("execution progress projection", () => {
     delete workflow.progress;
     result = await validator.validateWorkflow(workflow);
     expect(result.errors.map((error) => error.message)).toContain(
-      "Telegram node 'notify' cannot attach progress without a progress graph.",
+      "Notification node 'notify' cannot attach progress without a progress graph.",
     );
   });
 

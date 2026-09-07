@@ -681,9 +681,9 @@ flowchart TD
 },
 {
   "id": "notify-escalation",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "⚠️ *Escalation Required*\n\nStep failed after {{step_retry}} attempts.\n\nOptions:\n- revise_plan\n- ask_user\n- skip",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": { "default": "ask-escalation-decision", "error": "ask-escalation-decision" }
 },
 {
@@ -881,7 +881,7 @@ Validate using numeric checks instead of yes/no:
 }
 ```
 
-### Telegram Notifications
+### User Notifications
 
 Notifications keep users informed during long-running workflows. Use them strategically - too many notifications become noise.
 
@@ -908,9 +908,9 @@ For multi-step tasks, notify at each major stage:
 ```json
 {
   "id": "notify-step-start",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "🚀 *Step {{current_step}}/{{total_steps}}*\n\n{{current_step_description}}",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "execute-step",
     "error": "execute-step"
@@ -925,9 +925,9 @@ Alert when workflow is blocked waiting for user:
 ```json
 {
   "id": "notify-approval-needed",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "⏳ *Awaiting your approval*\n\nPlan ready for review. Please confirm to proceed.",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "present-plan-to-user",
     "error": "present-plan-to-user"
@@ -942,9 +942,9 @@ When automatic retries fail and human decision needed:
 ```json
 {
   "id": "notify-escalation",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "⚠️ *Action Required*\n\nStep {{current_step}} failed after {{max_retries}} attempts.\n\nOptions:\n- Skip this step\n- Handle manually",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "ask-user-decision",
     "error": "ask-user-decision"
@@ -959,9 +959,9 @@ Notify when task finishes:
 ```json
 {
   "id": "notify-completion",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "✅ *Task Complete*\n\n{{task_name}}\n\nDeliverable: {{deliverable_summary}}",
-  "parseMode": "Markdown",
+  "format": "markdown",
   "connections": {
     "default": "end",
     "error": "end"
@@ -970,7 +970,9 @@ Notify when task finishes:
 ```
 
 :::tip
-Always set `connections.error` → same as `default` for graceful degradation when Telegram fails.
+Set `connections.error` to the same target as `default` when notification failure must not block
+the workflow. Without an error connection, total failure already continues through `default` with
+an explicit `all_failed` result.
 :::
 
 :::note
@@ -1171,7 +1173,7 @@ before deploying.
 6. **Iteration counters** — prevent infinite loops
 7. **User approval gates** — for critical actions
 8. **Self-documenting** — declare knowledge as variableRegistry defaults
-9. **Graceful notifications** — Telegram errors shouldn't block workflow
+9. **Graceful notifications** — channel errors should not block the workflow when notification is optional
 
 ## Related
 

@@ -66,6 +66,24 @@ export interface ExtensionInvocationResult {
   artifacts?: Array<{ name: string; content: string }>;
 }
 
+export interface ExtensionCommunicationChannelRequest {
+  channelId: string;
+  timeoutMs: number;
+  message: {
+    text: string;
+    format?: "plain" | "markdown" | "html";
+    silent?: boolean;
+    attachment?: {
+      kind: "image" | "document";
+      bytes: Uint8Array;
+      filename: string;
+      mimeType: string;
+    };
+  };
+  settings?: Record<string, unknown>;
+  secrets?: Record<string, string | null>;
+}
+
 export interface IExtensionRunnerClient {
   /**
    * Execute one custom node out-of-process.
@@ -73,4 +91,14 @@ export interface IExtensionRunnerClient {
    * the caller into `handler-error`.
    */
   invoke(request: ExtensionInvocationRequest): Promise<ExtensionInvocationResult>;
+  /** Optional only so node-only test clients remain source-compatible; channel adapters refuse it. */
+  checkCommunicationChannel?(
+    channelId: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  deliverCommunicationChannel?(
+    request: ExtensionCommunicationChannelRequest,
+    signal?: AbortSignal,
+  ): Promise<void>;
 }

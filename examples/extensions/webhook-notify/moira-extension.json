@@ -39,7 +39,54 @@
       }
     }
   ],
+  "communicationChannels": [
+    {
+      "id": "webhook-notify.notifications",
+      "title": "Webhook notifications",
+      "description": "Delivers ordinary user notifications to the configured webhook recipient.",
+      "capabilities": {
+        "text": true,
+        "image": false,
+        "document": false,
+        "trustedDelivery": false
+      },
+      "configurationSchema": {
+        "type": "object",
+        "required": [
+          "webhook-notify.enabled",
+          "webhook-notify.base_url",
+          "webhook-notify.default_recipient"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "webhook-notify.enabled": { "type": "boolean" },
+          "webhook-notify.base_url": { "type": "string", "minLength": 1 },
+          "webhook-notify.message_path": { "type": "string", "minLength": 1 },
+          "webhook-notify.auth_scheme": { "type": "string", "minLength": 1 },
+          "webhook-notify.default_recipient": { "type": "string", "minLength": 1 }
+        }
+      },
+      "enabledSetting": "webhook-notify.enabled",
+      "settings": [
+        "webhook-notify.enabled",
+        "webhook-notify.base_url",
+        "webhook-notify.message_path",
+        "webhook-notify.auth_scheme",
+        "webhook-notify.default_recipient"
+      ],
+      "permissions": {
+        "network": ["example.com"],
+        "secrets": ["webhook-notify.token"]
+      }
+    }
+  ],
   "settings": [
+    {
+      "key": "webhook-notify.enabled",
+      "type": "boolean",
+      "label": "Enable notification channel",
+      "defaultValue": "true"
+    },
     {
       "key": "webhook-notify.token",
       "type": "encrypted",
@@ -66,6 +113,13 @@
       "label": "Authorization scheme",
       "description": "Scheme used in the Authorization header.",
       "defaultValue": "Bearer"
+    },
+    {
+      "key": "webhook-notify.default_recipient",
+      "type": "string",
+      "label": "Default notification recipient",
+      "description": "Channel or recipient used by generic user notifications.",
+      "required": true
     }
   ],
   "permissions": {

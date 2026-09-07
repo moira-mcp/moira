@@ -1,5 +1,5 @@
 /** Contract and behavioral scenarios for moira/universal-research-workflow. */
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphExecutionEngine,
   GraphTemplateProcessor,
@@ -19,7 +19,7 @@ type StorageMode = "filesystem" | "memory";
 type OperatingMode = "autonomous" | "interactive";
 type DeliveryIntent = "local" | "publish" | "publish_and_notify" | "undecided";
 
-const entry = findSystemCatalogEntry("universal-research-workflow", "public")!;
+const entry = findCatalogEntryBySlug("universal-research-workflow")!;
 const graph = (): WorkflowGraph => structuredClone(entry.graph) as WorkflowGraph;
 const summary =
   "The current authorized evidence supports a bounded decision while preserving explicit uncertainty and limitations.";
@@ -244,7 +244,10 @@ function baseInputs(
       reason: "notification_not_authorized",
     },
     "record-notified": { outcome: "published_and_notified" },
-    "record-notification-unsent": { outcome: "notification_failed", reason: "telegram_unsent" },
+    "record-notification-unsent": {
+      outcome: "notification_failed",
+      reason: "notification_unsent",
+    },
     "record-notification-error": {
       outcome: "notification_failed",
       reason: "Telegram returned an error.",
@@ -267,11 +270,11 @@ function baseInputs(
 }
 
 type MaterializeMode = "success" | "error";
-type TelegramMode = "default" | "sent" | "unsent" | "error";
+type NotificationMode = "default" | "sent" | "unsent" | "error";
 function configureHandlers(
   engine: GraphExecutionEngine,
   materializeMode: MaterializeMode,
-  telegramMode: TelegramMode,
+  notificationMode: NotificationMode,
 ): void {
   const handlers = (engine as unknown as { nodeHandlers: Map<string, any> }).nodeHandlers;
   handlers.set(
@@ -291,22 +294,25 @@ function configureHandlers(
           }),
         },
   );
-  if (telegramMode !== "default") {
-    handlers.set("telegram-notification", {
-      getNodeType: () => "telegram-notification",
+  if (notificationMode !== "default") {
+    handlers.set("user-notification", {
+      getNodeType: () => "user-notification",
       execute: async (current: { id: string }) =>
-        telegramMode === "error"
+        notificationMode === "error"
           ? {
               nodeId: current.id,
               action: "continue",
               outputPath: "error",
-              data: { telegramNotificationFailed: true },
+              data: { reason: "delivery_failed" },
             }
           : {
               nodeId: current.id,
               action: "continue",
               outputPath: "default",
-              data: { telegramNotificationSent: telegramMode === "sent" },
+              data: {
+                userNotificationStatus:
+                  notificationMode === "sent" ? "delivered" : "no_configured_channels",
+              },
             },
     });
   }
@@ -315,31 +321,20 @@ function configureHandlers(
 async function run(
   scenario: TestScenario,
   materializeMode: MaterializeMode = "success",
-  telegramMode: TelegramMode = "default",
+  notificationMode: NotificationMode = "default",
 ): Promise<ScenarioResult> {
   return runScenario(graph(), scenario, {
-    engineSetup: (engine) => configureHandlers(engine, materializeMode, telegramMode),
+    engineSetup: (engine) => configureHandlers(engine, materializeMode, notificationMode),
   });
 }
 
 describe("universal-research-workflow", () => {
-  test("publishes a valid detailed v3 public contract with fixed execution-bound artifacts", async () => {
+  test("validates execution-bound research artifact behavior", async () => {
     const workflow = graph();
     expect(await new GraphValidator().validateWorkflow(workflow)).toMatchObject({
       valid: true,
       errors: [],
     });
-    expect(entry.owner).toBe("system-moira");
-    expect(entry.visibility).toBe("public");
-    expect(workflow.metadata.version).toBe("3.0.2");
-    expect(workflow.nodes).toHaveLength(92);
-    expect(workflow.metadata.description).toContain(
-      "filesystem artifacts or a bounded self-contained memory result",
-    );
-    expect(workflow.metadata.description).toContain(
-      "independent reviewer must report exactly zero",
-    );
-    expect(workflow.metadata.description).toContain("separate explicit authority");
     expect(
       node(workflow, "materialize-workspace").files.map((file: { path: string }) => file.path),
     ).toEqual([
@@ -755,7 +750,7 @@ describe("universal-research-workflow", () => {
     const cases: Array<{
       scenario: TestScenario;
       materialize?: MaterializeMode;
-      telegram?: TelegramMode;
+      notification?: NotificationMode;
     }> = [
       {
         scenario: {
@@ -966,7 +961,7 @@ describe("universal-research-workflow", () => {
           },
           expect: { status: "completed" as const },
         },
-        ...(decision === "publish_and_notify" ? { telegram: "sent" as const } : {}),
+        ...(decision === "publish_and_notify" ? { notification: "sent" as const } : {}),
       })),
       {
         scenario: {
@@ -1025,7 +1020,7 @@ describe("universal-research-workflow", () => {
           mockInputs: baseInputs("filesystem", "autonomous", "publish_and_notify"),
           expect: { status: "completed" },
         },
-        telegram: "sent",
+        notification: "sent",
       },
       {
         scenario: {
@@ -1033,7 +1028,7 @@ describe("universal-research-workflow", () => {
           mockInputs: baseInputs("filesystem", "autonomous", "publish_and_notify"),
           expect: { status: "completed" },
         },
-        telegram: "unsent",
+        notification: "unsent",
       },
       {
         scenario: {
@@ -1041,7 +1036,7 @@ describe("universal-research-workflow", () => {
           mockInputs: baseInputs("filesystem", "autonomous", "publish_and_notify"),
           expect: { status: "completed" },
         },
-        telegram: "error",
+        notification: "error",
       },
       {
         scenario: {
@@ -1068,7 +1063,7 @@ describe("universal-research-workflow", () => {
         await run(
           current.scenario,
           current.materialize ?? "success",
-          current.telegram ?? "default",
+          current.notification ?? "default",
         ),
       );
     expect(

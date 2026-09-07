@@ -14,7 +14,7 @@ Publish static HTML content accessible via public URL. Generate reports, dashboa
 | **Reports**           | Purchase analysis, research results, comparison tables |
 | **Dashboards**        | Status pages, metrics visualization                    |
 | **Shareable content** | Documents, presentations, portfolios                   |
-| **Notifications**     | Generate report + send URL via Telegram                |
+| **Notifications**     | Generate a report and send its URL to the user         |
 | **User deliverables** | Anything user needs to view in browser                 |
 
 :::caution
@@ -238,14 +238,15 @@ Check quota before upload with `artifacts({ action: "stats" })`. Clean up old ar
 
 ## Integration with Notifications
 
-Combine with telegram notifications:
+Combine with a channel-neutral user notification:
 
 ```json
 {
   "id": "notify-with-link",
-  "type": "agent-directive",
-  "directive": "Send the report URL to user via Telegram.\n\nURL: {{report_url}}\n\nUse telegram-notification to share the link.",
-  "connections": { "success": "end" }
+  "type": "user-notification",
+  "message": "Report ready: {{report_url}}",
+  "format": "plain",
+  "connections": { "default": "end", "error": "end" }
 }
 ```
 

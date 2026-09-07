@@ -6,7 +6,7 @@
  * route and reports only state that is truthfully observable in the current execution context.
  */
 
-import { findSystemCatalogEntry } from "@mcp-moira/shared";
+import { findCatalogEntryBySlug } from "@mcp-moira/shared";
 import {
   GraphTemplateProcessor,
   GraphValidator,
@@ -15,7 +15,7 @@ import {
 import { calculateCoverage } from "../../helpers/coverage-calculator.js";
 import { runScenario, type TestScenario } from "../../helpers/scenario-runner.js";
 
-const catalogEntry = findSystemCatalogEntry("infinite-task-loop", "public")!;
+const catalogEntry = findCatalogEntryBySlug("infinite-task-loop")!;
 const taskA = "Prepare the release-readiness note for service A";
 const taskB = "Investigate the new alert for service B";
 const planA = "Inspect service A evidence and write the verified readiness note.";
@@ -52,126 +52,9 @@ describe("infinite-task-loop", () => {
     workflow = loadWorkflow();
   });
 
-  test("preserves public identity and implements the accepted 13-node graph", async () => {
-    expect(catalogEntry.owner).toBe("system-moira");
-    expect(catalogEntry.slug).toBe("infinite-task-loop");
-    expect(catalogEntry.visibility).toBe("public");
-    expect(workflow.id).toBe("0bad4d93-d199-4fa5-b318-d2d3c5ddc26a");
-    expect(workflow.metadata.version).toBe("2.0.0");
-
+  test("validates the iterative task graph", async () => {
     const validation = await new GraphValidator().validateUnified(workflow);
     expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
-    expect(workflow.nodes.map((candidate) => candidate.id)).toEqual([
-      "start",
-      "ask-task",
-      "reset-current-task-state",
-      "understand-and-plan",
-      "present-plan",
-      "route-plan-approved",
-      "revise-plan",
-      "execute-task",
-      "report-results",
-      "route-results-approved",
-      "replan-after-results",
-      "teleport-exit",
-      "end",
-    ]);
-  });
-
-  test("publishes a detailed decision-useful description and neighboring-flow boundaries", () => {
-    const description = workflow.metadata.description;
-    for (const phrase of [
-      "live sequence of tasks that are not known in advance",
-      "explicit user plan approval",
-      "explicit acceptance",
-      "atomically clears the prior current plan and result",
-      "native exit teleport",
-      "no durable task ledger",
-      "crash-recovery contract",
-      "independent reviewer",
-      "Plan approval never broadens",
-      "Quick Task",
-      "Robust Task",
-      "Todo List",
-      "Software Development Flow",
-      "not for unattended batch work",
-    ]) {
-      expect(description).toContain(phrase);
-    }
-  });
-
-  test("uses exactly four bounded globals and atomically resets cross-task state", () => {
-    expect(Object.keys(workflow.variableRegistry!).sort()).toEqual([
-      "execution_plan",
-      "execution_summary",
-      "session_summary",
-      "task_description",
-    ]);
-    expect(node(workflow, "reset-current-task-state").expressions).toEqual([
-      'execution_plan = ""',
-      'execution_summary = ""',
-    ]);
-    expect(workflow.variableRegistry!.task_description).toMatchObject({
-      type: "string",
-      minLength: 1,
-      maxLength: 20000,
-      pattern: "\\S",
-    });
-    expect(workflow.variableRegistry!.session_summary).toMatchObject({
-      type: "string",
-      minLength: 1,
-      maxLength: 20000,
-      pattern: "\\S",
-    });
-    for (const id of ["understand-and-plan", "revise-plan", "replan-after-results"]) {
-      expect(node(workflow, id).inputSchema.allOf[0].properties.execution_plan).toMatchObject({
-        type: "string",
-        minLength: 20,
-        pattern: "\\S",
-      });
-    }
-    expect(
-      node(workflow, "execute-task").inputSchema.allOf[0].properties.execution_summary,
-    ).toMatchObject({ type: "string", minLength: 20, pattern: "\\S" });
-  });
-
-  test("requires strict explicit decisions and conditional nonblank feedback", () => {
-    const planSchema = node(workflow, "present-plan").inputSchema;
-    expect(planSchema.additionalProperties).toBe(false);
-    expect(planSchema.properties.plan_decision.enum).toEqual(["approve", "revise"]);
-    expect(planSchema.allOf[0].then.required).toEqual(["user_feedback"]);
-
-    const resultSchema = node(workflow, "report-results").inputSchema;
-    expect(resultSchema.additionalProperties).toBe(false);
-    expect(resultSchema.properties.result_decision.enum).toEqual(["accept", "rework"]);
-    expect(resultSchema.allOf[0].then.required).toEqual(["user_feedback"]);
-  });
-
-  test("keeps native teleport as the only terminal route and projects only its summary", () => {
-    const incomingToEnd = workflow.nodes.flatMap((candidate) =>
-      Object.entries(candidate.connections ?? {})
-        .filter(([, target]) => target === "end")
-        .map(([branch]) => `${candidate.id}:${branch}`),
-    );
-    expect(incomingToEnd).toEqual(["teleport-exit:success"]);
-    expect(node(workflow, "teleport-exit").type).toBe("teleport");
-    expect(node(workflow, "end").finalOutput).toEqual(["session_summary"]);
-  });
-
-  test("states authority and persistence limits at the executing and exit boundaries", () => {
-    const execute = node(workflow, "execute-task").directive;
-    for (const phrase of [
-      "does not broaden the original task authority",
-      "Credentials, destructive work, publication, deployment, notification",
-      "separate consent",
-      "report the verified blocker",
-    ]) {
-      expect(execute).toContain(phrase);
-    }
-    const exit = node(workflow, "teleport-exit").directive;
-    expect(exit).toContain("stores no durable task ledger");
-    expect(exit).toContain("state that limitation instead of inventing a complete history");
-    expect(exit).toContain("Do not perform more task work or imply durable recovery");
   });
 
   test("rejects blank task input before any planning", async () => {

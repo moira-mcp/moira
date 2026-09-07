@@ -36,9 +36,13 @@ Compute values using arithmetic expressions.
 
 Delegate to another workflow.
 
-### Telegram Notification
+### User Notification
 
-Send notifications via Telegram.
+Send a notification through every enabled communication channel configured by the current user.
+
+### Telegram Notification (deprecated)
+
+Telegram-only compatibility node for existing provider-specific workflows.
 
 ### Teleport
 
@@ -290,16 +294,18 @@ Subgraphs enable workflow composition and reuse. The agent sees it as a continuo
 failures in the current runtime. Those failures are logged and execution pauses at the subgraph so
 the agent can correct the cause and retry.
 
-## Telegram Notification Node
+## User Notification Node
 
-Send automated notifications via Telegram:
+Send through every valid enabled channel configured by the execution user. The workflow cannot
+choose a provider, recipient, or credential:
 
 ```json
 {
   "id": "notify-complete",
-  "type": "telegram-notification",
+  "type": "user-notification",
   "message": "Workflow {{workflowName}} completed successfully",
-  "parseMode": "Markdown",
+  "format": "markdown",
+  "silent": false,
   "connections": {
     "default": "next-step",
     "error": "notification-failed"
@@ -307,12 +313,36 @@ Send automated notifications via Telegram:
 }
 ```
 
-| Property              | Required | Description                            |
-| --------------------- | -------- | -------------------------------------- |
-| `message`             | Yes      | Notification text (supports templates) |
-| `parseMode`           | No       | Message format: "Markdown" or "HTML"   |
-| `connections.default` | Yes      | Next node after sending                |
-| `connections.error`   | No       | Next node on API failure               |
+| Property              | Required | Description                                                 |
+| --------------------- | -------- | ----------------------------------------------------------- |
+| `message`             | Yes      | Notification text with template support                     |
+| `format`              | No       | Portable format: `plain`, `markdown`, or `html`             |
+| `silent`              | No       | Request silent delivery where the provider supports it      |
+| `attachProgressImage` | No       | Attach the current bounded workflow-progress PNG            |
+| `attachment`          | No       | One bounded base64 `image` or `document` with name and MIME |
+| `connections.default` | Yes      | Full, partial, or no-eligible-channel continuation          |
+| `connections.error`   | No       | Total attempted failure; otherwise it also uses `default`   |
+
+`attachment` and an enabled `attachProgressImage` are mutually exclusive. Attachment filenames
+use the safe portable allowlist and MIME types must have a valid `type/subtype` form. The service
+applies shared per-user/provider rate limits, per-user and provider concurrency, deadlines, text
+and byte limits before provider delivery. A configured Telegram channel supports text, PNG/JPEG
+images, and documents.
+
+The node result is stored under its node ID. `userNotificationStatus` is `delivered`, `partial`,
+`no_configured_channels`, or `all_failed`; `configuredChannels`, `deliveredChannels`, and
+`channels` contain counts and sanitized per-channel status/reason values. A configured channel that
+cannot carry the requested attachment is reported as `unsupported` and skipped; without another
+eligible channel or availability failure, the aggregate is `no_configured_channels`, not
+`all_failed`. Results and errors do not contain credentials, recipients, message bodies, or
+attachment bytes.
+
+### Deprecated Telegram-specific node
+
+`telegram-notification` remains executable for existing workflows. It sends only through Telegram,
+and an authored `chatId` keeps its exact provider-specific recipient meaning. New ordinary
+notifications should use `user-notification`; changing an explicit legacy recipient to generic
+fan-out requires an intentional workflow migration.
 
 ## Teleport Node
 
@@ -385,7 +415,7 @@ PIN-based execution gate. It delivers the PIN to the current user's configured T
 
 **Behavior:**
 
-1. Starting any workflow that contains a lock node requires a valid Telegram bot token and chat ID for the current user. `skipTelegramCheck` cannot bypass this requirement.
+1. Starting any workflow that contains a lock node requires a valid Telegram bot token and chat ID for the current user. Neither `skipNotificationCheck` nor its deprecated `skipTelegramCheck` alias can bypass this requirement.
 2. On the first visit, Moira stores only a hashed pending PIN, sends the plaintext PIN to that configured chat, activates the lock, stores `_lockId`, and pauses the execution.
 3. Missing or invalid settings and delivery failures create no usable active lock or context reference. Revisiting the node retries with a fresh delivery attempt.
 4. Subsequent visits check the active lock or validate a user-supplied PIN, then route through `connections.unlocked` after resolution.

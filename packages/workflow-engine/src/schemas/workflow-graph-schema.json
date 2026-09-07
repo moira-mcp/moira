@@ -69,6 +69,9 @@
             "$ref": "#/$defs/telegramNotificationNode"
           },
           {
+            "$ref": "#/$defs/userNotificationNode"
+          },
+          {
             "$ref": "#/$defs/expressionNode"
           },
           {
@@ -469,8 +472,64 @@
       },
       "additionalProperties": false
     },
+    "userNotificationNode": {
+      "type": "object",
+      "required": ["type", "id", "message", "connections"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "user-notification" },
+        "id": { "type": "string", "minLength": 1 },
+        "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "format": { "enum": ["plain", "markdown", "html"] },
+        "silent": { "type": "boolean" },
+        "attachProgressImage": { "type": "boolean" },
+        "attachment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "data", "encoding", "filename", "mimeType"],
+          "properties": {
+            "kind": { "enum": ["image", "document"] },
+            "data": {
+              "type": "string",
+              "minLength": 4,
+              "maxLength": 27962028,
+              "pattern": "^(?:[A-Za-z0-9+/]*={0,2}|\\{\\{[^{}]+\\}\\})$"
+            },
+            "encoding": { "const": "base64" },
+            "filename": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,254}$"
+            },
+            "mimeType": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 127,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$"
+            }
+          }
+        },
+        "connections": {
+          "type": "object",
+          "required": ["default"],
+          "additionalProperties": false,
+          "properties": {
+            "default": { "type": "string", "minLength": 1 },
+            "error": { "type": "string", "minLength": 1 }
+          }
+        },
+        "metadata": { "type": "object" }
+      },
+      "not": {
+        "required": ["attachProgressImage", "attachment"],
+        "properties": { "attachProgressImage": { "const": true } }
+      }
+    },
     "telegramNotificationNode": {
       "type": "object",
+      "deprecated": true,
       "required": ["type", "id", "message", "connections"],
       "properties": {
         "type": {

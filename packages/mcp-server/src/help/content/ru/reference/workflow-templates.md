@@ -43,17 +43,17 @@ mcp__moira__start({
 })
 ```
 
-Для child work укажите в `parentExecutionId` реальный Process ID родителя. Дополнительные параметры зависят от workflow. Например, Smart Purchase Assistant содержит опциональную Telegram-ноду и должен запускаться с `skipTelegramCheck: true`; это пропускает преждевременный graph preflight, но не разрешает уведомление:
+Для child work укажите в `parentExecutionId` реальный Process ID родителя. Дополнительные параметры зависят от workflow. Например, Smart Purchase Assistant содержит опциональную ноду `user-notification`. Если у текущего пользователя нет настроенного канала связи, запустите его с `skipNotificationCheck: true`; это пропускает graph preflight, но не разрешает уведомление:
 
 ```bash
 mcp__moira__start({
   workflowId: "moira/smart-purchase-assistant",
   parentExecutionId: "none",
-  skipTelegramCheck: true
+  skipNotificationCheck: true
 })
 ```
 
-Флаг пропускает только preflight опциональных нод `telegram-notification`. Если выбранный workflow содержит ноду `lock`, текущий пользователь должен сначала настроить корректные Telegram bot token и chat ID для доверенной доставки PIN. Инструкция по настройке без Process ID не является успешным запуском.
+Канонический флаг пропускает только preflight опциональных обычных уведомлений. `skipTelegramCheck` — устаревший alias с тем же поведением; противоречащие значения отклоняются. Если выбранный workflow содержит ноду `lock`, текущий пользователь должен сначала настроить корректные Telegram bot token и chat ID для доверенной доставки PIN. Ни один флаг не обходит это требование. Инструкция по настройке без Process ID не является успешным запуском.
 
 После того как `start()` вернул Process ID, выполните текущую directive, проверьте completion condition и отправьте точный `inputSchema` через `step()`. Продолжайте до terminal result или явного решения пользователя.
 
