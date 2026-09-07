@@ -468,6 +468,7 @@ app.use(geoipLogger({ logger: httpLogger }));
 // This endpoint must precede JSON parsing because a declared document may itself use application/json.
 app.post(
   "/api/communication/attachments",
+  mcpLimiter,
   createCommunicationAttachmentHandler({
     authenticate: authenticatePrincipal,
     grantService: attachmentGrantService,
