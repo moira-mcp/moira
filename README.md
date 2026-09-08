@@ -657,6 +657,7 @@ For contributors working on the codebase (implementation detail, not end-user do
 | Design system          | UI design tokens and components                      | `docs/DESIGN-SYSTEM.md`                                           |
 | Documentation style    | How to write internal **and** public docs            | `docs/DOCUMENTATION-STYLE-GUIDE.md`                               |
 | Logging                | Structured logging conventions                       | `docs/LOGGING.md`                                                 |
+| Workspace connections  | Website authorization, encrypted credentials, API    | `docs/WORKSPACES.md`                                              |
 | Issue management       | GitHub issue conventions                             | `docs/ISSUE-MANAGEMENT.md`                                        |
 | Architecture decisions | ADRs (licensing, OSS model, …)                       | `docs/adr/`                                                       |
 | Deployment             | Environment variables, restart procedures            | `docs/deployment/`                                                |
