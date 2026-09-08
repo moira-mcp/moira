@@ -20,7 +20,8 @@ const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const NEW_TABLE = "extensionSettingValue";
 const NEW_MIGRATION_TAG = "0022_extension_setting_values";
 const LATER_TABLE = "communication_attachment_grant";
-const LATEST_MIGRATION_TAG = "0023_communication_attachment_grants";
+const ATTEMPT_TABLE = "executionMutationAttempt";
+const ATTEMPT_MIGRATION_TAG = "0024_execution_mutation_attempts";
 
 function tableNames(sqlite: ReturnType<typeof Database>): string[] {
   return (
@@ -41,9 +42,12 @@ describe("Migrating a database created before the extension value store", () => 
   test("the new table appears, the existing ones are untouched, and their rows survive", () => {
     const journal = JSON.parse(
       fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
-    ) as { entries: Array<{ tag: string }> };
-    expect(journal.entries.at(-1)?.tag).toBe(LATEST_MIGRATION_TAG);
+    ) as { entries: Array<{ tag: string; when: number }> };
     expect(journal.entries.map((entry) => entry.tag)).toContain(NEW_MIGRATION_TAG);
+    expect(journal.entries.map((entry) => entry.tag)).toContain(ATTEMPT_MIGRATION_TAG);
+    const newMigrationTimestamp = journal.entries.find(
+      (entry) => entry.tag === NEW_MIGRATION_TAG,
+    )!.when;
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moira-migration-"));
     const file = path.join(dir, "moira.db");
@@ -53,13 +57,12 @@ describe("Migrating a database created before the extension value store", () => 
     try {
       // A database as it was before this change: everything applied except the new migration.
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
+      sqlite.exec(`DROP TABLE ${ATTEMPT_TABLE}`);
       sqlite.exec(`DROP TABLE ${LATER_TABLE}`);
       sqlite.exec(`DROP TABLE ${NEW_TABLE}`);
       sqlite
-        .prepare(
-          "DELETE FROM __drizzle_migrations WHERE hash IN (SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2)",
-        )
-        .run();
+        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
+        .run(newMigrationTimestamp);
       expect(tableNames(sqlite)).not.toContain(NEW_TABLE);
 
       // Data an installation would already have, so that "untouched" means something.
@@ -82,6 +85,7 @@ describe("Migrating a database created before the extension value store", () => 
       delete schemaAfter.__drizzle_migrations;
       delete schemaAfter[NEW_TABLE];
       delete schemaAfter[LATER_TABLE];
+      delete schemaAfter[ATTEMPT_TABLE];
       // Every other table is byte-for-byte the definition it had before.
       expect(schemaAfter).toEqual(schemaBefore);
 

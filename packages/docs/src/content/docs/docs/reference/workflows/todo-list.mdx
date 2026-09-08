@@ -8,7 +8,8 @@ Todo List turns one goal into an ordered checklist and presents one task at a ti
 ## Start the workflow
 
 ```js
-mcp__moira__start({ workflowId: "moira/todo-list", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/todo-list", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The first step obtains 1–100 tasks. If the current user or caller context already contains a
@@ -53,7 +54,7 @@ Checklist and Work outcomes are bounded render-only values. Revision replaces th
 When the checklist itself turns out wrong — remaining tasks are obsolete, missing, or in the wrong order — the agent jumps to the revision node instead of finishing a list it knows is wrong:
 
 ```js
-mcp__moira__step({ processId, teleportTo: "teleport-revise-tasks" })
+mcp__moira__step({ processId, attemptId, teleportTo: "teleport-revise-tasks" })
 ```
 
 This is a jump target: no step leads into it, so a revision is always a deliberate decision. It is not an escape from a task that is merely hard, blocked, or failing — that case stays with the rule above.

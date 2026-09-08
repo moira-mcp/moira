@@ -17,6 +17,16 @@ import type {
   WorkflowListResult,
   ExecutionError,
 } from "@mcp-moira/shared";
+import type {
+  CompleteExecutionAttemptInput,
+  ClaimStartExecutionAttemptInput,
+  ExecutionAttempt,
+  ExecutionAttemptClaimResult,
+  PreparedStartExecutionAttempt,
+  PresentedExecutionAttempt,
+  ReconciledExecutionAttemptCounts,
+  StartPreconditionCompletionResult,
+} from "../types/execution-attempt.js";
 
 /**
  * Setting definition metadata
@@ -256,6 +266,67 @@ export interface IDataRepository {
     expectedRevision: number,
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult>;
+
+  prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void>;
+  claimStartExecutionAttempt(
+    input: ClaimStartExecutionAttemptInput,
+  ): Promise<ExecutionAttemptClaimResult>;
+  completeStartAttemptPrecondition(
+    attemptId: string,
+    userId: string,
+    response: string,
+    now: number,
+  ): Promise<StartPreconditionCompletionResult>;
+  getBlockingStartExecutionAttempt(
+    executionId: string,
+    userId: string,
+  ): Promise<ExecutionAttempt | null>;
+  cancelExecutionWithStartAttempt(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    error: ExecutionError,
+  ): Promise<boolean>;
+
+  createPresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void>;
+  getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null>;
+  updatePresentedExecutionAttemptResponse(
+    attemptId: string,
+    userId: string,
+    response: string,
+    now: number,
+  ): Promise<boolean>;
+  getCurrentExecutionAttempt(executionId: string, userId: string): Promise<ExecutionAttempt | null>;
+  claimExecutionAttempt(input: {
+    attemptId: string;
+    userId: string;
+    executionId: string;
+    executionRevision: number;
+    nodeId: string;
+    workflowId: string;
+    workflowVersion: string;
+    workflowDigest: string;
+    inputFingerprint: string;
+    ownerId: string;
+    now: number;
+    leaseMs: number;
+  }): Promise<ExecutionAttemptClaimResult>;
+  heartbeatExecutionAttempt(
+    attemptId: string,
+    ownerId: string,
+    fence: number,
+    now: number,
+    leaseMs: number,
+  ): Promise<boolean>;
+  completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean>;
+  markExecutionAttemptOutcomeUnknown(
+    attemptId: string,
+    ownerId: string,
+    fence: number,
+    now: number,
+  ): Promise<boolean>;
+  reconcileExpiredExecutionAttempts(now: number): Promise<ReconciledExecutionAttemptCounts>;
+  cleanupExecutionAttempts(now: number): Promise<number>;
 
   // === Settings Operations ===
 

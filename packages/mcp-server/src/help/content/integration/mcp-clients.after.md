@@ -4,7 +4,7 @@ For custom MCP client implementations, use the MCP SDK with URL: `{MCP_URL}`
 
 ## Available Tools
 
-The core lifecycle is `list` → `start` → repeated `step` calls, with `session` for inspecting or
+The core lifecycle is `list` → `start` prepare → `start` execute → repeated `step` calls, with `session` for inspecting or
 resuming executions and `help` for runtime documentation. The
 [MCP tools reference](/docs/reference/tools/) is the source for the complete current
 catalog, exact input schemas, actions, and examples.
@@ -84,7 +84,7 @@ an account that cannot access MCP, still receives its normal authentication or a
 }
 ```
 
-### Start Workflow
+### Prepare Workflow Start
 
 ```json
 {
@@ -92,8 +92,24 @@ an account that cannot access MCP, still receives its normal authentication or a
   "params": {
     "name": "start",
     "arguments": {
+      "action": "prepare",
       "workflowId": "moira/software-development-flow",
       "parentExecutionId": "none"
+    }
+  }
+}
+```
+
+Preparation returns a `startAttemptId` without creating an execution. Execute it in a second call:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "start",
+    "arguments": {
+      "action": "execute",
+      "startAttemptId": "start-attempt-current"
     }
   }
 }
@@ -108,6 +124,7 @@ an account that cannot access MCP, still receives its normal authentication or a
     "name": "step",
     "arguments": {
       "processId": "abc-123",
+      "attemptId": "attempt-current",
       "input": {
         "result": "Task completed successfully",
         "details": { "files": ["main.ts", "utils.ts"] }
@@ -121,13 +138,15 @@ an account that cannot access MCP, still receives its normal authentication or a
 
 Common error responses:
 
-| Error              | Cause                         | Solution                            |
-| ------------------ | ----------------------------- | ----------------------------------- |
-| `UNAUTHORIZED`     | Invalid/expired token         | Re-authenticate                     |
-| `NOT_FOUND`        | Invalid workflow/process ID   | Verify IDs                          |
-| `FORBIDDEN`        | No access to resource         | Check permissions                   |
-| `upgrade_required` | MCP catalog must be refreshed | Reconnect using the same credential |
-| `VALIDATION_ERROR` | Invalid input                 | Check input schema                  |
+| Error                     | Cause                         | Solution                            |
+| ------------------------- | ----------------------------- | ----------------------------------- |
+| `UNAUTHORIZED`            | Invalid/expired token         | Re-authenticate                     |
+| `NOT_FOUND`               | Invalid workflow/process ID   | Verify IDs                          |
+| `FORBIDDEN`               | No access to resource         | Check permissions                   |
+| `upgrade_required`        | MCP catalog must be refreshed | Reconnect using the same credential |
+| `VALIDATION_ERROR`        | Invalid input                 | Check input schema                  |
+| `ATTEMPT_PROCESSING`      | Duplicate still executing     | Retry the same attempt and input    |
+| `ATTEMPT_OUTCOME_UNKNOWN` | Effect may have occurred      | Inspect the returned Process ID     |
 
 ## Self-Hosted Setup
 

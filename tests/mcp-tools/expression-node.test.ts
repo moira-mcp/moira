@@ -4,7 +4,13 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  advanceWorkflowExecution,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecution,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import { MCP_TEST_WORKFLOWS } from "../fixtures/mcp-workflows.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
@@ -64,10 +70,7 @@ describe("MCP Expression Node E2E", () => {
 
   test("expression node evaluates arithmetic and updates context", async () => {
     // Start workflow with expression node
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: withExpressionId,
-    });
+    const startResult = await startWorkflowExecution(client, withExpressionId);
 
     // Extract process ID
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
@@ -85,10 +88,7 @@ describe("MCP Expression Node E2E", () => {
 
   test("expression node results available in context", async () => {
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: withExpressionId,
-    });
+    const startResult = await startWorkflowExecution(client, withExpressionId);
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     const processId = processIdMatch![1];
@@ -109,10 +109,7 @@ describe("MCP Expression Node E2E", () => {
 
   test("multiple expression nodes chain correctly", async () => {
     // Start workflow with chain of expression nodes
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: expressionChainId,
-    });
+    const startResult = await startWorkflowExecution(client, expressionChainId);
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     const processId = processIdMatch![1];
@@ -139,10 +136,7 @@ describe("MCP Expression Node E2E", () => {
 
   test("expression node handles nested context paths", async () => {
     // Start workflow with nested path expression
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: expressionNestedId,
-    });
+    const startResult = await startWorkflowExecution(client, expressionNestedId);
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     const processId = processIdMatch![1];
@@ -167,18 +161,11 @@ describe("MCP Expression Node E2E", () => {
 
   test("expression node workflow completes successfully", async () => {
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: withExpressionId,
-    });
-
-    const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
-    const processId = processIdMatch![1];
+    const execution = await startWorkflowExecutionState(client, withExpressionId);
 
     // Execute the verify step
-    const stepResult = await callMCPTool<string>(client, "step", {
-      processId,
-      input: { confirmation: "counter=1, result=3" },
+    const stepResult = await advanceWorkflowExecution(client, execution, {
+      confirmation: "counter=1, result=3",
     });
 
     // Should complete workflow

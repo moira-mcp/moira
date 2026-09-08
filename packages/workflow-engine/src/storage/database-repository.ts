@@ -10,6 +10,7 @@ import {
   getSqliteInstance,
   WorkflowRepository,
   ExecutionRepository,
+  ExecutionAttemptRepository,
   SettingsRepository,
   ExtensionSettingsRepository,
   AuditRepository,
@@ -33,6 +34,16 @@ import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import { WorkflowExecution } from "../types/base-types.js";
 import type { ReminderMutation, ReminderMutationResult } from "../types/base-types.js";
+import type {
+  CompleteExecutionAttemptInput,
+  ClaimStartExecutionAttemptInput,
+  ExecutionAttempt,
+  ExecutionAttemptClaimResult,
+  PreparedStartExecutionAttempt,
+  PresentedExecutionAttempt,
+  ReconciledExecutionAttemptCounts,
+  StartPreconditionCompletionResult,
+} from "../types/execution-attempt.js";
 import { createLogger, ValidationError, AuditAction, getAuditSource } from "@mcp-moira/shared";
 import {
   extensionSettingDefinition,
@@ -63,6 +74,7 @@ export class DatabaseRepository implements IDataRepository {
   // Repositories for read operations
   private workflowRepo: WorkflowRepository;
   private executionRepo: ExecutionRepository;
+  private executionAttemptRepo: ExecutionAttemptRepository;
   private settingsRepo: SettingsRepository;
   private extensionSettingsRepo: ExtensionSettingsRepository;
   private auditRepo: AuditRepository;
@@ -82,6 +94,7 @@ export class DatabaseRepository implements IDataRepository {
     // Initialize repositories for read operations
     this.workflowRepo = new WorkflowRepository(db);
     this.executionRepo = new ExecutionRepository(db);
+    this.executionAttemptRepo = new ExecutionAttemptRepository(getSqliteInstance());
     this.settingsRepo = new SettingsRepository(db);
     this.extensionSettingsRepo = new ExtensionSettingsRepository(db);
     this.auditRepo = new AuditRepository(db);
@@ -299,6 +312,107 @@ export class DatabaseRepository implements IDataRepository {
     expectedRevision: number,
   ): Promise<boolean> {
     return await this.executionRepo.updateContext(executionId, context, expectedRevision);
+  }
+
+  async createPresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
+    this.executionAttemptRepo.createPresented(attempt);
+  }
+
+  async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {
+    this.executionAttemptRepo.prepareStart(attempt);
+  }
+
+  async claimStartExecutionAttempt(
+    input: ClaimStartExecutionAttemptInput,
+  ): Promise<ExecutionAttemptClaimResult> {
+    return this.executionAttemptRepo.claimStart(input);
+  }
+
+  async completeStartAttemptPrecondition(
+    attemptId: string,
+    userId: string,
+    response: string,
+    now: number,
+  ): Promise<StartPreconditionCompletionResult> {
+    return this.executionAttemptRepo.completeStartPrecondition(attemptId, userId, response, now);
+  }
+
+  async getBlockingStartExecutionAttempt(
+    executionId: string,
+    userId: string,
+  ): Promise<ExecutionAttempt | null> {
+    return this.executionAttemptRepo.getBlockingStart(executionId, userId);
+  }
+
+  async cancelExecutionWithStartAttempt(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    error: import("@mcp-moira/shared").ExecutionError,
+  ): Promise<boolean> {
+    return this.executionAttemptRepo.cancelWithStartAttempt(
+      executionId,
+      userId,
+      expectedRevision,
+      error,
+    );
+  }
+
+  async getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null> {
+    return this.executionAttemptRepo.get(attemptId);
+  }
+
+  async updatePresentedExecutionAttemptResponse(
+    attemptId: string,
+    userId: string,
+    response: string,
+    now: number,
+  ): Promise<boolean> {
+    return this.executionAttemptRepo.updatePresentedResponse(attemptId, userId, response, now);
+  }
+
+  async getCurrentExecutionAttempt(
+    executionId: string,
+    userId: string,
+  ): Promise<ExecutionAttempt | null> {
+    return this.executionAttemptRepo.getCurrent(executionId, userId);
+  }
+
+  async claimExecutionAttempt(
+    input: Parameters<ExecutionAttemptRepository["claim"]>[0],
+  ): Promise<ExecutionAttemptClaimResult> {
+    return this.executionAttemptRepo.claim(input);
+  }
+
+  async heartbeatExecutionAttempt(
+    attemptId: string,
+    ownerId: string,
+    fence: number,
+    now: number,
+    leaseMs: number,
+  ): Promise<boolean> {
+    return this.executionAttemptRepo.heartbeat(attemptId, ownerId, fence, now, leaseMs);
+  }
+
+  async completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean> {
+    return this.executionAttemptRepo.complete(input);
+  }
+
+  async markExecutionAttemptOutcomeUnknown(
+    attemptId: string,
+    ownerId: string,
+    fence: number,
+    now: number,
+  ): Promise<boolean> {
+    return this.executionAttemptRepo.markOutcomeUnknown(attemptId, ownerId, fence, now);
+  }
+
+  async reconcileExpiredExecutionAttempts(now: number): Promise<ReconciledExecutionAttemptCounts> {
+    return this.executionAttemptRepo.reconcileExpired(now);
+  }
+
+  async cleanupExecutionAttempts(now: number): Promise<number> {
+    return this.executionAttemptRepo.cleanup(now);
   }
 
   // === Settings Operations ===

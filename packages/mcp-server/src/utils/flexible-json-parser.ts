@@ -156,6 +156,14 @@ export function wrapSchemaWithAutoparse(
   return result;
 }
 
+export function wrapToolSchemaWithAutoparse(
+  inputSchema: z.ZodTypeAny,
+): Record<string, z.ZodTypeAny> | z.ZodTypeAny {
+  return inputSchema instanceof z.ZodObject
+    ? wrapSchemaWithAutoparse(inputSchema.shape)
+    : inputSchema;
+}
+
 /**
  * Recursively wrap a single Zod field with JSON auto-parsing if it expects
  * an object or array type. Handles optional/default wrappers.

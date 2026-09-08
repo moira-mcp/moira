@@ -74,6 +74,9 @@ export * from "./metrics/index.js";
 // Version utilities
 export * from "./utils/version-utils.js";
 
+// Canonical JSON identity
+export * from "./utils/canonical-json.js";
+
 // API Token utilities
 export * from "./utils/api-token.js";
 

@@ -142,7 +142,11 @@ describe("Parent Execution Continuation", () => {
     expect(completionResponse).toContain("CONTINUATION REMINDER");
     expect(completionResponse).toContain("Parent execution awaits continuation");
     expect(completionResponse).toContain(parentId);
-    expect(completionResponse).toContain(`step(processId: "${parentId}")`);
+    expect(completionResponse).toContain(
+      `session({ action: "current_step", executionId: "${parentId}" })`,
+    );
+    expect(completionResponse).toContain("returned step attempt");
+    expect(completionResponse).not.toContain(`step(processId: "${parentId}")`);
   });
 
   test("should NOT show continuation reminder when workflow has no parent", async () => {

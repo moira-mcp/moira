@@ -3,7 +3,7 @@
  * For testing purposes - no persistence
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { IDataRepository, WorkflowInfo, SettingDefinition } from "../interfaces/data-repository.js";
 import {
   extensionSettingDefinition,
@@ -20,6 +20,7 @@ import {
   ConflictError,
   ValidationError,
   applyExecutionReminderMutation,
+  canonicalJson,
   createLogger,
   mapLegacyStatusArray,
 } from "@mcp-moira/shared";
@@ -31,6 +32,16 @@ import type {
   WorkflowListResult,
   ExecutionError,
 } from "@mcp-moira/shared";
+import type {
+  CompleteExecutionAttemptInput,
+  ClaimStartExecutionAttemptInput,
+  ExecutionAttempt,
+  ExecutionAttemptClaimResult,
+  PreparedStartExecutionAttempt,
+  PresentedExecutionAttempt,
+  ReconciledExecutionAttemptCounts,
+  StartPreconditionCompletionResult,
+} from "../types/execution-attempt.js";
 
 export class InMemoryRepository implements IDataRepository {
   private workflows = new Map<
@@ -44,6 +55,7 @@ export class InMemoryRepository implements IDataRepository {
     }
   >();
   private executions = new Map<string, WorkflowExecution>();
+  private executionAttempts = new Map<string, ExecutionAttempt>();
   private settingDefinitions = new Map<string, SettingDefinition>();
   private settingValues = new Map<string, Map<string, { value: string; encrypted: boolean }>>();
   private logger = createLogger({ component: "InMemoryRepository" });
@@ -588,6 +600,454 @@ export class InMemoryRepository implements IDataRepository {
     return true;
   }
 
+  async createPresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
+    if (this.executionAttempts.has(attempt.attemptId)) throw new ConflictError("Attempt exists");
+    this.executionAttempts.set(attempt.attemptId, {
+      ...structuredClone(attempt),
+      operation: "step",
+      reservedExecutionId: null,
+      requestPayload: null,
+      inputFingerprint: null,
+      state: "presented",
+      ownerId: null,
+      fence: 0,
+      heartbeatAt: null,
+      leaseExpiresAt: null,
+      nextAttemptId: null,
+      expiresAt: null,
+      updatedAt: attempt.createdAt,
+      completedAt: null,
+    });
+  }
+
+  async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {
+    for (const [attemptId, existing] of this.executionAttempts) {
+      if (
+        existing.operation === "start" &&
+        existing.userId === attempt.userId &&
+        existing.state === "presented" &&
+        (existing.expiresAt ?? 0) <= attempt.createdAt
+      ) {
+        this.executionAttempts.delete(attemptId);
+      }
+    }
+    const live = [...this.executionAttempts.values()]
+      .filter(
+        (existing) =>
+          existing.operation === "start" &&
+          existing.userId === attempt.userId &&
+          existing.state === "presented",
+      )
+      .sort(
+        (left, right) =>
+          left.createdAt - right.createdAt || left.attemptId.localeCompare(right.attemptId),
+      );
+    for (const existing of live.slice(0, Math.max(0, live.length - 99))) {
+      this.executionAttempts.delete(existing.attemptId);
+    }
+    if (this.executionAttempts.has(attempt.attemptId)) throw new ConflictError("Attempt exists");
+    this.executionAttempts.set(attempt.attemptId, {
+      ...structuredClone(attempt),
+      operation: "start",
+      executionId: null,
+      executionRevision: null,
+      nodeId: null,
+      state: "presented",
+      ownerId: null,
+      fence: 0,
+      heartbeatAt: null,
+      leaseExpiresAt: null,
+      response: null,
+      nextAttemptId: null,
+      updatedAt: attempt.createdAt,
+      completedAt: null,
+    });
+  }
+
+  async claimStartExecutionAttempt(
+    input: ClaimStartExecutionAttemptInput,
+  ): Promise<ExecutionAttemptClaimResult> {
+    const attempt = this.executionAttempts.get(input.attemptId);
+    if (!attempt || attempt.operation !== "start" || attempt.userId !== input.userId)
+      return { kind: "invalid" };
+    if (attempt.state === "completed" && attempt.response !== null)
+      return { kind: "completed", attempt: structuredClone(attempt), response: attempt.response };
+    if (attempt.state === "outcome_unknown")
+      return { kind: "outcome_unknown", attempt: structuredClone(attempt) };
+    if (attempt.state === "executing")
+      return { kind: "processing", attempt: structuredClone(attempt) };
+    if ((attempt.expiresAt ?? 0) <= input.now) {
+      this.executionAttempts.delete(input.attemptId);
+      return { kind: "invalid" };
+    }
+    if (
+      attempt.reservedExecutionId !== input.execution.executionId ||
+      attempt.workflowId !== input.workflowId ||
+      attempt.workflowVersion !== input.workflowVersion ||
+      attempt.workflowDigest !== input.workflowDigest ||
+      attempt.inputFingerprint === null
+    )
+      return { kind: "stale" };
+    const storedWorkflow = this.workflows.get(attempt.workflowId);
+    if (
+      !storedWorkflow ||
+      (storedWorkflow.userId !== input.userId && storedWorkflow.visibility !== "public") ||
+      storedWorkflow.graph.metadata.version !== attempt.workflowVersion ||
+      createHash("sha256").update(canonicalJson(storedWorkflow.graph)).digest("hex") !==
+        attempt.workflowDigest
+    )
+      return { kind: "stale" };
+    if (input.execution.parentExecutionId) {
+      const parent = this.executions.get(input.execution.parentExecutionId);
+      if (!parent || parent.userId !== input.userId || parent.status !== "running")
+        return { kind: "stale" };
+    }
+    if (this.executions.has(input.execution.executionId)) return { kind: "stale" };
+
+    const fence = attempt.fence + 1;
+    Object.assign(attempt, {
+      executionId: input.execution.executionId,
+      executionRevision: input.execution.revision,
+      nodeId: input.execution.currentNodeId,
+      state: "executing",
+      ownerId: input.ownerId,
+      fence,
+      heartbeatAt: input.now,
+      leaseExpiresAt: input.now + input.leaseMs,
+      updatedAt: input.now,
+    });
+    this.executions.set(input.execution.executionId, structuredClone(input.execution));
+    return { kind: "claimed", attempt: structuredClone(attempt), fence };
+  }
+
+  async completeStartAttemptPrecondition(
+    attemptId: string,
+    userId: string,
+    response: string,
+    now: number,
+  ): Promise<StartPreconditionCompletionResult> {
+    const attempt = this.executionAttempts.get(attemptId);
+    if (!attempt || attempt.operation !== "start" || attempt.userId !== userId)
+      return { kind: "invalid" };
+    if (attempt.state === "completed" && attempt.response !== null)
+      return { kind: "replay", response: attempt.response };
+    if (attempt.state === "executing")
+      return { kind: "processing", attempt: structuredClone(attempt) };
+    if (attempt.state === "outcome_unknown")
+      return { kind: "outcome_unknown", attempt: structuredClone(attempt) };
+    if ((attempt.expiresAt ?? 0) <= now) {
+      this.executionAttempts.delete(attemptId);
+      return { kind: "invalid" };
+    }
+    Object.assign(attempt, { state: "completed", response, completedAt: now, updatedAt: now });
+    return { kind: "completed", response };
+  }
+
+  async getBlockingStartExecutionAttempt(
+    executionId: string,
+    userId: string,
+  ): Promise<ExecutionAttempt | null> {
+    const attempt = [...this.executionAttempts.values()].find(
+      (candidate) =>
+        candidate.operation === "start" &&
+        candidate.state === "outcome_unknown" &&
+        candidate.executionId === executionId &&
+        candidate.userId === userId,
+    );
+    return attempt ? structuredClone(attempt) : null;
+  }
+
+  async cancelExecutionWithStartAttempt(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    error: ExecutionError,
+  ): Promise<boolean> {
+    const execution = this.executions.get(executionId);
+    const blockingAttempt = [...this.executionAttempts.values()].find(
+      (attempt) =>
+        attempt.operation === "start" &&
+        attempt.state === "outcome_unknown" &&
+        attempt.executionId === executionId &&
+        attempt.userId === userId,
+    );
+    if (
+      !execution ||
+      !blockingAttempt ||
+      execution.userId !== userId ||
+      execution.status !== "running" ||
+      execution.revision !== expectedRevision
+    )
+      return false;
+    const updated = structuredClone(execution);
+    updated.status = "completed";
+    updated.error = error.message;
+    updated.errors = [...(updated.errors ?? []), error];
+    updated.completedAt = error.timestamp;
+    updated.updatedAt = error.timestamp;
+    updated.revision += 1;
+    this.executions.set(executionId, updated);
+    for (const [attemptId, attempt] of this.executionAttempts) {
+      if (
+        attempt.operation === "start" &&
+        attempt.state === "outcome_unknown" &&
+        attempt.executionId === executionId &&
+        attempt.userId === userId
+      )
+        this.executionAttempts.delete(attemptId);
+    }
+    return true;
+  }
+
+  async getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null> {
+    const attempt = this.executionAttempts.get(attemptId);
+    return attempt ? structuredClone(attempt) : null;
+  }
+
+  async updatePresentedExecutionAttemptResponse(
+    attemptId: string,
+    userId: string,
+    response: string,
+    now: number,
+  ): Promise<boolean> {
+    const attempt = this.executionAttempts.get(attemptId);
+    if (!attempt || attempt.userId !== userId || attempt.state !== "presented") return false;
+    attempt.response = response;
+    attempt.updatedAt = now;
+    return true;
+  }
+
+  async getCurrentExecutionAttempt(
+    executionId: string,
+    userId: string,
+  ): Promise<ExecutionAttempt | null> {
+    const attempts = [...this.executionAttempts.values()]
+      .filter(
+        (attempt) =>
+          attempt.executionId === executionId &&
+          attempt.userId === userId &&
+          attempt.operation === "step" &&
+          ["presented", "executing", "outcome_unknown"].includes(attempt.state),
+      )
+      .sort((left, right) => right.createdAt - left.createdAt);
+    return attempts[0] ? structuredClone(attempts[0]) : null;
+  }
+
+  async claimExecutionAttempt(input: {
+    attemptId: string;
+    userId: string;
+    executionId: string;
+    executionRevision: number;
+    nodeId: string;
+    workflowId: string;
+    workflowVersion: string;
+    workflowDigest: string;
+    inputFingerprint: string;
+    ownerId: string;
+    now: number;
+    leaseMs: number;
+  }): Promise<ExecutionAttemptClaimResult> {
+    const attempt = this.executionAttempts.get(input.attemptId);
+    if (!attempt || attempt.operation !== "step" || attempt.userId !== input.userId)
+      return { kind: "invalid" };
+    if (attempt.executionId !== input.executionId) return { kind: "stale" };
+    if (attempt.inputFingerprint && attempt.inputFingerprint !== input.inputFingerprint)
+      return { kind: "conflict" };
+    if (attempt.state === "completed" && attempt.response !== null)
+      return { kind: "completed", attempt: structuredClone(attempt), response: attempt.response };
+    if (
+      attempt.executionRevision !== input.executionRevision ||
+      attempt.nodeId !== input.nodeId ||
+      attempt.workflowId !== input.workflowId ||
+      attempt.workflowVersion !== input.workflowVersion ||
+      attempt.workflowDigest !== input.workflowDigest
+    )
+      return { kind: "stale" };
+    if (attempt.state === "outcome_unknown")
+      return { kind: "outcome_unknown", attempt: structuredClone(attempt) };
+    if (attempt.state === "executing")
+      return { kind: "processing", attempt: structuredClone(attempt) };
+    attempt.state = "executing";
+    attempt.inputFingerprint = input.inputFingerprint;
+    attempt.ownerId = input.ownerId;
+    attempt.fence += 1;
+    attempt.heartbeatAt = input.now;
+    attempt.leaseExpiresAt = input.now + input.leaseMs;
+    attempt.updatedAt = input.now;
+    return { kind: "claimed", attempt: structuredClone(attempt), fence: attempt.fence };
+  }
+
+  async heartbeatExecutionAttempt(
+    attemptId: string,
+    ownerId: string,
+    fence: number,
+    now: number,
+    leaseMs: number,
+  ): Promise<boolean> {
+    const attempt = this.executionAttempts.get(attemptId);
+    if (
+      !attempt ||
+      attempt.state !== "executing" ||
+      attempt.ownerId !== ownerId ||
+      attempt.fence !== fence
+    )
+      return false;
+    attempt.heartbeatAt = now;
+    attempt.leaseExpiresAt = now + leaseMs;
+    attempt.updatedAt = now;
+    return true;
+  }
+
+  async completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean> {
+    const attempt = this.executionAttempts.get(input.attemptId);
+    const current = this.executions.get(input.execution.executionId);
+    if (
+      !attempt ||
+      !current ||
+      attempt.state !== "executing" ||
+      attempt.ownerId !== input.ownerId ||
+      attempt.fence !== input.fence ||
+      attempt.inputFingerprint !== input.inputFingerprint ||
+      current.revision !== input.execution.revision
+    )
+      return false;
+    if (input.nextAttempt && this.executionAttempts.has(input.nextAttempt.attemptId)) {
+      throw new ConflictError("Next execution attempt already exists");
+    }
+    const nextRevision = input.execution.revision + 1;
+    const updatedExecution = structuredClone(input.execution);
+    updatedExecution.revision = nextRevision;
+    const now = Date.now();
+    const completedAttempt: ExecutionAttempt = {
+      ...structuredClone(attempt),
+      state: "completed",
+      response: input.response,
+      nextAttemptId: input.nextAttempt?.attemptId ?? null,
+      ownerId: null,
+      heartbeatAt: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+      completedAt: now,
+    };
+    const presentedAttempt: ExecutionAttempt | undefined = input.nextAttempt
+      ? {
+          ...structuredClone(input.nextAttempt),
+          executionRevision: nextRevision,
+          operation: "step",
+          reservedExecutionId: null,
+          requestPayload: null,
+          inputFingerprint: null,
+          state: "presented",
+          ownerId: null,
+          fence: 0,
+          heartbeatAt: null,
+          leaseExpiresAt: null,
+          nextAttemptId: null,
+          expiresAt: null,
+          updatedAt: input.nextAttempt.createdAt,
+          completedAt: null,
+        }
+      : undefined;
+
+    this.executions.set(input.execution.executionId, updatedExecution);
+    this.executionAttempts.set(input.attemptId, completedAttempt);
+    if (presentedAttempt) this.executionAttempts.set(presentedAttempt.attemptId, presentedAttempt);
+    input.execution.revision = nextRevision;
+    return true;
+  }
+
+  async markExecutionAttemptOutcomeUnknown(
+    attemptId: string,
+    ownerId: string,
+    fence: number,
+    now: number,
+  ): Promise<boolean> {
+    const attempt = this.executionAttempts.get(attemptId);
+    if (
+      !attempt ||
+      attempt.state !== "executing" ||
+      attempt.ownerId !== ownerId ||
+      attempt.fence !== fence
+    )
+      return false;
+    Object.assign(attempt, {
+      state: "outcome_unknown",
+      response: null,
+      ownerId: null,
+      heartbeatAt: null,
+      leaseExpiresAt: null,
+      updatedAt: now,
+    });
+    return true;
+  }
+
+  async reconcileExpiredExecutionAttempts(now: number): Promise<ReconciledExecutionAttemptCounts> {
+    const counts: ReconciledExecutionAttemptCounts = { start: 0, step: 0 };
+    for (const attempt of this.executionAttempts.values()) {
+      if (
+        attempt.state === "executing" &&
+        attempt.leaseExpiresAt !== null &&
+        attempt.leaseExpiresAt < now
+      ) {
+        attempt.state = "outcome_unknown";
+        attempt.response = null;
+        attempt.ownerId = null;
+        attempt.heartbeatAt = null;
+        attempt.leaseExpiresAt = null;
+        attempt.updatedAt = now;
+        counts[attempt.operation] += 1;
+      }
+    }
+    return counts;
+  }
+
+  async cleanupExecutionAttempts(now: number): Promise<number> {
+    const cutoff = now - 7 * 24 * 60 * 60 * 1000;
+    const completed = [...this.executionAttempts.values()].filter(
+      (attempt) => attempt.operation === "step" && attempt.state === "completed",
+    );
+    const removable = new Set(
+      completed.filter((attempt) => (attempt.completedAt ?? 0) < cutoff).map((a) => a.attemptId),
+    );
+    const byExecution = new Map<string, ExecutionAttempt[]>();
+    for (const attempt of completed) {
+      const id = attempt.executionId!;
+      const list = byExecution.get(id) ?? [];
+      list.push(attempt);
+      byExecution.set(id, list);
+    }
+    for (const attempts of byExecution.values()) {
+      attempts
+        .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0))
+        .slice(1_000)
+        .forEach((attempt) => removable.add(attempt.attemptId));
+    }
+    for (const attempt of this.executionAttempts.values()) {
+      if (
+        attempt.operation === "start" &&
+        attempt.state === "presented" &&
+        (attempt.expiresAt ?? 0) <= now
+      )
+        removable.add(attempt.attemptId);
+    }
+    const startsByUser = new Map<string, ExecutionAttempt[]>();
+    for (const attempt of this.executionAttempts.values()) {
+      if (attempt.operation !== "start" || attempt.state !== "completed") continue;
+      if ((attempt.completedAt ?? 0) < cutoff) removable.add(attempt.attemptId);
+      const list = startsByUser.get(attempt.userId) ?? [];
+      list.push(attempt);
+      startsByUser.set(attempt.userId, list);
+    }
+    for (const attempts of startsByUser.values()) {
+      attempts
+        .sort((left, right) => (right.completedAt ?? 0) - (left.completedAt ?? 0))
+        .slice(1_000)
+        .forEach((attempt) => removable.add(attempt.attemptId));
+    }
+    removable.forEach((id) => this.executionAttempts.delete(id));
+    return removable.size;
+  }
+
   // === Settings Operations ===
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -781,6 +1241,7 @@ export class InMemoryRepository implements IDataRepository {
   clear(): void {
     this.workflows.clear();
     this.executions.clear();
+    this.executionAttempts.clear();
     this.settingDefinitions.clear();
     this.settingValues.clear();
     this.logger.debug("Memory cleared");

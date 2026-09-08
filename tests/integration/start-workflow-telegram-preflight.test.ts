@@ -283,8 +283,9 @@ describe("Start Workflow Telegram Pre-flight Check", () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toContain(
-        'start({ workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
+        'start({ action: "prepare", workflowId: "moira/telegram-setup", parentExecutionId: "none", skipNotificationCheck: true })',
       );
+      expect(result.data).toContain("execute its returned Start attempt ID");
     });
 
     test("synthetic response includes the workflow ID for skip hint", async () => {

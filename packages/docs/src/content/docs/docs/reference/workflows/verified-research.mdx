@@ -10,7 +10,8 @@ Verified Research answers one specific question with a proportionate set of exte
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/verified-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The workflow reuses an explicitly supplied operating mode. In `autonomous` mode it skips only user waits; material ambiguity becomes a blocked prerequisite rather than an invented question. In `interactive` mode it may ask one essential clarification and later offer accept, bounded rework, or abort.

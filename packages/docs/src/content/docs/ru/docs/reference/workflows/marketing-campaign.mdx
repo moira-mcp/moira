@@ -6,7 +6,8 @@ description: Evidence-aware стратегия кампании и матери�
 Marketing Campaign создаёт один channel-ready пакет кампании для разрешённого продукта или предложения. Он объединяет audience и competitive context, positioning, mapping доказательств или гипотез, brand/legal constraints, материалы, calls to action, limitations, deterministic reference checks и настоящее independent semantic review.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/marketing-campaign", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/marketing-campaign", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 ## Когда использовать

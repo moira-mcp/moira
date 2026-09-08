@@ -4,7 +4,12 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  advanceWorkflowExecution,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 describe("MCP Execution Errors Array E2E", () => {
@@ -12,6 +17,7 @@ describe("MCP Execution Errors Array E2E", () => {
   let cleanup: () => Promise<void>;
   let testExecutionId: string;
   let testWorkflowId: string;
+  let execution: Awaited<ReturnType<typeof startWorkflowExecutionState>>;
 
   beforeAll(async () => {
     const mcpClient = await createAuthenticatedMCPClient();
@@ -53,10 +59,8 @@ describe("MCP Execution Errors Array E2E", () => {
     console.log("[Test] testWorkflowId:", testWorkflowId);
 
     // Start the workflow
-    const startResult = await callMCPTool(client, "start", {
-      workflowId: testWorkflowId,
-      parentExecutionId: "none",
-    });
+    execution = await startWorkflowExecutionState(client, testWorkflowId);
+    const startResult = execution.response;
     console.log("[Test] Start result:", startResult);
 
     // Extract processId from text response (format: "Process ID: xxx\nYour next task: ...")
@@ -85,10 +89,7 @@ describe("MCP Execution Errors Array E2E", () => {
 
   test("validation error is added to errors array", async () => {
     // Send invalid input (missing required field)
-    await callMCPTool(client, "step", {
-      processId: testExecutionId,
-      input: { wrongField: "value" },
-    });
+    await advanceWorkflowExecution(client, execution, { wrongField: "value" });
 
     // Check execution context for error
     const context = await callMCPTool(client, "session", {
@@ -135,10 +136,7 @@ describe("MCP Execution Errors Array E2E", () => {
     const errorCountBefore = contextBefore.errors.length;
 
     // Send another invalid input
-    await callMCPTool(client, "step", {
-      processId: testExecutionId,
-      input: { anotherWrongField: 123 },
-    });
+    await advanceWorkflowExecution(client, execution, { anotherWrongField: 123 });
 
     // Check that error was added
     const contextAfter = await callMCPTool(client, "session", {

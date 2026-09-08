@@ -13,9 +13,11 @@ The workflow is analysis-first. It changes the repository only when the user exp
 
 ```js
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/test-suite-audit",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The caller should identify the project and desired audit boundary. The workflow discovers applicable project instructions, languages, frameworks, runners, source and test roots, exclusions, dirty-work boundaries, available commands, and permitted operations. It asks only for a material fact or decision that cannot be discovered safely.

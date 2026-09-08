@@ -12,7 +12,8 @@ The workflow requires an agent with filesystem access. For smaller bounded tasks
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Process

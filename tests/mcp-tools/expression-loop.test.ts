@@ -4,7 +4,12 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  advanceWorkflowExecution,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 /**
@@ -99,10 +104,8 @@ describe("MCP Expression Loop E2E", () => {
 
   test("expression loop executes exactly 5 iterations with stop on each", async () => {
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: LOOP_WORKFLOW.id,
-    });
+    const execution = await startWorkflowExecutionState(client, LOOP_WORKFLOW.id);
+    const startResult = execution.response;
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     expect(processIdMatch).toBeDefined();
@@ -126,10 +129,7 @@ describe("MCP Expression Loop E2E", () => {
       expect(context.context.variables.iteration).toBe(expectedIteration);
 
       // Submit step - send JSON-encoded string to preserve string type through parseInputData
-      const stepResult = await callMCPTool<string>(client, "step", {
-        processId,
-        input: '"ok"',
-      });
+      const stepResult = await advanceWorkflowExecution(client, execution, '"ok"');
 
       if (expectedIteration < 5) {
         // Should show next iteration (this is where the bug happens - workflow completes instead)

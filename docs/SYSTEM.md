@@ -27,6 +27,48 @@ interface IGraphStorage {
 - Executions: `.graph-storage/executions/<uuid>.json`
 - Workflows: `workflows/production/flows/<uuid>.json` — one file per flow, named by its stable UUID. Each file carries top-level catalog metadata `owner` (the owning user id) and `visibility` (`public` | `private`) alongside the graph; catalog identity is `(owner, slug)` since a slug is unique only per owner. Read via `readWorkflowCatalog()` in `packages/shared/src/services/workflow-catalog.ts`.
 
+### Replay-safe execution mutations
+
+`start({ action: "prepare" })` resolves authorization, workflow version and digest, parent reference,
+note, and the requested notification-skip policy into a server-issued Start attempt without creating
+an execution. Prepared attempts expire after 15 minutes and are bounded per user. Executing the
+attempt revalidates mutable workflow, parent, account, lock-delivery, and communication preconditions,
+then reserves its Process ID before graph work and atomically persists the execution with the exact
+response receipt. Replays of the same attempt return that receipt; separately prepared attempts
+intentionally create separate executions.
+
+Every paused agent-facing presentation has a server-issued `attemptId` bound to its user,
+execution revision, node, workflow version, and workflow digest. `step()` requires that identity in
+addition to the Process ID. The repository claims the attempt before any handler or graph effect in
+an immediate transaction, records a fingerprint of `input` plus `teleportTo`, and fences the owner
+with a monotonically increasing token. The worker opens one lease handle with an immediate
+compare-and-set renewal; a five-second heartbeat then renews the 30-second lease.
+
+For an executing prepared Start, that handle opens immediately after the atomic claim and before
+lifecycle metrics, audit, execution reads, or graph work. The same handle remains active through
+attempt finalization and is passed into the executor rather than replaced by a second timer.
+Immediately before graph traversal, the executor renews and verifies the current owner and fence;
+failure prevents that worker from entering any node handler or provider effect.
+
+Execution state, the completed replay receipt, and the next presented attempt are committed in one
+transaction. Replaying the same attempt with the same fingerprint returns the exact stored response;
+a different fingerprint, user, execution state, or stale presentation is rejected. Concurrent
+duplicates wait up to ten seconds for the first owner's receipt and otherwise return
+`ATTEMPT_PROCESSING`. If ownership or durable outcome cannot be proven, the attempt becomes
+`outcome_unknown` and is never automatically executed again.
+
+Startup and recurring maintenance fence expired executing attempts every ten seconds. Completed
+receipts remain available for seven days, with at most 1,000 retained per execution, and cleanup runs
+every ten minutes. Attempt audit and Prometheus records contain bounded classification metadata, not
+workflow input or response content.
+
+Recurring reconciliation returns separate bounded Start and Step counts. Maintenance maps them to
+the corresponding `operation` label, so an expired Start lease is never reported as a Step outcome.
+
+An indeterminate start stays attached to its reserved Process ID and appears through session
+inspection instead of becoming an orphan. Only its owner can cancel it, and cancellation requires
+the current execution revision so a stale recovery action cannot remove newer work.
+
 ### Bundled Workflow Reconciliation
 
 Bundled workflows use three exact states: the last accepted upstream baseline, the current instance
@@ -110,10 +152,13 @@ const transport = new StreamableHTTPServerTransport({
 catalog that associates each public name with its static default and agent/model description
 variants, schema, response policy, validated examples, localized factual metadata, reference model,
 and deterministic revision. `tool-bindings.ts` separately binds every catalog identity to its lazy
-runtime handler. `register-tools.ts` combines them through the reconciliation-aware SDK wrapper;
-server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions are
-not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
-`instructions` channel.
+runtime handler. `register-tools.ts` combines them through the reconciliation-aware SDK wrapper and
+publishes `tools/list` from the same typed projection. This preserves complete schemas such as the
+top-level Start discriminated union even though the installed SDK 1.x catalog serializer accepts
+only object schemas; SDK invocation validation still consumes the canonical Zod schema. Server
+bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions are not stored
+or overridden in `globalSetting`; database-backed system prompts remain a separate MCP `instructions`
+channel.
 
 The same structured reference model renders `help({ topic: "tools" })` and the English and Russian
 public reference pages directly. `MCP_TOOLS_REVISION` is computed once from stable client-visible
@@ -179,25 +224,25 @@ step() supports multiple input formats:
 
 ```typescript
 // Object input (standard)
-{"processId": "abc-123", "input": {"name": "John", "age": 30}}
+{"processId": "abc-123", "attemptId": "attempt-current", "input": {"name": "John", "age": 30}}
 
 // Direct object without wrapper
-{"processId": "abc-123", "input": {"name": "John", "age": 30}}
+{"processId": "abc-123", "attemptId": "attempt-current", "input": {"name": "John", "age": 30}}
 
 // Single quotes (user-friendly)
-{"processId": "abc-123", "input": "{'name': 'John', 'age': 30}"}
+{"processId": "abc-123", "attemptId": "attempt-current", "input": "{'name': 'John', 'age': 30}"}
 
 // Unquoted keys (JavaScript style)
-{"processId": "abc-123", "input": "{name: 'John', age: 30}"}
+{"processId": "abc-123", "attemptId": "attempt-current", "input": "{name: 'John', age: 30}"}
 
 // Mixed quotes
-{"processId": "abc-123", "input": "{name: \"John\", 'age': 30}"}
+{"processId": "abc-123", "attemptId": "attempt-current", "input": "{name: \"John\", 'age': 30}"}
 
 // Escaped JSON string
-{"processId": "abc-123", "input": "\"{\\\"name\\\": \\\"John\\\"}\""}
+{"processId": "abc-123", "attemptId": "attempt-current", "input": "\"{\\\"name\\\": \\\"John\\\"}\""}
 
 // Legacy params.input structure (backward compatibility)
-{"processId": "abc-123", "params": {"input": {"name": "John"}}}
+{"processId": "abc-123", "attemptId": "attempt-current", "params": {"input": {"name": "John"}}}
 ```
 
 ### JSON Auto-Parsing for All MCP Tools
@@ -225,6 +270,7 @@ step() recognizes special variables in input that trigger side effects:
 // execution_note: Updates execution note (max 500 chars)
 step({
   processId: "abc-123",
+  attemptId: "attempt-current",
   input: {
     result: "task completed",
     execution_note: "Step 3: API integration done",
@@ -239,7 +285,7 @@ step() accepts an optional `teleportTo` parameter to jump execution to a telepor
 
 ```typescript
 // Jump to a teleport node (do NOT provide input when teleporting)
-step({ processId: "abc-123", teleportTo: "replan-node" });
+step({ processId: "abc-123", attemptId: "attempt-current", teleportTo: "replan-node" });
 ```
 
 - Only `teleport`-type nodes can be targets
@@ -250,34 +296,38 @@ step({ processId: "abc-123", teleportTo: "replan-node" });
 
 ### Notification and Lock Pre-flight Checks
 
-`start()` resolves the workflow before execution creation and applies three checks:
+`start({ action: "execute" })` re-resolves a prepared workflow without creating an execution unless its mutable preconditions pass:
 
 - A workflow with `user-notification` nodes returns channel-neutral Settings guidance when the current user has no configured communication adapter.
 - A workflow with legacy `telegram-notification` nodes checks only the built-in Telegram adapter and returns Telegram setup guidance when it is unavailable.
-- A workflow with a `lock` node always requires a valid-shaped bot token and chat ID for the current user. Missing or malformed configuration returns a synthetic setup directive without a Process ID or execution record.
+- A workflow with a `lock` node always requires a valid-shaped bot token and chat ID for the current user. Missing or malformed configuration completes the Start attempt with a stable `START_PRECONDITION_CHANGED` receipt and no execution record.
 
 ```typescript
 // Bypass only optional ordinary-notification preflight
 start({
+  action: "prepare",
   workflowId: "moira/software-development-flow",
   parentExecutionId: "none",
   skipNotificationCheck: true,
 });
+start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" });
 ```
 
 `skipTelegramCheck` is a deprecated alias for `skipNotificationCheck`; conflicting values are rejected. Neither field bypasses the lock check. Ordinary channel discovery uses the shared bounded configuration probe, which normalizes provider failure or timeout as unavailable without exposing diagnostics. Lock preflight checks configuration shape, not Telegram network reachability. `LockHandler` repeats the authoritative check and performs trusted delivery when execution reaches the lock node, so a later send failure still creates no usable active lock.
 
 ### Parent-Child Workflow Linking
 
-start() supports parentExecutionId to link child workflows to parent:
+Start preparation supports `parentExecutionId` to link child workflows to a parent:
 
 ```typescript
 // Start child workflow with parent link
-start({
+const preparedChild = start({
+  action: "prepare",
   workflowId: "child-workflow-id",
   note: "Child execution",
   parentExecutionId: "parent-execution-uuid",
 });
+start({ action: "execute", startAttemptId: preparedChild.startAttemptId });
 ```
 
 The parent must be a running execution owned by the authenticated user. A running execution can
@@ -295,7 +345,7 @@ Workflow completed successfully
 ---
 **CONTINUATION REMINDER**: This was a child workflow. Parent execution awaits continuation.
 Parent execution ID: <parent-uuid>
-Use step(processId: "<parent-uuid>") to continue the parent workflow.
+Read session({ action: "current_step", executionId: "<parent-uuid>" }) and continue with the returned step attempt.
 ```
 
 ### Workflow Management
@@ -1320,8 +1370,8 @@ Action-based tool for session-related information.
   error?: string;
 }
 
-// action: 'current_step' - Returns current workflow step directive
-string  // Formatted step directive
+// action: 'current_step' - Returns the authoritative current presentation
+string  // Formatted directive including Process ID and Step attempt ID
 
 // action: 'update-note' - Updates execution note
 {

@@ -7,9 +7,11 @@ Workflow Management Flow creates a new Moira workflow or edits one complete exis
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/workflow-management-flow",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Authoring lifecycle

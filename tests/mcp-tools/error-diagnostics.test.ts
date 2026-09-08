@@ -31,6 +31,7 @@ describe("MCP Error Diagnostics", () => {
   describe("start() with nonexistent workflow", () => {
     test("returns structured error with workflow ID", async () => {
       const text = await callMCPToolRaw(client, "start", {
+        action: "prepare",
         workflowId: "nonexistent-workflow-diagnostics-test",
         parentExecutionId: "none",
         note: "testing error diagnostics - should appear in logs",
@@ -46,6 +47,7 @@ describe("MCP Error Diagnostics", () => {
     test("returns structured error with process ID", async () => {
       const text = await callMCPToolRaw(client, "step", {
         processId: "nonexistent-process-id-123",
+        attemptId: "00000000-0000-4000-8000-000000000002",
         input: {
           decision: "yes",
           reason: "testing error diagnostics",

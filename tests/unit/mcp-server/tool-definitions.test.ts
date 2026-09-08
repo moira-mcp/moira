@@ -147,6 +147,7 @@ describe("MCP tool definitions", () => {
     expect(start.schema.safeParse({ workflowId: "moira/quick-task" }).success).toBe(false);
     expect(
       start.schema.safeParse({
+        action: "prepare",
         workflowId: "moira/quick-task",
         parentExecutionId: "none",
         skipNotificationCheck: true,
@@ -154,6 +155,7 @@ describe("MCP tool definitions", () => {
     ).toBe(true);
     expect(
       start.schema.safeParse({
+        action: "prepare",
         workflowId: "moira/quick-task",
         parentExecutionId: "none",
         skipTelegramCheck: true,
@@ -161,12 +163,45 @@ describe("MCP tool definitions", () => {
     ).toBe(true);
     expect(start.descriptions.default).toContain("skipNotificationCheck");
     expect(start.descriptions.default).toContain("deprecated alias");
-    expect(start.descriptions.default).toContain("trusted Telegram");
+    expect(start.descriptions.default).toContain("Lock PIN delivery remains mandatory");
 
     const settings = TOOL_DEFINITIONS.find((definition) => definition.name === "settings")!;
     expect(settings.examples).toContainEqual({ action: "get", key: "ui.theme" });
     expect(settings.examples).toContainEqual({ action: "get", category: "notifications" });
     expect(settings.examples).toContainEqual({ action: "get" });
+  });
+
+  it("publishes the exact discriminated Start contract to MCP clients", async () => {
+    const published = await inspectPublishedContract("start schema");
+    const start = published.tools.find((tool) => tool.name === "start");
+    expect(start).toBeDefined();
+    const schema = dereferenceLocalJsonSchema(start!.inputSchema) as {
+      anyOf?: Array<{
+        additionalProperties?: boolean;
+        properties?: Record<string, { const?: string }>;
+        required?: string[];
+      }>;
+      oneOf?: Array<{
+        additionalProperties?: boolean;
+        properties?: Record<string, { const?: string }>;
+        required?: string[];
+      }>;
+    };
+    const branches = schema.anyOf ?? schema.oneOf ?? [];
+    const prepare = branches.find((branch) => branch.properties?.action?.const === "prepare");
+    const execute = branches.find((branch) => branch.properties?.action?.const === "execute");
+
+    expect(prepare).toMatchObject({
+      additionalProperties: false,
+      required: expect.arrayContaining(["action", "workflowId", "parentExecutionId"]),
+    });
+    expect(prepare?.properties).not.toHaveProperty("startAttemptId");
+    expect(execute).toMatchObject({
+      additionalProperties: false,
+      required: expect.arrayContaining(["action", "startAttemptId"]),
+    });
+    expect(execute?.properties).not.toHaveProperty("workflowId");
+    expect(execute?.properties).not.toHaveProperty("parentExecutionId");
   });
 
   it("derives the complete operation inventory from schemas", () => {
@@ -306,7 +341,7 @@ describe("MCP tool definitions", () => {
       { name: "tool-definition-test", version: "1.0.0" },
       { capabilities: { tools: {} } },
     );
-    registerTools(server);
+    registerTools(server, undefined, () => null);
 
     const client = new Client(
       { name: "tool-definition-client", version: "1.0.0" },
@@ -323,9 +358,7 @@ describe("MCP tool definitions", () => {
       expect(published.tools.map((tool) => tool.name)).toEqual(MCP_TOOL_NAMES);
       for (const definition of TOOL_DEFINITIONS) {
         const tool = published.tools.find((candidate) => candidate.name === definition.name);
-        const expectedSchema = zodToJsonSchema(definition.schema, {
-          $refStrategy: "none",
-        });
+        const expectedSchema = getToolJsonSchema(definition);
         const publishedSchema = dereferenceLocalJsonSchema(tool?.inputSchema);
         expect(tool?.description).toBe(resolveToolDescription(definition));
         expect(publishedSchema).toEqual(dereferenceLocalJsonSchema(expectedSchema));
@@ -338,6 +371,39 @@ describe("MCP tool definitions", () => {
           dereferenceLocalJsonSchema(getRenderedToolSchema(renderedReference, definition.name)),
         ).toEqual(publishedSchema);
       }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("rejects a mixed start execute payload through the registered MCP boundary", async () => {
+    const server = new McpServer(
+      { name: "start-discrimination-test", version: "1.0.0" },
+      { capabilities: { tools: {} } },
+    );
+    registerTools(server, undefined, () => null);
+    const client = new Client(
+      { name: "start-discrimination-client", version: "1.0.0" },
+      { capabilities: {} },
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await client.callTool({
+        name: "start",
+        arguments: {
+          action: "execute",
+          startAttemptId: "00000000-0000-4000-8000-000000000000",
+          workflowId: "must-not-be-read",
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]).toMatchObject({ type: "text" });
+      expect((result.content[0] as { type: "text"; text: string }).text).toContain(
+        "Input validation error",
+      );
     } finally {
       await client.close();
       await server.close();
@@ -370,15 +436,14 @@ describe("MCP tool definitions", () => {
         context,
       );
 
-    expect(description("list")).toContain("first page, not the complete catalog");
+    expect(description("list")).toContain("Results are paginated");
     expect(description("list")).toContain("nextOffset");
     expect(description("list")).not.toContain("list all accessible workflows");
     expect(description("list")).not.toMatch(/stable ordering/i);
 
-    expect(description("start")).toContain(
-      "without creating an execution or returning a processId",
-    );
-    expect(description("start")).toContain("Otherwise, returns a processId");
+    expect(description("start")).toContain("no execution or workflow effect is created");
+    expect(description("start")).toContain("completed calls replay the exact stored receipt");
+    expect(description("start")).toContain("ATTEMPT_OUTCOME_UNKNOWN");
 
     const manage = TOOL_DEFINITIONS.find((definition) => definition.name === "manage")!;
     expect(description("manage")).toContain("input schema's `action` enum");
@@ -484,9 +549,6 @@ describe("MCP tool definitions", () => {
       const start = english.indexOf(`## \`${definition.name}\``);
       const end = next ? english.indexOf(`## \`${next.name}\``, start) : english.length;
       const block = english.slice(start, end);
-      for (const parameter of Object.keys(definition.schema.shape)) {
-        expect(block).toContain(`"${parameter}"`);
-      }
       for (const example of definition.examples) {
         expect(block).toContain(JSON.stringify(example, null, 2));
       }

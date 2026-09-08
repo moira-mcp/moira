@@ -109,7 +109,7 @@ export class LockHandler implements INodeHandler {
       // Still active — pause again for retry
       messageQueue.addNotification(
         lockNode.id,
-        `Invalid PIN. Provide PIN via step(processId, { pin: "YOUR_PIN" }).`,
+        `Invalid PIN. Call step with this response's Process ID and Step attempt ID, using input { pin: "YOUR_PIN" }.`,
         "pin_invalid",
       );
       return NodeResultBuilder.pause(lockNode.id, {
@@ -136,7 +136,7 @@ export class LockHandler implements INodeHandler {
         // Still active — pause with instructions for agent
         messageQueue.addNotification(
           lockNode.id,
-          `Execution locked. Provide PIN via step(processId, { pin: "YOUR_PIN" }) or wait for Telegram approval.`,
+          `Execution locked. Call step with this response's Process ID and Step attempt ID, using input { pin: "YOUR_PIN" }, or wait for Telegram approval.`,
           "lock_active",
         );
         return NodeResultBuilder.pause(lockNode.id, {
@@ -184,7 +184,7 @@ export class LockHandler implements INodeHandler {
     // Add notification to message queue for agent
     messageQueue.addNotification(
       lockNode.id,
-      `Execution locked: ${reason}. PIN sent via Telegram. Provide PIN via step(processId, { pin: "YOUR_PIN" }) or wait for Telegram approval.`,
+      `Execution locked: ${reason}. PIN sent via Telegram. Call step with this response's Process ID and Step attempt ID, using input { pin: "YOUR_PIN" }, or wait for Telegram approval.`,
       "lock_created",
     );
 

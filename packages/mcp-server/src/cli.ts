@@ -35,6 +35,7 @@ async function runWorkflow(workflowId: string) {
       throw new Error("Failed to extract process ID from workflow start response");
     }
     const processId = processIdMatch[1];
+    let attemptId = responseText.match(/Step attempt ID:\s*([a-f0-9-]+)/i)?.[1];
 
     console.log(`✅ Workflow started with ID: ${processId}\n`);
     console.log(responseText);
@@ -67,7 +68,14 @@ async function runWorkflow(workflowId: string) {
         }
 
         // Execute step
-        responseText = await MCPEngine.getInstance().executeStep(processId, input);
+        if (!attemptId) throw new Error("Failed to extract step attempt ID from response");
+        responseText = await MCPEngine.getInstance().executeStep(
+          processId,
+          input,
+          undefined,
+          attemptId,
+        );
+        attemptId = responseText.match(/Step attempt ID:\s*([a-f0-9-]+)/i)?.[1];
         console.log("\n", responseText);
       } catch (stepError) {
         if (stepError instanceof Error && stepError.message.includes("completed")) {

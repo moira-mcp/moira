@@ -172,7 +172,8 @@ Production-ready workflows you can use immediately. Each workflow provides expli
 Start any workflow:
 
 ```bash
-mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 List available workflows:

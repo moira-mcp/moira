@@ -12,8 +12,8 @@ WORKFLOW EXECUTION CYCLE:
      3. When completionCondition is met, call `step()` with required
      data:
         ```
-        mcp__moira__step({ processId: "...", input: { ...data from
-     inputSchema } })
+        mcp__moira__step({ processId: "...", attemptId: "...", input: {
+     ...data from inputSchema } })
         ```
 
      4. Receive next directive → repeat
@@ -31,6 +31,14 @@ CRITICALLY IMPORTANT:
 - Even if it takes a long time — finish it to the end
 - completionCondition must be satisfied 100%
 - Call step() only when EVERYTHING is ready
+- Always use the Step attempt ID from the current presentation, even when input is empty. Never use
+  an older attempt for a later presentation.
+- Starting a workflow is two-phase: call `start` with `action: "prepare"`, then call it with
+  `action: "execute"` and the returned Start attempt ID. Retry that same execute call after a lost
+  response; do not create a replacement preparation.
+- `ATTEMPT_OUTCOME_UNKNOWN` must not be automatically retried. Inspect its Process ID through
+  `session` and cancel only through `cancel-execution` with the current revision when recovery
+  requires retiring it.
 - IF STEP INPUT SCHEMA REQUIRES INPUT FROM USER - GATHER THE INFO, DO NOT SIMPLY CALL STEP WITH RANDOM DATA.
 
 PROHIBITED:

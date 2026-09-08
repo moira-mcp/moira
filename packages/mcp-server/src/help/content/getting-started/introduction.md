@@ -139,7 +139,7 @@ Moira connects to AI agents via [Model Context Protocol](https://modelcontextpro
 | Tool      | Purpose                              |
 | --------- | ------------------------------------ |
 | `list`    | Browse available workflows           |
-| `start`   | Begin workflow execution             |
+| `start`   | Prepare or execute a workflow start  |
 | `step`    | Execute current step and advance     |
 | `manage`  | Create, edit, and retrieve workflows |
 | `session` | Get user info and active executions  |

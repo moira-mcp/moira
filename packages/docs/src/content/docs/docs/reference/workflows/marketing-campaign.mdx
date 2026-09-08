@@ -6,7 +6,8 @@ description: Evidence-aware campaign strategy and channel materials with indepen
 Marketing Campaign creates one channel-ready campaign package from an authorized product or offer. It combines audience and competitive context, positioning, proof or hypothesis mapping, brand and legal constraints, materials, calls to action, limitations, deterministic reference checks, and genuinely independent semantic review.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/marketing-campaign", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/marketing-campaign", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Use it when

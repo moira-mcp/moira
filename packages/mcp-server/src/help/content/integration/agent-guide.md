@@ -14,7 +14,7 @@ MCP Moira exposes these tools:
 | Tool            | Purpose                       |
 | --------------- | ----------------------------- |
 | `list`          | List available workflows      |
-| `start`         | Start workflow execution      |
+| `start`         | Prepare or execute a start    |
 | `step`          | Advance workflow with input   |
 | `manage`        | CRUD operations on workflows  |
 | `session`       | User info and execution state |
@@ -25,17 +25,26 @@ MCP Moira exposes these tools:
 
 ## Basic Workflow Execution
 
-### 1. Start Workflow
+### 1. Prepare and Start Workflow
 
 ```json
-start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
+start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
 ```
 
-When no notification or trusted-lock setup is required, the response contains:
+Preparation validates the request and reserves a Start attempt for 15 minutes without creating an
+execution or running any workflow node. It returns `startAttemptId` independently of mutable
+notification and trusted-lock readiness. Execute that exact attempt to run those preflight checks:
+
+```json
+start({ action: "execute", startAttemptId: "start-attempt-123" })
+```
+
+The successful execution response contains:
 
 ```json
 {
   "processId": "abc-123-def",
+  "attemptId": "attempt-456",
   "directive": "Break down the task into steps...",
   "completionCondition": "Task breakdown complete with 3+ steps",
   "inputSchema": {
@@ -48,11 +57,16 @@ When no notification or trusted-lock setup is required, the response contains:
 }
 ```
 
-If a generic notification workflow has no configured user channel, `start` returns Settings >
-Notifications guidance without creating an execution or returning a `processId`. Legacy
-Telegram-notification workflows return Telegram setup guidance. Use `skipNotificationCheck: true`
-only to bypass optional ordinary-notification preflight; it never authorizes a send or bypasses the
-mandatory Telegram configuration for a `lock` node.
+During `execute`, a generic notification workflow with no configured user channel returns a stable
+`START_PRECONDITION_CHANGED` receipt containing Settings > Notifications guidance and creates no
+execution. Legacy Telegram-notification workflows return Telegram setup guidance. Set
+`skipNotificationCheck: true` during prepare only to bypass optional ordinary-notification preflight
+at execute; it never authorizes a send or bypasses mandatory Telegram configuration for a `lock`
+node.
+
+Repeat `execute` with the same Start attempt ID when its response is lost: a completed attempt
+returns the exact stored response and cannot create a second execution. Preparing again is an
+intentional request for a separate execution.
 
 ### 2. Execute Step
 
@@ -61,6 +75,7 @@ After completing the work described in `directive`:
 ```json
 step({
   processId: "abc-123-def",
+  attemptId: "attempt-456",
   input: {
     "steps": ["Step 1", "Step 2", "Step 3"]
   }
@@ -73,6 +88,10 @@ Returns next directive or completion status.
 
 Repeat `step()` calls until workflow returns completion.
 
+Use the Step attempt ID from the current presentation for every call, including a step with empty
+input. A replay of the same attempt with the same input returns its stored result without advancing
+again. Never use an attempt from an older presentation.
+
 ## Response Format
 
 Every workflow step returns:
@@ -80,6 +99,7 @@ Every workflow step returns:
 | Field                 | Description                                        |
 | --------------------- | -------------------------------------------------- |
 | `processId`           | UUID for this execution, use in all `step()` calls |
+| `attemptId`           | Identity of this exact presented step              |
 | `directive`           | What to do (the instruction)                       |
 | `completionCondition` | When you're done (success criteria)                |
 | `inputSchema`         | How to structure your response (JSON Schema)       |
@@ -153,7 +173,7 @@ session({ action: "current_step", executionId: "abc-123" })
 ```
 
 Returns the current agent-facing step presentation without advancing the workflow, including the
-Process ID, directive, success criteria, and input schema when present. Applicable child-workflow,
+Process ID, Step attempt ID, directive, success criteria, and input schema when present. Applicable child-workflow,
 system-reminder, and teleport context is included as well.
 
 ### Get Full Context
@@ -169,7 +189,8 @@ Returns execution state including context variables and history.
 Track execution progress with notes:
 
 ```json
-start({ workflowId: "dev-flow", note: "Feature: auth system", parentExecutionId: "none" })
+start({ action: "prepare", workflowId: "dev-flow", note: "Feature: auth system", parentExecutionId: "none" })
+start({ action: "execute", startAttemptId: "start-attempt-123" })
 ```
 
 Update note during execution via `step()` input:
@@ -177,6 +198,7 @@ Update note during execution via `step()` input:
 ```json
 step({
   processId: "abc-123",
+  attemptId: "attempt-456",
   input: {
     "task_result": "done",
     "execution_note": "Step 3: Integration tests"
@@ -219,13 +241,17 @@ list({ visibility: "public", limit: 10 })
 ### Start and Execute First Step
 
 ```json
-// 1. Start
-start({ workflowId: "moira/verified-research", parentExecutionId: "none" })
-// → { processId: "xyz", directive: "...", ... }
+// 1. Prepare without creating an execution
+start({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
+// → { startAttemptId: "start-1", expiresAt: "..." }
 
-// 2. Do work, then advance
-step({ processId: "xyz", input: { findings: "..." } })
-// → { directive: "next step...", ... }
+// 2. Execute that exact prepared start
+start({ action: "execute", startAttemptId: "start-1" })
+// → { processId: "xyz", attemptId: "attempt-1", directive: "...", ... }
+
+// 3. Do work, then advance
+step({ processId: "xyz", attemptId: "attempt-1", input: { findings: "..." } })
+// → { attemptId: "attempt-2", directive: "next step...", ... }
 ```
 
 ### Resume After Interruption
@@ -237,10 +263,10 @@ session({ action: "executions" })
 
 // 2. Get current step
 session({ action: "current_step", executionId: "xyz" })
-// → { directive: "...", completionCondition: "...", ... }
+// → { attemptId: "attempt-current", directive: "...", completionCondition: "...", ... }
 
 // 3. Continue
-step({ processId: "xyz", input: { ... } })
+step({ processId: "xyz", attemptId: "attempt-current", input: { ... } })
 ```
 
 ## Validation Errors
@@ -251,6 +277,13 @@ If `step()` returns validation error, check:
 2. **Required fields** - All required properties must be present
 3. **Data types** - String vs number vs boolean must match
 4. **Enum values** - Must be one of allowed values
+
+`ATTEMPT_PROCESSING` means another caller still owns this exact mutation; retry the same Process ID,
+Step attempt ID, and input, or the same Start attempt ID for `start({ action: "execute" })`.
+`ATTEMPT_OUTCOME_UNKNOWN` means an external effect may have happened; inspect the returned Process
+ID through `session` and do not automatically retry. The execution owner can retire a blocked
+execution with its current revision through
+`session({ action: "cancel-execution", executionId, expectedRevision })`.
 
 ## Related Documentation
 

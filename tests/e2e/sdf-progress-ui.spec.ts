@@ -1,7 +1,11 @@
 import { findSystemCatalogEntry } from "@mcp-moira/shared";
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
-import { callMCPTool, callMCPToolRaw, createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
+import {
+  callMCPTool,
+  createAuthenticatedMCPClient,
+  startWorkflowExecution,
+} from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -11,11 +15,13 @@ test("renders live SDF progress in the image endpoint and execution UI", async (
 
   try {
     const workflow = findSystemCatalogEntry("software-development-flow", "public")!.graph;
-    const started = await callMCPToolRaw(authenticated.client, "start", {
-      workflowId: "moira/software-development-flow",
-      parentExecutionId: "none",
-      skipTelegramCheck: true,
-    });
+    const started = await startWorkflowExecution(
+      authenticated.client,
+      "moira/software-development-flow",
+      {
+        skipTelegramCheck: true,
+      },
+    );
     const executionId = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     expect(executionId).toBeTruthy();
 

@@ -8,7 +8,8 @@ Todo List превращает одну цель в упорядоченный c
 ## Запуск workflow
 
 ```js
-mcp__moira__start({ workflowId: "moira/todo-list", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/todo-list", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Первый шаг получает от 1 до 100 задач. Если в текущем контексте пользователя или вызывающей стороны
@@ -53,7 +54,7 @@ Todo List владеет курсором с единицы. Он проецир
 Когда неверным оказывается сам checklist — оставшиеся задачи устарели, чего-то не хватает или порядок неправильный, — агент переходит к ноде пересмотра, вместо того чтобы доводить до конца список, о неверности которого уже знает:
 
 ```js
-mcp__moira__step({ processId, teleportTo: "teleport-revise-tasks" })
+mcp__moira__step({ processId, attemptId, teleportTo: "teleport-revise-tasks" })
 ```
 
 Это цель перехода (teleport): в неё не ведёт ни один шаг, поэтому пересмотр всегда осознанное решение. Это не способ уйти от задачи, которая просто сложна, заблокирована или падает, — для такого случая действует правило выше.

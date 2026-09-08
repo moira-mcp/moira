@@ -394,11 +394,12 @@ Every claim must be verifiable from code or system behavior:
 
 Workflows execute through MCP tools:
 
-- `mcp__moira__start` - returns setup guidance when required; otherwise begins execution and returns processId
-- `mcp__moira__step` - advances to next node, returns directive
+- `mcp__moira__start` - `prepare` returns setup guidance or a Start attempt ID without creating an execution; `execute` consumes that ID and returns the Process ID, first Step attempt ID, and directive
+- `mcp__moira__step` - submits the current Step attempt and returns its stored result or the next presentation
 
 Each step returns:
 
+- `attemptId`: identity of the exact presented step
 - `directive`: instruction for AI agent
 - `completionCondition`: success criteria
 - `inputSchema`: expected response format (optional)
@@ -414,17 +415,20 @@ Show the exact syntax the user will type:
 Start a workflow by ID:
 
 ```bash
-mcp__moira__start({ workflowId: "test-planning", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "test-planning", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 With an execution note:
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "development-flow",
   note: "Feature: auth system",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 ````
 

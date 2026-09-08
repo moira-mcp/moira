@@ -30,7 +30,8 @@ that selects between several of them, duplicates the same contract and lets the 
 
 ## 1. Teleport, at any point in execution
 
-A `teleport` node is reachable with `step({ processId, teleportTo: "teleport-replan" })`. It has no
+A `teleport` node is reachable with `step({ processId, attemptId, teleportTo: "teleport-replan" })`,
+using the attempt ID from the current presentation. It has no
 incoming connections — it is excluded from unreachable-node warnings and cannot be reached through
 normal routing. Its `hint` reaches the agent on every step, so it states both the legitimate trigger
 and the cases that belong to other owners:

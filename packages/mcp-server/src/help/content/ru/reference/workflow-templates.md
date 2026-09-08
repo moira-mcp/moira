@@ -38,24 +38,31 @@ mcp__moira__list({ visibility: "public", limit: 100, offset: 0 })
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/quick-task",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
-Для child work укажите в `parentExecutionId` реальный Process ID родителя. Дополнительные параметры зависят от workflow. Например, Smart Purchase Assistant содержит опциональную ноду `user-notification`. Если у текущего пользователя нет настроенного канала связи, запустите его с `skipNotificationCheck: true`; это пропускает graph preflight, но не разрешает уведомление:
+Для child work укажите в `parentExecutionId` реальный Process ID родителя. Дополнительные параметры зависят от workflow. Например, Smart Purchase Assistant содержит опциональную ноду `user-notification`. Если у текущего пользователя нет настроенного канала связи, включите `skipNotificationCheck: true` в prepare, чтобы execute пропустил graph preflight; это не разрешает уведомление:
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/smart-purchase-assistant",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
-Канонический флаг пропускает только preflight опциональных обычных уведомлений. `skipTelegramCheck` — устаревший alias с тем же поведением; противоречащие значения отклоняются. Если выбранный workflow содержит ноду `lock`, текущий пользователь должен сначала настроить корректные Telegram bot token и chat ID для доверенной доставки PIN. Ни один флаг не обходит это требование. Инструкция по настройке без Process ID не является успешным запуском.
+Канонический флаг сохраняется во время prepare и пропускает только preflight опциональных обычных уведомлений при execute. `skipTelegramCheck` — устаревший alias с тем же поведением; противоречащие значения отклоняются. Если выбранный workflow содержит ноду `lock`, текущий пользователь должен настроить корректные Telegram bot token и chat ID до того, как execute создаст execution. Ни один флаг не обходит это требование. Неуспешная изменяемая проверка возвращает стабильный ответ `START_PRECONDITION_CHANGED` без Process ID. Подготовленная попытка действует 15 минут и не создаёт execution, пока её не расходует `start({ action: "execute", startAttemptId })`. После потери ответа повторите тот же execute; новая подготовка намеренно запрашивает отдельное execution.
 
-После того как `start()` вернул Process ID, выполните текущую directive, проверьте completion condition и отправьте точный `inputSchema` через `step()`. Продолжайте до terminal result или явного решения пользователя.
+После того как execute вернул Process ID и идентификатор попытки шага, выполните текущую directive,
+проверьте completion condition и отправьте точный `inputSchema` через `step()` с обоими
+идентификаторами. Для каждого следующего шага используйте новую возвращённую попытку и продолжайте до
+terminal result или явного решения пользователя.
 
 ## Создание или редактирование workflow
 

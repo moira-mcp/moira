@@ -5,7 +5,7 @@
 
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl, getTestFetchUrl, getAdminCredentials } from "../utils/test-config.js";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import { createAuthenticatedMCPClient, startWorkflowExecution } from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -52,10 +52,7 @@ test.describe("Admin Execution Inspector Error Display", () => {
     testUserCleanup = mcpClient.cleanup;
 
     // Start execution as test user using existing public workflow
-    const result = await callMCPTool<string>(testUserMcpClient, "start", {
-      parentExecutionId: "none",
-      workflowId: TEST_WORKFLOW_ID,
-    });
+    const result = await startWorkflowExecution(testUserMcpClient, TEST_WORKFLOW_ID);
 
     // Extract execution ID
     const match = result.match(/Process ID: ([a-f0-9-]+)/);

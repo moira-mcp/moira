@@ -49,6 +49,7 @@ session({ action: "current_step", executionId: "abc-123" })
 
 ```json
 {
+  "attemptId": "attempt-current",
   "directive": "Реализовать фичу...",
   "completionCondition": "Фича работает и протестирована",
   "inputSchema": { ... }
@@ -58,7 +59,7 @@ session({ action: "current_step", executionId: "abc-123" })
 3. **Продолжить workflow:**
 
 ```json
-step({ processId: "abc-123", input: { ... } })
+step({ processId: "abc-123", attemptId: "attempt-current", input: { ... } })
 ```
 
 ### Сохранение Process ID
@@ -112,6 +113,7 @@ session({
 
 **Возвращает:**
 
+- `attemptId`: Идентификатор для отправки именно этого текущего предъявления
 - `directive`: Что делать
 - `completionCondition`: Критерии успеха
 - `inputSchema`: Структура ответа
@@ -172,6 +174,21 @@ session({
 3. Убедитесь что типы данных совпадают (string vs number)
 4. Включите все обязательные поля
 
+### `ATTEMPT_PROCESSING`
+
+**Причина:** Другой вызывающий всё ещё владеет активной заявкой на изменение именно этого шага.
+
+**Решение:** Повторите вызов с теми же Process ID, идентификатором попытки и входными данными. Не
+заменяйте попытку и не изменяйте ввод.
+
+### `ATTEMPT_OUTCOME_UNKNOWN`
+
+**Причина:** Moira не может доказать, завершилось ли уже принятое изменение и связанный с ним
+возможный внешний эффект.
+
+**Решение:** Изучите выполнение через `session({ action: "current_step", executionId: "..." })` и
+состояние соответствующей внешней системы. Не повторяйте изменение автоматически.
+
 ### Агент забывает контекст Workflow
 
 **Причина:** Сессия была архивирована/компактирована
@@ -210,11 +227,11 @@ session({
    → Найден: executionId: "abc-123", status: "waiting"
 
 2. session({ action: "current_step", executionId: "abc-123" })
-   → directive: "Реализовать endpoint логина"
+   → attemptId: "attempt-current", directive: "Реализовать endpoint логина"
 
 3. [Выполняет работу]
 
-4. step({ processId: "abc-123", input: { result: "done" } })
+4. step({ processId: "abc-123", attemptId: "attempt-current", input: { result: "done" } })
 ```
 
 ### Сценарий: Найти потерянный Process ID

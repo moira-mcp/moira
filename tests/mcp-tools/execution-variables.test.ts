@@ -4,6 +4,7 @@ import {
   callMCPToolRaw,
   createAuthenticatedMCPClient,
   createTestUserViaApi,
+  startWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { signInUser } from "../utils/mcp-auth.js";
 import { getAdminCredentials, getTestBaseUrl, getTestFetchUrl } from "../utils/test-config.js";
@@ -106,9 +107,7 @@ describe("runtime execution variables", () => {
       },
     });
     expect(edited).toMatchObject({ success: true, validation: { valid: true } });
-    const started = await callMCPToolRaw(client, "start", {
-      workflowId: "runtime-variable-test",
-      parentExecutionId: "none",
+    const started = await startWorkflowExecution(client, "runtime-variable-test", {
       skipTelegramCheck: true,
     });
     const id = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];
@@ -462,11 +461,11 @@ describe("runtime execution variables", () => {
         ],
       },
     });
-    const foreignStarted = await callMCPToolRaw(foreignClient, "start", {
-      workflowId: foreignOwnedWorkflow.workflowId,
-      parentExecutionId: "none",
-      skipTelegramCheck: true,
-    });
+    const foreignStarted = await startWorkflowExecution(
+      foreignClient,
+      foreignOwnedWorkflow.workflowId,
+      { skipTelegramCheck: true },
+    );
     const foreignExecutionId = foreignStarted.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     expect(foreignExecutionId).toBeDefined();
     const foreignOwnedBefore = await callMCPTool<any>(foreignClient, "session", {
@@ -737,9 +736,7 @@ describe("runtime execution variables", () => {
         ],
       },
     });
-    const noProgressStarted = await callMCPToolRaw(client, "start", {
-      workflowId: noProgressWorkflow.workflowId,
-      parentExecutionId: "none",
+    const noProgressStarted = await startWorkflowExecution(client, noProgressWorkflow.workflowId, {
       skipTelegramCheck: true,
     });
     const noProgressExecutionId = noProgressStarted.match(/Process ID: ([a-f0-9-]+)/)?.[1];
@@ -928,9 +925,7 @@ describe("runtime execution variables", () => {
   });
 
   test("bundled SDF exposes every variable read-only without changing its development boundary", async () => {
-    const started = await callMCPToolRaw(client, "start", {
-      workflowId: "moira/software-development-flow",
-      parentExecutionId: "none",
+    const started = await startWorkflowExecution(client, "moira/software-development-flow", {
       skipTelegramCheck: true,
     });
     const sdfExecutionId = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];

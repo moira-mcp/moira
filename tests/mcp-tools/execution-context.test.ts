@@ -4,7 +4,11 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 describe("MCP Execution Context Tools E2E", () => {
@@ -21,11 +25,8 @@ describe("MCP Execution Context Tools E2E", () => {
     const listResult = await callMCPTool(client, "list", {});
     const workflows = listResult.workflows || listResult;
     if (workflows && workflows.length > 0) {
-      const startResult = await callMCPTool(client, "start", {
-        workflowId: workflows[0].id,
-        parentExecutionId: "none",
-      });
-      testExecutionId = startResult.processId;
+      const execution = await startWorkflowExecutionState(client, workflows[0].id);
+      testExecutionId = execution.processId;
     }
   });
 

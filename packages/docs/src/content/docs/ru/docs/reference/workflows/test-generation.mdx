@@ -6,7 +6,8 @@ description: Реализация executable test code с переиспольз
 Test Generation добавляет или обновляет executable tests для одной разрешённой цели в существующем проекте.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/test-generation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/test-generation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Используйте его, когда результатом является test code. Для стратегии без реализации выбирайте [Test Planning](/ru/docs/reference/workflows/test-planning/), для аудита существующего suite — Test Suite Audit, а при необходимости менять production code — Software Development Flow.

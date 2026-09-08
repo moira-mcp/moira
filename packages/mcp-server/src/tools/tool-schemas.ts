@@ -212,6 +212,7 @@ export const getSessionInfoHandlerSchema = z.object({
       "executions",
       "execution_context",
       "current_step",
+      "cancel-execution",
       "update-note",
       "set-parent",
       "add-reminder",
@@ -344,36 +345,42 @@ export const manageReconciliationSchema = z.object({
   visibility: z.enum(["public", "private"]).optional(),
 });
 
-export const startSchema = z.object({
-  workflowId: z.string().describe("Workflow ID to start (use list() to see available workflows)"),
-  note: z
-    .string()
-    .max(500)
-    .optional()
-    .describe(
-      "Short note to identify this execution (max 500 chars). Use task name, project, or conversation context.",
-    ),
-  parentExecutionId: z
-    .string()
-    .describe(
-      'Required. Use "none" for standalone workflows, or provide parent execution UUID to link child workflows. Child completion will remind to continue parent.',
-    ),
-  skipNotificationCheck: z
-    .boolean()
-    .optional()
-    .describe(
-      "Skip the optional ordinary communication-channel pre-flight check. Lock nodes still require trusted Telegram PIN delivery.",
-    ),
-  skipTelegramCheck: z
-    .boolean()
-    .optional()
-    .describe(
-      "Deprecated alias for skipNotificationCheck. Lock nodes still require trusted Telegram PIN delivery.",
-    ),
-});
+export const startSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("prepare"),
+      workflowId: z
+        .string()
+        .describe("Workflow ID to prepare (use list() for available workflows)"),
+      note: z.string().max(500).optional().describe("Short execution note (max 500 chars)"),
+      parentExecutionId: z
+        .string()
+        .describe('Required. Use "none" for standalone, or a parent process UUID.'),
+      skipNotificationCheck: z
+        .boolean()
+        .optional()
+        .describe("Skip optional ordinary channel checks; lock PIN delivery remains mandatory"),
+      skipTelegramCheck: z
+        .boolean()
+        .optional()
+        .describe("Deprecated alias for skipNotificationCheck"),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("execute"),
+      startAttemptId: z.string().uuid().describe("Start attempt ID returned by prepare"),
+    })
+    .strict(),
+]);
+
+export const startRequestSchema = startSchema;
 
 export const stepSchema = z.object({
   processId: z.string().describe("Process ID from start() or previous step() response"),
+  attemptId: z
+    .string()
+    .describe("Step attempt ID from the current start(), step(), or session current_step response"),
   input: z
     .union([z.string(), z.record(z.any()), z.array(z.unknown()), z.number(), z.boolean(), z.null()])
     .optional()

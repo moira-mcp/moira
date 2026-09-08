@@ -11,9 +11,11 @@ import { Aside } from '@astrojs/starlight/components';
 
 ```js
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/infinite-task-loop",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The triggering request may already contain the first task. The workflow reuses that explicit task instead of asking for it again. Otherwise it waits for the user to supply the next concrete task. A request to stop, leave, finish, or exit is handled by the native exit teleport and is never recorded as task work.

@@ -49,6 +49,7 @@ Returns the current directive and context:
 
 ```json
 {
+  "attemptId": "attempt-current",
   "directive": "Implement the feature...",
   "completionCondition": "Feature working and tested",
   "inputSchema": { ... }
@@ -58,7 +59,7 @@ Returns the current directive and context:
 3. **Continue workflow:**
 
 ```json
-step({ processId: "abc-123", input: { ... } })
+step({ processId: "abc-123", attemptId: "attempt-current", input: { ... } })
 ```
 
 ### Process ID Preservation
@@ -112,6 +113,7 @@ Retrieves current step directive without advancing the workflow.
 
 **Returns:**
 
+- `attemptId`: Identity required to submit this exact current presentation
 - `directive`: What to do
 - `completionCondition`: Success criteria
 - `inputSchema`: Response structure
@@ -172,6 +174,21 @@ Gets full execution state including context variables.
 3. Verify data types match (string vs number)
 4. Include all required fields
 
+### `ATTEMPT_PROCESSING`
+
+**Cause:** Another caller still has a live claim on this exact step mutation.
+
+**Solution:** Retry with the same Process ID, Step attempt ID, and input. Do not replace the attempt
+or alter the input.
+
+### `ATTEMPT_OUTCOME_UNKNOWN`
+
+**Cause:** Moira could not prove whether a claimed mutation and its possible external effect
+completed.
+
+**Solution:** Inspect the execution with `session({ action: "current_step", executionId: "..." })`
+and the relevant external system. Do not automatically retry the mutation.
+
 ### Agent Forgets Workflow Context
 
 **Cause:** Session was archived/compacted
@@ -210,11 +227,11 @@ Agent:
    → Found: executionId: "abc-123", status: "waiting"
 
 2. session({ action: "current_step", executionId: "abc-123" })
-   → directive: "Implement login endpoint"
+   → attemptId: "attempt-current", directive: "Implement login endpoint"
 
 3. [Does the work]
 
-4. step({ processId: "abc-123", input: { result: "done" } })
+4. step({ processId: "abc-123", attemptId: "attempt-current", input: { result: "done" } })
 ```
 
 ### Scenario: Find Lost Process ID

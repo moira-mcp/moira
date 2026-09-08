@@ -53,6 +53,7 @@ Execute directly only a single answer, read-only lookup, or localized change tha
 Each Moira response contains:
 
 - `processId` — the workflow execution identifier.
+- `attemptId` — the server-issued identity of this exact presented step.
 - `directive` — the result to produce in the current step.
 - `completionCondition` — the criteria that must be satisfied before advancing.
 - `inputSchema` — the exact structure required by the next `step()` call, when present.
@@ -64,7 +65,7 @@ For every step:
 1. Read the complete directive, completion condition, and input schema.
 2. Perform only the current step using your own technical judgment.
 3. Verify every completion criterion with concrete evidence.
-4. Call `step(processId, input)` using the exact schema.
+4. Call `step({ processId, attemptId, input })` using the Process ID and Step attempt ID from the current presentation and matching the exact input schema.
 5. Continue until Moira completes the workflow or explicitly requires user input.
 
 ## Completion and evidence
@@ -94,6 +95,11 @@ If no recovery instructions are provided:
 1. Identify the verified cause from the error and available diagnostics.
 2. Retry only when the failure is plausibly transient.
 3. Report the blocker when recovery requires user action, new authority, or unavailable external state.
+
+`ATTEMPT_PROCESSING` means the current mutation still has a live owner; retry the same Process ID,
+Step attempt ID and input. `ATTEMPT_OUTCOME_UNKNOWN` means an external effect may already have
+occurred; inspect the execution and do not automatically retry the mutation. A later paused response
+has a new Step attempt ID, so never apply an older attempt to it.
 
 ## Completion example
 
@@ -134,11 +140,14 @@ The retrospective must report:
 ## Workflow tools
 
 - `list()` — discover available workflows and their purposes.
-- `start({ workflowId, parentExecutionId })` — start a workflow.
-- `step({ processId, input })` — submit a completed step and receive the next one.
+- `start({ action: "prepare", workflowId, parentExecutionId })` — reserve a replay-safe workflow start without creating an execution.
+- `start({ action: "execute", startAttemptId })` — execute that exact prepared start. Retry the same call after a lost response; never prepare a replacement merely because the response was lost.
+- `step({ processId, attemptId, input })` — submit the exact current presentation and receive the next one.
 - `session({ action: "current_step", executionId })` — resume an interrupted workflow.
 - `help({ topic })` — retrieve detailed workflow and tool documentation.
 
-Lifecycle: discover when needed → start → execute and verify the current directive → call `step()` → repeat until completion.
+Lifecycle: discover when needed → prepare start → execute the returned start attempt → execute and verify the current directive → call `step()` → repeat until completion.
+
+`ATTEMPT_PROCESSING` means retry the same attempt. `ATTEMPT_OUTCOME_UNKNOWN` means inspect the returned Process ID through `session` and do not repeat the mutation automatically. A blocked owned start can be retired with `session({ action: "cancel-execution", executionId, expectedRevision })`.
 
 Use the exact workflow and process identifiers returned by Moira. Never guess them.

@@ -18,7 +18,8 @@ validation plan, independent review, and repair record in one execution-bound lo
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/ux-design", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/ux-design", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 Use the calling execution ID instead of `none` when an orchestration workflow starts UX Design as a

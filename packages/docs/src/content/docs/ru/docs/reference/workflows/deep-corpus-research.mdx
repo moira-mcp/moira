@@ -6,7 +6,8 @@ description: Отдельно разрешённое исследование в
 Deep Corpus Research — дорогой исследовательский уровень для одного вопроса, ответ на который требует прочитать заданный корпус источников целиком. В autonomous и interactive mode требуется явное согласие исходного пользователя на эту стоимость. Для пропорционального ограниченного набора источников используйте [Verified Research](/ru/docs/reference/workflows/verified-research/), для повторной критики — [Iterative Research](/ru/docs/reference/workflows/iterative-research/), а при переносимых storage/method условиях — [Universal Research](/ru/docs/reference/workflows/universal-research-workflow/).
 
 ```bash
-mcp__moira__start({ workflowId: "moira/deep-corpus-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/deep-corpus-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 ## Результаты

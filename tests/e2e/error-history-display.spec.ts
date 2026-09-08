@@ -5,7 +5,12 @@
 
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  advanceWorkflowExecution,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -68,10 +73,8 @@ test.describe("Error History Display - Step 13", () => {
     console.log(`✓ Test workflow created: ${testWorkflowId}`);
 
     // Start the workflow
-    const startResult = await callMCPTool<string>(mcpClient, "start", {
-      parentExecutionId: "none",
-      workflowId: testWorkflowId,
-    });
+    const execution = await startWorkflowExecutionState(mcpClient, testWorkflowId);
+    const startResult = execution.response;
 
     // Extract execution ID
     const match = startResult.match(/Process ID: ([a-f0-9-]+)/);
@@ -82,13 +85,10 @@ test.describe("Error History Display - Step 13", () => {
     console.log(`✓ Execution created: ${executionId}`);
 
     // Send invalid input to trigger validation error with multiple missing required fields
-    await callMCPTool<string>(mcpClient, "step", {
-      processId: executionId,
-      input: {
-        wrong_field_1: "value1",
-        wrong_field_2: "value2",
-        another_invalid_field: "value3",
-      },
+    await advanceWorkflowExecution(mcpClient, execution, {
+      wrong_field_1: "value1",
+      wrong_field_2: "value2",
+      another_invalid_field: "value3",
     });
     console.log("✓ Triggered validation error with invalid input");
   });

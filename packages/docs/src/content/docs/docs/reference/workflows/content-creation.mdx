@@ -6,7 +6,8 @@ description: One reviewed text deliverable with durable evidence, cause-owned re
 Content Creation produces one bounded text deliverable—article, post, documentation, script, email, landing copy, or another requested format—from an authorized brief.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/content-creation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/content-creation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 Use it when the result is the text itself. Use [Marketing Campaign](/docs/reference/workflows/marketing-campaign/) for campaign positioning and multi-channel materials, a research workflow when evidence discovery is the result, or Software Development Flow for repository implementation.

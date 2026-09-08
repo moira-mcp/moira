@@ -12,7 +12,8 @@ Choose it when storage capability is uncertain, the question may require differe
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/universal-research-workflow", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/universal-research-workflow", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The intake captures one canonical contract:

@@ -4,7 +4,13 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "@jest/globals";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  advanceWorkflowExecution,
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecution,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 describe("MCP New Features E2E", () => {
@@ -343,22 +349,13 @@ describe("MCP New Features E2E", () => {
 
     test("execution_note updates execution note when provided", async () => {
       // Start workflow
-      const startResult = await callMCPTool<string>(client, "start", {
-        workflowId,
-        parentExecutionId: "none",
-      });
-
-      const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
-      expect(processIdMatch).toBeDefined();
-      const processId = processIdMatch![1];
+      const execution = await startWorkflowExecutionState(client, workflowId);
+      const processId = execution.processId;
 
       // Execute step with execution_note - workflow will complete (reach end node)
-      await callMCPTool(client, "step", {
-        processId,
-        input: {
-          result: "completed",
-          execution_note: "Test execution note via magic variable",
-        },
+      await advanceWorkflowExecution(client, execution, {
+        result: "completed",
+        execution_note: "Test execution note via magic variable",
       });
 
       // Check execution context to verify note was updated
@@ -406,10 +403,7 @@ describe("MCP New Features E2E", () => {
       createdWorkflows.push(workflowId);
 
       // Start workflow
-      const startResult = await callMCPTool<string>(client, "start", {
-        workflowId,
-        parentExecutionId: "none",
-      });
+      const startResult = await startWorkflowExecution(client, workflowId);
       const processId = startResult.match(/Process ID: ([a-f0-9-]+)/)![1];
 
       // Update note via session tool
@@ -490,17 +484,11 @@ describe("MCP New Features E2E", () => {
       createdWorkflows.push(workflowId);
 
       // Test with has_feature = true
-      const startResult = await callMCPTool<string>(client, "start", {
-        workflowId,
-        parentExecutionId: "none",
-      });
-      const processId = startResult.match(/Process ID: ([a-f0-9-]+)/)![1];
+      const execution = await startWorkflowExecutionState(client, workflowId);
+      const processId = execution.processId;
 
       // Set has_feature = true
-      await callMCPTool(client, "step", {
-        processId,
-        input: { has_feature: true },
-      });
+      await advanceWorkflowExecution(client, execution, { has_feature: true });
 
       // Get current step - directive should show "Feature enabled"
       const currentStep = await callMCPTool<string>(client, "session", {
@@ -567,17 +555,11 @@ describe("MCP New Features E2E", () => {
       const workflowId = createResult.workflowId;
       createdWorkflows.push(workflowId);
 
-      const startResult = await callMCPTool<string>(client, "start", {
-        workflowId,
-        parentExecutionId: "none",
-      });
-      const processId = startResult.match(/Process ID: ([a-f0-9-]+)/)![1];
+      const execution = await startWorkflowExecutionState(client, workflowId);
+      const processId = execution.processId;
 
       // Set test_mode = false
-      await callMCPTool(client, "step", {
-        processId,
-        input: { test_mode: false },
-      });
+      await advanceWorkflowExecution(client, execution, { test_mode: false });
 
       const currentStep = await callMCPTool<string>(client, "session", {
         action: "current_step",
@@ -636,10 +618,7 @@ describe("MCP New Features E2E", () => {
       const workflowId = createResult.workflowId;
       createdWorkflows.push(workflowId);
 
-      const startResult = await callMCPTool<string>(client, "start", {
-        workflowId,
-        parentExecutionId: "none",
-      });
+      const startResult = await startWorkflowExecution(client, workflowId);
 
       // Directive should contain resolved array values
       expect(startResult).toContain("Second Item");
@@ -689,10 +668,7 @@ describe("MCP New Features E2E", () => {
       const workflowId = createResult.workflowId;
       createdWorkflows.push(workflowId);
 
-      const startResult = await callMCPTool<string>(client, "start", {
-        workflowId,
-        parentExecutionId: "none",
-      });
+      const startResult = await startWorkflowExecution(client, workflowId);
 
       expect(startResult).toContain("alpha");
       expect(startResult).toContain("beta");
@@ -765,26 +741,22 @@ describe("MCP New Features E2E", () => {
       createdWorkflows.push(childWorkflowId);
 
       // Start parent (parentExecutionId="none" for standalone)
-      const parentStart = await callMCPTool<string>(client, "start", {
-        workflowId: parentWorkflowId,
-        parentExecutionId: "none",
-      });
+      const parentStart = await startWorkflowExecution(client, parentWorkflowId);
       const parentProcessId = parentStart.match(/Process ID: ([a-f0-9-]+)/)![1];
 
       // Start child with parentExecutionId
-      const childStart = await callMCPTool<string>(client, "start", {
-        workflowId: childWorkflowId,
+      const childExecution = await startWorkflowExecutionState(client, childWorkflowId, {
         parentExecutionId: parentProcessId,
       });
+      const childStart = childExecution.response;
 
       // Child should start successfully
       expect(childStart).toContain("Process ID:");
       const childProcessId = childStart.match(/Process ID: ([a-f0-9-]+)/)![1];
 
       // Complete child workflow
-      const completionResult = await callMCPTool<string>(client, "step", {
-        processId: childProcessId,
-        input: { result: "child completed" },
+      const completionResult = await advanceWorkflowExecution(client, childExecution, {
+        result: "child completed",
       });
 
       // Completion should mention parent continuation

@@ -6,7 +6,8 @@ description: Evidence-backed архитектура новых и существ
 Architecture Design Flow создаёт decision-ready поддерживаемый пакет архитектуры для новой системы или существующего продукта. Он объединяет подходящий сценарию discovery, evidence-backed решения, quality attributes, crosscutting и operational concerns, limitations, deterministic package checks и настоящее independent architecture review.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/architecture-design-flow", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/architecture-design-flow", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 ## Когда использовать

@@ -12,7 +12,8 @@ Workflow требует агента с доступом к файловой с�
 ## Запуск
 
 ```bash
-mcp__moira__start({ workflowId: "moira/robust-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/robust-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 ## Процесс

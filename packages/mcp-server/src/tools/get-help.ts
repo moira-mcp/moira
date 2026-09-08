@@ -465,7 +465,7 @@ function getTopicList(helpDirectory = HELP_CONTENT_DIR): string {
   result += `| analyze one completed execution using authorized session, workflow, artifact, review, retry, and correction evidence; propose improvements without applying them | \`moira/execution-retrospective\` |\n`;
   result += `| configure and verify the current user's Moira Telegram notifications without exposing the bot token or full chat ID | \`moira/telegram-setup\` |\n`;
   result += `| create a reviewed visual presentation of a workflow's purpose, graph, routes, variables, and operating contract | \`moira/workflow-presentation-generator\` |\n\n`;
-  result += `Start: \`mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })\``;
+  result += `Start: first \`mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })\`, then call \`start\` with \`action: "execute"\` and its returned \`startAttemptId\`.`;
 
   return result;
 }

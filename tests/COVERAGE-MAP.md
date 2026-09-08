@@ -275,11 +275,18 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
+- `tests/unit/mcp-server/replay-safe-step-schema.test.ts` — required Step attempt identity in the public schema, runtime prompt, static lifecycle descriptions, and default/Cursor variants, with rejection of attempt-less guidance
+- `tests/unit/mcp-server/replay-safe-start-schema.test.ts` — public two-phase start fields and exact runtime prepare/execute discrimination, including rejection of mixed authority
 - `tests/unit/shared/execution-repository-errors.test.ts` — including terminal-result persistence, owner-identity validation, legacy null rows, and fail-closed empty/falsy payload handling
 - `tests/unit/shared/execution-status-mapping.test.ts` — legacy execution-status normalization
 
 **integration**
 
+- `tests/integration/execution-attempt-persistence-migration.test.ts` — additive attempt-storage migration, durable step/start receipts, forced transactional claim rollback, restart-stable unknown-start attachment, revision- and blocking-row-bound atomic cancellation, fenced ownership across SQLite connections, post-eviction no-create behavior, and independent preparation/receipt age/count retention
+- `tests/integration/replay-safe-start-attempts.test.ts` — no-effect preparation, execute-only ordinary/lock preflight, intentional distinct starts, concurrent external-effect coalescing, exact replay without lifecycle metric duplication, foreign non-disclosure, independent digest/version/access binding, start heartbeat reconciliation, stable changed-precondition receipt, expiry rejection, and owner-visible/revision-bound outcome-unknown recovery
+- `tests/integration/replay-safe-step-attempts.test.ts` — exact replay, conflicting/foreign/stale binding rejection, coalesced external effects, unrelated-execution concurrency, fenced leases and recurring recovery, atomic completion/current presentation, materialize/teleport behavior, retention, and terminal metrics
+- `tests/integration/replay-safe-step-audit.test.ts` — bounded content-free audit and Prometheus classifications for all applicable step/start outcomes plus proof that a start replay creates no duplicate execution-start business audit transition
+- `tests/integration/replay-safe-step-mcp-boundary.test.ts` — public parsing, exact replay, conflict projection, and expired-receipt rejection without execution mutation
 - `tests/integration/execution-filters.test.ts`
 - `tests/integration/parent-execution-continuation.test.ts`
 - `tests/integration/start-workflow-parent-execution.test.ts`
@@ -294,7 +301,7 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/mcp-tools/execution-audit.test.ts`
 - `tests/mcp-tools/execution-errors.test.ts`
-- `tests/mcp-tools/workflow-execution.test.ts` — public start/step/session execution, context and branching behavior, intentional validation pause, and `isError` preservation for a genuine failed step
+- `tests/mcp-tools/workflow-execution.test.ts` — process-level authenticated prepare/execute start, current Step attempt propagation, step/session execution, context and branching behavior, intentional validation pause, concurrent intentional starts, and `isError` preservation for a genuine failed step
 - `tests/mcp-tools/communication-tool.test.ts` — authenticated text delivery projection plus attachment grant owner binding, credential/grant separation, pre-delivery release and terminal single-use behavior through the real proxy and MCP process
 
 **e2e**
@@ -460,7 +467,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, strict least-authority communication contract, exact normalized protocol schemas through real registration including projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, and EN/RU renderer parity
+- `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, strict least-authority communication contract, exact normalized protocol schemas through real registration including mixed start-phase rejection and projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, and EN/RU renderer parity
 - `tests/unit/mcp-server/tool-examples.test.ts` — exact-key, current notification-category, and all-settings registry examples reach the masked read projection
 - `tests/unit/mcp-server/mcp-catalog-lifecycle.test.ts` — SDK-valid singleton initialize classification, exact successful-result stamp ordering, error/other-result non-stamping, and successful-result suppression when the credential cannot be stamped
 - `tests/unit/mcp-server/mcp-tools-revision.test.ts` — deterministic matching, null, and stale catalog-revision decisions with package version retained only as diagnostic response data

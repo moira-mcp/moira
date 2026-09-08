@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
-import { callMCPToolRaw, createAuthenticatedMCPClient, signInUser } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  signInUser,
+  startWorkflowExecution,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -23,10 +27,8 @@ describe("execution parent API", () => {
     const authenticated = await createAuthenticatedMCPClient(credentials);
     cleanup = authenticated.cleanup;
     const start = () =>
-      callMCPToolRaw(authenticated.client, "start", {
-        workflowId: "moira/todo-list",
-        parentExecutionId: "none",
-        skipTelegramCheck: true,
+      startWorkflowExecution(authenticated.client, "moira/todo-list", {
+        skipNotificationCheck: true,
       });
     childId = processId(await start());
     parentId = processId(await start());

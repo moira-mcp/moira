@@ -10,7 +10,8 @@ Use it when the requested result is a decision about an idea—not implementatio
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/startup-idea-validation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/startup-idea-validation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The input is the idea in free form. The first step reuses supplied scope, constraints, operating mode, and any publication or notification authority. It asks only when a missing fact materially changes the analysis and cannot be discovered safely.
