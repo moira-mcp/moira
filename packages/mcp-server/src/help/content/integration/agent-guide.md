@@ -286,6 +286,13 @@ Step attempt ID, and input, or the same Start attempt ID for `start({ action: "e
 `ATTEMPT_STALE` was rejected before handler work. Automatically read
 `session({ action: "current_step", executionId })` and retry the intended submission once with the
 returned Step attempt ID; user guidance is not required.
+`ATTEMPT_CONFLICT` means the attempt is already bound to different input. Automatically read
+`session({ action: "current_step", executionId })`, discard the conflicting attempt, and continue
+from the returned directive and input schema without replaying the rejected input; user guidance is
+not required unless the current directive requires a decision.
+For a step-level `ATTEMPT_INVALID_OR_EXPIRED` that explicitly directs you to `current_step`, use the
+same state-refresh recovery and do not reuse the unavailable attempt. An unavailable start attempt
+does not provide this recovery.
 `ATTEMPT_OUTCOME_UNKNOWN` means an external effect may have happened; inspect the returned Process
 ID through `session` and do not automatically retry. The execution owner can retire a blocked
 execution with its current revision through

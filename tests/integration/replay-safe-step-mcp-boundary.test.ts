@@ -78,6 +78,11 @@ describe("replay-safe step MCP boundary", () => {
     );
     expect(conflict.success).toBe(false);
     expect(conflict.error).toContain("ATTEMPT_CONFLICT");
+    expect(conflict.error).toContain("session({ action: 'current_step'");
+    expect(conflict.error).toContain("Do NOT reuse the conflicting attempt ID");
+    expect(conflict.error).toContain("returned directive and input schema");
+    expect(conflict.error?.toLowerCase()).not.toContain("stop");
+    expect(conflict.error?.toLowerCase()).not.toContain("wait for user guidance");
 
     const stateBeforeEvictedRetry = await repository.getExecution(executionId);
     expect(await repository.cleanupExecutionAttempts(Date.now() + 8 * 24 * 60 * 60 * 1_000)).toBe(
@@ -89,6 +94,10 @@ describe("replay-safe step MCP boundary", () => {
     );
     expect(expired.success).toBe(false);
     expect(expired.error).toContain("ATTEMPT_INVALID_OR_EXPIRED");
+    expect(expired.error).toContain("session({ action: 'current_step'");
+    expect(expired.error).toContain("Do NOT reuse the unavailable attempt ID");
+    expect(expired.error).toContain("returned directive and input schema");
+    expect(expired.error?.toLowerCase()).not.toContain("stop");
     expect(await repository.getExecution(executionId)).toEqual(stateBeforeEvictedRetry);
   });
 });

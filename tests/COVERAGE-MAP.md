@@ -157,7 +157,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/messages.test.ts` — error categorization, including automatic `current_step` recovery for pre-handler stale attempts and retained stop boundaries for unrecoverable states
+- `tests/unit/mcp-server/messages.test.ts` — attempt-error categorization, including identical processing retries, automatic `current_step` recovery for stale, conflicting, and explicitly recoverable unavailable step attempts, rejected-input disposal, and retained no-retry boundaries for unavailable starts, outcome-unknown, and unrecoverable states
 - `tests/unit/workflow-engine/telegram-error-messages.test.ts` — actionable Telegram categories with provider/template detail redacted from generic API error projections
 
 **integration**
@@ -275,7 +275,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/replay-safe-step-schema.test.ts` — required Step attempt identity in the public schema, runtime prompt, static lifecycle descriptions, and default/Cursor variants, with rejection of attempt-less guidance
+- `tests/unit/mcp-server/replay-safe-step-schema.test.ts` — required Step attempt identity in the public schema plus conflict and unavailable-step recovery in the runtime prompt and default/Cursor static descriptions, with rejection of attempt-less guidance
 - `tests/unit/mcp-server/replay-safe-start-schema.test.ts` — public two-phase start fields and exact runtime prepare/execute discrimination, including rejection of mixed authority
 - `tests/unit/shared/execution-repository-errors.test.ts` — including terminal-result persistence, owner-identity validation, legacy null rows, and fail-closed empty/falsy payload handling
 - `tests/unit/shared/execution-status-mapping.test.ts` — legacy execution-status normalization
@@ -285,8 +285,8 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/integration/execution-attempt-persistence-migration.test.ts` — additive attempt-storage migration, durable step/start receipts, forced transactional claim rollback, restart-stable unknown-start attachment, revision- and blocking-row-bound atomic cancellation, fenced ownership across SQLite connections, post-eviction no-create behavior, and independent preparation/receipt age/count retention
 - `tests/integration/replay-safe-start-attempts.test.ts` — no-effect preparation, execute-only ordinary/lock preflight, intentional distinct starts, concurrent external-effect coalescing, exact replay without lifecycle metric duplication, foreign non-disclosure, independent digest/version/access binding, start heartbeat reconciliation, stable changed-precondition receipt, expiry rejection, and owner-visible/revision-bound outcome-unknown recovery
 - `tests/integration/replay-safe-step-attempts.test.ts` — exact replay, legacy missing-attempt adoption, revision-only stale presentation recovery, metadata-stable step generations, cancellation semantics, conflicting/foreign binding rejection, coalesced external effects, fenced leases, atomic completion/current presentation, materialize/teleport behavior, retention, and terminal metrics
-- `tests/integration/replay-safe-step-audit.test.ts` — bounded content-free audit and Prometheus classifications for all applicable step/start outcomes plus proof that a start replay creates no duplicate execution-start business audit transition
-- `tests/integration/replay-safe-step-mcp-boundary.test.ts` — public parsing, exact replay, automatic stale-attempt `current_step` recovery without a user stop, conflict projection, and expired-receipt rejection without execution mutation
+- `tests/integration/replay-safe-step-audit.test.ts` — bounded content-free audit and Prometheus classifications for all applicable step/start outcomes, actual start-boundary identical `ATTEMPT_PROCESSING` retry guidance without a user stop, and proof that a start replay creates no duplicate execution-start business audit transition
+- `tests/integration/replay-safe-step-mcp-boundary.test.ts` — public parsing, exact replay, and automatic `current_step` recovery for stale, conflicting, and expired step attempts without a user stop, stale-input replay, or execution mutation
 - `tests/integration/execution-filters.test.ts`
 - `tests/integration/parent-execution-continuation.test.ts`
 - `tests/integration/start-workflow-parent-execution.test.ts`
