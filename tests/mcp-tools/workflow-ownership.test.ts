@@ -11,6 +11,7 @@ import {
   callMCPTool,
   callMCPToolRaw,
   createTestUserViaApi,
+  startWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { getTestFetchUrl } from "../utils/test-config.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -361,6 +362,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
 
     test("non-owner cannot start private workflow", async () => {
       const result = await callMCPToolRaw(userClient, "start", {
+        action: "prepare",
         parentExecutionId: "none",
         workflowId: privateExecWorkflowId,
       });
@@ -372,10 +374,7 @@ describe("MCP Workflow Ownership & Security E2E", () => {
     });
 
     test("owner can start own private workflow", async () => {
-      const result = await callMCPToolRaw(adminClient, "start", {
-        parentExecutionId: "none",
-        workflowId: privateExecWorkflowId,
-      });
+      const result = await startWorkflowExecution(adminClient, privateExecWorkflowId);
 
       // Start returns text format: "Process ID: xxx\nYour next task:..."
       expect(result).toMatch(/Process ID:/);

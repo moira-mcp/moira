@@ -10,6 +10,7 @@ import {
   callMCPToolRaw,
   createAuthenticatedMCPClient,
   createTestUserViaApi,
+  startWorkflowExecution,
 } from "../utils/mcp-auth.js";
 import { getTestFetchUrl } from "../utils/test-config.js";
 
@@ -68,10 +69,7 @@ describe("MCP Lock Step Integration", () => {
   });
 
   test("lock workflow refuses to start without trusted Telegram delivery", async () => {
-    const response = await callMCPToolRaw(client, "start", {
-      workflowId,
-      parentExecutionId: "none",
-    });
+    const response = await startWorkflowExecution(client, workflowId);
 
     expect(response).toContain("lock nodes");
     expect(response).toContain("Telegram");
@@ -80,9 +78,7 @@ describe("MCP Lock Step Integration", () => {
   });
 
   test("skipTelegramCheck cannot bypass mandatory lock PIN delivery", async () => {
-    const response = await callMCPToolRaw(client, "start", {
-      workflowId,
-      parentExecutionId: "none",
+    const response = await startWorkflowExecution(client, workflowId, {
       skipTelegramCheck: true,
     });
 

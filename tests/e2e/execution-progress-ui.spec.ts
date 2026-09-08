@@ -1,6 +1,10 @@
 import { test, expect, type Page } from "./fixtures.js";
 import { getTestBaseUrl } from "../utils/test-config.js";
-import { callMCPTool, callMCPToolRaw, createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
+import {
+  callMCPTool,
+  createAuthenticatedMCPClient,
+  startWorkflowExecution,
+} from "../utils/mcp-auth.js";
 import { loginAsAdmin } from "./helpers/auth-helper.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -22,9 +26,7 @@ async function openProgressExecution(page: Page) {
     agentIds[Math.floor((agentIds.length * 2) / 3)],
     agentIds[agentIds.length - 1],
   ];
-  const started = await callMCPToolRaw(authenticated.client, "start", {
-    workflowId: "moira/verified-research",
-    parentExecutionId: "none",
+  const started = await startWorkflowExecution(authenticated.client, "moira/verified-research", {
     skipTelegramCheck: true,
   });
   const executionId = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];

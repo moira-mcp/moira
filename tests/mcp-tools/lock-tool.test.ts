@@ -19,6 +19,8 @@ import {
   callMCPToolRaw,
   createTestUserViaApi,
   signInUser,
+  startWorkflowExecution,
+  requireMCPResponseId,
 } from "../utils/mcp-auth.js";
 import { getTestFetchUrl } from "../utils/test-config.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -134,7 +136,11 @@ describe("MCP Lock Tool", () => {
   });
 
   /** Helper: create and start a workflow that pauses at an agent step. */
-  async function createUnlockedExecution(): Promise<{ processId: string; workflowId: string }> {
+  async function createUnlockedExecution(): Promise<{
+    processId: string;
+    attemptId: string;
+    workflowId: string;
+  }> {
     const result = await callMCPTool(client, "manage", {
       action: "create",
       workflow: buildWaitingWorkflow(),
@@ -142,20 +148,22 @@ describe("MCP Lock Tool", () => {
     const workflowId = result.workflowId;
     workflowIds.push(workflowId);
 
-    const startRaw = await callMCPToolRaw(client, "start", {
-      workflowId,
-      parentExecutionId: "none",
-    });
+    const startRaw = await startWorkflowExecution(client, workflowId);
 
     const processIdMatch = startRaw.match(/Process ID:\s*([a-f0-9-]+)/i);
     expect(processIdMatch).not.toBeNull();
     const processId = processIdMatch![1];
 
-    return { processId, workflowId };
+    return {
+      processId,
+      attemptId: requireMCPResponseId(startRaw, "Step attempt"),
+      workflowId,
+    };
   }
 
   async function createLockedExecution(): Promise<{
     processId: string;
+    attemptId: string;
     workflowId: string;
     pin: string;
   }> {
@@ -222,10 +230,7 @@ describe("MCP Lock Tool", () => {
       });
       workflowIds.push(createResult.workflowId);
 
-      const startRaw = await callMCPToolRaw(client, "start", {
-        workflowId: createResult.workflowId,
-        parentExecutionId: "none",
-      });
+      const startRaw = await startWorkflowExecution(client, createResult.workflowId);
       const processIdMatch = startRaw.match(/Process ID:\s*([a-f0-9-]+)/i);
       const processId = processIdMatch![1];
 
@@ -339,11 +344,12 @@ describe("MCP Lock Tool", () => {
     });
 
     test("step() is blocked when an owner-created lock is active", async () => {
-      const { processId } = await createLockedExecution();
+      const { processId, attemptId } = await createLockedExecution();
 
       // Try to execute step — should be blocked
       const stepResult = await callMCPToolRaw(client, "step", {
         processId,
+        attemptId,
         input: "anything",
       });
       expect(stepResult).toContain("locked");
@@ -387,10 +393,7 @@ describe("MCP Session Lock Enrichment", () => {
     });
     workflowIds.push(createResult.workflowId);
 
-    const startRaw = await callMCPToolRaw(client, "start", {
-      workflowId: createResult.workflowId,
-      parentExecutionId: "none",
-    });
+    const startRaw = await startWorkflowExecution(client, createResult.workflowId);
 
     const match = startRaw.match(/Process ID:\s*([a-f0-9-]+)/i);
     expect(match).not.toBeNull();

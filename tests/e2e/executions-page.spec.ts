@@ -5,7 +5,7 @@
 
 import { test, expect } from "./fixtures.js";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import { createAuthenticatedMCPClient, startWorkflowExecution } from "../utils/mcp-auth.js";
 import { TEST_WORKFLOWS } from "./fixtures/test-constants.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
@@ -27,10 +27,7 @@ test.describe("Executions Page", () => {
     mcpCleanup = client.cleanup;
 
     // Start execution via MCP tool
-    const result = await callMCPTool<string>(mcpClient, "start", {
-      parentExecutionId: "none",
-      workflowId: TEST_WORKFLOWS.REACT_FLOW_THEME.id,
-    });
+    const result = await startWorkflowExecution(mcpClient, TEST_WORKFLOWS.REACT_FLOW_THEME.id);
 
     // Extract execution ID from response
     const match = result.match(/Process ID: ([a-f0-9-]+)/);

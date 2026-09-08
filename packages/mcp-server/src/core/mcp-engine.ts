@@ -331,60 +331,63 @@ class MCPEngineClass {
     const { userId } = getUserContext();
     this.logger.info("Executing workflow step via MCPEngine", { processId, userId, teleportTo });
 
-    // Capture state BEFORE step execution for audit comparison
-    const executionBefore = await this.executor.getExecutionState(processId);
-    const nodeIdBefore = executionBefore?.currentNodeId ?? null;
-    const statusBefore = executionBefore?.status ?? null;
-    const workflowId = executionBefore?.workflowId;
-    const errorCountBefore = executionBefore?.errors?.length ?? 0;
+    try {
+      // Capture state BEFORE step execution for audit comparison
+      const executionBefore = await this.executor.getExecutionState(processId);
+      const nodeIdBefore = executionBefore?.currentNodeId ?? null;
+      const statusBefore = executionBefore?.status ?? null;
+      const workflowId = executionBefore?.workflowId;
+      const errorCountBefore = executionBefore?.errors?.length ?? 0;
 
-    // Refuse a foreign or unavailable capability before reading lock or workflow details. The
-    // executor repeats the full revision/node/digest binding check atomically at claim time.
-    if (attemptId) {
-      const attempt = await this.repository.getExecutionAttempt(attemptId);
-      if (
-        !attempt ||
-        attempt.operation !== "step" ||
-        attempt.userId !== userId ||
-        attempt.executionId !== processId
-      ) {
-        executionMutationAttemptsTotal.inc({ operation: "step", outcome: "stale_rejection" });
-        await this.logExecutionAttemptOutcome(processId, userId, "stale_rejection");
-        throw new ValidationError(
-          "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
-          { attemptOutcome: "stale_rejection" },
-        );
-      }
-    }
-
-    // Block step if execution has an agent-created lock (not a lock-node lock)
-    if (executionBefore && executionBefore.status === "running") {
-      const lockService = getLockService();
-      const activeLock = await lockService.getActiveLock(processId);
-      if (activeLock) {
-        // Allow step if current node IS a lock node (LockHandler manages its own locks)
-        let isLockNode = false;
-        try {
-          const graph = await this.repository.getWorkflowGraph(executionBefore.workflowId, userId);
-          if (graph) {
-            const currentNode = graph.nodes.find(
-              (n: { id: string; type: string }) => n.id === executionBefore.currentNodeId,
-            );
-            isLockNode = currentNode?.type === "lock";
-          }
-        } catch {
-          // If we can't load graph, fail open (let executor handle it)
-        }
-        if (!isLockNode) {
+      // Refuse a foreign or unavailable capability before reading lock or workflow details. The
+      // executor repeats the full revision/node/digest binding check atomically at claim time.
+      if (attemptId) {
+        const attempt = await this.repository.getExecutionAttempt(attemptId);
+        if (
+          !attempt ||
+          attempt.operation !== "step" ||
+          attempt.userId !== userId ||
+          attempt.executionId !== processId
+        ) {
+          executionMutationAttemptsTotal.inc({ operation: "step", outcome: "stale_rejection" });
+          await this.logExecutionAttemptOutcome(processId, userId, "stale_rejection");
           throw new ValidationError(
-            `Execution is locked (reason: "${activeLock.reason}"). Use lock({ action: "unlock", executionId: "${processId}", pin: "<PIN>" }) to unlock before continuing.`,
-            { executionId: processId, lockId: activeLock.id },
+            "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
+            { attemptOutcome: "stale_rejection" },
           );
         }
       }
-    }
 
-    try {
+      // Block step if execution has an agent-created lock (not a lock-node lock)
+      if (executionBefore && executionBefore.status === "running") {
+        const lockService = getLockService();
+        const activeLock = await lockService.getActiveLock(processId);
+        if (activeLock) {
+          // Allow step if current node IS a lock node (LockHandler manages its own locks)
+          let isLockNode = false;
+          try {
+            const graph = await this.repository.getWorkflowGraph(
+              executionBefore.workflowId,
+              userId,
+            );
+            if (graph) {
+              const currentNode = graph.nodes.find(
+                (n: { id: string; type: string }) => n.id === executionBefore.currentNodeId,
+              );
+              isLockNode = currentNode?.type === "lock";
+            }
+          } catch {
+            // If we can't load graph, fail open (let executor handle it)
+          }
+          if (!isLockNode) {
+            throw new ValidationError(
+              `Execution is locked (reason: "${activeLock.reason}"). Use lock({ action: "unlock", executionId: "${processId}", pin: "<PIN>" }) to unlock before continuing.`,
+              { executionId: processId, lockId: activeLock.id },
+            );
+          }
+        }
+      }
+
       let attemptOutcome: "original" | "safe_replay" | undefined;
       const formattedText = await this.executor.executeStep(processId, input, teleportTo, {
         userId,

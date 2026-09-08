@@ -63,7 +63,11 @@ MCP tools require an authenticated session. Create a client with
 `createAuthenticatedMCPClient()`, then call tools with `callMCPTool(client, name, args)`:
 
 ```typescript
-import { createAuthenticatedMCPClient, callMCPTool } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  callMCPTool,
+  startWorkflowExecutionState,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 let client: Client;
@@ -91,6 +95,8 @@ expect(result.workflows).toBeDefined();
    extracts the text content, and JSON-parses it (falling back to the raw text if
    it is not JSON).
 3. `callMCPToolRaw()` returns the raw text response (used for output-format checks).
+4. `startWorkflowExecutionState()` performs replay-safe `prepare` and `execute`
+   calls and returns the process and current step-attempt IDs.
 
 ---
 
@@ -99,14 +105,12 @@ expect(result.workflows).toBeDefined();
 ```typescript
 test("expression node executes through MCP workflow", async () => {
   // 1. Start workflow with expression node via MCP
-  const startResult = await callMCPTool(client, "start", {
-    workflowId: "test-expression",
-    parentExecutionId: "none",
-  });
+  const execution = await startWorkflowExecutionState(client, "test-expression");
 
   // 2. Execute step via MCP
   const stepResult = await callMCPTool(client, "step", {
-    processId: startResult.processId,
+    processId: execution.processId,
+    attemptId: execution.attemptId,
     input: {},
   });
 

@@ -9,6 +9,9 @@ import {
   createAuthenticatedMCPClient,
   callMCPTool,
   getAdminSessionCookie,
+  advanceWorkflowExecution,
+  startWorkflowExecution,
+  startWorkflowExecutionState,
 } from "../utils/mcp-auth.js";
 import { MCP_TEST_WORKFLOWS } from "../fixtures/mcp-workflows.js";
 import { MCP_TEST_DATA } from "../fixtures/mcp-test-data.js";
@@ -147,10 +150,7 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("execution:start is logged when workflow starts", async () => {
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId,
-    });
+    const startResult = await startWorkflowExecution(client, workflowId);
 
     // Extract process ID
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
@@ -165,7 +165,7 @@ describe("MCP Execution Audit Logging E2E", () => {
           resourceId: processId,
           limit: 10,
         }),
-      (logs) => logs.some((l) => l.resourceId === processId),
+      (logs) => logs.some((l) => l.resourceId === processId && l.resource === "execution"),
       { timeout: 5000, interval: 300 },
     );
 
@@ -184,20 +184,15 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("execution:step is logged when node transitions", async () => {
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId,
-    });
+    const execution = await startWorkflowExecutionState(client, workflowId);
+    const startResult = execution.response;
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     expect(processIdMatch).toBeDefined();
     const processId = processIdMatch![1];
 
     // Execute step (should cause node transition)
-    await callMCPTool<string>(client, "step", {
-      processId,
-      input: EXECUTION_INPUTS.STEP1_SIMPLE,
-    });
+    await advanceWorkflowExecution(client, execution, EXECUTION_INPUTS.STEP1_SIMPLE);
 
     // Wait for execution:step audit log with retry
     const stepLogs = await waitFor(
@@ -235,26 +230,22 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("execution:complete is logged when workflow finishes", async () => {
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId,
-    });
+    const execution = await startWorkflowExecutionState(client, workflowId);
+    const startResult = execution.response;
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     expect(processIdMatch).toBeDefined();
     const processId = processIdMatch![1];
 
     // Execute step1
-    await callMCPTool<string>(client, "step", {
-      processId,
-      input: EXECUTION_INPUTS.STEP1_SIMPLE,
-    });
+    await advanceWorkflowExecution(client, execution, EXECUTION_INPUTS.STEP1_SIMPLE);
 
     // Execute step2 (should complete workflow)
-    const step2Result = await callMCPTool<string>(client, "step", {
-      processId,
-      input: EXECUTION_INPUTS.STEP2_SIMPLE,
-    });
+    const step2Result = await advanceWorkflowExecution(
+      client,
+      execution,
+      EXECUTION_INPUTS.STEP2_SIMPLE,
+    );
 
     // Verify workflow completed
     expect(step2Result).toContain("Workflow completed");
@@ -286,23 +277,15 @@ describe("MCP Execution Audit Logging E2E", () => {
 
   test("full workflow audit trail", async () => {
     // Run a complete workflow and verify full audit trail
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: workflowId,
-    });
+    const execution = await startWorkflowExecutionState(client, workflowId);
+    const startResult = execution.response;
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     const processId = processIdMatch![1];
 
     // Execute both steps
-    await callMCPTool<string>(client, "step", {
-      processId,
-      input: EXECUTION_INPUTS.STEP1_SIMPLE,
-    });
-    await callMCPTool<string>(client, "step", {
-      processId,
-      input: EXECUTION_INPUTS.STEP2_SIMPLE,
-    });
+    await advanceWorkflowExecution(client, execution, EXECUTION_INPUTS.STEP1_SIMPLE);
+    await advanceWorkflowExecution(client, execution, EXECUTION_INPUTS.STEP2_SIMPLE);
 
     // Wait for all audit events with retry (need start, step, and complete)
     const allLogs = await waitFor(
@@ -338,6 +321,7 @@ describe("MCP Execution Audit Logging E2E", () => {
 
     try {
       await callMCPTool<string>(client, "start", {
+        action: "prepare",
         parentExecutionId: "none",
         workflowId: nonExistentWorkflowId,
       });
@@ -380,6 +364,7 @@ describe("MCP Execution Audit Logging E2E", () => {
     try {
       await callMCPTool<string>(client, "step", {
         processId: nonExistentProcessId,
+        attemptId: "00000000-0000-4000-8000-000000000001",
         input: { test: "data" },
       });
       // Should not reach here
@@ -425,10 +410,8 @@ describe("MCP Execution Audit Logging E2E", () => {
     createdWorkflows.push(validationWorkflowId);
 
     // Start workflow
-    const startResult = await callMCPTool<string>(client, "start", {
-      parentExecutionId: "none",
-      workflowId: validationWorkflowId,
-    });
+    const execution = await startWorkflowExecutionState(client, validationWorkflowId);
+    const startResult = execution.response;
 
     const processIdMatch = startResult.match(/Process ID: ([a-f0-9-]+)/);
     expect(processIdMatch).toBeDefined();
@@ -436,10 +419,9 @@ describe("MCP Execution Audit Logging E2E", () => {
 
     // Send invalid input - missing requiredNumber which is required by schema
     // This should trigger validation error and log execution:step_attempt
-    const invalidResult = await callMCPTool<string>(client, "step", {
-      processId,
-      input: { requiredString: "abc" }, // missing requiredNumber
-    });
+    const invalidResult = await advanceWorkflowExecution(client, execution, {
+      requiredString: "abc",
+    }); // missing requiredNumber
 
     // Step 12: Validation error returns comprehensive agent-friendly format
     expect(invalidResult).toContain("❌ VALIDATION ERROR");
@@ -457,12 +439,14 @@ describe("MCP Execution Audit Logging E2E", () => {
           resourceId: processId,
           limit: 10,
         }),
-      (logs) => logs.some((l) => l.resourceId === processId),
+      (logs) => logs.some((l) => l.resourceId === processId && l.resource === "execution"),
       { timeout: 5000, interval: 300 },
     );
 
     expect(attemptLogs.length).toBeGreaterThan(0);
-    const attemptLog = attemptLogs.find((l) => l.resourceId === processId);
+    const attemptLog = attemptLogs.find(
+      (l) => l.resourceId === processId && l.resource === "execution",
+    );
     expect(attemptLog).toBeDefined();
     expect(attemptLog!.action).toBe("execution:step_attempt");
     expect(attemptLog!.resource).toBe("execution");
