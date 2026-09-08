@@ -602,6 +602,105 @@
           "channel_error": "Канал не смог доставить тестовое сообщение."
         }
       },
+      "github": {
+        "title": "Рабочие пространства GitHub",
+        "description": "Подключите GitHub на этом сайте, чтобы Moira могла использовать разрешённые Codespaces, принадлежащие вам. Агент не получает учётные данные GitHub или ссылки авторизации.",
+        "loadFailed": "Не удалось загрузить подключение GitHub",
+        "loadFailedDescription": "Остальные настройки по-прежнему доступны. Повторите загрузку статуса подключения.",
+        "retry": "Повторить",
+        "disabledTitle": "Рабочие пространства GitHub отключены",
+        "disabledDescription": "Администратор должен настроить GitHub App и хранилище учётных данных, прежде чем пользователи смогут подключать аккаунты.",
+        "accountId": "ID аккаунта GitHub {{id}}",
+        "connect": "Подключить GitHub",
+        "reconnect": "Переподключить GitHub",
+        "install": "Установить GitHub App",
+        "disconnect": "Отключить",
+        "confirmDisconnect": "Отключить GitHub и отозвать сохранённый доступ Moira? Активные облачные сессии больше не будут авторизованы.",
+        "disconnected": "GitHub отключён",
+        "disconnectFailed": "Не удалось отключить GitHub",
+        "revocationPending": "Подключение отключено, пока Moira повторяет отзыв доступа в GitHub",
+        "confirmExternalRevocationAction": "Удалить после внешнего отзыва",
+        "confirmExternalRevocationTitle": "Подтвердите отзыв доступа в GitHub",
+        "confirmExternalRevocationDescription": "Moira не может расшифровать credential и отозвать его. Сначала отзовите grant приложения Moira GitHub App в настройках GitHub. Подтверждайте только после исчезновения grant из GitHub; затем Moira удалит нечитаемый локальный credential.",
+        "confirmExternalGrantRevocationDescription": "Moira не может подтвердить отзыв обновлённого credential GitHub. Сначала отзовите весь grant приложения Moira GitHub App в настройках GitHub. Подтверждайте только после исчезновения grant из GitHub; затем Moira удалит заблокированное локальное подключение.",
+        "externalRevocationCompleted": "Нечитаемый credential GitHub удалён",
+        "externalGrantRevocationCompleted": "Подключение GitHub удалено после внешнего отзыва",
+        "externalRevocationFailed": "Не удалось завершить восстановление после внешнего отзыва",
+        "repositories": "Разрешённые репозитории",
+        "noRepositories": "GitHub App пока не предоставляет доступ ни к одному репозиторию.",
+        "private": "Приватный",
+        "public": "Публичный",
+        "states": {
+          "disabled": "Отключено",
+          "configuration_error": "Ошибка конфигурации",
+          "connection_required": "Не подключено",
+          "connecting": "Подключение",
+          "installation_required": "Нужно установить приложение",
+          "connected": "Подключено",
+          "refresh_failed": "Нужно переподключить",
+          "revocation_pending": "Отключение",
+          "disconnected": "Отключено"
+        },
+        "outcomes": {
+          "connected": "GitHub успешно подключён",
+          "installation_required": "Разрешите установку GitHub App, чтобы завершить настройку",
+          "authorization_failed": "Авторизация GitHub не удалась или истекла. Повторите её из Настроек."
+        },
+        "errors": {
+          "INCOMPLETE_CONFIGURATION": {
+            "title": "Конфигурация GitHub заполнена не полностью",
+            "description": "Попросите администратора настроить все параметры GitHub App и хранилища."
+          },
+          "INVALID_CLIENT_ID": {
+            "title": "Неверный client ID GitHub App",
+            "description": "Попросите администратора исправить конфигурацию сервера."
+          },
+          "INVALID_CLIENT_SECRET": {
+            "title": "Неверный client secret GitHub App",
+            "description": "Попросите администратора заменить секрет сервера."
+          },
+          "INVALID_CALLBACK_URL": {
+            "title": "Неверная конфигурация URL GitHub App",
+            "description": "Попросите администратора исправить точный callback URL."
+          },
+          "INVALID_INSTALL_URL": {
+            "title": "Неверный URL установки GitHub App",
+            "description": "Попросите администратора настроить точный URL установки приложения в GitHub."
+          },
+          "CALLBACK_ORIGIN_MISMATCH": {
+            "title": "Callback GitHub не соответствует этому сайту Moira",
+            "description": "Попросите администратора указать точный callback URL этого сайта."
+          },
+          "INVALID_VAULT_KEY": {
+            "title": "Неверный ключ хранилища учётных данных",
+            "description": "Попросите администратора настроить отдельный стойкий ключ хранилища."
+          },
+          "INVALID_KEY_VERSION": {
+            "title": "Неверная версия ключа хранилища",
+            "description": "Попросите администратора исправить версию ключа хранилища."
+          },
+          "AUTH_REFRESH_FAILED": {
+            "title": "GitHub нужно переподключить",
+            "description": "Сохранённые учётные данные GitHub истекли или были отозваны. Переподключите аккаунт на этой странице."
+          },
+          "AUTH_GRANT_REVOCATION_REQUIRED": {
+            "title": "Перед переподключением отзовите grant GitHub App",
+            "description": "Результат обновления credential не удалось безопасно сохранить или отозвать. Отзовите весь grant приложения Moira GitHub App в настройках GitHub, затем подтвердите внешний отзыв ниже. До завершения восстановления переподключение отключено."
+          },
+          "CREDENTIAL_UNREADABLE": {
+            "title": "Сохранённый credential GitHub нельзя расшифровать",
+            "description": "Отзовите grant приложения Moira GitHub App в настройках GitHub, затем подтвердите внешний отзыв ниже. До завершения восстановления переподключение отключено."
+          },
+          "REVOCATION_PENDING": {
+            "title": "Доступ GitHub отзывается",
+            "description": "Подключение уже отключено. Повторите отключение, чтобы завершить удалённый отзыв доступа."
+          },
+          "UNKNOWN": {
+            "title": "Подключение GitHub требует внимания",
+            "description": "Проверьте подключение и повторите действие с этой страницы."
+          }
+        }
+      },
       "saveChanges": "Сохранить изменения",
       "saving": "Сохранение...",
       "cancel": "Отмена",
@@ -619,6 +718,7 @@
         "oauth": "OAuth авторизации",
         "sessions": "Активные сессии",
         "notifications": "Уведомления",
+        "integrations": "Интеграции",
         "connections": "Подключения и сессии",
         "settings": "Настройки",
         "apiTokens": "API Токены"

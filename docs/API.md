@@ -487,6 +487,109 @@ delivery without returning secrets or destinations. An unknown or removed channe
 
 Authentication: Required
 
+## Workspace Connection API
+
+Website-only GitHub App authorization and connection management. These routes
+are mounted under `/api/integrations` behind `requireAuth`; they are separate
+from Better Auth social login and are not MCP operations. Every response uses
+`Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+
+The sanitized connection view has this shape:
+
+```typescript
+interface WorkspaceConnectionView {
+  state:
+    | "disabled"
+    | "configuration_error"
+    | "connection_required"
+    | "connecting"
+    | "installation_required"
+    | "connected"
+    | "refresh_failed"
+    | "revocation_pending"
+    | "disconnected";
+  reason: string | null;
+  settingsUrl: string;
+  installationUrl: string | null;
+  account: { id: string; login: string } | null;
+  installations: Array<{
+    externalInstallationId: string;
+    repositorySelection: "all" | "selected";
+  }>;
+  repositories: Array<{
+    externalRepositoryId: string;
+    fullName: string;
+    private: boolean;
+  }>;
+  canConnect: boolean;
+  canDisconnect: boolean;
+}
+```
+
+The view never contains provider tokens, client/vault secrets, OAuth state,
+connection IDs or revocation IDs.
+
+### GET /api/integrations/github
+
+Returns `{ success: true, data: WorkspaceConnectionView }` for the authenticated
+user. Missing complete server configuration is represented as `disabled` or
+`configuration_error`; it does not contact GitHub.
+
+Authentication: Required
+
+### GET /api/integrations/github/start
+
+Creates one ten-minute, single-use state bound to the current user and web
+session, then returns a `303` redirect to GitHub. A newer start invalidates that
+user's older unconsumed state. Missing/invalid server configuration returns
+`503` with `WORKSPACE_NOT_CONFIGURED`. Unreadable stored credentials and an
+untracked refresh successor return their typed safe recovery errors and cannot
+start authorization.
+
+Authentication: Required
+
+### GET /api/integrations/github/callback
+
+Consumes the exact user/session-bound `state`, exchanges `code` server-side,
+verifies the numeric GitHub user and personal installation/repository grants,
+then returns a `303` redirect to the same-origin Settings page. The redirect
+contains only `github=connected`, `github=installation_required`, or
+`github=authorization_failed`. Code, state and provider errors are never
+reflected in the response; nginx also omits this callback from access logs.
+
+Authentication: Required
+
+### DELETE /api/integrations/github
+
+Makes the connection unusable before provider I/O, retries every exact pending
+token revocation, revokes the active GitHub App grant, and returns the sanitized
+view. A transient provider failure leaves `revocation_pending`; it never restores
+local authority.
+
+Authentication: Required
+
+### DELETE /api/integrations/github/external-revocation
+
+Recovery for an encrypted credential that Moira can no longer decrypt, or for a
+submitted refresh whose successor could be neither retained nor revoked. First
+revoke the entire Moira GitHub App grant in GitHub, then send:
+
+```json
+{ "confirmed": true }
+```
+
+Only an eligible recovery state owned by the authenticated user is accepted. A
+successful confirmation deletes that user's blocked active/pending ciphertext
+and grants. When the configured vault key can read every envelope again, a stale
+unreadable marker is cleared and this endpoint rejects confirmation. The user
+can then use ordinary Reconnect or Disconnect; both paths revoke the readable
+predecessor exactly.
+
+Authentication: Required
+
+See `docs/WORKSPACES.md` for configuration, encryption, refresh and recovery
+contracts.
+
 ## Notes API
 
 User notes management with authentication. All operations scoped to authenticated user.
@@ -3880,6 +3983,11 @@ HTTP status codes:
 - 404: Not Found (resource doesn't exist)
 - 429: Too Many Requests (rate limited)
 - 500: Internal Server Error
+
+For routes whose URL carries a temporary credential, including the GitHub App
+callback, `requestContext.query` and `requestContext.params` are empty and the
+path is sanitized. Callback code/state are never copied into a generic error
+response.
 
 ## Static Artifacts Serving
 

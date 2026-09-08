@@ -8,6 +8,7 @@
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
+import type { WorkspaceConnectionView } from "@mcp-moira/shared";
 import {
   ApiResponse,
   ApiErrorCode,
@@ -477,6 +478,26 @@ export class MoiraApiClient {
       }
       throw new ApiClientError("Failed to update user settings", ApiErrorCode.INTERNAL_ERROR);
     }
+  }
+
+  async getGitHubWorkspaceConnection(): Promise<WorkspaceConnectionView> {
+    const response =
+      await this.client.get<ApiResponse<WorkspaceConnectionView>>("/integrations/github");
+    return response.data.data!;
+  }
+
+  async disconnectGitHubWorkspace(): Promise<WorkspaceConnectionView> {
+    const response =
+      await this.client.delete<ApiResponse<WorkspaceConnectionView>>("/integrations/github");
+    return response.data.data!;
+  }
+
+  async confirmGitHubExternalRevocation(): Promise<WorkspaceConnectionView> {
+    const response = await this.client.delete<ApiResponse<WorkspaceConnectionView>>(
+      "/integrations/github/external-revocation",
+      { data: { confirmed: true } },
+    );
+    return response.data.data!;
   }
 
   /**

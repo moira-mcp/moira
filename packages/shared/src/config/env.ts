@@ -14,6 +14,8 @@ import { validateHostFormat } from "./urls.js";
 import { loadPersistedSecrets } from "./secrets-bootstrap.js";
 import dotenv from "dotenv";
 import path from "path";
+import type { WorkspaceResourcePolicy } from "../workspaces/resource-types.js";
+import { evaluateWorkspaceResourcePolicy } from "../workspaces/resource-policy.js";
 
 const logger = createLogger({ component: "config" });
 
@@ -165,6 +167,41 @@ class ConfigSingleton {
   getGitHubClientSecret(): string | undefined {
     this.ensureInitialized();
     return process.env.GITHUB_CLIENT_SECRET;
+  }
+
+  getWorkspaceGitHubAppClientId(): string | undefined {
+    this.ensureInitialized();
+    return process.env.WORKSPACE_GITHUB_APP_CLIENT_ID;
+  }
+
+  getWorkspaceGitHubAppClientSecret(): string | undefined {
+    this.ensureInitialized();
+    return process.env.WORKSPACE_GITHUB_APP_CLIENT_SECRET;
+  }
+
+  getWorkspaceGitHubAppCallbackUrl(): string | undefined {
+    this.ensureInitialized();
+    return process.env.WORKSPACE_GITHUB_APP_CALLBACK_URL;
+  }
+
+  getWorkspaceGitHubAppInstallUrl(): string | undefined {
+    this.ensureInitialized();
+    return process.env.WORKSPACE_GITHUB_APP_INSTALL_URL;
+  }
+
+  getWorkspaceCredentialVaultKey(): string | undefined {
+    this.ensureInitialized();
+    return process.env.WORKSPACE_CREDENTIAL_VAULT_KEY;
+  }
+
+  getWorkspaceCredentialVaultKeyVersion(): string {
+    this.ensureInitialized();
+    return process.env.WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION?.trim() || "v1";
+  }
+
+  getWorkspaceResourcePolicy(): WorkspaceResourcePolicy {
+    this.ensureInitialized();
+    return evaluateWorkspaceResourcePolicy((name) => process.env[name]);
   }
 
   getGoogleClientId(): string | undefined {
@@ -628,6 +665,7 @@ class ConfigSingleton {
       mcpPort: this.getMcpPort(),
       emailDelivery: this.getEmailDeliveryStatus(),
       githubOAuthConfigured: !!this.getGitHubClientId(),
+      workspaceGitHubAppConfigured: !!this.getWorkspaceGitHubAppClientId(),
       telegramEncryptionConfigured: !!this.getTelegramEncryptionKey(),
     });
   }
@@ -654,6 +692,27 @@ export function getGitHubClientId(): string | undefined {
 }
 export function getGitHubClientSecret(): string | undefined {
   return config.getGitHubClientSecret();
+}
+export function getWorkspaceGitHubAppClientId(): string | undefined {
+  return config.getWorkspaceGitHubAppClientId();
+}
+export function getWorkspaceGitHubAppClientSecret(): string | undefined {
+  return config.getWorkspaceGitHubAppClientSecret();
+}
+export function getWorkspaceGitHubAppCallbackUrl(): string | undefined {
+  return config.getWorkspaceGitHubAppCallbackUrl();
+}
+export function getWorkspaceGitHubAppInstallUrl(): string | undefined {
+  return config.getWorkspaceGitHubAppInstallUrl();
+}
+export function getWorkspaceCredentialVaultKey(): string | undefined {
+  return config.getWorkspaceCredentialVaultKey();
+}
+export function getWorkspaceCredentialVaultKeyVersion(): string {
+  return config.getWorkspaceCredentialVaultKeyVersion();
+}
+export function getWorkspaceResourcePolicy(): WorkspaceResourcePolicy {
+  return config.getWorkspaceResourcePolicy();
 }
 export function getGoogleClientId(): string | undefined {
   return config.getGoogleClientId();

@@ -67,6 +67,7 @@ frontend/src/
 │   ├── settings/               # Settings sub-components
 │   │   ├── ProfileSettings.tsx  # Profile info, name editing, handle, email verification
 │   │   ├── SecuritySettings.tsx # Password change with strength indicator
+│   │   ├── GitHubWorkspaceSettings.tsx # Website-only GitHub workspace connection
 │   │   ├── OAuthSettings.tsx    # OAuth consent management
 │   │   ├── SessionsSettings.tsx # Active session management
 │   │   └── ApiTokensSettings.tsx # API token management (create, list, revoke)
@@ -266,6 +267,7 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 
 - Profile (`ProfileSettings.tsx`): Name editing, email display with verification badge, handle management with AlertDialog confirmation
 - Security (`SecuritySettings.tsx`): Password change form with Progress-based strength indicator
+- Integrations (`GitHubWorkspaceSettings.tsx`): website-only GitHub App connect/reconnect, verified account and repository grants, disconnect confirmation, disabled/configuration/revocation states, and explicit external-grant recovery for unreadable credentials or an untracked refresh successor
 - OAuth Authorizations (`OAuthSettings.tsx`): DataListView with consent cards, empty state with KeyRound icon, revoke with ConfirmDialog
 - Active Sessions (`SessionsSettings.tsx`): DataListView with session cards, Current Session badge, revoke disabled for current session
 - API Tokens (`ApiTokensSettings.tsx`): DataListView with token cards showing name, prefix (monospace), dates, status badge (Active/Expired/Revoked). Create dialog with name input and expiration select (30d/90d/365d/never). One-time token display dialog with copy button and warning. Revoke with ConfirmDialog (variant="destructive").
@@ -289,15 +291,15 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
   without hover.
 
 **Section Order:** Profile → Security → Notifications (when channels exist) → Settings (when
-unmapped dynamic definitions exist) → OAuth Authorizations → Active Sessions → API Tokens. Each
-section has a stable `data-testid`.
+unmapped dynamic definitions exist) → Integrations → OAuth Authorizations → Active Sessions → API
+Tokens. Each section has a stable `data-testid="settings-section-{name}"`.
 
 **SettingsEditor `collapsible` prop:**
 
 - `collapsible={true}` (default): Collapsible groups with ChevronDown toggle — used by AdminSettings
 - `collapsible={false}`: Flat Card rendering without Collapsible wrapper — used by Settings page
 
-**Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, OAuthSettings.tsx, SessionsSettings.tsx
+**Implementation:** Settings.tsx → ProfileSettings.tsx, SecuritySettings.tsx, GitHubWorkspaceSettings.tsx, OAuthSettings.tsx, SessionsSettings.tsx
 
 - Loads user profile via GET /api/user/profile
 - Fetches dynamic settings definitions via GET /api/settings/definitions
@@ -311,6 +313,8 @@ section has a stable `data-testid`.
 - OAuth consents via GET/DELETE /api/user/oauth-consents
 - Sessions via GET/DELETE /api/user/sessions
 - Handle change via PATCH /api/user/handle
+- GitHub workspace connection via GET /api/integrations/github, browser navigation to GET /api/integrations/github/start, and DELETE /api/integrations/github
+- External GitHub grant recovery via DELETE /api/integrations/github/external-revocation after the user revokes the grant in GitHub; this covers unreadable credentials and an untracked refresh successor
 
 **Password Strength Indicator (Progress component):**
 
@@ -1315,7 +1319,8 @@ src/
     "settings": {
       "title", "loading", "required", "enable", "saveChanges", "saving", "cancel", "noSettings", "saveSuccess", "saveFailed", "fixErrors",
       "validation": { "mustBeOneOf", "minLength", "maxLength" },
-      "telegram": { "testNotification", "sending", "testDescription", "configureBotFirst", "testSuccess", "testFailed" }
+      "telegram": { "testNotification", "sending", "testDescription", "configureBotFirst", "testSuccess", "testFailed" },
+      "github": { "title", "description", "states", "outcomes", "errors", "connect", "reconnect", "install", "disconnect", "confirmExternalRevocationAction" }
     },
     "artifacts": {
       "title", "subtitle", "loading", "retry", "noArtifacts",
@@ -1518,6 +1523,9 @@ export class MoiraApiClient {
     request?: WorkflowValidationRequest,
   ): Promise<WorkflowValidationResponse>;
   async copyWorkflow(id: string): Promise<{ workflowId: string; message: string }>;
+  async getGitHubWorkspaceConnection(): Promise<WorkspaceConnectionView>;
+  async disconnectGitHubWorkspace(): Promise<WorkspaceConnectionView>;
+  async confirmGitHubExternalRevocation(): Promise<WorkspaceConnectionView>;
 }
 
 // Default instance using same-origin (nginx proxies /api/ to backend)

@@ -96,3 +96,14 @@ export * from "./errors/domain-errors.js";
 
 // Types
 export * from "./types/index.js";
+
+// Workspace provider connection primitives
+export * from "./workspaces/types.js";
+export * from "./workspaces/github-app-config.js";
+export * from "./workspaces/credential-vault.js";
+export * from "./workspaces/connection-service.js";
+export * from "./workspaces/resource-types.js";
+export * from "./workspaces/provider-registry.js";
+export * from "./workspaces/resource-repository.js";
+export * from "./workspaces/resource-service.js";
+export * from "./workspaces/resource-policy.js";

@@ -787,6 +787,38 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/e2e/verify-step24.spec.ts` — navigation, dashboard statistics, and execution-card behavior
 - `tests/e2e/visual-regression.spec.ts` — light/dark screenshots of the principal application pages
 
+### workspace-connections
+
+**unit**
+
+- `tests/unit/shared/workspace-github-config.test.ts` — disabled-by-default, complete strong configuration, malformed client/key-version rejection, exact same-origin HTTPS callback, GitHub installation URL and dedicated vault-key validation
+- `tests/unit/shared/workspace-credential-vault.test.ts` — versioned AES-GCM envelope, random nonce, plaintext absence and authenticated tenant/provider/connection binding
+- `tests/unit/shared/logging/express-middleware.test.ts` — includes GitHub callback code/state URL redaction
+- `tests/unit/config/nginx-sensitive-logging.test.ts` — both runtime nginx modes omit the credential-bearing GitHub callback request from access logs
+- `tests/unit/config/workspace-github-deployment-config.test.ts` — complete distinct GitHub App/vault environment names in examples and operator-owned Compose references with no committed secret value
+- `tests/unit/web-backend/workspace-connection-routes.test.ts` — browser redirect, secret-free successful/failed/early-status callback outcomes, generic sensitive-query suppression, explicit external-revocation confirmation and sanitized status projection at the HTTP boundary
+- `tests/unit/web-backend/github-workspace-client.test.ts` — authorization-code and refresh exchanges for expiring user tokens, refresh-error secrecy, bounded same-origin pagination, lossless GitHub IDs and app-owned revocation request boundaries
+- `tests/unit/shared/workspace-provider-registry.test.ts` — reviewed provider IDs, stable contract version, duplicate rejection and provider-neutral lookup
+- `tests/unit/shared/workspace-resource-policy.test.ts` — disabled safe defaults, finite hard ceilings, unit conversion and fail-closed malformed/inconsistent resource limits
+- `tests/unit/web-backend/github-codespaces-provider.test.ts` — exact REST methods/paths, explicit machine/marker/retention, machine and bounded same-origin Codespace pagination, immutable owner/billable/repository/machine parsing, unknown-state containment, background acceptance, sanitized definitive/unknown failures and exact absence
+- `tests/unit/web-backend/github-codespaces-connector.test.ts` — fixed worker argv, stdin-only credential delivery, minimal environment, successful and failed operation-HOME removal, bounded stdin/stdout/stderr, timeout/kill, spawn/nonzero failure sanitization, version health and secret-free generated SSH capability probe
+
+**integration**
+
+- `tests/integration/workspace-connections-migration.test.ts` — migration 0024 clean install, representative existing-database preservation, transactional failure rollback and ciphertext-only credential/revocation storage
+- `tests/integration/workspace-connection-service.test.ts` — expired/session/cross-tenant one-time state, foreign-installation rejection before repository enumeration, GitHub identity/install/repository binding, encrypted cross-tenant persistence, same-process and cross-service refresh single-flight, persisted pre-provider recovery authority plus successor disposition across staging/provider/CAS/disconnect failures, submitted-lease waiter recovery, ambiguous/expired/abandoned refresh failure, classic-OAuth rejection, combined exact pending revocation, active and pending-only unreadable recovery, restored-key exact disconnect, and installation-required behavior
+- `tests/integration/workspace-connection-http-lifecycle.test.ts` — real authenticated route, connection service, vault and SQLite start/callback/status/disconnect lifecycle with only outbound GitHub transport substituted and callback/token secrecy observed
+- `tests/integration/workspace-resources-migration.test.ts` — migration 0025 preserves Unit 1 connection data, creates secret-free lifecycle authority atomically and rolls back injected failure
+- `tests/integration/workspace-resource-lifecycle.test.ts` — opaque non-GitHub repository identity, connection-authorization generation fencing, pre-mutation durable mutation intents/quota/capability digest, tenant isolation, separate-service/SQLite reservation serialization, live/stale claim fencing, restart response-loss/background adoption and deadline rejection, multiple-match containment, exact competing cleanup, remote TTL/disconnect cleanup, create/required-cleanup accounting, distinct throttle/user/global/daily limits, global/provider kill-switch boundaries and races, billing/machine/connector rejection, transitional containment and foreign-identity deletion refusal
+
+**api**
+
+- `tests/api/workspace-connections-api.test.ts` — authenticated default-disabled status plus fail-closed start/disconnect without credential metadata or provider contact
+
+**e2e**
+
+- `tests/e2e/workspace-github-settings.spec.ts` — website-only connect navigation, callback outcome, connected repositories, disconnect confirmation, unreadable-credential and untracked-refresh full-grant recovery, safe actionable EN/RU states and inspected desktop/narrow screenshots
+
 ### workflow-engine
 
 **unit**

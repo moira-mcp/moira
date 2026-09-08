@@ -19,6 +19,8 @@ ENV WEB_FRONTEND_PORT=3002
 # Install system dependencies
 RUN apk add --no-cache \
     git \
+    github-cli=2.97.0-r1 \
+    openssh-client-default=10.3_p1-r1 \
     curl \
     nginx \
     supervisor \

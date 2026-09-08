@@ -29,6 +29,7 @@ Persistent audit trail for:
 - `WorkflowService` - workflow CRUD with automatic audit
 - `ExecutionService` - execution lifecycle with automatic audit
 - `SettingsService` - database-backed settings management with automatic audit
+- `WorkspaceConnectionService` - website-owned GitHub connection, refresh and revocation audit
 - `DatabaseRepository` - routes manifest-declared extension settings to their separate value store and writes equivalent audit events without recording secret plaintext
 - Services obtain the source from the AsyncLocalStorage context automatically
 
@@ -156,13 +157,14 @@ Route/Tool → Repository → Database (audit lost!)
 
 ### Available Services
 
-| Service                | Factory Function              | Operations                                             |
-| ---------------------- | ----------------------------- | ------------------------------------------------------ |
-| WorkflowService        | `getWorkflowService()`        | save, softDelete, restore, hardDelete                  |
-| ExecutionService       | `getExecutionService()`       | start, step, complete, fail, cancel, delete            |
-| SettingsService        | `getSettingsService()`        | set, delete, createDefinition, deleteDefinition        |
-| GlobalSettingsService  | `getGlobalSettingsService()`  | setValue                                               |
-| WorkflowSharingService | `getWorkflowSharingService()` | createInvite, acceptInvite, revokeInvite, revokeAccess |
+| Service                    | Factory Function                      | Operations                                                         |
+| -------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
+| WorkflowService            | `getWorkflowService()`                | save, softDelete, restore, hardDelete                              |
+| ExecutionService           | `getExecutionService()`               | start, step, complete, fail, cancel, delete                        |
+| SettingsService            | `getSettingsService()`                | set, delete, createDefinition, deleteDefinition                    |
+| GlobalSettingsService      | `getGlobalSettingsService()`          | setValue                                                           |
+| WorkflowSharingService     | `getWorkflowSharingService()`         | createInvite, acceptInvite, revokeInvite, revokeAccess             |
+| WorkspaceConnectionService | `getWorkspaceConnectionService()`     | start/complete authorization, refresh failure, disconnect/recovery |
 
 ### Code Example
 
@@ -212,6 +214,20 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 - `OAUTH_CONSENT_UPDATE` - OAuth consent updated (scope changes)
 
 **Logged via:** REST API (`/api/oauth/consent`)
+
+### Workspace Connection Events
+
+- `WORKSPACE_CONNECTION_START` - website authorization started
+- `WORKSPACE_CONNECTION_COMPLETE` - GitHub identity and installation binding completed
+- `WORKSPACE_CONNECTION_REFRESH_FAILED` - credential refresh failed closed
+- `WORKSPACE_CONNECTION_DISCONNECT` - remote revoke completed, remains pending, or externally revoked unreadable state was confirmed
+
+**Logged via:** `WorkspaceConnectionService`
+
+Workspace audit metadata is limited to provider and outcome, with the actor and
+opaque connection resource recorded in the ordinary audit fields. OAuth code and
+state, web-session token, repository/source content, provider credentials,
+client secret and vault material are forbidden audit payloads.
 
 ### Workflow Events
 
@@ -1022,6 +1038,7 @@ GET /api/admin/audit-log
 | `/api/executions/*`       | requireAuth       | User execution operations       |
 | `/api/user/*`             | requireAuth       | User profile operations         |
 | `/api/settings/*`         | requireAuth       | User settings                   |
+| `/api/integrations/*`     | requireAuth       | User-owned provider connections |
 | `/api/admin/*`            | requireAuth+Admin | Admin operations                |
 | `/api/stats/*`            | requireAuth       | User statistics                 |
 
@@ -1076,6 +1093,7 @@ Every action type has call sites in the codebase, logged via the source noted be
 | Auth events           | ✅ Via Better Auth hooks                    |
 | User profile          | ✅ Via REST API                             |
 | OAuth consent         | ✅ Via REST API                             |
+| Workspace connection  | ✅ Via WorkspaceConnectionService           |
 | Workflow              | ✅ Via WorkflowService                      |
 | Workflow sharing      | ✅ Via WorkflowSharingService               |
 | Execution             | ✅ Via ExecutionService + MCPEngine         |

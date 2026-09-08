@@ -5,11 +5,12 @@ import { describe, expect, test } from "@jest/globals";
 const configs = ["nginx-root.conf", "nginx-app.conf"];
 
 describe("nginx configuration", () => {
-  test.each(configs)("%s excludes materialize bearer credentials from access logs", (config) => {
+  test.each(configs)("%s excludes credential-bearing requests from access logs", (config) => {
     const source = readFileSync(resolve(process.cwd(), "config", config), "utf8");
 
     expect(source).toContain("map $uri $moira_access_loggable {");
     expect(source).toContain("~^/api/public/executions/materialize/ 0;");
+    expect(source).toContain("/api/integrations/github/callback 0;");
     expect(source).toContain(
       "access_log /var/log/nginx/access.log combined if=$moira_access_loggable;",
     );

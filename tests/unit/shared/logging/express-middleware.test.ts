@@ -20,6 +20,14 @@ describe("sanitizeRequestUrl", () => {
     ).toBe("/api/public/execution-progress-image/[REDACTED]?download=true");
   });
 
+  test("redacts GitHub callback code and state as one sensitive query", () => {
+    const safe = sanitizeRequestUrl(
+      "/api/integrations/github/callback?code=github-secret-code&state=browser-secret-state",
+    );
+    expect(safe).toBe("/api/integrations/github/callback?[REDACTED]");
+    expect(safe).not.toMatch(/github-secret-code|browser-secret-state/);
+  });
+
   test("request logger emits the redacted URL rather than the materialize grant", async () => {
     const messages: string[] = [];
     const logger = {

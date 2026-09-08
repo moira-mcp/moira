@@ -23,6 +23,7 @@ import { SecuritySettings } from "./settings/SecuritySettings";
 import { OAuthSettings } from "./settings/OAuthSettings";
 import { SessionsSettings } from "./settings/SessionsSettings";
 import { ApiTokensSettings } from "./settings/ApiTokensSettings";
+import { GitHubWorkspaceSettings } from "./settings/GitHubWorkspaceSettings";
 
 interface SettingDefinition {
   key: string;
@@ -214,6 +215,13 @@ export const Settings: React.FC = () => {
             </section>
           </>
         )}
+
+        <Separator />
+
+        <section id="integrations-github" data-testid="settings-section-integrations">
+          <h2 className="text-lg font-semibold mb-4">{t("pages.settings.tabs.integrations")}</h2>
+          <GitHubWorkspaceSettings />
+        </section>
 
         <Separator />
 

@@ -602,6 +602,105 @@
           "channel_error": "The channel could not deliver the test message."
         }
       },
+      "github": {
+        "title": "GitHub workspaces",
+        "description": "Connect GitHub on this website so Moira can use approved, user-owned Codespaces. Agents never receive GitHub credentials or authorization links.",
+        "loadFailed": "Failed to load the GitHub workspace connection",
+        "loadFailedDescription": "Your other settings are still available. Retry this connection status request.",
+        "retry": "Retry",
+        "disabledTitle": "GitHub workspaces are disabled",
+        "disabledDescription": "An administrator must configure the GitHub App and credential vault before accounts can be connected.",
+        "accountId": "GitHub account ID {{id}}",
+        "connect": "Connect GitHub",
+        "reconnect": "Reconnect GitHub",
+        "install": "Install GitHub App",
+        "disconnect": "Disconnect",
+        "confirmDisconnect": "Disconnect GitHub and revoke Moira's stored access? Active cloud workspace sessions will no longer be authorized.",
+        "disconnected": "GitHub was disconnected",
+        "disconnectFailed": "Failed to disconnect GitHub",
+        "revocationPending": "The connection is disabled while GitHub revocation is retried",
+        "confirmExternalRevocationAction": "Forget after external revoke",
+        "confirmExternalRevocationTitle": "Confirm GitHub access was revoked",
+        "confirmExternalRevocationDescription": "Moira cannot decrypt this credential to revoke it. First revoke the Moira GitHub App grant in GitHub settings. Confirm only after GitHub no longer lists the grant; Moira will then delete the unreadable local credential.",
+        "confirmExternalGrantRevocationDescription": "Moira cannot prove that a refreshed GitHub credential was revoked. First revoke the entire Moira GitHub App grant in GitHub settings. Confirm only after GitHub no longer lists the grant; Moira will then remove the blocked local connection.",
+        "externalRevocationCompleted": "The unreadable GitHub credential was removed",
+        "externalGrantRevocationCompleted": "The GitHub connection was removed after external revocation",
+        "externalRevocationFailed": "Failed to finish external revocation recovery",
+        "repositories": "Approved repositories",
+        "noRepositories": "The GitHub App does not currently grant access to a repository.",
+        "private": "Private",
+        "public": "Public",
+        "states": {
+          "disabled": "Disabled",
+          "configuration_error": "Configuration error",
+          "connection_required": "Not connected",
+          "connecting": "Connecting",
+          "installation_required": "App installation required",
+          "connected": "Connected",
+          "refresh_failed": "Reconnect required",
+          "revocation_pending": "Disconnecting",
+          "disconnected": "Disconnected"
+        },
+        "outcomes": {
+          "connected": "GitHub connected successfully",
+          "installation_required": "Authorize the GitHub App installation to finish setup",
+          "authorization_failed": "GitHub authorization failed or expired. Try again from Settings."
+        },
+        "errors": {
+          "INCOMPLETE_CONFIGURATION": {
+            "title": "GitHub workspace configuration is incomplete",
+            "description": "Ask an administrator to configure every required GitHub App and vault setting."
+          },
+          "INVALID_CLIENT_ID": {
+            "title": "GitHub App client ID is invalid",
+            "description": "Ask an administrator to correct the server configuration."
+          },
+          "INVALID_CLIENT_SECRET": {
+            "title": "GitHub App client secret is invalid",
+            "description": "Ask an administrator to replace the server secret."
+          },
+          "INVALID_CALLBACK_URL": {
+            "title": "GitHub App URL configuration is invalid",
+            "description": "Ask an administrator to correct the exact callback URL."
+          },
+          "INVALID_INSTALL_URL": {
+            "title": "GitHub App installation URL is invalid",
+            "description": "Ask an administrator to configure the app's exact GitHub installation URL."
+          },
+          "CALLBACK_ORIGIN_MISMATCH": {
+            "title": "GitHub callback does not match this Moira site",
+            "description": "Ask an administrator to use this site's exact callback URL."
+          },
+          "INVALID_VAULT_KEY": {
+            "title": "Credential vault key is invalid",
+            "description": "Ask an administrator to configure a strong dedicated vault key."
+          },
+          "INVALID_KEY_VERSION": {
+            "title": "Credential vault key version is invalid",
+            "description": "Ask an administrator to correct the vault key version."
+          },
+          "AUTH_REFRESH_FAILED": {
+            "title": "GitHub must be reconnected",
+            "description": "The saved GitHub credential expired or was revoked. Reconnect it on this page."
+          },
+          "AUTH_GRANT_REVOCATION_REQUIRED": {
+            "title": "Revoke the GitHub App grant before reconnecting",
+            "description": "A refresh outcome could not be safely retained or revoked. Revoke the entire Moira GitHub App grant in GitHub settings, then confirm that external revocation below. Reconnect remains disabled until recovery is complete."
+          },
+          "CREDENTIAL_UNREADABLE": {
+            "title": "The saved GitHub credential cannot be decrypted",
+            "description": "Revoke the Moira GitHub App grant in GitHub settings, then confirm the external revocation below. Reconnect is disabled until this recovery is complete."
+          },
+          "REVOCATION_PENDING": {
+            "title": "GitHub access is being revoked",
+            "description": "The connection is already disabled. Retry Disconnect to finish remote revocation."
+          },
+          "UNKNOWN": {
+            "title": "GitHub connection needs attention",
+            "description": "Review the connection and try again from this page."
+          }
+        }
+      },
       "saveChanges": "Save Changes",
       "saving": "Saving...",
       "cancel": "Cancel",
@@ -619,6 +718,7 @@
         "oauth": "OAuth Authorizations",
         "sessions": "Active Sessions",
         "notifications": "Notifications",
+        "integrations": "Integrations",
         "connections": "Connections & Sessions",
         "settings": "Settings",
         "apiTokens": "API Tokens"

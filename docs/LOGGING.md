@@ -45,6 +45,12 @@ Logs all HTTP requests via morgan:
 2025-10-18 02:19:30.123 [INFO] [web-backend] [HTTP] GET /api/workflows 200 45.231 ms
 ```
 
+The request logger sanitizes tokenized public paths and replaces the complete
+GitHub workspace callback query with `[REDACTED]`. The generic HTTP error
+projection also omits query/params and sanitizes the path for these sensitive
+URLs, so callback code/state and temporary grants do not reappear in response
+diagnostics.
+
 ### Request Body Logging
 
 POST/PUT/PATCH request bodies logged at debug level for debugging:
@@ -121,6 +127,7 @@ They cover, by area:
 - **Tokens** — `TOKEN_CREATE`, `TOKEN_REVOKE`
 - **Locks** — `LOCK_CREATE`, `LOCK_UNLOCK`, `LOCK_ATTEMPT_FAIL`
 - **OAuth consent** — `OAUTH_CONSENT_GRANT`, `OAUTH_CONSENT_UPDATE`
+- **Workspace connection** — connect start/completion, refresh failure and disconnect/recovery; metadata contains only provider, opaque resource and outcome
 - **Workflow sharing** — invite create/accept/revoke, access revoke
 - **MCP read operations** — workflow list, session info, settings read, token create, help request, notes list
 - **Admin** — user management, security actions (force reset, session/OAuth revocation), execution-context updates, database operations (vacuum/backup), settings and global-settings management, artifact moderation (takedown, list reported), and system-wide operations
