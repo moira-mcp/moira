@@ -352,6 +352,8 @@ describe("replay-safe step audit classification", () => {
       );
       expect(processing.success).toBe(false);
       expect(processing.error).toContain("ATTEMPT_PROCESSING");
+      expect(processing.error).toContain("same Process ID, attempt ID, and input");
+      expect(processing.error?.toLowerCase()).not.toContain("stop");
       expect(
         await repository.markExecutionAttemptOutcomeUnknown(
           startAttemptId!,

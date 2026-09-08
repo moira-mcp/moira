@@ -189,6 +189,24 @@ handler work.
 **Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, then
 retry the intended submission once with the returned Step attempt ID. Do not reuse the stale ID.
 
+### `ATTEMPT_CONFLICT`
+
+**Cause:** The attempt is already bound to a different input and the new submission was rejected
+before handler work.
+
+**Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, discard
+the conflicting attempt, and continue from the returned directive and input schema. Do not replay
+the rejected input against the current presentation.
+
+### `ATTEMPT_INVALID_OR_EXPIRED` for a step
+
+**Cause:** The step attempt is unavailable and was rejected before handler work. This recovery
+applies only when the error explicitly directs the caller to `current_step`; an unavailable start
+attempt has no current step to recover.
+
+**Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, discard
+the unavailable attempt, and continue from the returned directive and input schema.
+
 ### `ATTEMPT_OUTCOME_UNKNOWN`
 
 **Cause:** Moira could not prove whether a claimed mutation and its possible external effect

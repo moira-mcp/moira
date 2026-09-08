@@ -4,6 +4,7 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
+import { ConflictError } from "@mcp-moira/shared";
 import {
   ERRORS,
   SUCCESS,
@@ -11,6 +12,7 @@ import {
   VALIDATION_HELP,
   AGENT_INSTRUCTIONS,
   formatError,
+  formatDomainError,
   formatErrorWithAgentInstructions,
 } from "../../../packages/mcp-server/src/messages/en.js";
 
@@ -114,6 +116,10 @@ describe("MCP Messages Module", () => {
     it("should have all required agent instruction categories", () => {
       expect(AGENT_INSTRUCTIONS.workflow_not_found).toBeDefined();
       expect(AGENT_INSTRUCTIONS.stale_attempt).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.processing_attempt).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.conflicting_attempt).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.invalid_step_attempt).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.outcome_unknown).toBeDefined();
       expect(AGENT_INSTRUCTIONS.process_not_found).toBeDefined();
       expect(AGENT_INSTRUCTIONS.validation_failed).toBeDefined();
       expect(AGENT_INSTRUCTIONS.auth_required).toBeDefined();
@@ -130,10 +136,19 @@ describe("MCP Messages Module", () => {
 
     it("should contain STOP instruction only in categories that require a user boundary", () => {
       for (const [category, instructions] of Object.entries(AGENT_INSTRUCTIONS)) {
-        if (category === "stale_attempt") continue;
+        if (
+          category === "stale_attempt" ||
+          category === "processing_attempt" ||
+          category === "conflicting_attempt" ||
+          category === "invalid_step_attempt"
+        )
+          continue;
         expect(instructions.toLowerCase()).toContain("stop");
       }
       expect(AGENT_INSTRUCTIONS.stale_attempt.toLowerCase()).not.toContain("stop");
+      expect(AGENT_INSTRUCTIONS.processing_attempt.toLowerCase()).not.toContain("stop");
+      expect(AGENT_INSTRUCTIONS.conflicting_attempt.toLowerCase()).not.toContain("stop");
+      expect(AGENT_INSTRUCTIONS.invalid_step_attempt.toLowerCase()).not.toContain("stop");
     });
 
     it("should contain numbered steps", () => {
@@ -192,6 +207,64 @@ describe("MCP Messages Module", () => {
       expect(result).toContain("session({ action: 'current_step'");
       expect(result).toContain("No user guidance is required");
       expect(result.toLowerCase()).not.toContain("stop");
+    });
+
+    it("should refresh current state after a conflicting attempt without replaying stale input", () => {
+      const result = formatErrorWithAgentInstructions(
+        "ATTEMPT_CONFLICT: this attempt was already submitted with different input",
+      );
+      expect(result).toContain("session({ action: 'current_step'");
+      expect(result).toContain("Do NOT reuse the conflicting attempt ID");
+      expect(result).toContain("returned directive and input schema");
+      expect(result.toLowerCase()).not.toContain("stop");
+      expect(result.toLowerCase()).not.toContain("wait for user guidance");
+    });
+
+    it("should retry a still-processing attempt with the identical identity and input", () => {
+      const result = formatErrorWithAgentInstructions(
+        "ATTEMPT_PROCESSING: this attempt is still processing. Retry the same attempt.",
+      );
+      expect(result).toContain("same Process ID, attempt ID, and input");
+      expect(result).toContain("Do NOT create a replacement attempt");
+      expect(result.toLowerCase()).not.toContain("stop");
+      expect(result.toLowerCase()).not.toContain("wait for user guidance");
+    });
+
+    it("should preserve attempt-specific recovery through domain error formatting", () => {
+      const result = formatDomainError(
+        new ConflictError("ATTEMPT_PROCESSING: this attempt is still processing."),
+      );
+      expect(result).toContain("same Process ID, attempt ID, and input");
+      expect(result.toLowerCase()).not.toContain("stop");
+      expect(result).not.toContain("Review the inputSchema");
+    });
+
+    it("should refresh current state for an unavailable step attempt when the engine permits it", () => {
+      const result = formatErrorWithAgentInstructions(
+        "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
+      );
+      expect(result).toContain("session({ action: 'current_step'");
+      expect(result).toContain("Do NOT reuse the unavailable attempt ID");
+      expect(result).toContain("returned directive and input schema");
+      expect(result.toLowerCase()).not.toContain("stop");
+    });
+
+    it("should not invent current-step recovery for an unavailable start attempt", () => {
+      const result = formatErrorWithAgentInstructions(
+        "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable.",
+      );
+      expect(result).toContain("STOP and report the full error details to user");
+      expect(result).not.toContain("Do NOT reuse the unavailable attempt ID");
+    });
+
+    it("should inspect outcome-unknown attempts without authorizing an automatic retry", () => {
+      const result = formatErrorWithAgentInstructions(
+        "ATTEMPT_OUTCOME_UNKNOWN: this workflow mutation may already have produced effects",
+      );
+      expect(result).toContain("Inspect the execution");
+      expect(result).toContain("Do NOT retry the mutation automatically");
+      expect(result.toLowerCase()).toContain("stop");
+      expect(result).not.toContain("Retry the intended step once");
     });
 
     it("should detect process_not_found errors", () => {

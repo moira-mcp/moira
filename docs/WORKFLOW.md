@@ -90,6 +90,12 @@ stale, another caller still owns it after the bounded wait (`ATTEMPT_PROCESSING`
 claimed mutation has an unknown durable outcome (`ATTEMPT_OUTCOME_UNKNOWN`). For
 `ATTEMPT_PROCESSING`, retry the same attempt and identical input. `ATTEMPT_STALE` performed no
 handler work: read `current_step` automatically and retry once with its authoritative attempt.
+`ATTEMPT_CONFLICT` also performed no handler work: read `current_step` automatically, discard the
+conflicting attempt, and continue from the returned directive and schema without replaying its old
+input.
+For a step-level `ATTEMPT_INVALID_OR_EXPIRED` that explicitly directs the caller to `current_step`,
+use the same state refresh and discard the unavailable attempt. This does not apply to an
+unavailable start attempt.
 For a start attempt with unknown outcome, use the returned Process ID with `session` to inspect
 the attached execution instead of preparing or executing another start. The owner may retire a
 blocked execution with `session({ action: "cancel-execution", executionId, expectedRevision })`;

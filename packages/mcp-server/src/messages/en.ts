@@ -230,6 +230,34 @@ AGENT INSTRUCTIONS:
 3. Retry the intended step once with the Step attempt ID returned by current_step
 Do NOT reuse the stale attempt ID. No user guidance is required for this recovery.`,
 
+  processing_attempt: `
+AGENT INSTRUCTIONS:
+1. This exact workflow mutation still has a live owner
+2. Retry with the same Process ID, attempt ID, and input
+3. Reuse the stored result returned when the owner completes
+Do NOT create a replacement attempt or change the input. No user guidance is required for this recovery.`,
+
+  conflicting_attempt: `
+AGENT INSTRUCTIONS:
+1. This submission was rejected before workflow handler work because the attempt ID is already bound to different input
+2. Call session({ action: 'current_step', executionId: '<Process ID>' }) automatically
+3. Discard the rejected presentation and continue from the returned directive and input schema
+Do NOT reuse the conflicting attempt ID or blindly apply its input to the current presentation. No user guidance is required unless the current directive requires a user decision.`,
+
+  invalid_step_attempt: `
+AGENT INSTRUCTIONS:
+1. This step attempt was rejected before workflow handler work because it is unavailable
+2. Call session({ action: 'current_step', executionId: '<Process ID>' }) automatically
+3. Discard the unavailable presentation and continue from the returned directive and input schema
+Do NOT reuse the unavailable attempt ID or blindly apply its input to the current presentation. No user guidance is required unless the current directive requires a user decision.`,
+
+  outcome_unknown: `
+AGENT INSTRUCTIONS:
+1. STOP before retrying this workflow mutation because its effects may already have occurred
+2. Inspect the execution with session({ action: 'current_step', executionId: '<Process ID>' }) and session({ action: 'execution_context', executionId: '<Process ID>' })
+3. Continue only from the observed current state; ask the user when resolving it requires a decision
+Do NOT retry the mutation automatically. Do NOT treat a missing response as proof that no effect occurred.`,
+
   // Workflow not found - agent should verify ID and use list()
   workflow_not_found: `
 AGENT INSTRUCTIONS:
@@ -293,6 +321,10 @@ Do NOT continue independently. Do NOT ignore this error.`,
  */
 export type ErrorCategory =
   | "stale_attempt"
+  | "processing_attempt"
+  | "conflicting_attempt"
+  | "invalid_step_attempt"
+  | "outcome_unknown"
   | "workflow_not_found"
   | "process_not_found"
   | "validation_failed"
@@ -332,7 +364,7 @@ export const LABELS = {
 
 /**
  * Format error with troubleshooting help AND agent instructions
- * Agent instructions ensure agents STOP and WAIT for user on errors
+ * Agent instructions select the safe automatic or user-bound recovery for each error.
  */
 export function formatError(
   message: string,
@@ -367,7 +399,18 @@ export function formatErrorWithAgentInstructions(message: string): string {
   let helpCategory: keyof typeof VALIDATION_HELP | undefined;
   let agentCategory: ErrorCategory | undefined;
 
-  if (lowerMessage.includes("attempt_stale")) {
+  if (lowerMessage.includes("attempt_outcome_unknown")) {
+    agentCategory = "outcome_unknown";
+  } else if (lowerMessage.includes("attempt_processing")) {
+    agentCategory = "processing_attempt";
+  } else if (lowerMessage.includes("attempt_conflict")) {
+    agentCategory = "conflicting_attempt";
+  } else if (
+    lowerMessage.includes("attempt_invalid_or_expired") &&
+    lowerMessage.includes("current_step")
+  ) {
+    agentCategory = "invalid_step_attempt";
+  } else if (lowerMessage.includes("attempt_stale")) {
     agentCategory = "stale_attempt";
   } else if (lowerMessage.includes("workflow") && lowerMessage.includes("not found")) {
     helpCategory = "workflow_troubleshooting";
