@@ -138,15 +138,16 @@ Preparation returns a `startAttemptId` without creating an execution. Execute it
 
 Common error responses:
 
-| Error                     | Cause                         | Solution                            |
-| ------------------------- | ----------------------------- | ----------------------------------- |
-| `UNAUTHORIZED`            | Invalid/expired token         | Re-authenticate                     |
-| `NOT_FOUND`               | Invalid workflow/process ID   | Verify IDs                          |
-| `FORBIDDEN`               | No access to resource         | Check permissions                   |
-| `upgrade_required`        | MCP catalog must be refreshed | Reconnect using the same credential |
-| `VALIDATION_ERROR`        | Invalid input                 | Check input schema                  |
-| `ATTEMPT_PROCESSING`      | Duplicate still executing     | Retry the same attempt and input    |
-| `ATTEMPT_OUTCOME_UNKNOWN` | Effect may have occurred      | Inspect the returned Process ID     |
+| Error                     | Cause                             | Solution                            |
+| ------------------------- | --------------------------------- | ----------------------------------- |
+| `UNAUTHORIZED`            | Invalid/expired token             | Re-authenticate                     |
+| `NOT_FOUND`               | Invalid workflow/process ID       | Verify IDs                          |
+| `FORBIDDEN`               | No access to resource             | Check permissions                   |
+| `upgrade_required`        | MCP catalog must be refreshed     | Reconnect using the same credential |
+| `VALIDATION_ERROR`        | Invalid input                     | Check input schema                  |
+| `ATTEMPT_PROCESSING`      | Duplicate still executing         | Retry the same attempt and input    |
+| `ATTEMPT_STALE`           | Presentation is no longer current | Read `current_step` and retry once  |
+| `ATTEMPT_OUTCOME_UNKNOWN` | Effect may have occurred          | Inspect the returned Process ID     |
 
 ## Self-Hosted Setup
 

@@ -5,6 +5,7 @@ import {
   InternalError,
   TokenManager,
   ValidationError,
+  metadataRevision,
 } from "@mcp-moira/shared";
 import type { INodeHandler } from "../interfaces/core-interfaces.js";
 import type { IDataRepository } from "../interfaces/data-repository.js";
@@ -31,7 +32,12 @@ const EMPTY_COMPLETION_SCHEMA = {
 };
 
 export interface MaterializeGrantIssuer {
-  createMaterializeToken(executionId: string, nodeId: string, userId: string): string;
+  createMaterializeToken(
+    executionId: string,
+    nodeId: string,
+    userId: string,
+    contextRevision?: string,
+  ): string;
 }
 
 export class MaterializeHandler implements INodeHandler {
@@ -65,6 +71,7 @@ export class MaterializeHandler implements INodeHandler {
           context.executionId,
           node.id,
           context.userId,
+          metadataRevision(context),
         );
         const url = `${this.baseUrl().replace(/\/$/, "")}/api/public/executions/materialize/${token}`;
         const command = `mkdir -p -- ${quotePosixShellArgument(basePath)} && curl -sSf -- ${quotePosixShellArgument(url)} | tar -x -C ${quotePosixShellArgument(basePath)}`;

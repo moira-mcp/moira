@@ -181,6 +181,14 @@ Gets full execution state including context variables.
 **Solution:** Retry with the same Process ID, Step attempt ID, and input. Do not replace the attempt
 or alter the input.
 
+### `ATTEMPT_STALE`
+
+**Cause:** The attempt no longer matches the current execution presentation and was rejected before
+handler work.
+
+**Solution:** Automatically call `session({ action: "current_step", executionId: "..." })`, then
+retry the intended submission once with the returned Step attempt ID. Do not reuse the stale ID.
+
 ### `ATTEMPT_OUTCOME_UNKNOWN`
 
 **Cause:** Moira could not prove whether a claimed mutation and its possible external effect
@@ -188,6 +196,14 @@ completed.
 
 **Solution:** Inspect the execution with `session({ action: "current_step", executionId: "..." })`
 and the relevant external system. Do not automatically retry the mutation.
+
+### `CURRENT_PRESENTATION_STALE`
+
+**Cause:** The persisted live attempt belongs to a different node or workflow definition and cannot
+be safely rebound to the current execution.
+
+**Solution:** Do not retry the old attempt. Inspect the execution and current workflow definition;
+this state requires explicit repair or a deliberate restart rather than automatic replay.
 
 ### Agent Forgets Workflow Context
 

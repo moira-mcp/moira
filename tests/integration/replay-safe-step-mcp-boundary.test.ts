@@ -42,8 +42,28 @@ describe("replay-safe step MCP boundary", () => {
     const attemptId = presentation.match(/Step attempt ID:\s*([a-f0-9-]+)/i)?.[1];
     expect(attemptId).toBeDefined();
 
+    const preHotfixMetadataState = (await repository.getExecution(executionId))!;
+    preHotfixMetadataState.note = "metadata changed by an older server";
+    await repository.saveExecution(preHotfixMetadataState);
+    const stale = await requestContext.run({ userId: USER_ID }, () =>
+      executeStep({ processId: executionId, attemptId: attemptId!, input: { answer: "ok" } }),
+    );
+    expect(stale.success).toBe(false);
+    expect(stale.error).toContain("ATTEMPT_STALE");
+    expect(stale.error).toContain("session({ action: 'current_step'");
+    expect(stale.error?.toLowerCase()).not.toContain("stop");
+    const recovered = await requestContext.run({ userId: USER_ID }, () =>
+      engine.getCurrentStep(executionId),
+    );
+    const recoveredAttemptId = recovered.match(/Step attempt ID:\s*([a-f0-9-]+)/i)?.[1];
+    expect(recoveredAttemptId).toBe(attemptId);
+
     const original = await requestContext.run({ userId: USER_ID }, () =>
-      executeStep({ processId: executionId, attemptId: attemptId!, input: "{answer: 'ok'}" }),
+      executeStep({
+        processId: executionId,
+        attemptId: recoveredAttemptId!,
+        input: "{answer: 'ok'}",
+      }),
     );
     expect(original).toEqual(
       expect.objectContaining({ success: true, data: expect.stringContaining("completed") }),

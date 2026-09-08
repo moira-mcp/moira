@@ -191,6 +191,7 @@ describe("execution attempt migration and persistence", () => {
           fence: claim.kind === "claimed" ? claim.fence : 0,
           inputFingerprint: "fingerprint",
           execution: changed,
+          expectedExecution: execution!,
           response: "durable receipt",
           nextAttempt: next,
         }),
@@ -335,6 +336,7 @@ describe("execution attempt migration and persistence", () => {
           fence: claim.kind === "claimed" ? claim.fence : 0,
           inputFingerprint: "fingerprint",
           execution: { ...execution!, status: "completed", currentNodeId: null },
+          expectedExecution: execution!,
           response: "first owner receipt",
         }),
       ).toBe(true);
@@ -411,6 +413,7 @@ describe("execution attempt migration and persistence", () => {
           fence: claim.kind === "claimed" ? claim.fence : 0,
           inputFingerprint: prepared.inputFingerprint,
           execution: { ...execution, currentNodeId: "task", waitingForInputNodeId: "task" },
+          expectedExecution: execution,
           response: "durable start receipt",
         }),
       ).toBe(true);

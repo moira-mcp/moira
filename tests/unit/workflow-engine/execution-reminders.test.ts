@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@jest/globals";
-import { ConflictError, ValidationError } from "@mcp-moira/shared";
+import { ConflictError, metadataRevision, ValidationError } from "@mcp-moira/shared";
 import { UniversalGraphExecutor } from "../../../packages/workflow-engine/src/core/universal-graph-executor.js";
 import { InMemoryRepository } from "../../../packages/workflow-engine/src/storage/in-memory-repository.js";
 import type { WorkflowGraph } from "../../../packages/workflow-engine/src/interfaces/core-interfaces.js";
@@ -35,10 +35,13 @@ describe("execution reminders", () => {
         if (this.reads === 2) {
           const current = await super.getExecution(executionId);
           if (!current) throw new Error("execution missing");
-          await super.mutateExecutionReminder(executionId, "owner", current.revision, {
-            action: "add",
-            text: "concurrent follow-up",
-          });
+          await super.mutateExecutionReminder(
+            executionId,
+            "owner",
+            current.revision,
+            metadataRevision(current.reminders ?? []),
+            { action: "add", text: "concurrent follow-up" },
+          );
         }
         return super.getExecution(executionId);
       }
@@ -73,17 +76,26 @@ describe("execution reminders", () => {
       expect(first).not.toContain("publish {{context.variables}}");
       let state = await repository.getExecution(executionId);
       if (!state) throw new Error("execution missing");
-      await repository.mutateExecutionReminder(executionId, "owner", state.revision, {
-        action: "add",
-        text: "publish {{context.variables}}",
-        idempotencyKey: "publish",
-      });
+      await repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        state.revision,
+        metadataRevision(state.reminders ?? []),
+        {
+          action: "add",
+          text: "publish {{context.variables}}",
+          idempotencyKey: "publish",
+        },
+      );
       state = await repository.getExecution(executionId);
       if (!state) throw new Error("execution missing");
-      await repository.mutateExecutionReminder(executionId, "owner", state.revision, {
-        action: "add",
-        text: "notify user",
-      });
+      await repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        state.revision,
+        metadataRevision(state.reminders ?? []),
+        { action: "add", text: "notify user" },
+      );
 
       const current = await executor.executeStep(executionId, {});
       expect(current).not.toContain("publish {{context.variables}}");
@@ -102,49 +114,82 @@ describe("execution reminders", () => {
     const executionId = await executor.startWorkflow(workflow, undefined, "owner");
     let state = await repository.getExecution(executionId);
     if (!state) throw new Error("execution missing");
-    const added = await repository.mutateExecutionReminder(executionId, "owner", state.revision, {
-      action: "add",
-      text: "first",
-      idempotencyKey: "same",
-    });
+    const added = await repository.mutateExecutionReminder(
+      executionId,
+      "owner",
+      state.revision,
+      metadataRevision(state.reminders ?? []),
+      { action: "add", text: "first", idempotencyKey: "same" },
+    );
     const repeated = await repository.mutateExecutionReminder(
       executionId,
       "owner",
-      added.revision - 1,
+      added.revision,
+      metadataRevision([]),
       { action: "add", text: "first", idempotencyKey: "same" },
     );
     expect(repeated).toMatchObject({ changed: false, revision: added.revision });
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", added.revision, {
-        action: "add",
-        text: "different",
-        idempotencyKey: "same",
-      }),
+      repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        added.revision,
+        metadataRevision([]),
+        { action: "add", text: "stale sibling" },
+      ),
     ).rejects.toBeInstanceOf(ConflictError);
-    const updated = await repository.mutateExecutionReminder(executionId, "owner", added.revision, {
-      action: "update",
-      reminderId: added.reminder.id,
-      text: "updated",
-    });
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", added.revision, {
-        action: "update",
-        reminderId: added.reminder.id,
-        text: "updated",
-      }),
+      repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        added.revision,
+        added.remindersRevision,
+        {
+          action: "add",
+          text: "different",
+          idempotencyKey: "same",
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConflictError);
+    const updated = await repository.mutateExecutionReminder(
+      executionId,
+      "owner",
+      added.revision,
+      added.remindersRevision,
+      { action: "update", reminderId: added.reminder.id, text: "updated" },
+    );
+    await expect(
+      repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        added.revision,
+        updated.remindersRevision,
+        {
+          action: "update",
+          reminderId: added.reminder.id,
+          text: "updated",
+        },
+      ),
     ).resolves.toMatchObject({ changed: false, revision: updated.revision });
     const cancelled = await repository.mutateExecutionReminder(
       executionId,
       "owner",
       updated.revision,
+      updated.remindersRevision,
       { action: "cancel", reminderId: added.reminder.id },
     );
     expect(cancelled.reminder).toMatchObject({ text: "updated", status: "cancelled" });
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", updated.revision, {
-        action: "cancel",
-        reminderId: added.reminder.id,
-      }),
+      repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        updated.revision,
+        cancelled.remindersRevision,
+        {
+          action: "cancel",
+          reminderId: added.reminder.id,
+        },
+      ),
     ).resolves.toMatchObject({ changed: false, revision: cancelled.revision });
     state = await repository.getExecution(executionId);
     expect(state?.reminders).toHaveLength(1);
@@ -156,19 +201,25 @@ describe("execution reminders", () => {
     await repository.saveWorkflow(workflow, "owner");
     const executionId = await executor.startWorkflow(workflow, undefined, "owner");
     await expect(
-      repository.mutateExecutionReminder(executionId, "other", 0, { action: "add", text: "x" }),
+      repository.mutateExecutionReminder(executionId, "other", 0, metadataRevision([]), {
+        action: "add",
+        text: "x",
+      }),
     ).rejects.toBeInstanceOf(ValidationError);
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", 1, { action: "add", text: "x" }),
+      repository.mutateExecutionReminder(executionId, "owner", 1, metadataRevision([]), {
+        action: "add",
+        text: "x",
+      }),
     ).rejects.toBeInstanceOf(ConflictError);
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", 0, {
+      repository.mutateExecutionReminder(executionId, "owner", 0, metadataRevision([]), {
         action: "add",
         text: "x".repeat(1001),
       }),
     ).rejects.toBeInstanceOf(ValidationError);
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", 0, {
+      repository.mutateExecutionReminder(executionId, "owner", 0, metadataRevision([]), {
         action: "add",
         text: "x",
         idempotencyKey: "k".repeat(101),
@@ -185,18 +236,30 @@ describe("execution reminders", () => {
     }));
     await repository.saveExecution(state);
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", state.revision, {
-        action: "add",
-        text: "overflow",
-      }),
+      repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        state.revision,
+        metadataRevision(state.reminders ?? []),
+        {
+          action: "add",
+          text: "overflow",
+        },
+      ),
     ).rejects.toBeInstanceOf(ValidationError);
     state.status = "completed";
     await repository.saveExecution(state);
     await expect(
-      repository.mutateExecutionReminder(executionId, "owner", state.revision, {
-        action: "cancel",
-        reminderId: "r-0",
-      }),
+      repository.mutateExecutionReminder(
+        executionId,
+        "owner",
+        state.revision,
+        metadataRevision(state.reminders ?? []),
+        {
+          action: "cancel",
+          reminderId: "r-0",
+        },
+      ),
     ).rejects.toBeInstanceOf(ValidationError);
   });
 });

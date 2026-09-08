@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { ExecutionRepository } from "@mcp-moira/shared";
+import { ExecutionRepository, metadataRevision } from "@mcp-moira/shared";
 import type { ExecutionError, LegacyExecutionStatus } from "@mcp-moira/shared";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
 import { randomUUID } from "crypto";
@@ -166,6 +166,7 @@ describe("ExecutionRepository Error Methods", () => {
         execution.executionId,
         { variables: { concurrentlyAccepted: "preserve" } },
         0,
+        metadataRevision(execution.globalContext),
       );
 
       const cancellation = createTestError("cancel-node");
@@ -175,14 +176,14 @@ describe("ExecutionRepository Error Methods", () => {
       expect(first.changed).toBe(true);
       expect(first.execution).toMatchObject({
         status: "completed",
-        revision: 2,
+        revision: 0,
         globalContext: { variables: { concurrentlyAccepted: "preserve" } },
       });
       expect(first.execution?.errors).toEqual([cancellation]);
 
       const repeated = await repository.cancelExecution(execution.executionId, cancellation);
       expect(repeated.changed).toBe(false);
-      expect(repeated.execution?.revision).toBe(2);
+      expect(repeated.execution?.revision).toBe(0);
       expect(repeated.execution?.errors).toEqual([cancellation]);
     });
   });

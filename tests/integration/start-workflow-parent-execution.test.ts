@@ -10,7 +10,7 @@ import { getSessionInfo } from "../../packages/mcp-server/src/tools/get-session-
 import { manageWorkflow } from "../../packages/mcp-server/src/tools/manage-workflow.js";
 import { runWithMCPContext } from "../../packages/mcp-server/src/core/request-context.js";
 import { DatabaseRepository } from "@mcp-moira/workflow-engine";
-import { auditLog, ConflictError, getDatabase, user } from "@mcp-moira/shared";
+import { auditLog, ConflictError, getDatabase, metadataRevision, user } from "@mcp-moira/shared";
 import type { WorkflowGraph } from "@mcp-moira/workflow-engine";
 
 const TEST_USER_ID = "test-parent-execution";
@@ -158,12 +158,13 @@ describe("Start Workflow parentExecutionId Tests", () => {
           executionId: childId,
           parentExecutionId: parentId,
           expectedRevision: child.revision,
+          expectedParentRevision: metadataRevision(null),
         }),
       );
 
       expect(attached.success).toBe(true);
       expect((attached.data as { parentExecutionId: string }).parentExecutionId).toBe(parentId);
-      expect((await repository.getExecution(childId))?.revision).toBe(child.revision + 1);
+      expect((await repository.getExecution(childId))?.revision).toBe(child.revision);
 
       const sameValue = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
         getSessionInfo({
@@ -171,17 +172,19 @@ describe("Start Workflow parentExecutionId Tests", () => {
           executionId: childId,
           parentExecutionId: parentId,
           expectedRevision: child.revision,
+          expectedParentRevision: metadataRevision(parentId),
         }),
       );
       expect(sameValue.success).toBe(true);
-      expect((sameValue.data as { revision: number }).revision).toBe(child.revision + 1);
+      expect((sameValue.data as { revision: number }).revision).toBe(child.revision);
 
       const replaced = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
         getSessionInfo({
           action: "set-parent",
           executionId: childId,
           parentExecutionId: replacementParentId,
-          expectedRevision: child.revision + 1,
+          expectedRevision: child.revision,
+          expectedParentRevision: metadataRevision(parentId),
         }),
       );
       expect(replaced.success).toBe(true);
@@ -194,7 +197,8 @@ describe("Start Workflow parentExecutionId Tests", () => {
           action: "set-parent",
           executionId: childId,
           parentExecutionId: "none",
-          expectedRevision: child.revision + 2,
+          expectedRevision: child.revision,
+          expectedParentRevision: metadataRevision(replacementParentId),
         }),
       );
       expect(detached.success).toBe(true);
@@ -212,7 +216,7 @@ describe("Start Workflow parentExecutionId Tests", () => {
       expect(JSON.parse(latestAudit.metadata ?? "{}")).toMatchObject({
         action: "set-parent",
         parentExecutionId: null,
-        revision: child.revision + 3,
+        revision: child.revision,
       });
     });
 
@@ -254,8 +258,20 @@ describe("Start Workflow parentExecutionId Tests", () => {
       if (!first || !second) throw new Error("execution snapshots missing");
 
       const outcomes = await Promise.allSettled([
-        repository.setExecutionParent(firstId, secondId, TEST_USER_ID, first.revision),
-        repository.setExecutionParent(secondId, firstId, TEST_USER_ID, second.revision),
+        repository.setExecutionParent(
+          firstId,
+          secondId,
+          TEST_USER_ID,
+          first.revision,
+          metadataRevision(null),
+        ),
+        repository.setExecutionParent(
+          secondId,
+          firstId,
+          TEST_USER_ID,
+          second.revision,
+          metadataRevision(null),
+        ),
       ]);
       expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
       expect(outcomes.filter((outcome) => outcome.status === "rejected")).toHaveLength(1);
@@ -364,17 +380,23 @@ describe("Start Workflow parentExecutionId Tests", () => {
         action: "add-reminder",
         executionId,
         expectedRevision: execution!.revision,
+        expectedRemindersRevision: metadataRevision(execution!.reminders ?? []),
         reminderText: "Open PR",
         idempotencyKey: "pr",
       }),
     );
     expect(added.success).toBe(true);
-    const addedData = added.data as { reminder: { id: string }; revision: number };
+    const addedData = added.data as {
+      reminder: { id: string };
+      revision: number;
+      remindersRevision: string;
+    };
     const repeated = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
       getSessionInfo({
         action: "add-reminder",
         executionId,
-        expectedRevision: addedData.revision - 1,
+        expectedRevision: addedData.revision,
+        expectedRemindersRevision: metadataRevision([]),
         reminderText: "Open PR",
         idempotencyKey: "pr",
       }),
@@ -394,16 +416,18 @@ describe("Start Workflow parentExecutionId Tests", () => {
         action: "update-reminder",
         executionId,
         expectedRevision: addedData.revision,
+        expectedRemindersRevision: addedData.remindersRevision,
         reminderId: addedData.reminder.id,
         reminderText: "Open and review PR",
       }),
     );
-    const updateData = updated.data as { revision: number };
+    const updateData = updated.data as { revision: number; remindersRevision: string };
     const removed = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
       getSessionInfo({
         action: "remove-reminder",
         executionId,
         expectedRevision: updateData.revision,
+        expectedRemindersRevision: updateData.remindersRevision,
         reminderId: addedData.reminder.id,
       }),
     );

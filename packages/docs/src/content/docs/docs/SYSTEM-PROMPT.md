@@ -148,6 +148,6 @@ The retrospective must report:
 
 Lifecycle: discover when needed → prepare start → execute the returned start attempt → execute and verify the current directive → call `step()` → repeat until completion.
 
-`ATTEMPT_PROCESSING` means retry the same attempt. `ATTEMPT_OUTCOME_UNKNOWN` means inspect the returned Process ID through `session` and do not repeat the mutation automatically. A blocked owned start can be retired with `session({ action: "cancel-execution", executionId, expectedRevision })`.
+`ATTEMPT_PROCESSING` means retry the same attempt. `ATTEMPT_STALE` means no handler work occurred: automatically read `session({ action: "current_step", executionId })` and retry the intended submission once with the returned attempt. If that read reports `CURRENT_PRESENTATION_STALE`, do not reuse the old attempt; inspect the execution and workflow definition. `ATTEMPT_OUTCOME_UNKNOWN` means inspect the returned Process ID through `session` and do not repeat the mutation automatically. A blocked owned start can be retired with `session({ action: "cancel-execution", executionId, expectedRevision })`.
 
 Use the exact workflow and process identifiers returned by Moira. Never guess them.

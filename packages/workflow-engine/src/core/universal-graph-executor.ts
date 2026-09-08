@@ -364,8 +364,9 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       // appendError modifies execution directly in repository, we need to fetch
       // updated errors before saveExecution overwrites them
       const currentExecution = await this.repository.getExecution(executionId);
-      if (currentExecution && currentExecution.revision !== loadedExecution.revision) {
+      if (currentExecution) {
         const coreChanged =
+          currentExecution.revision !== loadedExecution.revision ||
           currentExecution.status !== loadedExecution.status ||
           currentExecution.currentNodeId !== loadedExecution.currentNodeId ||
           currentExecution.waitingForInputNodeId !== loadedExecution.waitingForInputNodeId ||
@@ -384,10 +385,16 @@ export class UniversalGraphExecutor implements IGraphExecutor {
         execution.errors = currentExecution.errors;
         execution.reminders = currentExecution.reminders;
         execution.parentExecutionId = currentExecution.parentExecutionId;
-        if (currentExecution.note !== loadedExecution.note) execution.note = currentExecution.note;
+        const stepChangedNote = execution.note !== loadedExecution.note;
+        const metadataChangedNote = currentExecution.note !== loadedExecution.note;
+        if (stepChangedNote && metadataChangedNote) {
+          throw new ConflictError(
+            "Execution note changed while the workflow step was running; retry from current state",
+            { executionId },
+          );
+        }
+        if (metadataChangedNote) execution.note = currentExecution.note;
         execution.revision = currentExecution.revision;
-      } else if (currentExecution?.errors) {
-        execution.errors = currentExecution.errors;
       }
 
       // Update execution status based on result
@@ -455,6 +462,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
           fence: claimed.fence,
           inputFingerprint: claimed.inputFingerprint,
           execution,
+          expectedExecution: loadedExecution,
           response,
           nextAttempt,
         });
@@ -518,7 +526,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
     if (!execution) {
       throw new Error(`Execution ${executionId} not found`);
     }
-    const currentAttempt = await this.repository.getCurrentExecutionAttempt(
+    let currentAttempt = await this.repository.getCurrentExecutionAttempt(
       executionId,
       execution.userId,
     );
@@ -538,8 +546,43 @@ export class UniversalGraphExecutor implements IGraphExecutor {
       throw new Error(`Workflow ${execution.workflowId} not found or access denied`);
     }
     const currentNode = graph.nodes.find((node) => node.id === execution.currentNodeId);
+    if (!currentAttempt || currentAttempt.state === "presented") {
+      currentAttempt = await this.repository.ensureCurrentPresentedExecutionAttempt(
+        this.mutationCoordinator.newPresentedAttempt(execution, graph, null),
+      );
+    }
+    if (currentAttempt.state !== "presented") {
+      return currentAttemptGuidance(currentAttempt);
+    }
+    const expectedAttempt = this.mutationCoordinator.newPresentedAttempt(
+      execution,
+      graph,
+      currentAttempt.response,
+      currentAttempt.attemptId,
+    );
+    const bindingMatches =
+      currentAttempt.executionRevision === expectedAttempt.executionRevision &&
+      currentAttempt.nodeId === expectedAttempt.nodeId &&
+      currentAttempt.workflowId === expectedAttempt.workflowId &&
+      currentAttempt.workflowVersion === expectedAttempt.workflowVersion &&
+      currentAttempt.workflowDigest === expectedAttempt.workflowDigest;
+    if (!bindingMatches) {
+      throw new ConflictError(
+        "CURRENT_PRESENTATION_STALE: the persisted step attempt belongs to a different node or workflow definition. Do not use or retry that attempt; inspect the execution and workflow before continuing.",
+        {
+          executionId,
+          attemptId: currentAttempt.attemptId,
+          currentNodeId: execution.currentNodeId,
+          attemptNodeId: currentAttempt.nodeId,
+          workflowId: execution.workflowId,
+          attemptWorkflowId: currentAttempt.workflowId,
+          workflowVersion: graph.metadata.version,
+          attemptWorkflowVersion: currentAttempt.workflowVersion,
+        },
+      );
+    }
     if (currentNode?.type !== "materialize") {
-      return currentAttempt ? currentAttemptGuidance(currentAttempt) : null;
+      return currentAttemptGuidance(currentAttempt);
     }
 
     const messageQueue = new AgentMessageQueue();
@@ -551,7 +594,6 @@ export class UniversalGraphExecutor implements IGraphExecutor {
     );
 
     const rawRendered = await this.formatQueueResponse(execution.executionId, messageQueue, graph);
-    if (!currentAttempt) return rawRendered;
     const rendered = presentedAttemptResponse(currentAttempt.attemptId, rawRendered);
     const refreshed = await this.repository.updatePresentedExecutionAttemptResponse(
       currentAttempt.attemptId,

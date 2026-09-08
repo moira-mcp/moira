@@ -95,7 +95,7 @@ export interface WorkflowExecution {
   status: LegacyExecutionStatus; // TODO(#386): Change to ExecutionStatus after migration
   note?: string | null; // User-provided note for identification (max 500 chars)
   parentExecutionId?: string | null; // Links to parent execution for continuation
-  revision: number; // Optimistic concurrency revision for persisted mutations
+  revision: number; // Workflow-step generation; metadata targets use independent revisions
   reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
   createdAt: number;
   updatedAt: number;
@@ -121,6 +121,7 @@ export type ReminderMutation =
 export interface ReminderMutationResult {
   reminder: ExecutionReminder;
   revision: number;
+  remindersRevision: string;
   changed: boolean;
 }
 

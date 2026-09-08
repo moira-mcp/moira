@@ -182,7 +182,10 @@ system-reminder, and teleport context is included as well.
 session({ action: "execution_context", executionId: "abc-123" })
 ```
 
-Returns execution state including context variables and history.
+Returns execution state including context variables, history, the workflow-step `revision`, and
+independent parent, context, and reminder revisions. Supply the matching target revision together
+with `expectedRevision` when changing that metadata; successful writes return the next target
+revision without changing the step revision.
 
 ## Execution Notes
 
@@ -280,6 +283,9 @@ If `step()` returns validation error, check:
 
 `ATTEMPT_PROCESSING` means another caller still owns this exact mutation; retry the same Process ID,
 Step attempt ID, and input, or the same Start attempt ID for `start({ action: "execute" })`.
+`ATTEMPT_STALE` was rejected before handler work. Automatically read
+`session({ action: "current_step", executionId })` and retry the intended submission once with the
+returned Step attempt ID; user guidance is not required.
 `ATTEMPT_OUTCOME_UNKNOWN` means an external effect may have happened; inspect the returned Process
 ID through `session` and do not automatically retry. The execution owner can retire a blocked
 execution with its current revision through

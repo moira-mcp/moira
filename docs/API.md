@@ -294,11 +294,13 @@ Authentication: Required
 `GET /api/executions/:id/variables` returns registry declarations, current value presence/value,
 declared policy, write phase, effective editability, denial reasons and applied filters. `names`,
 `search`, `types`, `hasValue`, `editable`, and `writePhase=current|other` filter results;
-unknown requested names are returned separately. `PUT /api/executions/:id/variables/:name` accepts
-`value` and `expectedRevision` and writes only when `runtimePolicy.externalVariableWrites` permits
-the current paused node and the value satisfies its registry JSON Schema. Arbitrary bulk variables
-and `nodeStates` mutation is rejected; the legacy context-path route applies the same policy/schema
-to its top-level declared variable.
+unknown requested names are returned separately. Variable reads include the workflow-step
+`revision` and independent `contextRevision`. `PUT /api/executions/:id/variables/:name` accepts
+`value`, `expectedRevision`, and `expectedContextRevision` and writes only when
+`runtimePolicy.externalVariableWrites` permits the current paused node and the value satisfies its
+registry JSON Schema. A successful write returns the unchanged step revision and the next context
+revision. Arbitrary bulk variables and `nodeStates` mutation is rejected; the legacy context-path
+route applies the same policy/schema to its top-level declared variable.
 
 Authentication: Required
 
@@ -319,7 +321,8 @@ guidance, preventing a result from an earlier revision or unit from appearing cu
 
 Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
 workflow/execution-level image API. It returns `null` for a workflow without progress and otherwise
-returns the PNG buffer, `image/png`, dimensions, workflow version, and execution revision. Failures
+returns the PNG buffer, `image/png`, dimensions, workflow version, step revision, and context
+revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active
 milestone's returned label; inactive labels remain the static definition.
 `progressActiveContent` applies the same active-only rule to `summary`, `details`, `outcome`, and
@@ -332,7 +335,7 @@ of being silently truncated.
 grant with `downloadUrl`, `expiresAt`, `mimeType`, and `executionRevision`. The optional body accepts
 `theme: "light"|"dark"` and `viewportWidth` from 480 through 4096. `GET
 /api/public/execution-progress-image/:token` uses the token as authorization and returns the exact
-execution revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
+step revision/context revision/workflow version image once with `Cache-Control: no-store`; expired, stale,
 foreign, or reused grants return 401. Rendering or a failed/closed HTTP response releases the
 reservation; successful response completion consumes it.
 
@@ -1761,7 +1764,12 @@ Response:
       waitingForInputNodeId: string | null;
       note?: string | null;
       parentExecutionId: string | null; // null for a standalone execution
-      revision: number; // expectedRevision source for guarded mutations
+      revision: number; // expectedRevision source for step-generation guards
+      metadataRevisions: {
+        parent: string;
+        context: string;
+        reminders: string;
+      };
       reminders: Array<{
         id: string;
         text: string;
@@ -1809,28 +1817,33 @@ Use `"none"` to detach. Repeating the current value is an idempotent no-op.
 {
   parentExecutionId: string | "none";
   expectedRevision: number;
+  expectedParentRevision: string;
 }
 ```
 
 The response contains the effective `parentExecutionId` (`null` when standalone) and current
-revision. A stale revision returns `409`. Parent linkage controls continuation only and does not
-copy variables or grant authority.
+workflow-step revision and the next `parentRevision`. A previous step generation or parent snapshot
+returns `409`. Changing the parent does not advance the step revision or invalidate the current Step
+attempt. Parent linkage controls continuation only and does not copy variables or grant authority.
 
 Authentication: Required
 
 ### Execution reminders
 
-`GET /api/executions/:id/reminders` lists owner-scoped reminders and current revision. Optional
-`status=active|cancelled` and `search` filters compose. Mutations require a running execution and
-`expectedRevision`:
+`GET /api/executions/:id/reminders` lists owner-scoped reminders, the current step revision, and an
+opaque `remindersRevision`. Optional `status=active|cancelled` and `search` filters compose.
+Mutations require a running execution, `expectedRevision`, and `expectedRemindersRevision`:
 
 - `POST /api/executions/:id/reminders` with `text`, optional `idempotencyKey`, and revision;
 - `PATCH /api/executions/:id/reminders/:reminderId` with `text` and revision;
 - `DELETE /api/executions/:id/reminders/:reminderId` with revision cancels without deleting history.
 
-Matching idempotent additions return the existing reminder without advancing revision; a reused key
-with different text returns conflict. Reminder text is never authority and is returned literally in
-the normal completion response only.
+Reminder mutations do not advance the workflow-step revision or invalidate the current Step attempt.
+Every successful mutation returns the next `remindersRevision`; a stale reminder collection is
+rejected without overwriting newer entries.
+Matching idempotent additions return the existing reminder; a reused key with different text returns
+conflict. Reminder text is never authority and is returned literally in the normal completion
+response only.
 
 Authentication: Required
 
@@ -1839,13 +1852,17 @@ Authentication: Required
 This legacy editor route accepts only a per-path update whose first segment names one declared
 registry variable permitted by `runtimePolicy.externalVariableWrites` at the execution's current
 waiting node. The complete projected top-level value must satisfy its registry schema, and
-`expectedRevision` provides compare-and-swap protection.
+`expectedRevision` requires the current workflow-step generation. The context snapshot is updated
+with compare-and-swap protection through `expectedContextRevision`, without advancing the step
+generation or invalidating its Step attempt. Obtain the context revision from the execution detail,
+variable query, or previous variable mutation response.
 
 ```typescript
 {
   variablePath: string[]; // e.g. ["review_findings", "blocking"]
   value: unknown;
   expectedRevision: number;
+  expectedContextRevision: string;
 }
 ```
 
@@ -1861,6 +1878,8 @@ Response:
   data: {
     executionId: string;
     updated: boolean;
+    revision: number;
+    contextRevision: string;
   }
   timestamp: string;
 }
@@ -1872,7 +1891,7 @@ Errors:
 
 - `404` execution not found
 - `401` not owner
-- `409` execution revision changed; reload before writing
+- `409` the workflow step or context snapshot changed; reload before writing
 - `400` execution is not running/paused at an allowed node, variable/path is not permitted, schema
   validation fails, or arbitrary variables/node state mutation is requested
 

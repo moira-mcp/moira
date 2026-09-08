@@ -23,6 +23,7 @@ import {
   canonicalJson,
   createLogger,
   mapLegacyStatusArray,
+  metadataRevision,
 } from "@mcp-moira/shared";
 import { encryptValue, decryptValue } from "../utils/encryption.js";
 import type {
@@ -430,7 +431,6 @@ export class InMemoryRepository implements IDataRepository {
     if (execution) {
       execution.note = note;
       execution.updatedAt = Date.now();
-      execution.revision += 1;
     }
   }
 
@@ -448,8 +448,6 @@ export class InMemoryRepository implements IDataRepository {
     // Append error
     execution.errors.push(error);
     execution.updatedAt = Date.now();
-    execution.revision += 1;
-
     this.logger.debug("Error appended to execution", {
       executionId: executionId.slice(0, 8),
       errorType: error.errorType,
@@ -475,7 +473,6 @@ export class InMemoryRepository implements IDataRepository {
     execution.status = "completed";
     execution.updatedAt = Date.now();
     execution.completedAt = execution.updatedAt;
-    execution.revision += 1;
     return { changed: true, execution: structuredClone(execution) };
   }
 
@@ -497,6 +494,7 @@ export class InMemoryRepository implements IDataRepository {
     parentExecutionId: string | null,
     userId: string,
     expectedRevision: number,
+    expectedParentRevision: string,
   ): Promise<WorkflowExecution> {
     const child = this.executions.get(executionId);
     if (!child) throw new ValidationError("Execution must exist");
@@ -504,6 +502,12 @@ export class InMemoryRepository implements IDataRepository {
       throw new ValidationError("Execution must belong to the authenticated user");
     if (child.status !== "running") throw new ValidationError("Execution must be running");
     if ((child.parentExecutionId ?? null) === parentExecutionId) return structuredClone(child);
+    if (metadataRevision(child.parentExecutionId ?? null) !== expectedParentRevision) {
+      throw new ConflictError("Execution parent changed; reload before changing parent", {
+        executionId,
+        expectedParentRevision,
+      });
+    }
     if (child.revision !== expectedRevision) {
       throw new ConflictError("Execution state changed; reload before changing parent", {
         executionId,
@@ -535,7 +539,6 @@ export class InMemoryRepository implements IDataRepository {
     }
     const updated = structuredClone(child);
     updated.parentExecutionId = parentExecutionId;
-    updated.revision += 1;
     updated.updatedAt = Date.now();
     this.executions.set(executionId, updated);
     return structuredClone(updated);
@@ -545,6 +548,7 @@ export class InMemoryRepository implements IDataRepository {
     executionId: string,
     userId: string,
     expectedRevision: number,
+    expectedRemindersRevision: string,
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult> {
     const execution = this.executions.get(executionId);
@@ -555,21 +559,33 @@ export class InMemoryRepository implements IDataRepository {
       throw new ValidationError("Only running executions accept reminder mutations");
     const applied = applyExecutionReminderMutation(execution.reminders ?? [], mutation);
     if (!applied.changed)
-      return { reminder: applied.reminder, revision: execution.revision, changed: false };
+      return {
+        reminder: applied.reminder,
+        revision: execution.revision,
+        remindersRevision: metadataRevision(execution.reminders ?? []),
+        changed: false,
+      };
+    if (metadataRevision(execution.reminders ?? []) !== expectedRemindersRevision)
+      throw new ConflictError("Execution reminders changed; reload before changing reminders");
     if (execution.revision !== expectedRevision)
       throw new ConflictError("Execution state changed; reload before changing reminders");
     const updated = structuredClone(execution);
     updated.reminders = applied.reminders;
-    updated.revision += 1;
     updated.updatedAt = Date.now();
     this.executions.set(executionId, updated);
-    return { reminder: applied.reminder, revision: updated.revision, changed: true };
+    return {
+      reminder: applied.reminder,
+      revision: updated.revision,
+      remindersRevision: metadataRevision(updated.reminders ?? []),
+      changed: true,
+    };
   }
 
   async updateExecutionContext(
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
+    expectedContextRevision: string,
   ): Promise<boolean> {
     const execution = this.executions.get(executionId);
     if (!execution) {
@@ -580,6 +596,12 @@ export class InMemoryRepository implements IDataRepository {
         executionId,
         expectedRevision,
         currentRevision: execution.revision,
+      });
+    }
+    if (metadataRevision(execution.globalContext) !== expectedContextRevision) {
+      throw new ConflictError("Execution context changed; reload before updating context", {
+        executionId,
+        expectedContextRevision,
       });
     }
 
@@ -596,7 +618,6 @@ export class InMemoryRepository implements IDataRepository {
       };
     }
     execution.updatedAt = Date.now();
-    execution.revision += 1;
     return true;
   }
 
@@ -618,6 +639,53 @@ export class InMemoryRepository implements IDataRepository {
       updatedAt: attempt.createdAt,
       completedAt: null,
     });
+  }
+
+  async ensureCurrentPresentedExecutionAttempt(
+    candidate: PresentedExecutionAttempt,
+  ): Promise<ExecutionAttempt> {
+    const current = [...this.executionAttempts.values()]
+      .filter(
+        (attempt) =>
+          attempt.executionId === candidate.executionId &&
+          attempt.userId === candidate.userId &&
+          attempt.operation === "step" &&
+          ["presented", "executing", "outcome_unknown"].includes(attempt.state),
+      )
+      .sort((left, right) => right.createdAt - left.createdAt)[0];
+    if (!current) {
+      const created: ExecutionAttempt = {
+        ...structuredClone(candidate),
+        operation: "step",
+        reservedExecutionId: null,
+        requestPayload: null,
+        inputFingerprint: null,
+        state: "presented",
+        ownerId: null,
+        fence: 0,
+        heartbeatAt: null,
+        leaseExpiresAt: null,
+        nextAttemptId: null,
+        expiresAt: null,
+        updatedAt: candidate.createdAt,
+        completedAt: null,
+      };
+      this.executionAttempts.set(candidate.attemptId, created);
+      return structuredClone(created);
+    }
+    const revisionOnlyStale =
+      current.state === "presented" &&
+      current.nodeId === candidate.nodeId &&
+      current.workflowId === candidate.workflowId &&
+      current.workflowVersion === candidate.workflowVersion &&
+      current.workflowDigest === candidate.workflowDigest;
+    if (!revisionOnlyStale || current.executionRevision === candidate.executionRevision) {
+      return structuredClone(current);
+    }
+    const stored = this.executionAttempts.get(current.attemptId)!;
+    stored.executionRevision = candidate.executionRevision;
+    stored.updatedAt = candidate.createdAt;
+    return structuredClone(stored);
   }
 
   async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {
@@ -785,7 +853,6 @@ export class InMemoryRepository implements IDataRepository {
     updated.errors = [...(updated.errors ?? []), error];
     updated.completedAt = error.timestamp;
     updated.updatedAt = error.timestamp;
-    updated.revision += 1;
     this.executions.set(executionId, updated);
     for (const [attemptId, attempt] of this.executionAttempts) {
       if (
@@ -901,6 +968,8 @@ export class InMemoryRepository implements IDataRepository {
   async completeExecutionAttempt(input: CompleteExecutionAttemptInput): Promise<boolean> {
     const attempt = this.executionAttempts.get(input.attemptId);
     const current = this.executions.get(input.execution.executionId);
+    const expected = input.expectedExecution;
+    const noteChanged = input.execution.note !== expected.note;
     if (
       !attempt ||
       !current ||
@@ -908,7 +977,12 @@ export class InMemoryRepository implements IDataRepository {
       attempt.ownerId !== input.ownerId ||
       attempt.fence !== input.fence ||
       attempt.inputFingerprint !== input.inputFingerprint ||
-      current.revision !== input.execution.revision
+      current.revision !== input.execution.revision ||
+      current.status !== expected.status ||
+      current.currentNodeId !== expected.currentNodeId ||
+      current.waitingForInputNodeId !== expected.waitingForInputNodeId ||
+      JSON.stringify(current.globalContext) !== JSON.stringify(expected.globalContext) ||
+      (noteChanged && current.note !== expected.note)
     )
       return false;
     if (input.nextAttempt && this.executionAttempts.has(input.nextAttempt.attemptId)) {
@@ -917,6 +991,10 @@ export class InMemoryRepository implements IDataRepository {
     const nextRevision = input.execution.revision + 1;
     const updatedExecution = structuredClone(input.execution);
     updatedExecution.revision = nextRevision;
+    updatedExecution.errors = structuredClone(current.errors);
+    updatedExecution.reminders = structuredClone(current.reminders);
+    updatedExecution.parentExecutionId = current.parentExecutionId;
+    if (!noteChanged) updatedExecution.note = current.note;
     const now = Date.now();
     const completedAttempt: ExecutionAttempt = {
       ...structuredClone(attempt),

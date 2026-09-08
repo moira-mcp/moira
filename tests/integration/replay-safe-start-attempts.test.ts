@@ -460,7 +460,7 @@ describe("replay-safe workflow start attempts", () => {
     expect(await repository.getExecution(prepared.reservedExecutionId)).toMatchObject({
       status: "completed",
       error: cancellationError.message,
-      revision: blockedBefore!.revision + 1,
+      revision: blockedBefore!.revision,
     });
   });
 
@@ -687,7 +687,7 @@ describe("replay-safe workflow start attempts", () => {
     );
     expect(cancelled).toEqual({
       success: true,
-      data: { executionId: execution.executionId, cancelled: true, revision: 1 },
+      data: { executionId: execution.executionId, cancelled: true, revision: 0 },
     });
     expect((await repository.getExecution(execution.executionId))?.status).toBe("completed");
     expect((await repository.getExecution(execution.executionId))?.error).toBe(
@@ -821,6 +821,7 @@ describe("replay-safe workflow start attempts", () => {
         fence: claim.kind === "claimed" ? claim.fence : 0,
         inputFingerprint: prepared.inputFingerprint,
         execution: { ...execution, currentNodeId: "task", waitingForInputNodeId: "task" },
+        expectedExecution: execution,
         response: "winning start receipt",
       }),
     ).toBe(true);

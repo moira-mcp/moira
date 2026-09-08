@@ -43,7 +43,7 @@ export interface PresentedExecutionAttempt {
   workflowId: string;
   workflowVersion: string;
   workflowDigest: string;
-  response: string;
+  response: string | null;
   createdAt: number;
 }
 
@@ -96,6 +96,7 @@ export interface CompleteExecutionAttemptInput {
   fence: number;
   inputFingerprint: string;
   execution: WorkflowExecution;
+  expectedExecution: WorkflowExecution;
   response: string;
   nextAttempt?: PresentedExecutionAttempt;
 }

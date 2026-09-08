@@ -322,7 +322,7 @@ export class ExecutionAttemptRepository {
         const changed = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = 'completed', error = ?, errors = ?, completedAt = ?,
-             updatedAt = ?, revision = revision + 1
+             updatedAt = ?
              WHERE executionId = ? AND userId = ? AND state = 'running' AND revision = ?`,
           )
           .run(
@@ -368,6 +368,55 @@ export class ExecutionAttemptRepository {
         attempt.createdAt,
         attempt.createdAt,
       );
+  }
+
+  ensureCurrentPresented(candidate: PresentedExecutionAttempt): ExecutionAttempt {
+    return this.sqlite
+      .transaction(() => {
+        const current = this.getCurrent(candidate.executionId, candidate.userId);
+        if (!current) {
+          this.createPresented(candidate);
+          const created = this.get(candidate.attemptId);
+          if (!created) throw new Error("Created execution attempt was not persisted");
+          return created;
+        }
+        const revisionOnlyStale =
+          current.state === "presented" &&
+          current.nodeId === candidate.nodeId &&
+          current.workflowId === candidate.workflowId &&
+          current.workflowVersion === candidate.workflowVersion &&
+          current.workflowDigest === candidate.workflowDigest;
+        if (!revisionOnlyStale || current.executionRevision === candidate.executionRevision) {
+          return current;
+        }
+        const changed = this.sqlite
+          .prepare(
+            `UPDATE executionMutationAttempt SET executionRevision = ?, updatedAt = ?
+             WHERE attemptId = ? AND state = 'presented' AND executionRevision IS ?
+               AND nodeId = ? AND workflowId = ? AND workflowVersion = ? AND workflowDigest = ?`,
+          )
+          .run(
+            candidate.executionRevision,
+            candidate.createdAt,
+            current.attemptId,
+            current.executionRevision,
+            candidate.nodeId,
+            candidate.workflowId,
+            candidate.workflowVersion,
+            candidate.workflowDigest,
+          );
+        if (changed.changes !== 1) {
+          const authoritative = this.getCurrent(candidate.executionId, candidate.userId);
+          if (!authoritative) throw new Error("Current execution attempt disappeared");
+          return authoritative;
+        }
+        return {
+          ...current,
+          executionRevision: candidate.executionRevision,
+          updatedAt: candidate.createdAt,
+        };
+      })
+      .immediate();
   }
 
   get(attemptId: string): ExecutionAttempt | null {
@@ -512,27 +561,34 @@ export class ExecutionAttemptRepository {
         if (!current) return false;
 
         const execution = serializeExecution(input.execution);
+        const expectedExecution = serializeExecution(input.expectedExecution);
+        const noteChanged = input.execution.note !== input.expectedExecution.note;
         const update = this.sqlite
           .prepare(
             `UPDATE workflowExecution SET state = ?, currentNodeId = ?, waitingForInputNodeId = ?,
-             context = ?, error = ?, errors = ?, note = ?, parentExecutionId = ?, reminders = ?,
+             context = ?, note = CASE WHEN ? = 1 THEN ? ELSE note END,
              updatedAt = ?, completedAt = ?, revision = revision + 1
-           WHERE executionId = ? AND revision = ?`,
+           WHERE executionId = ? AND revision = ? AND state = ?
+             AND currentNodeId IS ? AND waitingForInputNodeId IS ? AND context = ?
+             AND (? = 0 OR note IS ?)`,
           )
           .run(
             execution.state,
             execution.currentNodeId,
             execution.waitingForInputNodeId,
             execution.context,
-            execution.error,
-            execution.errors,
+            noteChanged ? 1 : 0,
             execution.note,
-            execution.parentExecutionId,
-            execution.reminders,
             execution.updatedAt,
             execution.completedAt,
             input.execution.executionId,
             input.execution.revision,
+            expectedExecution.state,
+            expectedExecution.currentNodeId,
+            expectedExecution.waitingForInputNodeId,
+            expectedExecution.context,
+            noteChanged ? 1 : 0,
+            expectedExecution.note,
           );
         if (update.changes !== 1) return false;
         const now = Date.now();

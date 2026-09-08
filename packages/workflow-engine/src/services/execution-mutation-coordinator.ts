@@ -66,8 +66,8 @@ export class ExecutionMutationCoordinator {
   newPresentedAttempt(
     execution: WorkflowExecution,
     graph: WorkflowGraph,
-    response: string,
-    attemptId = randomUUID(),
+    response: string | null,
+    attemptId: string = randomUUID(),
   ): PresentedExecutionAttempt {
     if (!execution.currentNodeId)
       throw new Error("Cannot present an attempt without a current node");

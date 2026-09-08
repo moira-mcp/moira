@@ -3,7 +3,7 @@
  * Drizzle ORM queries for execution operations
  */
 
-import { eq, ne, and, or, like, inArray, isNotNull, sql } from "drizzle-orm";
+import { eq, ne, and, or, like, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { workflowExecution } from "../schema.js";
 import type { WorkflowExecution } from "@mcp-moira/workflow-engine";
@@ -11,6 +11,7 @@ import type * as schema from "../schema.js";
 import { type ExecutionError, type LegacyExecutionStatus } from "../../types/execution-error.js";
 import { executeListQuery, type ListQueryConfig } from "../list-query-builder.js";
 import { ConflictError, ValidationError } from "../../errors/index.js";
+import { metadataRevision } from "../../utils/metadata-revision.js";
 
 const EXECUTION_LIST_CONFIG: ListQueryConfig<"createdAt" | "updatedAt"> = {
   table: workflowExecution,
@@ -330,7 +331,6 @@ export class ExecutionRepository {
       .set({
         note,
         updatedAt: new Date(),
-        revision: sql`${workflowExecution.revision} + 1`,
       })
       .where(eq(workflowExecution.executionId, executionId));
   }
@@ -340,6 +340,7 @@ export class ExecutionRepository {
     parentExecutionId: string | null,
     userId: string,
     expectedRevision: number,
+    expectedParentRevision: string,
   ): Promise<WorkflowExecution> {
     const child = await this.get(executionId);
     if (!child) throw new ValidationError("Execution must exist");
@@ -347,6 +348,12 @@ export class ExecutionRepository {
       throw new ValidationError("Execution must belong to the authenticated user");
     if (child.status !== "running") throw new ValidationError("Execution must be running");
     if ((child.parentExecutionId ?? null) === parentExecutionId) return child;
+    if (metadataRevision(child.parentExecutionId ?? null) !== expectedParentRevision) {
+      throw new ConflictError("Execution parent changed; reload before changing parent", {
+        executionId,
+        expectedParentRevision,
+      });
+    }
     if (child.revision !== expectedRevision) {
       throw new ConflictError("Execution state changed; reload before changing parent", {
         executionId,
@@ -395,12 +402,15 @@ export class ExecutionRepository {
       : sql`1 = 1`;
     const result = await this.db
       .update(workflowExecution)
-      .set({ parentExecutionId, revision: expectedRevision + 1, updatedAt: new Date() })
+      .set({ parentExecutionId, updatedAt: new Date() })
       .where(
         and(
           eq(workflowExecution.executionId, executionId),
           eq(workflowExecution.revision, expectedRevision),
           eq(workflowExecution.state, "running"),
+          child.parentExecutionId
+            ? eq(workflowExecution.parentExecutionId, child.parentExecutionId)
+            : isNull(workflowExecution.parentExecutionId),
           parentGuard,
         ),
       );
@@ -417,6 +427,28 @@ export class ExecutionRepository {
     return updated;
   }
 
+  async updateReminders(
+    executionId: string,
+    userId: string,
+    expectedRevision: number,
+    expectedReminders: WorkflowExecution["reminders"],
+    reminders: WorkflowExecution["reminders"],
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(workflowExecution)
+      .set({ reminders: JSON.stringify(reminders ?? []), updatedAt: new Date() })
+      .where(
+        and(
+          eq(workflowExecution.executionId, executionId),
+          eq(workflowExecution.userId, userId),
+          eq(workflowExecution.state, "running"),
+          eq(workflowExecution.revision, expectedRevision),
+          eq(workflowExecution.reminders, JSON.stringify(expectedReminders ?? [])),
+        ),
+      );
+    return result.changes === 1;
+  }
+
   /**
    * Update only the context (variables and node states) of an execution
    * Used for ExecutionInspector to modify running executions
@@ -425,6 +457,7 @@ export class ExecutionRepository {
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
+    expectedContextRevision: string,
   ): Promise<boolean> {
     // First get current execution to merge context
     const execution = await this.get(executionId);
@@ -436,6 +469,12 @@ export class ExecutionRepository {
         executionId,
         expectedRevision,
         currentRevision: execution.revision,
+      });
+    }
+    if (metadataRevision(execution.globalContext) !== expectedContextRevision) {
+      throw new ConflictError("Execution context changed; reload before updating context", {
+        executionId,
+        expectedContextRevision,
       });
     }
 
@@ -466,12 +505,12 @@ export class ExecutionRepository {
       .set({
         context: JSON.stringify(updatedContext),
         updatedAt: new Date(),
-        revision: expectedRevision + 1,
       })
       .where(
         and(
           eq(workflowExecution.executionId, executionId),
           eq(workflowExecution.revision, expectedRevision),
+          eq(workflowExecution.context, JSON.stringify(execution.globalContext)),
         ),
       );
 
@@ -496,51 +535,41 @@ export class ExecutionRepository {
    * @returns true if error was appended, false if execution not found
    */
   async appendError(executionId: string, error: ExecutionError): Promise<boolean> {
-    // Get current errors array
-    const [row] = await this.db
-      .select({ errors: workflowExecution.errors })
-      .from(workflowExecution)
-      .where(eq(workflowExecution.executionId, executionId))
-      .limit(1);
-
-    if (!row) {
-      return false;
-    }
-
-    // Parse existing errors or start with empty array
-    let errors: ExecutionError[] = [];
-    if (row.errors) {
-      try {
-        errors = JSON.parse(row.errors) as ExecutionError[];
-      } catch {
-        errors = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const [row] = await this.db
+        .select({ errors: workflowExecution.errors })
+        .from(workflowExecution)
+        .where(eq(workflowExecution.executionId, executionId))
+        .limit(1);
+      if (!row) return false;
+      let errors: ExecutionError[] = [];
+      if (row.errors) {
+        try {
+          errors = JSON.parse(row.errors) as ExecutionError[];
+        } catch {
+          errors = [];
+        }
       }
+      errors.push(error);
+      if (Buffer.byteLength(JSON.stringify(errors), "utf8") > 1024 * 1024) {
+        errors = errors.slice(-100);
+      }
+      const result = await this.db
+        .update(workflowExecution)
+        .set({ errors: JSON.stringify(errors), updatedAt: new Date() })
+        .where(
+          and(
+            eq(workflowExecution.executionId, executionId),
+            row.errors === null
+              ? isNull(workflowExecution.errors)
+              : eq(workflowExecution.errors, row.errors),
+          ),
+        );
+      if (result.changes === 1) return true;
     }
-
-    // Append new error
-    errors.push(error);
-
-    // Size validation: max 1MB for errors array to prevent unbounded growth
-    const errorsJson = JSON.stringify(errors);
-    const sizeBytes = Buffer.byteLength(errorsJson, "utf8");
-    const maxSize = 1 * 1024 * 1024; // 1MB
-
-    if (sizeBytes > maxSize) {
-      // If too large, keep only last 100 errors
-      errors = errors.slice(-100);
-    }
-
-    // Update database
-    const result = await this.db
-      .update(workflowExecution)
-      .set({
-        errors: JSON.stringify(errors),
-        updatedAt: new Date(),
-        revision: sql`${workflowExecution.revision} + 1`,
-      })
-      .where(eq(workflowExecution.executionId, executionId));
-
-    return result.changes > 0;
+    throw new ConflictError("Execution errors changed concurrently; retry appending the error", {
+      executionId,
+    });
   }
 
   async cancelExecution(
@@ -560,7 +589,6 @@ export class ExecutionRepository {
         END`,
         updatedAt: now,
         completedAt: now,
-        revision: sql`${workflowExecution.revision} + 1`,
       })
       .where(
         and(

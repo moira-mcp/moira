@@ -98,16 +98,30 @@ export class TokenManager {
     return token;
   }
 
-  createMaterializeToken(executionId: string, nodeId: string, userId: string): string {
+  createMaterializeToken(
+    executionId: string,
+    nodeId: string,
+    userId: string,
+    contextRevision?: string,
+  ): string {
     try {
       const db = getSqliteInstance();
       const token = randomUUID();
       const now = Date.now();
       db.prepare(
         `INSERT INTO workflow_tokens
-         (token, workflow_id, execution_id, node_id, user_id, type, expires_at, used, created_at)
-         VALUES (?, NULL, ?, ?, ?, 'materialize', ?, 0, ?)`,
-      ).run(token, executionId, nodeId, userId, now + TokenManager.MATERIALIZE_TTL_MS, now);
+         (token, workflow_id, execution_id, node_id, user_id, type, options_json, expires_at, used,
+          created_at)
+         VALUES (?, NULL, ?, ?, ?, 'materialize', ?, ?, 0, ?)`,
+      ).run(
+        token,
+        executionId,
+        nodeId,
+        userId,
+        contextRevision ? JSON.stringify({ contextRevision }) : null,
+        now + TokenManager.MATERIALIZE_TTL_MS,
+        now,
+      );
       return token;
     } catch (error) {
       if (error instanceof DatabaseError) throw error;

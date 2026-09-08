@@ -180,7 +180,10 @@ success criteria и input schema при её наличии. При необхо
 session({ action: "execution_context", executionId: "abc-123" })
 ```
 
-Возвращает состояние execution включая переменные контекста и историю.
+Возвращает состояние execution, включая переменные контекста, историю, ревизию шага `revision` и
+отдельные ревизии родителя, контекста и напоминаний. При изменении метаданных передавайте ревизию
+соответствующей цели вместе с `expectedRevision`; успешная запись возвращает следующую ревизию цели,
+не меняя ревизию шага.
 
 ## Заметки Execution
 
@@ -278,7 +281,10 @@ step({ processId: "xyz", attemptId: "attempt-current", input: { ... } })
 
 `ATTEMPT_PROCESSING` означает, что это изменение ещё принадлежит другому вызывающему: повторите тот
 же Process ID, идентификатор попытки и ввод либо тот же Start attempt ID для
-`start({ action: "execute" })`. `ATTEMPT_OUTCOME_UNKNOWN` означает, что внешний эффект уже мог
+`start({ action: "execute" })`. `ATTEMPT_STALE` отклонён до работы обработчика. Автоматически
+прочитайте `session({ action: "current_step", executionId })` и один раз повторите исходную отправку
+с возвращённым идентификатором попытки; решение пользователя не требуется.
+`ATTEMPT_OUTCOME_UNKNOWN` означает, что внешний эффект уже мог
 произойти: найдите возвращённый Process ID через `session` и не повторяйте изменение автоматически.
 Владелец execution может завершить заблокированное выполнение на его текущей ревизии через
 `session({ action: "cancel-execution", executionId, expectedRevision })`.

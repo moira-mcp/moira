@@ -4,6 +4,7 @@ import {
   materializeDownloadsTotal,
   TokenManager,
   ValidationError,
+  metadataRevision,
   type WorkflowToken,
 } from "@mcp-moira/shared";
 import {
@@ -66,6 +67,20 @@ export function createExecutionMaterializeRoutes(
       ) {
         denyMaterialize(res, "execution_binding_mismatch");
         return;
+      }
+      if (grant.optionsJson) {
+        let contextRevision: string | undefined;
+        try {
+          contextRevision = (JSON.parse(grant.optionsJson) as { contextRevision?: string })
+            .contextRevision;
+        } catch {
+          denyMaterialize(res, "grant_invalid_or_expired");
+          return;
+        }
+        if (contextRevision && metadataRevision(execution.globalContext) !== contextRevision) {
+          denyMaterialize(res, "execution_binding_mismatch");
+          return;
+        }
       }
       const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
       const node = graph?.nodes.find((candidate) => candidate.id === grant.nodeId);

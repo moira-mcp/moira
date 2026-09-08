@@ -1,5 +1,5 @@
 import { describe, expect, test } from "@jest/globals";
-import { ConflictError, ValidationError } from "@mcp-moira/shared";
+import { ConflictError, metadataRevision, ValidationError } from "@mcp-moira/shared";
 import { InMemoryRepository } from "../../../packages/workflow-engine/src/storage/in-memory-repository.js";
 import type { WorkflowExecution } from "../../../packages/workflow-engine/src/types/base-types.js";
 
@@ -30,20 +30,25 @@ describe("execution revision and parent recovery", () => {
     await repository.saveExecution(execution("replacement"));
     await repository.saveExecution(execution("child"));
 
-    const updated = await repository.setExecutionParent("child", "parent", "owner", 0);
+    const updated = await repository.setExecutionParent(
+      "child",
+      "parent",
+      "owner",
+      0,
+      metadataRevision(null),
+    );
 
     expect(updated.parentExecutionId).toBe("parent");
-    expect(updated.revision).toBe(1);
+    expect(updated.revision).toBe(0);
     await expect(
-      repository.setExecutionParent("child", "parent", "owner", 0),
-    ).resolves.toMatchObject({ parentExecutionId: "parent", revision: 1 });
+      repository.setExecutionParent("child", "parent", "owner", 0, metadataRevision("parent")),
+    ).resolves.toMatchObject({ parentExecutionId: "parent", revision: 0 });
     await expect(
-      repository.setExecutionParent("child", "replacement", "owner", 1),
-    ).resolves.toMatchObject({ parentExecutionId: "replacement", revision: 2 });
-    await expect(repository.setExecutionParent("child", null, "owner", 2)).resolves.toMatchObject({
-      parentExecutionId: null,
-      revision: 3,
-    });
+      repository.setExecutionParent("child", "replacement", "owner", 0, metadataRevision("parent")),
+    ).resolves.toMatchObject({ parentExecutionId: "replacement", revision: 0 });
+    await expect(
+      repository.setExecutionParent("child", null, "owner", 0, metadataRevision("replacement")),
+    ).resolves.toMatchObject({ parentExecutionId: null, revision: 0 });
   });
 
   test.each([
@@ -55,7 +60,7 @@ describe("execution revision and parent recovery", () => {
     await repository.saveExecution(execution("child"));
 
     await expect(
-      repository.setExecutionParent("child", "parent", "owner", 0),
+      repository.setExecutionParent("child", "parent", "owner", 0, metadataRevision(null)),
     ).rejects.toBeInstanceOf(ValidationError);
     const child = await repository.getExecution("child");
     expect(child?.parentExecutionId).toBeUndefined();
@@ -67,7 +72,7 @@ describe("execution revision and parent recovery", () => {
     await repository.saveExecution(execution("child"));
     await repository.saveExecution(execution("parent", "owner", { parentExecutionId: "child" }));
     await expect(
-      repository.setExecutionParent("child", "parent", "owner", 0),
+      repository.setExecutionParent("child", "parent", "owner", 0, metadataRevision(null)),
     ).rejects.toBeInstanceOf(ValidationError);
 
     const freshRepository = new InMemoryRepository();
@@ -78,8 +83,25 @@ describe("execution revision and parent recovery", () => {
     child.note = "newer";
     await freshRepository.saveExecution(child);
     await expect(
-      freshRepository.setExecutionParent("child", "parent", "owner", 0),
+      freshRepository.setExecutionParent("child", "parent", "owner", 0, metadataRevision(null)),
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  test("a stale parent snapshot cannot replace a newer parent in the same step generation", async () => {
+    const repository = new InMemoryRepository();
+    await repository.saveExecution(execution("first"));
+    await repository.saveExecution(execution("second"));
+    await repository.saveExecution(execution("child"));
+    const staleParentRevision = metadataRevision(null);
+
+    await repository.setExecutionParent("child", "first", "owner", 0, staleParentRevision);
+    await expect(
+      repository.setExecutionParent("child", "second", "owner", 0, staleParentRevision),
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(await repository.getExecution("child")).toMatchObject({
+      parentExecutionId: "first",
+      revision: 0,
+    });
   });
 
   test("a stale full save cannot overwrite a newer execution snapshot", async () => {
@@ -98,7 +120,7 @@ describe("execution revision and parent recovery", () => {
     expect((await repository.getExecution("execution"))?.revision).toBe(1);
   });
 
-  test("a stale in-memory context mutation cannot overwrite a newer step snapshot", async () => {
+  test("a previous-step context mutation cannot overwrite a newer step snapshot", async () => {
     const repository = new InMemoryRepository();
     await repository.saveExecution(execution("execution"));
     const newer = await repository.getExecution("execution");
@@ -107,7 +129,12 @@ describe("execution revision and parent recovery", () => {
     await repository.saveExecution(newer);
 
     await expect(
-      repository.updateExecutionContext("execution", { variables: { accepted: "stale" } }, 0),
+      repository.updateExecutionContext(
+        "execution",
+        { variables: { accepted: "stale" } },
+        0,
+        metadataRevision(execution("execution").globalContext),
+      ),
     ).rejects.toBeInstanceOf(ConflictError);
     expect((await repository.getExecution("execution"))?.globalContext.variables.accepted).toBe(
       "newer",

@@ -24,6 +24,7 @@ import {
   isExecutionParentReference,
   logAuditEventDirect,
   AuditAction,
+  metadataRevision,
 } from "@mcp-moira/shared";
 
 const router = Router();
@@ -234,6 +235,11 @@ router.get(
           note: execution.note,
           parentExecutionId: execution.parentExecutionId ?? null,
           revision: execution.revision,
+          metadataRevisions: {
+            parent: metadataRevision(execution.parentExecutionId ?? null),
+            context: metadataRevision(execution.globalContext),
+            reminders: metadataRevision(execution.reminders ?? []),
+          },
           reminders: execution.reminders ?? [],
           context: execution.globalContext,
           createdAt: execution.createdAt,
@@ -274,7 +280,11 @@ router.get(
     );
     res.json({
       success: true,
-      data: { reminders, revision: execution.revision },
+      data: {
+        reminders,
+        revision: execution.revision,
+        remindersRevision: metadataRevision(execution.reminders ?? []),
+      },
       timestamp: new Date().toISOString(),
     });
   }),
@@ -284,13 +294,16 @@ router.post(
   "/:id/reminders",
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-    const { text, idempotencyKey, expectedRevision } = req.body;
+    const { text, idempotencyKey, expectedRevision, expectedRemindersRevision } = req.body;
     if (!Number.isInteger(expectedRevision))
       throw createApiError.validationFailed("integer expectedRevision is required");
+    if (typeof expectedRemindersRevision !== "string")
+      throw createApiError.validationFailed("expectedRemindersRevision is required");
     const result = await repository.mutateExecutionReminder(
       req.params.id,
       userId,
       expectedRevision,
+      expectedRemindersRevision,
       { action: "add", text: typeof text === "string" ? text : "", idempotencyKey },
     );
     res.json({ success: true, data: result, timestamp: new Date().toISOString() });
@@ -301,13 +314,16 @@ router.patch(
   "/:id/reminders/:reminderId",
   asyncHandler(async (req: Request, res: Response) => {
     const userId = (req as AuthenticatedRequest).userId;
-    const { text, expectedRevision } = req.body;
+    const { text, expectedRevision, expectedRemindersRevision } = req.body;
     if (!Number.isInteger(expectedRevision))
       throw createApiError.validationFailed("integer expectedRevision is required");
+    if (typeof expectedRemindersRevision !== "string")
+      throw createApiError.validationFailed("expectedRemindersRevision is required");
     const result = await repository.mutateExecutionReminder(
       req.params.id,
       userId,
       expectedRevision,
+      expectedRemindersRevision,
       {
         action: "update",
         reminderId: req.params.reminderId,
@@ -325,10 +341,14 @@ router.delete(
     const expectedRevision = Number(req.body.expectedRevision);
     if (!Number.isInteger(expectedRevision))
       throw createApiError.validationFailed("integer expectedRevision is required");
+    const expectedRemindersRevision = req.body.expectedRemindersRevision;
+    if (typeof expectedRemindersRevision !== "string")
+      throw createApiError.validationFailed("expectedRemindersRevision is required");
     const result = await repository.mutateExecutionReminder(
       req.params.id,
       userId,
       expectedRevision,
+      expectedRemindersRevision,
       { action: "cancel", reminderId: req.params.reminderId },
     );
     res.json({ success: true, data: result, timestamp: new Date().toISOString() });
@@ -375,14 +395,24 @@ router.put(
       throw createApiError.unauthorized("Access denied");
     const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
     if (!graph) throw createApiError.notFound("Workflow not found");
+    if (!Number.isInteger(req.body.expectedRevision))
+      throw createApiError.validationFailed("integer expectedRevision is required");
+    if (typeof req.body.expectedContextRevision !== "string")
+      throw createApiError.validationFailed("expectedContextRevision is required");
     const updated = prepareExecutionVariableWrite(
       execution,
       graph,
       req.params.name,
       req.body.value,
       req.body.expectedRevision,
+      req.body.expectedContextRevision,
     );
-    await repository.saveExecution(updated);
+    await repository.updateExecutionContext(
+      req.params.id,
+      { variables: { [req.params.name]: updated.globalContext.variables[req.params.name] } },
+      req.body.expectedRevision,
+      req.body.expectedContextRevision,
+    );
     await logAuditEventDirect(repository, {
       userId,
       action: AuditAction.EXECUTION_UPDATE_CONTEXT,
@@ -397,7 +427,12 @@ router.put(
     });
     res.json({
       success: true,
-      data: { name: req.params.name, value: req.body.value, revision: updated.revision },
+      data: {
+        name: req.params.name,
+        value: req.body.value,
+        revision: updated.revision,
+        contextRevision: metadataRevision(updated.globalContext),
+      },
     });
   }),
 );
@@ -411,10 +446,14 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const { id: executionId } = req.params;
     const userId = (req as AuthenticatedRequest).userId;
-    const { parentExecutionId, expectedRevision } = req.body;
-    if (typeof parentExecutionId !== "string" || !Number.isInteger(expectedRevision)) {
+    const { parentExecutionId, expectedRevision, expectedParentRevision } = req.body;
+    if (
+      typeof parentExecutionId !== "string" ||
+      !Number.isInteger(expectedRevision) ||
+      typeof expectedParentRevision !== "string"
+    ) {
       throw createApiError.validationFailed(
-        "parentExecutionId and integer expectedRevision are required",
+        "parentExecutionId, integer expectedRevision, and expectedParentRevision are required",
         { executionId },
       );
     }
@@ -428,6 +467,7 @@ router.post(
       parentExecutionId === "none" ? null : parentExecutionId,
       userId,
       expectedRevision,
+      expectedParentRevision,
     );
     res.json({
       success: true,
@@ -435,6 +475,7 @@ router.post(
         executionId,
         parentExecutionId: updated.parentExecutionId ?? null,
         revision: updated.revision,
+        parentRevision: metadataRevision(updated.parentExecutionId ?? null),
       },
       timestamp: new Date().toISOString(),
     });
@@ -451,7 +492,8 @@ router.put(
   asyncHandler(async (req: Request, res: Response) => {
     const { id: executionId } = req.params;
     const userId = (req as AuthenticatedRequest).userId;
-    const { variables, nodeStates, variablePath, expectedRevision } = req.body;
+    const { variables, nodeStates, variablePath, expectedRevision, expectedContextRevision } =
+      req.body;
 
     // Get execution
     const execution = await repository.getExecution(executionId);
@@ -478,6 +520,11 @@ router.put(
         executionId,
       });
     }
+    if (typeof expectedContextRevision !== "string") {
+      throw createApiError.validationFailed("expectedContextRevision is required", {
+        executionId,
+      });
+    }
 
     // Per-path update: set a value at any nesting path inside variables without overwriting
     // the rest of the object. Body: { variablePath: (string|number)[], value }.
@@ -496,8 +543,18 @@ router.put(
         variablePath,
         req.body.value,
         expectedRevision,
+        expectedContextRevision,
       );
-      await repository.saveExecution(updated);
+      await repository.updateExecutionContext(
+        executionId,
+        {
+          variables: {
+            [String(variablePath[0])]: updated.globalContext.variables[String(variablePath[0])],
+          },
+        },
+        expectedRevision,
+        expectedContextRevision,
+      );
       const variablePathText = variablePath
         .map((segment, index) =>
           typeof segment === "number" ? `[${segment}]` : index === 0 ? segment : `.${segment}`,
@@ -517,7 +574,12 @@ router.put(
       });
       res.json({
         success: true,
-        data: { executionId, updated: true, revision: updated.revision },
+        data: {
+          executionId,
+          updated: true,
+          revision: updated.revision,
+          contextRevision: metadataRevision(updated.globalContext),
+        },
         timestamp: new Date().toISOString(),
       });
       return;

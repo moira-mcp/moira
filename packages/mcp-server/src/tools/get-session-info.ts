@@ -25,6 +25,7 @@ import {
   ValidationError,
   activeExecutionsGauge,
   workflowExecutionsTotal,
+  metadataRevision,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
@@ -77,6 +78,11 @@ interface ExecutionContextData {
   note?: string | null;
   parentExecutionId?: string | null;
   revision: number;
+  metadataRevisions: {
+    parent: string;
+    context: string;
+    reminders: string;
+  };
   context: {
     variables: Record<string, unknown>;
     nodeStates: Record<string, unknown>;
@@ -106,6 +112,7 @@ interface ParentUpdateResult {
   executionId: string;
   parentExecutionId: string | null;
   revision: number;
+  parentRevision: string;
 }
 
 type SessionInfoData =
@@ -115,10 +122,19 @@ type SessionInfoData =
   | NoteUpdateResult
   | ParentUpdateResult
   | { executionId: string; cancelled: true; revision: number }
-  | { reminders: import("@mcp-moira/workflow-engine").ExecutionReminder[]; revision: number }
+  | {
+      reminders: import("@mcp-moira/workflow-engine").ExecutionReminder[];
+      revision: number;
+      remindersRevision: string;
+    }
   | import("@mcp-moira/workflow-engine").ReminderMutationResult
-  | { variables: Array<Record<string, unknown>>; unknownNames: string[]; revision: number }
-  | { name: string; value: unknown; revision: number }
+  | {
+      variables: Array<Record<string, unknown>>;
+      unknownNames: string[];
+      revision: number;
+      contextRevision: string;
+    }
+  | { name: string; value: unknown; revision: number; contextRevision: string }
   | import("@mcp-moira/workflow-engine").ExecutionProgress
   | import("@mcp-moira/workflow-engine").ProgressImageGrant
   | string;
@@ -343,6 +359,11 @@ export async function getSessionInfo(
           note: execution.note,
           parentExecutionId: execution.parentExecutionId,
           revision: execution.revision,
+          metadataRevisions: {
+            parent: metadataRevision(execution.parentExecutionId ?? null),
+            context: metadataRevision(execution.globalContext),
+            reminders: metadataRevision(execution.reminders ?? []),
+          },
           context: {
             variables: filteredVariables,
             nodeStates: execution.globalContext.nodeStates,
@@ -488,7 +509,7 @@ export async function getSessionInfo(
         });
         return {
           success: true,
-          data: { executionId, cancelled: true, revision: params.expectedRevision + 1 },
+          data: { executionId, cancelled: true, revision: params.expectedRevision },
         };
       }
 
@@ -548,11 +569,16 @@ export async function getSessionInfo(
       }
 
       case "set-parent": {
-        if (!executionId || !params.parentExecutionId || params.expectedRevision === undefined) {
+        if (
+          !executionId ||
+          !params.parentExecutionId ||
+          params.expectedRevision === undefined ||
+          !params.expectedParentRevision
+        ) {
           return {
             success: false,
             error:
-              "executionId, parentExecutionId, and expectedRevision are required for set-parent",
+              "executionId, parentExecutionId, expectedRevision, and expectedParentRevision are required for set-parent",
           };
         }
         if (!isExecutionParentReference(params.parentExecutionId)) {
@@ -564,6 +590,7 @@ export async function getSessionInfo(
           params.parentExecutionId === "none" ? null : params.parentExecutionId,
           userId,
           params.expectedRevision,
+          params.expectedParentRevision,
         );
         return {
           success: true,
@@ -571,6 +598,7 @@ export async function getSessionInfo(
             executionId,
             parentExecutionId: updated.parentExecutionId ?? null,
             revision: updated.revision,
+            parentRevision: metadataRevision(updated.parentExecutionId ?? null),
           },
         };
       }
@@ -588,14 +616,28 @@ export async function getSessionInfo(
             (!params.reminderStatus || item.status === params.reminderStatus) &&
             (!search || item.text.toLowerCase().includes(search)),
         );
-        return { success: true, data: { reminders, revision: execution.revision } };
+        return {
+          success: true,
+          data: {
+            reminders,
+            revision: execution.revision,
+            remindersRevision: metadataRevision(execution.reminders ?? []),
+          },
+        };
       }
 
       case "add-reminder":
       case "update-reminder":
       case "remove-reminder": {
-        if (!executionId || params.expectedRevision === undefined)
-          return { success: false, error: "executionId and expectedRevision are required" };
+        if (
+          !executionId ||
+          params.expectedRevision === undefined ||
+          !params.expectedRemindersRevision
+        )
+          return {
+            success: false,
+            error: "executionId, expectedRevision, and expectedRemindersRevision are required",
+          };
         const mutation =
           action === "add-reminder"
             ? {
@@ -614,6 +656,7 @@ export async function getSessionInfo(
           executionId,
           userId,
           params.expectedRevision,
+          params.expectedRemindersRevision,
           mutation,
         );
         return { success: true, data: result };
@@ -667,10 +710,16 @@ export async function getSessionInfo(
       }
 
       case "set-variable": {
-        if (!executionId || !params.variableName || params.expectedRevision === undefined)
+        if (
+          !executionId ||
+          !params.variableName ||
+          params.expectedRevision === undefined ||
+          !params.expectedContextRevision
+        )
           return {
             success: false,
-            error: "executionId, variableName and expectedRevision are required",
+            error:
+              "executionId, variableName, expectedRevision, and expectedContextRevision are required",
           };
         const repository = MCPEngine.getInstance().repository;
         const execution = await repository.getExecution(executionId);
@@ -684,8 +733,18 @@ export async function getSessionInfo(
           params.variableName,
           params.variableValue,
           params.expectedRevision,
+          params.expectedContextRevision,
         );
-        await repository.saveExecution(updated);
+        await repository.updateExecutionContext(
+          executionId,
+          {
+            variables: {
+              [params.variableName]: updated.globalContext.variables[params.variableName],
+            },
+          },
+          params.expectedRevision,
+          params.expectedContextRevision,
+        );
         await logAuditEventDirect(repository as DatabaseRepository, {
           userId,
           action: AuditAction.EXECUTION_UPDATE_CONTEXT,
@@ -704,6 +763,7 @@ export async function getSessionInfo(
             name: params.variableName,
             value: params.variableValue,
             revision: updated.revision,
+            contextRevision: metadataRevision(updated.globalContext),
           },
         };
       }
