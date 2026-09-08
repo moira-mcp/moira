@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "@jest/globals";
 import { getAdminCredentials, getTestBaseUrl } from "../utils/test-config.js";
-import { callMCPToolRaw, createAuthenticatedMCPClient, signInUser } from "../utils/mcp-auth.js";
+import {
+  createAuthenticatedMCPClient,
+  signInUser,
+  startWorkflowExecution,
+} from "../utils/mcp-auth.js";
 
 const BASE_URL = getTestBaseUrl();
 
@@ -14,10 +18,8 @@ describe("execution reminders API", () => {
     cookie = await signInUser(BASE_URL, credentials.email, credentials.password);
     const authenticated = await createAuthenticatedMCPClient(credentials);
     cleanup = authenticated.cleanup;
-    const started = await callMCPToolRaw(authenticated.client, "start", {
-      workflowId: "moira/todo-list",
-      parentExecutionId: "none",
-      skipTelegramCheck: true,
+    const started = await startWorkflowExecution(authenticated.client, "moira/todo-list", {
+      skipNotificationCheck: true,
     });
     const id = started.match(/Process ID: ([a-f0-9-]+)/)?.[1];
     if (!id) throw new Error("Process ID missing");

@@ -8,7 +8,11 @@
 
 import { afterAll, describe, test, expect, beforeAll } from "@jest/globals";
 import { getTestBaseUrl, getAdminCredentials } from "../utils/test-config.js";
-import { callMCPTool, callMCPToolRaw, createAuthenticatedMCPClient } from "../utils/mcp-auth.js";
+import {
+  callMCPTool,
+  createAuthenticatedMCPClient,
+  startWorkflowExecution,
+} from "../utils/mcp-auth.js";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const BASE_URL = getTestBaseUrl();
@@ -137,10 +141,7 @@ describe("User Lock Management API - Permission Checks", () => {
       },
     });
     humanWorkflowId = workflow.workflowId;
-    const started = await callMCPToolRaw(humanMcpClient, "start", {
-      workflowId: workflow.workflowId,
-      parentExecutionId: "none",
-    });
+    const started = await startWorkflowExecution(humanMcpClient, workflow.workflowId);
     humanExecutionId = started.match(/Process ID:\s*([a-f0-9-]+)/i)?.[1] ?? "";
     expect(humanExecutionId).toMatch(/^[a-f0-9-]+$/);
   });

@@ -709,6 +709,36 @@ export async function callMCPToolRaw(
 }
 
 /**
+ * Prepare and execute one workflow start through the public replay-safe MCP contract.
+ * Returns the raw execute response containing the reserved Process ID and first Step attempt.
+ */
+export async function startWorkflowExecution(
+  client: Client,
+  workflowId: string,
+  options: {
+    parentExecutionId?: string;
+    note?: string;
+    skipNotificationCheck?: boolean;
+  } = {},
+): Promise<string> {
+  const prepared = await callMCPToolRaw(client, "start", {
+    action: "prepare",
+    workflowId,
+    parentExecutionId: options.parentExecutionId ?? "none",
+    ...(options.note ? { note: options.note } : {}),
+    ...(options.skipNotificationCheck ? { skipNotificationCheck: true } : {}),
+  });
+  const startAttemptId = prepared.match(/Start attempt ID:\s*([a-f0-9-]+)/i)?.[1];
+  if (!startAttemptId) {
+    throw new Error(`Start attempt ID missing from response: ${prepared}`);
+  }
+  return callMCPToolRaw(client, "start", {
+    action: "execute",
+    startAttemptId,
+  });
+}
+
+/**
  * Parse token tool response (formatted text)
  * Extracts token, expires, and URL from formatted string
  */
