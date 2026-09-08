@@ -2,7 +2,7 @@
   "id": "91b11263-a180-4a08-9399-55f406f82c69",
   "metadata": {
     "name": "Software Development Flow",
-    "version": "15.5.1",
+    "version": "15.6.0",
     "description": "Implements one complete repository change through source-grounded requirements, independently reviewed planning, vertical units, staged validation, post-validation permanent-documentation updates, independent unit completeness, and one numeric final semantic/requirements review. Reports stay semantic and diff-first; HTML reports prefer agentic-report@latest and preserve Artifact/user-communication delivery. Authorized unit checkpoints are commit-or-no-op without receipt files or automatic repair branches. Seven-stage progress, cause-aware replan, user gates, external-blocker recovery, local VCS authority, and caller-owned delivery boundaries remain intact.",
     "author": "mcp-moira-team",
     "tags": [
@@ -251,8 +251,8 @@
     {
       "id": "wait-for-health-state-change",
       "type": "agent-directive",
-      "directive": "Present the external blocker from {{workspace_path}}/project-health.md. Ask the user to confirm that external state changed before retrying, or to abort. Do not retry on an unchanged environment. If aborting, ensure the health report contains the current blocker and partial-work facts.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker and partial-work facts recorded.\n\nProgress outcome ownership: Return a concise truthful current result in progress_intake_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
-      "completionCondition": "The user confirmed changed external state or chose to abort",
+      "directive": "Present the external blocker from {{workspace_path}}/project-health.md and re-check whether the relevant external state actually changed. Return `retry` only after observed evidence of change or the user's explicit confirmation that it changed. Do not retry an unchanged environment.\n\nIf no changed-state retry is available, explain that `end_workflow` ends the entire Software Development Flow now, leaves planning and every later implementation, validation, review, and local-finalization obligation incomplete, and preserves only the current partial repository and workspace state. Ask the user explicitly whether to end the whole workflow. Submit `end_workflow` only after that consequence-aware user confirmation. If the user keeps the run open or has not decided, do not submit a response to this node; leave it waiting for changed state or a later explicit decision.\n\nIn `autonomous` mode, re-check external state yourself and return `retry` only on evidence that it changed. Never infer or select `end_workflow`; when state is unchanged, present the blocker and obtain the same explicit user authority or leave the node waiting.\n\nProgress outcome ownership: Return a concise truthful current result in progress_intake_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "completionCondition": "External state changed and retry is authorized, or the user explicitly confirmed end_workflow after seeing the complete-run consequence",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -260,7 +260,7 @@
             "type": "string",
             "enum": [
               "retry",
-              "abort"
+              "end_workflow"
             ]
           }
         },
@@ -279,7 +279,7 @@
       "progressActiveContent": {
         "summary": "Resolve the external project-health blocker",
         "outcome": "Current responsibility in progress",
-        "next": "Retry only after changed state, or stop"
+        "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
       },
       "progressActiveLabel": "Resolve project-health blocker"
     },
@@ -906,8 +906,8 @@
     {
       "id": "approve-current-unit-closure",
       "type": "agent-directive",
-      "directive": "Read the complete current unit and exactly one route-current replan source, then decide whether unit {{current_step_index}} may close for a material plan revision without mutating product or plan content. When reached from `update-unit-documentation.documentation_outcome=replan`, the sole source is the current revision/unit `unit-report.md` even though validation has already run. Other preparation, producer, test, architecture, completeness and repair routes retain their existing exact source files.\n\nRecord the decision and verbatim feedback in `closure-feedback.md`. Interactive mode asks the user; autonomous mode approves only a diagnosis that satisfies the current replan contract and otherwise exposes the contradiction. Return `closure_decision=approved|refused` and the current `progress_plan_outcome`.\n",
-      "completionCondition": "Exactly one route-current replan diagnosis is verified and the unit is explicitly closed or kept open without product mutation",
+      "directive": "Read the complete current unit and exactly one route-current replan source, then decide whether unit {{current_step_index}} may close for a material plan revision without mutating product or plan content. When reached from `update-unit-documentation.documentation_outcome=replan`, the sole source is the current revision/unit `unit-report.md` even though validation has already run. Other preparation, producer, test, architecture, completeness and repair routes retain their existing exact source files.\n\nWhen the diagnosis satisfies the current replan contract, record the decision and relevant feedback in `closure-feedback.md` and return `closure_decision=approved`. When it does not, record the contradiction and explain that `end_workflow` ends the entire Software Development Flow now, leaves the current unit and every remaining plan, validation, review, checkpoint, reporting, and local-finalization obligation incomplete as applicable, and preserves only the current partial repository and workspace state. Ask the user explicitly whether to end the whole workflow. Return `closure_decision=end_workflow` only after that consequence-aware user confirmation. If the user keeps the run open, supplies corrective direction, or has not decided, do not submit a response to this node; leave it waiting for a valid closure decision or later explicit termination authority.\n\nInteractive mode asks the user to approve the valid replan closure. Autonomous mode may return `approved` only for a diagnosis that satisfies the current replan contract. It must never infer or select `end_workflow`; when the diagnosis cannot be approved, it presents the contradiction and obtains the same explicit user authority or leaves the node waiting.\n\nReturn the current `progress_plan_outcome` with the decision.",
+      "completionCondition": "Exactly one route-current replan diagnosis is verified and either valid closure is approved or the user explicitly confirms end_workflow after seeing the complete-run consequence",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -915,7 +915,7 @@
             "type": "string",
             "enum": [
               "approved",
-              "refused"
+              "end_workflow"
             ]
           }
         },
@@ -935,7 +935,7 @@
       "progressActiveContent": {
         "summary": "Decide whether the current unit may close for a material replan",
         "outcome": "Current responsibility in progress",
-        "next": "Advance the plan revision when valid, or stop without unsafe repair"
+        "next": "Advance a valid plan revision; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
       }
     },
     {
@@ -1111,8 +1111,8 @@
     {
       "id": "wait-for-runtime-state-change",
       "type": "agent-directive",
-      "directive": "Present the concrete external blocker from the current runtime-validation report. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker recorded.\n\nProgress outcome ownership: Return a concise truthful current result in progress_review_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
-      "completionCondition": "The user confirmed changed state or chose abort",
+      "directive": "Present the concrete external blocker from the current runtime-validation report and re-check whether the relevant external state actually changed. Return `retry` only after observed evidence of change or the user's explicit confirmation that it changed. Do not retry unchanged state.\n\nIf no changed-state retry is available, explain that `end_workflow` ends the entire Software Development Flow now, leaves the current unit and all remaining validation, review, checkpoint, feature-wide validation, reporting, and local-finalization obligations incomplete as applicable, and preserves only the current partial repository and workspace state. Ask the user explicitly whether to end the whole workflow. Submit `end_workflow` only after that consequence-aware user confirmation. If the user keeps the run open or has not decided, do not submit a response to this node; leave it waiting for changed state or a later explicit decision.\n\nIn `autonomous` mode, re-check external state yourself and return `retry` only on evidence that it changed. Never infer or select `end_workflow`; when state is unchanged, present the blocker and obtain the same explicit user authority or leave the node waiting.\n\nProgress outcome ownership: Return a concise truthful current result in progress_review_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "completionCondition": "External state changed and retry is authorized, or the user explicitly confirmed end_workflow after seeing the complete-run consequence",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1120,7 +1120,7 @@
             "type": "string",
             "enum": [
               "retry",
-              "abort"
+              "end_workflow"
             ]
           }
         },
@@ -1138,9 +1138,9 @@
       "progressNodeId": "review",
       "progressActiveLabel": "Runtime blocker · {{current_step_index}}/{{total_steps}}",
       "progressActiveContent": {
-        "summary": "Runtime blocker · {{current_step_index}}/{{total_steps}}",
+        "summary": "Resolve the runtime-validation external blocker",
         "outcome": "Current responsibility in progress",
-        "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
+        "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
       }
     },
     {
@@ -1357,8 +1357,8 @@
     {
       "id": "wait-for-expensive-state-change",
       "type": "agent-directive",
-      "directive": "Present the concrete external blocker from the current expensive-validation report. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker recorded.\n\nProgress outcome ownership: Return a concise truthful current result in progress_review_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
-      "completionCondition": "The user confirmed changed state or chose abort",
+      "directive": "Present the concrete external blocker from the current expensive-validation report and re-check whether the relevant external state actually changed. Return `retry` only after observed evidence of change or the user's explicit confirmation that it changed. Do not retry unchanged state.\n\nIf no changed-state retry is available, explain that `end_workflow` ends the entire Software Development Flow now, leaves the current unit and all remaining documentation, review, checkpoint, feature-wide validation, reporting, and local-finalization obligations incomplete as applicable, and preserves only the current partial repository and workspace state. Ask the user explicitly whether to end the whole workflow. Submit `end_workflow` only after that consequence-aware user confirmation. If the user keeps the run open or has not decided, do not submit a response to this node; leave it waiting for changed state or a later explicit decision.\n\nIn `autonomous` mode, re-check external state yourself and return `retry` only on evidence that it changed. Never infer or select `end_workflow`; when state is unchanged, present the blocker and obtain the same explicit user authority or leave the node waiting.\n\nProgress outcome ownership: Return a concise truthful current result in progress_review_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "completionCondition": "External state changed and retry is authorized, or the user explicitly confirmed end_workflow after seeing the complete-run consequence",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1366,7 +1366,7 @@
             "type": "string",
             "enum": [
               "retry",
-              "abort"
+              "end_workflow"
             ]
           }
         },
@@ -1384,9 +1384,9 @@
       "progressNodeId": "review",
       "progressActiveLabel": "Validation blocker · {{current_step_index}}/{{total_steps}}",
       "progressActiveContent": {
-        "summary": "Validation blocker · {{current_step_index}}/{{total_steps}}",
+        "summary": "Resolve the broad-validation external blocker",
         "outcome": "Current responsibility in progress",
-        "next": "Continue through remaining review, repair, checkpoint policy, or final reconciliation"
+        "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
       }
     },
     {
@@ -1546,8 +1546,8 @@
     {
       "id": "resolve-finalization-blocker",
       "type": "agent-directive",
-      "directive": "Present the concrete external finalization blocker from {{workspace_path}}/finalization.md. Ask whether external state has changed and now permits retry, whether to skip the already-authorized finalization without altering verified repository content, or whether to abort. Do not rerun unrelated validation and do not retry unchanged state.\n\nIn `autonomous` mode do not ask: decide on evidence. Retry only when the external state actually changed, skip only the finalization that was already authorized without altering verified repository content, and otherwise abort.\n\nProgress outcome ownership: Return a concise truthful current result in progress_finalize_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
-      "completionCondition": "The user chose retry after changed external state, skip, or abort",
+      "directive": "Present the concrete external finalization blocker from {{workspace_path}}/finalization.md and re-check whether external state now permits retry. Return `retry` only after observed evidence of change or the user's explicit confirmation that it changed. Do not rerun unrelated validation and do not retry unchanged state.\n\nIf retry is unavailable, present two distinct user authority choices and their consequences. `finish_without_finalization` closes the Software Development Flow while preserving the already verified repository content, but leaves the already-authorized local finalization undone and reports that partial closure truthfully from `finalization.md`. `end_workflow` stops the entire Software Development Flow as incomplete and preserves only the current repository and workspace state. Submit either terminal value only after the user explicitly selects it with those consequences visible. If the user keeps the run open or has not decided, do not submit a response to this node; leave it waiting for changed state or a later explicit decision.\n\nIn `autonomous` mode, re-check external state yourself and return `retry` only on evidence that it changed. Never infer or select `finish_without_finalization` or `end_workflow`; when state is unchanged, present the blocker and obtain explicit user authority or leave the node waiting.\n\nProgress outcome ownership: Return a concise truthful current result in progress_finalize_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "completionCondition": "External state changed and retry is authorized, or the user explicitly chose finish_without_finalization or end_workflow after seeing its exact consequence",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1555,8 +1555,8 @@
             "type": "string",
             "enum": [
               "retry",
-              "skip",
-              "abort"
+              "finish_without_finalization",
+              "end_workflow"
             ]
           }
         },
@@ -1576,7 +1576,7 @@
       "progressActiveContent": {
         "summary": "Resolve the concrete external finalization blocker",
         "outcome": "Current responsibility in progress",
-        "next": "Retry after changed state, skip the authorized effect, or stop"
+        "next": "Retry only after changed state; otherwise obtain explicit user authority for partial closure or termination, or remain waiting"
       }
     },
     {
@@ -1602,10 +1602,10 @@
         "left": {
           "contextPath": "resolve-finalization-blocker.blocker_decision"
         },
-        "right": "skip"
+        "right": "finish_without_finalization"
       },
       "connections": {
-        "true": "notify-workflow-complete",
+        "true": "notify-workflow-finished-without-finalization",
         "false": "notify-workflow-stopped"
       }
     },
@@ -1745,8 +1745,8 @@
     {
       "id": "wait-for-feature-state-change",
       "type": "agent-directive",
-      "directive": "Present the concrete external blocker in {{workspace_path}}/feature-validation.md. Ask the user to confirm changed external state before retrying, or to abort. Do not retry unchanged.\n\nIn `autonomous` mode do not ask: re-check the external state yourself and retry only on evidence that it actually changed; otherwise abort with the blocker recorded.\n\nProgress outcome ownership: Return a concise truthful current result in progress_finalize_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
-      "completionCondition": "The user confirmed changed state or chose abort",
+      "directive": "Present the concrete external blocker from {{workspace_path}}/feature-validation.md and re-check whether the relevant external state actually changed. Return `retry` only after observed evidence of change or the user's explicit confirmation that it changed. Do not retry unchanged state.\n\nIf no changed-state retry is available, explain that `end_workflow` ends the entire Software Development Flow now, leaves final semantic review, final reporting, any required acceptance, and local finalization incomplete, and preserves only the current partial repository and workspace state. Ask the user explicitly whether to end the whole workflow. Submit `end_workflow` only after that consequence-aware user confirmation. If the user keeps the run open or has not decided, do not submit a response to this node; leave it waiting for changed state or a later explicit decision.\n\nIn `autonomous` mode, re-check external state yourself and return `retry` only on evidence that it changed. Never infer or select `end_workflow`; when state is unchanged, present the blocker and obtain the same explicit user authority or leave the node waiting.\n\nProgress outcome ownership: Return a concise truthful current result in progress_finalize_outcome for this responsibility and its actual disposition. Replace the prior value; do not append history, predict a branch that has not resolved, or claim an effect before success.",
+      "completionCondition": "External state changed and retry is authorized, or the user explicitly confirmed end_workflow after seeing the complete-run consequence",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1754,7 +1754,7 @@
             "type": "string",
             "enum": [
               "retry",
-              "abort"
+              "end_workflow"
             ]
           }
         },
@@ -1772,9 +1772,9 @@
       "progressNodeId": "finalize",
       "progressActiveLabel": "Feature blocker",
       "progressActiveContent": {
-        "summary": "Feature blocker",
+        "summary": "Resolve the feature-validation external blocker",
         "outcome": "Current responsibility in progress",
-        "next": "Complete locally, obtain a required decision, repair current evidence, replan, or stop"
+        "next": "Retry only after changed state; otherwise obtain explicit user authority to end the whole workflow or remain waiting"
       }
     },
     {
@@ -3112,7 +3112,7 @@
     {
       "id": "notify-workflow-stopped",
       "type": "user-notification",
-      "message": "⛔ *Software Development Flow stopped*\n\nThe workflow ended before normal completion. Review the current workspace evidence for the exact blocker, refusal, or abort reason.",
+      "message": "⛔ *Software Development Flow stopped*\n\nYou explicitly chose to end the whole workflow before normal completion. The current repository and workspace state is preserved; review the active blocker or closure evidence for the exact incomplete work.",
       "format": "markdown",
       "connections": {
         "default": "end-aborted"
@@ -3167,6 +3167,17 @@
       "format": "markdown",
       "connections": {
         "default": "report-and-accept-feature"
+      },
+      "progressNodeId": "finalize",
+      "attachProgressImage": true
+    },
+    {
+      "id": "notify-workflow-finished-without-finalization",
+      "type": "user-notification",
+      "message": "⚠️ *Software Development Flow closed without local finalization*\n\nYou explicitly chose to finish while the external finalization blocker remained. Verified repository content is preserved, but the already-authorized local finalization was not completed. Review `finalization.md` in the workflow workspace for the exact blocker and remaining local action.",
+      "format": "markdown",
+      "connections": {
+        "default": "end"
       },
       "progressNodeId": "finalize",
       "attachProgressImage": true
