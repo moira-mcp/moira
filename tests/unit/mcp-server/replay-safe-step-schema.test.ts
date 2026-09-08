@@ -24,6 +24,11 @@ describe("replay-safe step public contract", () => {
     ]) {
       expect(description).toContain("attemptId");
       expect(description).toContain("required even when the workflow accepts an empty response");
+      expect(description).toContain("ATTEMPT_CONFLICT");
+      expect(description).toContain("read session current_step automatically");
+      expect(description).toContain("returned directive and input schema");
+      expect(description).toContain("ATTEMPT_INVALID_OR_EXPIRED");
+      expect(description).toContain("do not reuse the unavailable attempt");
       expect(description).toContain("ATTEMPT_OUTCOME_UNKNOWN");
       expect(description).not.toContain('step({ processId: "abc123" })');
     }
@@ -44,5 +49,15 @@ describe("replay-safe step public contract", () => {
       expect(content).not.toContain("step(processId, input)");
       expect(content).not.toMatch(/mcp__moira__step\(\{ processId: "\.\.\.", input:/);
     }
+
+    const systemPrompt = readFileSync(
+      resolve(process.cwd(), "config/prompts/systemPrompt.md"),
+      "utf8",
+    );
+    expect(systemPrompt).toContain("ATTEMPT_CONFLICT");
+    expect(systemPrompt).toContain('session({ action: "current_step", executionId })');
+    expect(systemPrompt).toContain("returned directive and input schema");
+    expect(systemPrompt).toContain("ATTEMPT_INVALID_OR_EXPIRED");
+    expect(systemPrompt).toContain("do not reuse the unavailable attempt");
   });
 });

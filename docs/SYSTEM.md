@@ -74,7 +74,12 @@ duplicates wait up to ten seconds for the first owner's receipt and otherwise re
 `ATTEMPT_PROCESSING`. If ownership or durable outcome cannot be proven, the attempt becomes
 `outcome_unknown` and is never automatically executed again. `ATTEMPT_STALE` is rejected before
 handler work and directs the caller to refresh `current_step` automatically; it does not require a
-human recovery decision.
+human recovery decision. `ATTEMPT_CONFLICT` also rejects before handler work because the attempt is
+already bound to different input. The caller refreshes `current_step`, discards the conflicting
+presentation, and follows the returned directive and schema rather than replaying the rejected
+input. A step-level `ATTEMPT_INVALID_OR_EXPIRED` that explicitly directs the caller to
+`current_step` uses the same recovery; an unavailable start attempt does not. Outcome-unknown
+inspection never authorizes an automatic mutation retry.
 
 Startup and recurring maintenance fence expired executing attempts every ten seconds. Completed
 receipts remain available for seven days, with at most 1,000 retained per execution, and cleanup runs

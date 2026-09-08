@@ -140,7 +140,9 @@ export async function executeStep(params: ExecuteStepParams): Promise<ToolResult
     // Format error message with agent instructions based on error type
     let enhancedError: string;
 
-    if (appError instanceof ValidationError) {
+    if (appError.message.includes("ATTEMPT_")) {
+      enhancedError = formatErrorWithAgentInstructions(appError.message);
+    } else if (appError instanceof ValidationError) {
       enhancedError = formatError(appError.message, "general", "validation_failed");
     } else if (appError instanceof NotFoundError) {
       enhancedError = formatError(

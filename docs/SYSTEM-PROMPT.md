@@ -97,9 +97,14 @@ If no recovery instructions are provided:
 3. Report the blocker when recovery requires user action, new authority, or unavailable external state.
 
 `ATTEMPT_PROCESSING` means the current mutation still has a live owner; retry the same Process ID,
-Step attempt ID and input. `ATTEMPT_OUTCOME_UNKNOWN` means an external effect may already have
-occurred; inspect the execution and do not automatically retry the mutation. A later paused response
-has a new Step attempt ID, so never apply an older attempt to it.
+Step attempt ID and input. `ATTEMPT_CONFLICT` means the attempt is already bound to different input:
+automatically read `session({ action: "current_step", executionId })`, discard the conflicting
+attempt, and continue from the returned directive and input schema without blindly reusing its
+input. If `ATTEMPT_INVALID_OR_EXPIRED` for a step explicitly directs you to `current_step`, use the
+same state-refresh recovery and do not reuse the unavailable attempt. `ATTEMPT_OUTCOME_UNKNOWN`
+means an external effect may already have occurred; inspect the execution and do not automatically
+retry the mutation. A later paused response has a new Step attempt ID, so never apply an older
+attempt to it.
 
 ## Completion example
 
@@ -148,6 +153,6 @@ The retrospective must report:
 
 Lifecycle: discover when needed → prepare start → execute the returned start attempt → execute and verify the current directive → call `step()` → repeat until completion.
 
-`ATTEMPT_PROCESSING` means retry the same attempt. `ATTEMPT_STALE` means no handler work occurred: automatically read `session({ action: "current_step", executionId })` and retry the intended submission once with the returned attempt. If that read reports `CURRENT_PRESENTATION_STALE`, do not reuse the old attempt; inspect the execution and workflow definition. `ATTEMPT_OUTCOME_UNKNOWN` means inspect the returned Process ID through `session` and do not repeat the mutation automatically. A blocked owned start can be retired with `session({ action: "cancel-execution", executionId, expectedRevision })`.
+`ATTEMPT_PROCESSING` means retry the same attempt. `ATTEMPT_STALE` means no handler work occurred: automatically read `session({ action: "current_step", executionId })` and retry the intended submission once with the returned attempt. If that read reports `CURRENT_PRESENTATION_STALE`, do not reuse the old attempt; inspect the execution and workflow definition. `ATTEMPT_CONFLICT` means the rejected attempt is already bound to different input: automatically read `current_step`, discard the rejected presentation, and continue from the returned directive and input schema instead of replaying its input. A step-level `ATTEMPT_INVALID_OR_EXPIRED` that explicitly directs you to `current_step` uses the same state-refresh recovery; an unavailable start attempt does not. `ATTEMPT_OUTCOME_UNKNOWN` means inspect the returned Process ID through `session` and do not repeat the mutation automatically. A blocked owned start can be retired with `session({ action: "cancel-execution", executionId, expectedRevision })`.
 
 Use the exact workflow and process identifiers returned by Moira. Never guess them.
