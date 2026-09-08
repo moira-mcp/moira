@@ -31,7 +31,7 @@ export interface WorkspaceRepositoryResolver {
 }
 
 export interface WorkspaceResourceAuditEvent {
-  action: "create" | "create_pending" | "create_rejected" | "cleanup";
+  action: "create" | "create_pending" | "create_rejected" | "cleanup" | "start" | "stop" | "delete";
   userId: string;
   provider: string;
   resourceId: string;
@@ -123,7 +123,7 @@ export class WorkspaceResourceService {
       requiredCapabilities: Partial<
         Pick<
           WorkspaceProviderAdapter["capabilities"],
-          "disposable" | "exactLifecycle" | "personalBillingOnly"
+          "disposable" | "persistent" | "exactLifecycle" | "personalBillingOnly"
         >
       >;
       policy: () => WorkspaceResourcePolicy;
@@ -146,7 +146,7 @@ export class WorkspaceResourceService {
     if (incompatible) {
       throw new WorkspaceResourceError(
         "WORKSPACE_PROVIDER_UNAVAILABLE",
-        "Workspace provider does not satisfy the disposable lifecycle contract",
+        "Workspace provider does not satisfy the required lifecycle contract",
       );
     }
     return provider;
@@ -194,6 +194,48 @@ export class WorkspaceResourceService {
 
   listResources(userId: string): WorkspaceResourceRecord[] {
     return this.dependencies.repository.listOwned(userId, this.dependencies.providerId);
+  }
+
+  async rebindAfterAuthorization(userId: string): Promise<number> {
+    const provider = this.provider();
+    const candidates = this.dependencies.repository.listAuthorizationRebindCandidates(
+      userId,
+      provider.id,
+    );
+    if (candidates.length === 0) return 0;
+    const credential = await this.dependencies.credentials.getCredential(userId, provider.id);
+    const identity = await provider.getIdentity(credential);
+    let rebound = 0;
+    for (const candidate of candidates) {
+      const record = candidate.resource;
+      if (!record.providerResourceName || record.externalOwnerId !== identity.id) continue;
+      const exact = await provider.getExact(credential, record.providerResourceName);
+      if (
+        !exact ||
+        exact.name !== record.providerResourceName ||
+        exact.displayName !== record.operationMarker ||
+        exact.ownerId !== identity.id ||
+        exact.billableOwnerId !== record.billableOwnerId ||
+        exact.repositoryId !== record.repositoryId ||
+        exact.repositoryFullName.toLowerCase() !== record.repositoryFullName.toLowerCase() ||
+        exact.ref !== record.requestedRef
+      ) {
+        continue;
+      }
+      if (
+        this.dependencies.repository.rebindAuthorization({
+          userId,
+          resourceId: record.id,
+          resourceGeneration: record.generation,
+          expectedAuthorizationGeneration: record.authorizationGeneration,
+          authorizationGeneration: candidate.authorizationGeneration,
+          now: this.now(),
+        })
+      ) {
+        rebound++;
+      }
+    }
+    return rebound;
   }
 
   async create(
@@ -291,6 +333,13 @@ export class WorkspaceResourceService {
         now: this.now(),
       })
     ) {
+      const superseded = this.dependencies.repository.getOwned(userId, initial.id);
+      if (
+        superseded &&
+        ["stop_before_submission", "delete_requested"].includes(superseded.lastOutcome ?? "")
+      ) {
+        return { resource: superseded, lifecycleCapability: reservation.capability };
+      }
       this.dependencies.repository.markRejected(
         initial.id,
         initial.generation,
@@ -311,7 +360,10 @@ export class WorkspaceResourceService {
         machine,
         operationMarker: initial.operationMarker,
         idleTimeoutMinutes: Math.min(240, Math.max(5, Math.ceil(policy.remoteTtlMs / 60_000))),
-        retentionMinutes: Math.min(43_200, Math.max(1, Math.ceil(policy.remoteTtlMs / 60_000))),
+        retentionMinutes: Math.min(
+          43_200,
+          Math.max(1, Math.ceil((policy.persistentRetentionMs ?? 30 * 24 * 60 * 60_000) / 60_000)),
+        ),
       });
     } catch {
       this.dependencies.repository.releaseClaim(
@@ -452,6 +504,14 @@ export class WorkspaceResourceService {
   }
 
   async release(userId: string, resourceId: string, capability: string): Promise<void> {
+    const existing = this.dependencies.repository.getByCapability(userId, capability);
+    if (!existing || existing.id !== resourceId) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
+    }
+    if (existing.retentionPolicy === "persistent") {
+      await this.stopWorkspace(userId, resourceId);
+      return;
+    }
     const policy = this.dependencies.policy();
     if (
       !this.dependencies.repository.requestCleanup(
@@ -467,6 +527,111 @@ export class WorkspaceResourceService {
     await this.reconcileOnce(userId);
   }
 
+  getWorkspace(userId: string, resourceId: string): WorkspaceResourceRecord {
+    const workspace = this.dependencies.repository.getOwned(userId, resourceId);
+    if (!workspace) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
+    }
+    return workspace;
+  }
+
+  async startWorkspace(userId: string, resourceId: string): Promise<WorkspaceResourceRecord> {
+    const policy = this.dependencies.policy();
+    if (!policy.enabled) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_PROVIDER_DISABLED",
+        "Workspace provider is disabled",
+      );
+    }
+    this.requireCurrentLifecycleAuthority(userId, resourceId);
+    const requested = this.dependencies.repository.requestStart(
+      userId,
+      resourceId,
+      policy,
+      this.now(),
+    );
+    if (requested === "limit") {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_POLICY_LIMIT",
+        "Daily workspace operation budget reached",
+      );
+    }
+    if (requested === "disabled") {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_PROVIDER_DISABLED",
+        "Workspace provider is disabled",
+      );
+    }
+    if (!requested) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
+    }
+    if (["usable", "create_pending", "create_submitted"].includes(requested.state))
+      return requested;
+    await this.applyPersistentLifecycle(requested);
+    const current = this.getWorkspace(userId, resourceId);
+    if (current.state === "usable")
+      await this.emit("start", current, current.lastOutcome ?? "running");
+    return current;
+  }
+
+  async stopWorkspace(userId: string, resourceId: string): Promise<WorkspaceResourceRecord> {
+    this.requireCurrentLifecycleAuthority(userId, resourceId);
+    const requested = this.dependencies.repository.requestStop(userId, resourceId, this.now());
+    if (!requested) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
+    }
+    if (["stopped", "deleted"].includes(requested.state)) {
+      await this.emit("stop", requested, requested.lastOutcome ?? requested.state);
+      return requested;
+    }
+    await this.applyPersistentLifecycle(requested);
+    const current = this.getWorkspace(userId, resourceId);
+    if (current.state === "stopped")
+      await this.emit("stop", current, current.lastOutcome ?? "stopped");
+    return current;
+  }
+
+  async deleteWorkspace(
+    userId: string,
+    resourceId: string,
+    expectedGeneration: number,
+  ): Promise<WorkspaceResourceRecord> {
+    this.requireCurrentLifecycleAuthority(userId, resourceId);
+    const requested = this.dependencies.repository.requestDelete(
+      userId,
+      resourceId,
+      expectedGeneration,
+      this.now(),
+    );
+    if (requested === "conflict") {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_GENERATION_CONFLICT",
+        "Workspace generation changed; refresh it before deleting",
+      );
+    }
+    if (!requested) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
+    }
+    await this.applyPersistentLifecycle(requested);
+    const current = this.getWorkspace(userId, resourceId);
+    if (current.state === "deleted")
+      await this.emit("delete", current, current.lastOutcome ?? "deleted");
+    return current;
+  }
+
+  private requireCurrentLifecycleAuthority(userId: string, resourceId: string): void {
+    const owned = this.dependencies.repository.getOwned(userId, resourceId);
+    if (!owned) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace was not found");
+    }
+    if (!this.dependencies.repository.hasCurrentAuthorization(userId, resourceId)) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Reconnect the same provider account and repository in Moira settings",
+      );
+    }
+  }
+
   async cleanupBeforeDisconnect(userId: string): Promise<void> {
     const policy = this.dependencies.policy();
     this.dependencies.repository.requestAllCleanupForUser(
@@ -475,23 +640,41 @@ export class WorkspaceResourceService {
       this.now() + policy.cleanupDeadlineMs,
       this.now(),
     );
+    this.dependencies.repository.requestPersistentStopsForUser(
+      userId,
+      this.dependencies.providerId,
+      this.now(),
+    );
     const maximumPasses = this.listResources(userId).length + 1;
     for (let pass = 0; pass < maximumPasses; pass++) {
       if (!(await this.reconcileOnce(userId))) break;
     }
-    const unfinished = this.listResources(userId).filter(
-      (resource) => !["deleted", "rejected"].includes(resource.state),
+    const unfinished = this.listResources(userId).filter((resource) =>
+      resource.retentionPolicy === "persistent"
+        ? !["stopped", "deleted", "rejected"].includes(resource.state)
+        : !["deleted", "rejected"].includes(resource.state),
     );
     if (unfinished.length > 0) {
       throw new WorkspaceResourceError(
         "WORKSPACE_CREATE_PENDING",
-        "Workspace cleanup must finish before disconnecting GitHub",
+        "Workspace operations must stop before disconnecting GitHub",
       );
     }
   }
 
   async reconcileOnce(userId?: string): Promise<boolean> {
     const policy = this.dependencies.policy();
+    const rebindUser = this.dependencies.repository.nextAuthorizationRebindUser(
+      this.dependencies.providerId,
+      userId,
+    );
+    if (rebindUser) {
+      try {
+        if ((await this.rebindAfterAuthorization(rebindUser)) > 0) return true;
+      } catch {
+        // Keep the stale authorization generation fenced and retry later.
+      }
+    }
     const claimId = randomUUID();
     const record = this.dependencies.repository.claimDue(
       claimId,
@@ -525,6 +708,20 @@ export class WorkspaceResourceService {
       );
       return true;
     }
+    if (["start_pending", "stop_pending", "delete_pending"].includes(record.state)) {
+      try {
+        await this.applyPersistentLifecycle(record);
+      } catch {
+        this.dependencies.repository.releaseClaim(
+          record.id,
+          record.generation,
+          claimId,
+          "lifecycle_reconcile_required",
+          this.now(),
+        );
+      }
+      return true;
+    }
     try {
       const credential = await this.dependencies.credentials.getCredential(
         record.userId,
@@ -554,6 +751,194 @@ export class WorkspaceResourceService {
       );
     }
     return true;
+  }
+
+  private async applyPersistentLifecycle(record: WorkspaceResourceRecord): Promise<void> {
+    const provider = this.dependencies.registry.require(record.provider);
+    const credential = await this.dependencies.credentials.getCredential(
+      record.userId,
+      record.provider,
+    );
+    let resourceName = record.providerResourceName;
+    if (!resourceName) {
+      const identity = await provider.getIdentity(credential);
+      const matches = (await provider.listOwned(credential)).filter(
+        (candidate) =>
+          candidate.displayName === record.operationMarker &&
+          candidate.ownerId === identity.id &&
+          (!this.requiresPersonalBilling() || candidate.billableOwnerId === identity.id) &&
+          candidate.repositoryId === record.repositoryId &&
+          candidate.repositoryFullName.toLowerCase() === record.repositoryFullName.toLowerCase() &&
+          candidate.ref === record.requestedRef &&
+          candidate.createdAt >= record.createdAt - 60_000 &&
+          candidate.createdAt <= record.createDeadlineAt + PROVIDER_CLOCK_SKEW_MS,
+      );
+      if (matches.length !== 1) {
+        if (
+          matches.length === 0 &&
+          record.desiredState === "stopped" &&
+          this.now() >= record.createDeadlineAt
+        ) {
+          this.dependencies.repository.completeAbsentPersistentLifecycle(
+            record.id,
+            record.generation,
+            "stopped",
+            "verified_never_created",
+            this.now(),
+          );
+          return;
+        }
+        if (
+          matches.length === 0 &&
+          record.desiredState === "deleted" &&
+          this.now() >= record.createDeadlineAt
+        ) {
+          this.dependencies.repository.completeLifecycle({
+            resourceId: record.id,
+            generation: record.generation,
+            desiredState: "deleted",
+            observedState: "absent",
+            state: "deleted",
+            outcome: "verified_never_created",
+            now: this.now(),
+          });
+          return;
+        }
+        this.dependencies.repository.markLifecyclePending(
+          record.id,
+          record.generation,
+          matches.length === 0 ? "resource_not_visible" : "multiple_exact_matches",
+          "unknown",
+          this.now(),
+        );
+        return;
+      }
+      const discovered = matches[0];
+      resourceName = discovered.name;
+      this.dependencies.repository.bindLifecycleIdentity({
+        resourceId: record.id,
+        generation: record.generation,
+        resourceName,
+        ownerId: discovered.ownerId,
+        billableOwnerId: discovered.billableOwnerId,
+        now: this.now(),
+      });
+      record = {
+        ...record,
+        providerResourceName: resourceName,
+        externalOwnerId: discovered.ownerId,
+        billableOwnerId: discovered.billableOwnerId,
+      };
+    }
+    const exact = await provider.getExact(credential, resourceName);
+    if (!exact) {
+      if (record.desiredState === "deleted") {
+        this.dependencies.repository.completeLifecycle({
+          resourceId: record.id,
+          generation: record.generation,
+          desiredState: "deleted",
+          observedState: "absent",
+          state: "deleted",
+          outcome: "verified_absent",
+          now: this.now(),
+        });
+      } else if (
+        !this.dependencies.repository.completeAbsentPersistentLifecycle(
+          record.id,
+          record.generation,
+          record.desiredState,
+          "verified_externally_absent",
+          this.now(),
+        )
+      ) {
+        return;
+      }
+      return;
+    }
+    if (
+      exact.name !== resourceName ||
+      exact.ownerId !== record.externalOwnerId ||
+      exact.billableOwnerId !== record.billableOwnerId ||
+      exact.repositoryId !== record.repositoryId ||
+      exact.repositoryFullName.toLowerCase() !== record.repositoryFullName.toLowerCase() ||
+      exact.ref !== record.requestedRef ||
+      exact.displayName !== record.operationMarker
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESOURCE_INVALID",
+        "Workspace exact identity changed",
+      );
+    }
+    if (record.desiredState === "running") {
+      if (exact.state !== "available") await provider.startExact(credential, resourceName);
+      const observed = await provider.getExact(credential, resourceName);
+      if (observed?.state === "available") {
+        await provider.probeConnector(credential, resourceName);
+        this.dependencies.repository.completeLifecycle({
+          resourceId: record.id,
+          generation: record.generation,
+          desiredState: "running",
+          observedState: "running",
+          state: "usable",
+          outcome: "verified_running",
+          now: this.now(),
+        });
+      } else {
+        this.dependencies.repository.markLifecyclePending(
+          record.id,
+          record.generation,
+          "start_pending",
+          "provisioning",
+          this.now(),
+        );
+      }
+      return;
+    }
+    await provider.stopExact(credential, resourceName);
+    if (record.desiredState === "deleted") {
+      await provider.deleteExact(credential, resourceName);
+      const observed = await provider.getExact(credential, resourceName);
+      if (!observed) {
+        this.dependencies.repository.completeLifecycle({
+          resourceId: record.id,
+          generation: record.generation,
+          desiredState: "deleted",
+          observedState: "absent",
+          state: "deleted",
+          outcome: "verified_absent",
+          now: this.now(),
+        });
+      } else {
+        this.dependencies.repository.markLifecyclePending(
+          record.id,
+          record.generation,
+          "delete_pending",
+          "deleting",
+          this.now(),
+        );
+      }
+      return;
+    }
+    const observed = await provider.getExact(credential, resourceName);
+    if (observed?.state === "shutdown") {
+      this.dependencies.repository.completeLifecycle({
+        resourceId: record.id,
+        generation: record.generation,
+        desiredState: "stopped",
+        observedState: "stopped",
+        state: "stopped",
+        outcome: "verified_stopped",
+        now: this.now(),
+      });
+    } else {
+      this.dependencies.repository.markLifecyclePending(
+        record.id,
+        record.generation,
+        "stop_pending",
+        observed ? "running" : "absent",
+        this.now(),
+      );
+    }
   }
 
   private async reconcileCreation(

@@ -5,6 +5,8 @@ import {
   WorkspaceConnectionRepository,
   WorkspaceConnectionService,
   WorkspaceProviderRegistry,
+  WorkspaceOperationRepository,
+  WorkspaceOperationService,
   WorkspaceResourceRepository,
   WorkspaceResourceService,
   getDatabase,
@@ -14,6 +16,7 @@ import {
   logAuditEventDirect,
   type WorkspaceConnectionAuditEvent,
   type WorkspaceResourceAuditEvent,
+  type WorkspaceOperationAuditEvent,
 } from "@mcp-moira/shared";
 import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
 import { HttpGitHubWorkspaceClient } from "./github-workspace-client.js";
@@ -21,6 +24,7 @@ import { HttpGitHubWorkspaceClient } from "./github-workspace-client.js";
 interface WorkspaceServices {
   connection: WorkspaceConnectionService;
   resource: WorkspaceResourceService | null;
+  operation: WorkspaceOperationService | null;
 }
 
 let services: WorkspaceServices | null = null;
@@ -48,6 +52,23 @@ function resourceAuditAction(event: WorkspaceResourceAuditEvent): AuditAction {
       return AuditAction.WORKSPACE_RESOURCE_CREATE_REJECTED;
     case "cleanup":
       return AuditAction.WORKSPACE_RESOURCE_CLEANUP;
+    case "start":
+      return AuditAction.WORKSPACE_RESOURCE_START;
+    case "stop":
+      return AuditAction.WORKSPACE_RESOURCE_STOP;
+    case "delete":
+      return AuditAction.WORKSPACE_RESOURCE_DELETE;
+  }
+}
+
+function operationAuditAction(event: WorkspaceOperationAuditEvent): AuditAction {
+  switch (event.action) {
+    case "reserve":
+      return AuditAction.WORKSPACE_OPERATION_RESERVE;
+    case "reconcile":
+      return AuditAction.WORKSPACE_OPERATION_RECONCILE;
+    case "terminal":
+      return AuditAction.WORKSPACE_OPERATION_TERMINAL;
   }
 }
 
@@ -56,12 +77,16 @@ function initializeWorkspaceServices(): WorkspaceServices {
   const auditRepository = new AuditRepository(getDatabase());
   const config = getWorkspaceGitHubConfig();
   let resource: WorkspaceResourceService | null = null;
+  let operation: WorkspaceOperationService | null = null;
   const connection = new WorkspaceConnectionService({
     repository: new WorkspaceConnectionRepository(getSqliteInstance()),
     config: getWorkspaceGitHubConfig,
     client: (availableConfig) => new HttpGitHubWorkspaceClient(availableConfig),
     beforeDisconnect: async (userId) => {
       await resource?.cleanupBeforeDisconnect(userId);
+    },
+    afterConnect: async (userId) => {
+      await resource?.rebindAfterAuthorization(userId);
     },
     audit: async (event) => {
       await logAuditEventDirect(auditRepository, {
@@ -92,7 +117,7 @@ function initializeWorkspaceServices(): WorkspaceServices {
       registry,
       providerId: WORKSPACE_PROVIDER_GITHUB,
       requiredCapabilities: {
-        disposable: true,
+        persistent: true,
         exactLifecycle: true,
         personalBillingOnly: true,
       },
@@ -120,9 +145,38 @@ function initializeWorkspaceServices(): WorkspaceServices {
         });
       },
     });
+    operation = new WorkspaceOperationService({
+      repository: new WorkspaceOperationRepository(getSqliteInstance()),
+      credentials: {
+        getCredential: async (userId, providerId) => {
+          if (providerId !== WORKSPACE_PROVIDER_GITHUB) {
+            throw new Error("Workspace credential provider does not match the service binding");
+          }
+          return connection.getAccessToken(userId);
+        },
+      },
+      transport: connector,
+      policy: getWorkspaceResourcePolicy,
+      audit: async (event) => {
+        await logAuditEventDirect(auditRepository, {
+          userId: event.userId,
+          action: operationAuditAction(event),
+          resource: "workspace_operation",
+          resourceId: event.operationId,
+          metadata: {
+            workspaceId: event.workspaceId,
+            provider: event.provider,
+            state: event.state,
+            inputBytes: event.inputBytes,
+            outputBytes: event.outputBytes,
+            exitCode: event.exitCode,
+          },
+        });
+      },
+    });
   }
 
-  services = { connection, resource };
+  services = { connection, resource, operation };
   return services;
 }
 
@@ -132,4 +186,8 @@ export function getWorkspaceConnectionService(): WorkspaceConnectionService {
 
 export function getWorkspaceResourceService(): WorkspaceResourceService | null {
   return initializeWorkspaceServices().resource;
+}
+
+export function getWorkspaceOperationService(): WorkspaceOperationService | null {
+  return initializeWorkspaceServices().operation;
 }

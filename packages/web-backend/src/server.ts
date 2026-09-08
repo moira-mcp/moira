@@ -88,6 +88,7 @@ import { createWorkspaceConnectionRoutes } from "./routes/workspace-connections.
 import { mcpClientAutoRegister } from "./middleware/mcp-client-auto-register.js";
 import { auth } from "./auth.js";
 import { getWorkspaceResourceService } from "./services/workspace-resource-service.js";
+import { getWorkspaceOperationService } from "./services/workspace-operation-service.js";
 
 // ES module compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -465,6 +466,7 @@ class MoiraApiServer {
       // executions.retention_days > 0).
       getExecutionRetentionService().start();
       getWorkspaceResourceService()?.start();
+      getWorkspaceOperationService()?.start();
 
       // Establish this process's extension state. The API server and the MCP server run as
       // separate processes, so each needs its own registry and its own runner client: without them
@@ -541,6 +543,7 @@ class MoiraApiServer {
       });
 
       getWorkspaceResourceService()?.stop();
+      getWorkspaceOperationService()?.stop();
 
       // Close metrics server
       if (this.metricsServer) {

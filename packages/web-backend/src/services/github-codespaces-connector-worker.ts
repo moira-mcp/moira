@@ -1,13 +1,22 @@
 import { spawn } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  CONNECTOR_MAX_CONTROL_OUTPUT_BYTES,
+  CONNECTOR_MAX_REQUEST_BYTES,
+  CONNECTOR_MAX_RESPONSE_BYTES,
+  decodeConnectorRequest,
+  encodeConnectorResponse,
+  validGitHubUserCredential,
+} from "./github-codespaces-connector-protocol.mjs";
 
-const MAX_INPUT_BYTES = 2048;
-const MAX_OUTPUT_BYTES = 64 * 1024;
-const TIMEOUT_MS = 30_000;
+const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
 interface WorkerInput {
   token: string;
   home: string;
+  supervisorPath?: string;
+  job?: Record<string, unknown>;
 }
 
 async function readInput(): Promise<WorkerInput> {
@@ -16,97 +25,174 @@ async function readInput(): Promise<WorkerInput> {
   for await (const chunk of process.stdin) {
     const value = Buffer.from(chunk);
     size += value.length;
-    if (size > MAX_INPUT_BYTES) throw new Error("Connector input exceeded its bound");
+    if (size > CONNECTOR_MAX_REQUEST_BYTES) throw new Error("Connector input exceeded its bound");
     chunks.push(value);
   }
-  const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Partial<WorkerInput>;
-  if (typeof value.token !== "string" || !/^gh[uis]_[A-Za-z0-9_]+$/.test(value.token)) {
+  const value = decodeConnectorRequest(Buffer.concat(chunks)) as Partial<WorkerInput>;
+  if (!validGitHubUserCredential(value.token)) {
     throw new Error("Invalid GitHub App user credential");
   }
   if (
     typeof value.home !== "string" ||
-    !/\/moira-codespaces-connector-[A-Za-z0-9]+$/.test(value.home)
+    !/^\/tmp\/moira-codespaces-connector-[A-Za-z0-9]+$/.test(value.home)
   ) {
     throw new Error("Invalid connector HOME");
   }
-  return { token: value.token, home: value.home };
+  return value as WorkerInput;
 }
 
-async function generateSshConfig(resourceName: string, input: WorkerInput): Promise<string> {
+function run(
+  executable: string,
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  stdin: Buffer | string = "",
+  timeoutMs = 90_000,
+  outputLimitBytes = CONNECTOR_MAX_CONTROL_OUTPUT_BYTES,
+): Promise<{ exitCode: number; stdout: Buffer; stderr: Buffer }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "/usr/bin/gh",
-      ["codespace", "ssh", "--codespace", resourceName, "--config"],
-      {
-        env: {
-          HOME: input.home,
-          GH_CONFIG_DIR: `${input.home}/.config/gh`,
-          GH_TOKEN: input.token,
-          PATH: "/usr/local/bin:/usr/bin:/bin",
-          LANG: "C.UTF-8",
-          LC_ALL: "C.UTF-8",
-          GIT_TERMINAL_PROMPT: "0",
-          GCM_INTERACTIVE: "never",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    const output: Buffer[] = [];
-    let size = 0;
+    const child = spawn(executable, argv, {
+      env,
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let bytes = 0;
     let settled = false;
-    const finish = (error?: Error, value?: string) => {
+    const finish = (error?: Error, exitCode?: number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       if (error) reject(error);
-      else resolve(value ?? "");
+      else
+        resolve({
+          exitCode: exitCode ?? -1,
+          stdout: Buffer.concat(stdout),
+          stderr: Buffer.concat(stderr),
+        });
+    };
+    const killGroup = () => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    };
+    const collect = (target: Buffer[]) => (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > outputLimitBytes) {
+        killGroup();
+        finish(new Error("Connector output exceeded its bound"));
+      } else target.push(Buffer.from(chunk));
     };
     const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
+      killGroup();
       finish(new Error("Connector command timed out"));
-    }, TIMEOUT_MS);
+    }, timeoutMs);
     timeout.unref();
-    child.stdout.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_OUTPUT_BYTES) {
-        child.kill("SIGKILL");
-        finish(new Error("Connector output exceeded its bound"));
-      } else {
-        output.push(chunk);
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_OUTPUT_BYTES) {
-        child.kill("SIGKILL");
-        finish(new Error("Connector output exceeded its bound"));
-      }
-    });
+    child.stdout.on("data", collect(stdout));
+    child.stderr.on("data", collect(stderr));
     child.once("error", (error) => finish(error));
-    child.once("close", (code) => {
-      if (code !== 0) finish(new Error("Codespace SSH capability is unavailable"));
-      else finish(undefined, Buffer.concat(output).toString("utf8"));
-    });
+    child.once("close", (code) => finish(undefined, code ?? -1));
+    child.stdin.end(stdin);
   });
+}
+
+function environment(input: WorkerInput, includeToken: boolean): NodeJS.ProcessEnv {
+  return {
+    HOME: input.home,
+    GH_CONFIG_DIR: join(input.home, ".config", "gh"),
+    ...(includeToken ? { GH_TOKEN: input.token } : {}),
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    GIT_TERMINAL_PROMPT: "0",
+    GCM_INTERACTIVE: "never",
+    HTTPS_PROXY: "http://127.0.0.1:18080",
+    HTTP_PROXY: "http://127.0.0.1:18080",
+    NO_PROXY: "",
+  };
+}
+
+async function generateSshConfig(resourceName: string, input: WorkerInput): Promise<string> {
+  const result = await run(
+    "/usr/bin/gh",
+    ["codespace", "ssh", "--codespace", resourceName, "--config"],
+    environment(input, true),
+    "",
+    30_000,
+  );
+  const config = result.stdout.toString("utf8");
+  if (
+    result.exitCode !== 0 ||
+    !config.includes("ProxyCommand") ||
+    config.includes(input.token) ||
+    /\b(?:IdentityFile|LocalCommand|RemoteCommand)\b/i.test(config)
+  ) {
+    throw new Error("Codespace SSH capability is unavailable");
+  }
+  return config;
+}
+
+function sshHost(config: string): string {
+  const match = config.match(/^Host\s+([A-Za-z0-9][A-Za-z0-9_.-]{0,255})\s*$/m);
+  if (!match) throw new Error("Codespace SSH host is unavailable");
+  return match[1];
+}
+
+async function runSupervisor(resourceName: string, input: WorkerInput): Promise<unknown> {
+  if (!input.job || typeof input.supervisorPath !== "string") {
+    throw new Error("Invalid connector operation job");
+  }
+  const config = await generateSshConfig(resourceName, input);
+  const configPath = join(input.home, "ssh_config");
+  await writeFile(configPath, config, { mode: 0o600 });
+  const supervisor = await readFile(input.supervisorPath, "utf8");
+  const encoded = Buffer.from(JSON.stringify(input.job), "utf8").toString("base64");
+  const result = await run(
+    "/usr/bin/ssh",
+    [
+      "-F",
+      configPath,
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ClearAllForwardings=yes",
+      "-o",
+      "ConnectTimeout=20",
+      sshHost(config),
+      "node",
+      "--input-type=module",
+    ],
+    environment(input, true),
+    `${supervisor}\nawait runEncoded("${encoded}");\n`,
+    Number(input.job.timeoutMs ?? 30_000) + 90_000,
+    CONNECTOR_MAX_RESPONSE_BYTES,
+  );
+  if (result.exitCode !== 0) throw new Error("Codespace operation failed");
+  const envelope = JSON.parse(result.stdout.toString("utf8")) as { ok?: boolean; result?: unknown };
+  if (envelope.ok !== true) throw new Error("Codespace supervisor rejected the operation");
+  return envelope.result;
 }
 
 async function main(): Promise<void> {
   const action = process.argv[2];
   if (action === "health") {
-    process.stdout.write("connector-worker-ok\n");
+    process.stdout.write(
+      `connector-worker-ok uid=${process.getuid?.()} gid=${process.getgid?.()}\n`,
+    );
     return;
   }
   const resourceName = process.argv[3];
-  if (action !== "ssh-config" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(resourceName ?? "")) {
-    throw new Error("Invalid connector operation");
-  }
+  if (!RESOURCE.test(resourceName ?? "")) throw new Error("Invalid connector operation");
   const input = await readInput();
   try {
-    const config = await generateSshConfig(resourceName!, input);
-    if (!config.includes("ProxyCommand") || config.includes(input.token)) {
-      throw new Error("Codespace SSH capability is unavailable");
+    if (action === "ssh-config") {
+      process.stdout.write(await generateSshConfig(resourceName!, input));
+      return;
     }
-    process.stdout.write(config);
+    if (action !== "operation") throw new Error("Invalid connector operation");
+    process.stdout.write(encodeConnectorResponse(await runSupervisor(resourceName!, input)));
   } finally {
     await rm(input.home, { recursive: true, force: true });
   }

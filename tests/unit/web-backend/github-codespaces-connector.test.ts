@@ -1,140 +1,197 @@
 import { describe, expect, jest, test } from "@jest/globals";
+import { spawn as spawnProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
-import { PassThrough } from "node:stream";
-import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
+import type { ClientRequest, IncomingMessage, RequestOptions } from "node:http";
 import { GitHubCodespacesConnector } from "../../../packages/web-backend/src/services/github-codespaces-connector.js";
+import {
+  CONNECTOR_MAX_REQUEST_BYTES,
+  CONNECTOR_MAX_RESPONSE_BYTES,
+  encodeConnectorRequest,
+  encodeConnectorResponse,
+} from "../../../packages/web-backend/src/services/github-codespaces-connector-protocol.mjs";
+import type { WorkspaceOperationRecord, WorkspaceResourceRecord } from "@mcp-moira/shared";
+
+function requestHarness(responder: (body: unknown, options: RequestOptions) => unknown) {
+  const calls: Array<{ options: RequestOptions; body: string }> = [];
+  const requestImpl = (
+    options: RequestOptions,
+    callback: (response: IncomingMessage) => void,
+  ): ClientRequest => {
+    const request = new EventEmitter() as ClientRequest;
+    Object.assign(request, {
+      setTimeout: jest.fn(),
+      destroy: (error?: Error) => queueMicrotask(() => request.emit("error", error)),
+      end: (payload?: Buffer) => {
+        const body = payload?.toString("utf8") ?? "";
+        calls.push({ options, body });
+        const response = new EventEmitter() as IncomingMessage;
+        response.statusCode = 200;
+        callback(response);
+        const value = Buffer.from(
+          JSON.stringify(responder(body ? JSON.parse(body) : null, options)),
+        );
+        queueMicrotask(() => {
+          response.emit("data", value);
+          response.emit("end");
+        });
+      },
+    });
+    return request;
+  };
+  return { calls, requestImpl };
+}
+
+const workspace = {
+  id: "workspace-1",
+  userId: "user-1",
+  provider: "github-codespaces",
+  providerResourceName: "silver-space-123",
+  repositoryFullName: "owner/repository",
+} as WorkspaceResourceRecord;
+const operation = {
+  id: "operation-1",
+  userId: "user-1",
+  resourceId: "workspace-1",
+  remoteMarker: "moira-op-0123456789abcdef0123456789abcdef",
+  stdoutLimitBytes: 4096,
+  stderrLimitBytes: 4096,
+} as WorkspaceOperationRecord;
 
 describe("GitHub Codespaces connector boundary", () => {
-  test("passes the credential through stdin only, bounds argv, and removes operation HOME", async () => {
-    const calls: Array<{
-      executable: string;
-      argv: readonly string[];
-      env: NodeJS.ProcessEnv;
-      stdin: string;
-    }> = [];
-    const spawnImpl = (
-      executable: string,
-      argv: readonly string[],
-      options: { env: NodeJS.ProcessEnv },
-    ): ChildProcessWithoutNullStreams => {
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      const stdin = new PassThrough();
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      const chunks: Buffer[] = [];
-      stdin.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-      stdin.on("finish", () => {
-        calls.push({ executable, argv, env: options.env, stdin: Buffer.concat(chunks).toString() });
-        stdout.end("Host cs\n  ProxyCommand gh codespace ssh --stdio\n");
-        stderr.end();
-        queueMicrotask(() => child.emit("close", 0));
-      });
-      Object.assign(child, { stdin, stdout, stderr, kill: jest.fn(() => true) });
-      return child;
-    };
-    const connector = new GitHubCodespacesConnector(spawnImpl, "/usr/bin/gh", "/usr/bin/ssh");
+  test("passes credentials only in the Unix-socket request body", async () => {
+    const harness = requestHarness(() => ({
+      value: "Host silver-space-123\n  ProxyCommand gh codespace ssh --stdio\n",
+    }));
+    const connector = new GitHubCodespacesConnector(
+      harness.requestImpl,
+      "/run/test/connector.sock",
+    );
     await connector.probeSshConfiguration("ghu_topsecret", "silver-space-123");
 
-    expect(calls).toHaveLength(1);
-    expect(JSON.parse(calls[0].stdin)).toEqual({
-      token: "ghu_topsecret",
-      home: calls[0].env.HOME,
+    expect(harness.calls).toHaveLength(1);
+    expect(harness.calls[0].options).toMatchObject({
+      socketPath: "/run/test/connector.sock",
+      path: "/job",
+      method: "POST",
     });
-    expect(JSON.stringify(calls.map(({ argv, env }) => ({ argv, env })))).not.toContain(
-      "ghu_topsecret",
-    );
-    expect(Object.keys(calls[0].env).sort()).toEqual([
-      "GCM_INTERACTIVE",
-      "GH_CONFIG_DIR",
-      "GIT_TERMINAL_PROMPT",
-      "HOME",
-      "LANG",
-      "LC_ALL",
-      "PATH",
-    ]);
-    expect(calls[0].executable).toBe("/usr/local/bin/tsx");
-    expect(calls[0].argv).toEqual([
-      "/app/packages/web-backend/src/services/github-codespaces-connector-worker.ts",
-      "ssh-config",
-      "silver-space-123",
-    ]);
-    expect(existsSync(calls[0].env.HOME!)).toBe(false);
+    expect(JSON.parse(harness.calls[0].body)).toEqual({
+      action: "ssh-config",
+      token: "ghu_topsecret",
+      resourceName: "silver-space-123",
+    });
+    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
   });
 
-  test.each([
-    ["oversized output", "oversized"],
-    ["token-bearing output", "token"],
-    ["nonzero worker exit", "exit"],
-    ["worker spawn error", "spawn"],
-    ["command timeout", "timeout"],
-  ] as const)("fails generically and removes HOME after %s", async (_name, mode) => {
-    let observedHome = "";
-    const kill = jest.fn(() => true);
-    const spawnImpl = (
-      _executable: string,
-      _argv: readonly string[],
-      options: { env: NodeJS.ProcessEnv },
-    ): ChildProcessWithoutNullStreams => {
-      observedHome = options.env.HOME!;
-      if (mode === "spawn") throw new Error("worker spawn failed");
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      const stdin = new PassThrough();
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      stdin.on("finish", () => {
-        if (mode === "timeout") return;
-        if (mode === "oversized") stdout.end(Buffer.alloc(64 * 1024 + 1, "x"));
-        else if (mode === "token") stdout.end("ProxyCommand ghu_topsecret");
-        else stdout.end();
-        stderr.end();
-        queueMicrotask(() => child.emit("close", mode === "exit" ? 23 : 0));
-      });
-      Object.assign(child, { stdin, stdout, stderr, kill });
-      return child;
-    };
-    const connector = new GitHubCodespacesConnector(
-      spawnImpl,
-      "/usr/bin/gh",
-      "/usr/bin/ssh",
-      "/usr/local/bin/tsx",
-      "/app/packages/web-backend/src/services/github-codespaces-connector-worker.ts",
-      1,
+  test("reports sidecar health without contacting a workspace", async () => {
+    const harness = requestHarness(() => ({ state: "available", reason: null }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(connector.health()).resolves.toEqual({ ok: true, reason: null });
+    expect(harness.calls[0].options).toMatchObject({ path: "/health", method: "GET" });
+  });
+
+  test("preserves argv boundaries, stdin bytes and exact nonzero results", async () => {
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "failed",
+        stdoutBase64: Buffer.from("partial").toString("base64"),
+        stderrBase64: Buffer.from("expected").toString("base64"),
+        exitCode: 23,
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.execute("ghu_topsecret", workspace, operation, {
+        argv: ["printf", "%s", "a value;$(false)"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new TextEncoder().encode("input") },
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+      }),
+    ).resolves.toEqual({
+      state: "failed",
+      stdout: "partial",
+      stderr: "expected",
+      exitCode: 23,
+    });
+    const body = JSON.parse(harness.calls[0].body);
+    expect(body.job.argv).toEqual(["printf", "%s", "a value;$(false)"]);
+    expect(Buffer.from(body.job.stdin, "base64").toString("utf8")).toBe("input");
+    expect(JSON.stringify(harness.calls[0].options)).not.toContain("ghu_topsecret");
+  });
+
+  test("carries contract-max stdin and independent output streams inside wire envelopes", async () => {
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await connector.execute("ghu_topsecret", workspace, operation, {
+      argv: ["true"],
+      cwd: ".",
+      stdin: { kind: "inline", bytes: Buffer.alloc(4 * 1024 * 1024, "a") },
+      timeoutMs: 5_000,
+      maxStdoutBytes: 8 * 1024 * 1024,
+      maxStderrBytes: 8 * 1024 * 1024,
+    });
+    expect(Buffer.byteLength(harness.calls[0].body)).toBeLessThanOrEqual(
+      CONNECTOR_MAX_REQUEST_BYTES,
     );
+    expect(Buffer.byteLength(harness.calls[0].body)).toBeGreaterThan(4 * 1024 * 1024);
+
+    const remoteWireResult = encodeConnectorResponse({
+      state: "failed",
+      stdoutBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
+      stderrBase64: Buffer.alloc(8 * 1024 * 1024).toString("base64"),
+      exitCode: 23,
+    });
+    const maximumWireResult = encodeConnectorResponse({
+      value: remoteWireResult.toString("utf8"),
+    });
+    expect(maximumWireResult.length).toBeLessThanOrEqual(CONNECTOR_MAX_RESPONSE_BYTES);
+    expect(() =>
+      encodeConnectorRequest({ padding: "x".repeat(CONNECTOR_MAX_REQUEST_BYTES) }),
+    ).toThrow(/exceeded its bound/);
+  });
+
+  test("sends an explicit remote finalize operation", async () => {
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "absent" }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.finalize("ghu_topsecret", workspace, operation),
+    ).resolves.toBeUndefined();
+    expect(JSON.parse(harness.calls[0].body).job).toMatchObject({
+      action: "finalize",
+      remoteMarker: operation.remoteMarker,
+    });
+  });
+
+  test("fails closed when the sidecar returns token-bearing output", async () => {
+    const harness = requestHarness(() => ({ value: "ProxyCommand ghu_topsecret" }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
     await expect(
       connector.probeSshConfiguration("ghu_topsecret", "silver-space-123"),
-    ).rejects.toThrow(/Connector|Codespace/);
-    expect(existsSync(observedHome)).toBe(false);
-    if (mode === "oversized" || mode === "timeout") expect(kill).toHaveBeenCalledWith("SIGKILL");
+    ).rejects.toThrow(/Codespace/);
   });
 
-  test("reports incompatible tooling as unavailable without attempting a workspace", async () => {
-    const spawnImpl = (
-      executable: string,
-      argv: readonly string[],
-      _options: { env: NodeJS.ProcessEnv },
-    ): ChildProcessWithoutNullStreams => {
-      const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-      const stdin = new PassThrough();
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      stdin.on("finish", () => {
-        if (executable.endsWith("gh")) stdout.end("gh version 2.96.0\n");
-        else if (executable.endsWith("ssh")) stderr.end("OpenSSH_10.3p1\n");
-        else stdout.end(argv.includes("health") ? "connector-worker-ok\n" : "");
-        stdout.end();
-        stderr.end();
-        queueMicrotask(() => child.emit("close", 0));
-      });
-      Object.assign(child, { stdin, stdout, stderr, kill: jest.fn(() => true) });
-      return child;
-    };
-    const connector = new GitHubCodespacesConnector(spawnImpl);
-    await expect(connector.health()).resolves.toEqual({
-      ok: false,
-      reason: "GitHub CLI 2.97 is unavailable",
-    });
+  test("rejects a malformed remote terminal envelope", async () => {
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        stdoutBase64: "not-base64",
+        stderrBase64: "",
+        exitCode: 0,
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.execute("ghu_topsecret", workspace, operation, {
+        argv: ["true"],
+        cwd: ".",
+        stdin: { kind: "inline", bytes: new Uint8Array() },
+        timeoutMs: 5_000,
+        maxStdoutBytes: 4096,
+        maxStderrBytes: 4096,
+      }),
+    ).rejects.toThrow(/result contract/);
   });
 
   test("the reviewed worker rejects oversized stdin without echoing credential bytes", async () => {
@@ -163,7 +220,7 @@ describe("GitHub Codespaces connector boundary", () => {
         );
         child.stdin.end(
           JSON.stringify({
-            token: `ghu_${"secret".repeat(500)}`,
+            token: `ghu_${"secret".repeat(700_000)}`,
             home: "/tmp/moira-codespaces-connector-oversized",
           }),
         );

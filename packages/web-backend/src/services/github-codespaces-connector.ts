@@ -1,144 +1,221 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { request as httpRequest, type RequestOptions } from "node:http";
+import type {
+  WorkspaceExecRequest,
+  WorkspaceOperationRecord,
+  WorkspaceOperationResult,
+  WorkspaceOperationTransport,
+  WorkspaceResourceRecord,
+} from "@mcp-moira/shared";
+import {
+  CONNECTOR_MAX_RESPONSE_BYTES,
+  decodeConnectorResponse,
+  encodeConnectorRequest,
+  validGitHubUserCredential,
+} from "./github-codespaces-connector-protocol.mjs";
 
-const MAX_DIAGNOSTIC_BYTES = 64 * 1024;
-const COMMAND_TIMEOUT_MS = 30_000;
+const SOCKET_PATH = "/run/moira-workspace-connector/connector.sock";
+const RESOURCE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const TERMINAL_OPERATION_STATES = new Set(["succeeded", "failed", "cancelled", "timed_out"]);
 
-type Spawn = (
-  executable: string,
-  argv: readonly string[],
-  options: { env: NodeJS.ProcessEnv; stdio: ["pipe", "pipe", "pipe"] },
-) => ChildProcessWithoutNullStreams;
+type RequestFunction = (
+  options: RequestOptions,
+  callback: (response: import("node:http").IncomingMessage) => void,
+) => import("node:http").ClientRequest;
 
-interface CommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-export class GitHubCodespacesConnector {
+export class GitHubCodespacesConnector implements WorkspaceOperationTransport {
   constructor(
-    private readonly spawnImpl: Spawn = spawn,
-    private readonly ghPath = "/usr/bin/gh",
-    private readonly sshPath = "/usr/bin/ssh",
-    private readonly workerRuntimePath = "/usr/local/bin/tsx",
-    private readonly workerPath = "/app/packages/web-backend/src/services/github-codespaces-connector-worker.ts",
-    private readonly commandTimeoutMs = COMMAND_TIMEOUT_MS,
+    private readonly requestImpl: RequestFunction = httpRequest,
+    private readonly socketPath = SOCKET_PATH,
+    private readonly requestTimeoutMs = 30_000,
   ) {}
 
-  private run(
-    executable: string,
-    argv: readonly string[],
-    env: NodeJS.ProcessEnv,
-    stdin = "",
-  ): Promise<CommandResult> {
-    return new Promise((resolve, reject) => {
-      const child = this.spawnImpl(executable, argv, { env, stdio: ["pipe", "pipe", "pipe"] });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      let bytes = 0;
-      let settled = false;
-      const finish = (error?: Error, exitCode?: number) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        if (error) reject(error);
-        else
-          resolve({
-            exitCode: exitCode ?? -1,
-            stdout: Buffer.concat(stdout).toString("utf8"),
-            stderr: Buffer.concat(stderr).toString("utf8"),
+  private call(path: "/health" | "/job", body?: unknown, timeoutMs = this.requestTimeoutMs) {
+    return new Promise<unknown>((resolve, reject) => {
+      const payload = body === undefined ? null : encodeConnectorRequest(body);
+      const request = this.requestImpl(
+        {
+          socketPath: this.socketPath,
+          path,
+          method: payload ? "POST" : "GET",
+          headers: payload
+            ? { "content-type": "application/json", "content-length": payload.length }
+            : undefined,
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          let bytes = 0;
+          response.on("data", (chunk: Buffer) => {
+            bytes += chunk.length;
+            if (bytes > CONNECTOR_MAX_RESPONSE_BYTES) {
+              request.destroy(new Error("Connector response exceeded its bound"));
+            } else chunks.push(Buffer.from(chunk));
           });
-      };
-      const collect = (target: Buffer[]) => (chunk: Buffer) => {
-        bytes += chunk.length;
-        if (bytes > MAX_DIAGNOSTIC_BYTES) {
-          child.kill("SIGKILL");
-          finish(new Error("Connector output exceeded its bound"));
-          return;
-        }
-        target.push(chunk);
-      };
-      const timeout = setTimeout(() => {
-        child.kill("SIGKILL");
-        finish(new Error("Connector command timed out"));
-      }, this.commandTimeoutMs);
-      timeout.unref();
-      child.stdout.on("data", collect(stdout));
-      child.stderr.on("data", collect(stderr));
-      child.once("error", (error) => finish(error));
-      child.once("close", (code) => finish(undefined, code ?? -1));
-      child.stdin.end(stdin);
+          response.once("end", () => {
+            if (response.statusCode !== 200) {
+              reject(new Error("Connector sidecar is unavailable"));
+              return;
+            }
+            try {
+              resolve(decodeConnectorResponse(Buffer.concat(chunks)));
+            } catch {
+              reject(new Error("Connector sidecar returned an invalid response"));
+            }
+          });
+        },
+      );
+      request.setTimeout(timeoutMs, () =>
+        request.destroy(new Error("Connector request timed out")),
+      );
+      request.once("error", reject);
+      request.end(payload ?? undefined);
     });
   }
 
-  private environment(home: string): NodeJS.ProcessEnv {
-    return {
-      HOME: home,
-      GH_CONFIG_DIR: join(home, ".config", "gh"),
-      PATH: "/usr/local/bin:/usr/bin:/bin",
-      LANG: "C.UTF-8",
-      LC_ALL: "C.UTF-8",
-      GIT_TERMINAL_PROMPT: "0",
-      GCM_INTERACTIVE: "never",
-    };
-  }
-
   async health(): Promise<{ ok: boolean; reason: string | null }> {
-    const home = await mkdtemp(join(tmpdir(), "moira-codespaces-health-"));
     try {
-      const env = this.environment(home);
-      const [gh, ssh, worker] = await Promise.all([
-        this.run(this.ghPath, ["--version"], env),
-        this.run(this.sshPath, ["-V"], env),
-        this.run(this.workerRuntimePath, [this.workerPath, "health"], env),
-      ]);
-      if (gh.exitCode !== 0 || !/gh version 2\.97\./.test(gh.stdout)) {
-        return { ok: false, reason: "GitHub CLI 2.97 is unavailable" };
-      }
-      if (ssh.exitCode !== 0 || !/OpenSSH_10\.3/.test(`${ssh.stdout}\n${ssh.stderr}`)) {
-        return { ok: false, reason: "OpenSSH 10.3 is unavailable" };
-      }
-      if (worker.exitCode !== 0 || !worker.stdout.includes("connector-worker-ok")) {
-        return { ok: false, reason: "Codespaces connector worker is unavailable" };
-      }
-      return { ok: true, reason: null };
+      const result = (await this.call("/health")) as { state?: string; reason?: string | null };
+      return result.state === "available"
+        ? { ok: true, reason: null }
+        : { ok: false, reason: result.reason ?? "Codespaces connector is unavailable" };
     } catch {
-      return { ok: false, reason: "Codespaces connector tooling is unavailable" };
-    } finally {
-      await rm(home, { recursive: true, force: true });
+      return { ok: false, reason: "Codespaces connector sidecar is unavailable" };
     }
   }
 
   async probeSshConfiguration(accessToken: string, resourceName: string): Promise<void> {
-    if (!/^gh[uis]_[A-Za-z0-9_]+$/.test(accessToken)) {
+    this.validateCredentialAndResource(accessToken, resourceName);
+    const result = (await this.call("/job", {
+      action: "ssh-config",
+      token: accessToken,
+      resourceName,
+    })) as { value?: string };
+    if (
+      typeof result.value !== "string" ||
+      !result.value.includes("ProxyCommand") ||
+      result.value.includes(accessToken)
+    ) {
+      throw new Error("Codespace SSH capability is unavailable");
+    }
+  }
+
+  async execute(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceExecRequest,
+  ): Promise<WorkspaceOperationResult | { state: "running" }> {
+    if (request.stdin.kind !== "inline") {
+      throw new Error("Referenced operation input is not materialized by this transport version");
+    }
+    const result = await this.operationJob(credential, workspace, operation, {
+      action: "execute",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+      repositoryFullName: workspace.repositoryFullName,
+      argv: request.argv,
+      cwd: request.cwd,
+      stdin: Buffer.from(request.stdin.bytes).toString("base64"),
+      timeoutMs: request.timeoutMs,
+      maxStdoutBytes: request.maxStdoutBytes,
+      maxStderrBytes: request.maxStderrBytes,
+    });
+    if (result.state === "absent") throw new Error("Remote operation was not created");
+    return result;
+  }
+
+  inspect(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ) {
+    return this.operationJob(credential, workspace, operation, {
+      action: "inspect",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+    });
+  }
+
+  cancel(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ) {
+    return this.operationJob(credential, workspace, operation, {
+      action: "cancel",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+    });
+  }
+
+  async finalize(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ): Promise<void> {
+    const result = await this.operationJob(credential, workspace, operation, {
+      action: "finalize",
+      version: 1,
+      remoteMarker: operation.remoteMarker,
+    });
+    if (result.state !== "absent") throw new Error("Remote operation cleanup is incomplete");
+  }
+
+  private async operationJob(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    job: Record<string, unknown>,
+  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }> {
+    if (!workspace.providerResourceName || workspace.id !== operation.resourceId) {
+      throw new Error("Invalid workspace operation identity");
+    }
+    this.validateCredentialAndResource(credential, workspace.providerResourceName);
+    const result = (await this.call(
+      "/job",
+      {
+        action: "operation",
+        token: credential,
+        resourceName: workspace.providerResourceName,
+        job,
+      },
+      Number(job.timeoutMs ?? this.requestTimeoutMs) + 120_000,
+    )) as { value?: string };
+    if (typeof result.value !== "string" || result.value.includes(credential)) {
+      throw new Error("Codespace operation transport is unavailable");
+    }
+    const value = JSON.parse(result.value) as Record<string, unknown>;
+    if (value.state === "running" || value.state === "absent") return { state: value.state };
+    if (
+      typeof value.state !== "string" ||
+      !TERMINAL_OPERATION_STATES.has(value.state) ||
+      typeof value.stdoutBase64 !== "string" ||
+      typeof value.stderrBase64 !== "string" ||
+      !(value.exitCode === null || Number.isInteger(value.exitCode))
+    ) {
+      throw new Error("Codespace operation transport returned an invalid result");
+    }
+    const stdout = Buffer.from(value.stdoutBase64, "base64");
+    const stderr = Buffer.from(value.stderrBase64, "base64");
+    if (
+      stdout.toString("base64") !== value.stdoutBase64 ||
+      stderr.toString("base64") !== value.stderrBase64 ||
+      stdout.length > operation.stdoutLimitBytes ||
+      stderr.length > operation.stderrLimitBytes
+    ) {
+      throw new Error("Codespace operation transport exceeded its result contract");
+    }
+    return {
+      state: value.state as WorkspaceOperationResult["state"],
+      stdout: stdout.toString("utf8"),
+      stderr: stderr.toString("utf8"),
+      exitCode: value.exitCode as number | null,
+    };
+  }
+
+  private validateCredentialAndResource(accessToken: string, resourceName: string): void {
+    if (!validGitHubUserCredential(accessToken)) {
       throw new Error("Invalid GitHub App user credential");
     }
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(resourceName)) {
-      throw new Error("Invalid Codespace name");
-    }
-    const home = await mkdtemp(join(tmpdir(), "moira-codespaces-connector-"));
-    try {
-      const env = this.environment(home);
-      const config = await this.run(
-        this.workerRuntimePath,
-        [this.workerPath, "ssh-config", resourceName],
-        env,
-        JSON.stringify({ token: accessToken, home }),
-      );
-      if (
-        config.exitCode !== 0 ||
-        !config.stdout.includes("ProxyCommand") ||
-        config.stdout.includes(accessToken)
-      ) {
-        throw new Error("Codespace SSH capability is unavailable");
-      }
-    } catch {
-      throw new Error("Codespace SSH capability is unavailable");
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
+    if (!RESOURCE.test(resourceName)) throw new Error("Invalid Codespace name");
   }
 }

@@ -107,3 +107,5 @@ export * from "./workspaces/provider-registry.js";
 export * from "./workspaces/resource-repository.js";
 export * from "./workspaces/resource-service.js";
 export * from "./workspaces/resource-policy.js";
+export * from "./workspaces/operation-repository.js";
+export * from "./workspaces/operation-service.js";

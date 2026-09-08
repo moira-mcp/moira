@@ -264,15 +264,18 @@ describe("GitHub Codespaces provider edge", () => {
     const fetchImpl = jest
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 404 }))
-      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 202 }));
     const client = new HttpGitHubWorkspaceClient(config, fetchImpl);
     await expect(client.getExact("ghu_secret", "silver-space-123")).resolves.toBeNull();
+    await expect(client.startExact("ghu_secret", "silver-space-123")).resolves.toBe("accepted");
     await expect(client.stopExact("ghu_secret", "silver-space-123")).resolves.toBe("accepted");
     await expect(client.deleteExact("ghu_secret", "silver-space-123")).resolves.toBe("accepted");
     expect(fetchImpl.mock.calls.map(([url, init]) => [String(url), init?.method ?? "GET"])).toEqual(
       [
         ["https://api.github.com/user/codespaces/silver-space-123", "GET"],
+        ["https://api.github.com/user/codespaces/silver-space-123/start", "POST"],
         ["https://api.github.com/user/codespaces/silver-space-123/stop", "POST"],
         ["https://api.github.com/user/codespaces/silver-space-123", "DELETE"],
       ],

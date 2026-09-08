@@ -279,6 +279,7 @@ export const workspaceResource = sqliteTable(
     connectionId: text("connectionId")
       .notNull()
       .references(() => workspaceConnection.id),
+    authorizationGeneration: integer("authorizationGeneration").notNull().default(1),
     provider: text("provider").notNull(),
     repositoryId: text("repositoryId").notNull(),
     repositoryFullName: text("repositoryFullName").notNull(),
@@ -294,6 +295,9 @@ export const workspaceResource = sqliteTable(
     machineMemoryBytes: integer("machineMemoryBytes").notNull(),
     machineStorageBytes: integer("machineStorageBytes").notNull(),
     state: text("state").notNull(),
+    retentionPolicy: text("retentionPolicy").notNull().default("legacy_disposable"),
+    desiredState: text("desiredState").notNull().default("running"),
+    observedState: text("observedState").notNull().default("unknown"),
     generation: integer("generation").notNull().default(1),
     createDeadlineAt: integer("createDeadlineAt", { mode: "timestamp_ms" }).notNull(),
     remoteExpiresAt: integer("remoteExpiresAt", { mode: "timestamp_ms" }).notNull(),
@@ -390,6 +394,44 @@ export const workspaceProviderControl = sqliteTable("workspaceProviderControl", 
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
   updatedBy: text("updatedBy").references(() => user.id),
 });
+
+/** Durable metadata for an exact operation in a user-owned workspace. */
+export const workspaceOperation = sqliteTable(
+  "workspaceOperation",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id),
+    resourceId: text("resourceId")
+      .notNull()
+      .references(() => workspaceResource.id),
+    resourceGeneration: integer("resourceGeneration").notNull(),
+    authorizationGeneration: integer("authorizationGeneration").notNull(),
+    provider: text("provider").notNull(),
+    providerResourceName: text("providerResourceName").notNull(),
+    remoteMarker: text("remoteMarker").notNull().unique(),
+    kind: text("kind").notNull(),
+    state: text("state").notNull(),
+    inputBytes: integer("inputBytes").notNull(),
+    stdoutLimitBytes: integer("stdoutLimitBytes").notNull(),
+    stderrLimitBytes: integer("stderrLimitBytes").notNull(),
+    outputBytes: integer("outputBytes").notNull().default(0),
+    exitCode: integer("exitCode"),
+    remoteCleanupPending: integer("remoteCleanupPending").notNull().default(1),
+    resultExpiresAt: integer("resultExpiresAt", { mode: "timestamp_ms" }),
+    deadlineAt: integer("deadlineAt", { mode: "timestamp_ms" }).notNull(),
+    claimId: text("claimId"),
+    claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
+    lastOutcome: text("lastOutcome"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    ownerIdx: index("workspace_operation_owner_idx").on(table.userId, table.resourceId),
+    reconcileIdx: index("workspace_operation_reconcile_idx").on(table.state, table.claimExpiresAt),
+  }),
+);
 
 // ===== MCP Moira Workflow Tables =====
 

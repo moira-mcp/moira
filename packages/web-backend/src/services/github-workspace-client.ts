@@ -56,6 +56,7 @@ export class HttpGitHubWorkspaceClient implements GitHubWorkspaceClient, Workspa
   readonly contractVersion = WORKSPACE_PROVIDER_CONTRACT_VERSION;
   readonly capabilities = {
     disposable: true,
+    persistent: true,
     exactLifecycle: true,
     personalBillingOnly: true,
     connector: "github-cli-ssh",
@@ -337,15 +338,25 @@ export class HttpGitHubWorkspaceClient implements GitHubWorkspaceClient, Workspa
   private async lifecycle(
     accessToken: string,
     resourceName: string,
-    action: "stop" | "delete",
+    action: "start" | "stop" | "delete",
   ): Promise<"accepted" | "absent"> {
+    const acceptedStatuses =
+      action === "start"
+        ? ([200, 202, 304, 404] as const)
+        : action === "stop"
+          ? ([200, 202, 404] as const)
+          : ([202, 204, 304, 404] as const);
     const result = await this.apiResponse<undefined>(
-      `/user/codespaces/${encodeURIComponent(resourceName)}${action === "stop" ? "/stop" : ""}`,
+      `/user/codespaces/${encodeURIComponent(resourceName)}${action === "delete" ? "" : `/${action}`}`,
       accessToken,
-      { method: action === "stop" ? "POST" : "DELETE" },
-      [202, 204, 404],
+      { method: action === "delete" ? "DELETE" : "POST" },
+      acceptedStatuses,
     );
     return result.response.status === 404 ? "absent" : "accepted";
+  }
+
+  startExact(accessToken: string, resourceName: string): Promise<"accepted" | "absent"> {
+    return this.lifecycle(accessToken, resourceName, "start");
   }
 
   stopExact(accessToken: string, resourceName: string): Promise<"accepted" | "absent"> {

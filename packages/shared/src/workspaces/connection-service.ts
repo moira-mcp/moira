@@ -91,6 +91,7 @@ export interface WorkspaceConnectionServiceDependencies {
   sleep?: (ms: number) => Promise<void>;
   audit?: (event: WorkspaceConnectionAuditEvent) => Promise<void> | void;
   beforeDisconnect?: (userId: string) => Promise<void>;
+  afterConnect?: (userId: string) => Promise<void>;
 }
 
 const AUTHORIZATION_STATE_TTL_MS = 10 * 60 * 1000;
@@ -669,12 +670,25 @@ export class WorkspaceConnectionService {
     if (!connectionId) {
       throw new WorkspaceConnectionError("AUTHORIZATION_FAILED", "GitHub authorization failed");
     }
+    let rebindPending = false;
+    try {
+      await this.dependencies.afterConnect?.(input.userId);
+    } catch {
+      // The new credential remains valid. Existing workspaces stay generation-fenced
+      // until an exact provider recheck succeeds on a later reconciliation.
+      rebindPending = true;
+    }
     await this.dependencies.audit?.({
       action: "complete",
       userId: input.userId,
       provider: WORKSPACE_PROVIDER_GITHUB,
       connectionId,
-      outcome: installationGrants.length > 0 ? "connected" : "installation_required",
+      outcome:
+        installationGrants.length === 0
+          ? "installation_required"
+          : rebindPending
+            ? "connected_rebind_pending"
+            : "connected",
     });
     return this.getStatus(input.userId);
   }
