@@ -24,6 +24,12 @@ export enum AuditAction {
   WORKSPACE_RESOURCE_CREATE_PENDING = "workspace:resource_create_pending",
   WORKSPACE_RESOURCE_CREATE_REJECTED = "workspace:resource_create_rejected",
   WORKSPACE_RESOURCE_CLEANUP = "workspace:resource_cleanup",
+  WORKSPACE_RESOURCE_START = "workspace:resource_start",
+  WORKSPACE_RESOURCE_STOP = "workspace:resource_stop",
+  WORKSPACE_RESOURCE_DELETE = "workspace:resource_delete",
+  WORKSPACE_OPERATION_RESERVE = "workspace:operation_reserve",
+  WORKSPACE_OPERATION_RECONCILE = "workspace:operation_reconcile",
+  WORKSPACE_OPERATION_TERMINAL = "workspace:operation_terminal",
 
   // Workflow events
   WORKFLOW_CREATE = "workflow:create",

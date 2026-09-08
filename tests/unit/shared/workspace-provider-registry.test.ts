@@ -11,6 +11,7 @@ function provider(id: string): WorkspaceProviderAdapter {
     contractVersion: WORKSPACE_PROVIDER_CONTRACT_VERSION,
     capabilities: {
       disposable: true,
+      persistent: true,
       exactLifecycle: true,
       personalBillingOnly: true,
       connector: "github-cli-ssh",
@@ -36,7 +37,10 @@ describe("WorkspaceProviderRegistry", () => {
     expect(registry.list()).toEqual([adapter]);
     expect(() => registry.register(provider(adapter.id))).toThrow(/already registered/);
     expect(() =>
-      registry.register({ ...provider("future-provider"), contractVersion: 2 as 1 }),
+      registry.register({
+        ...provider("future-provider"),
+        contractVersion: 1 as typeof WORKSPACE_PROVIDER_CONTRACT_VERSION,
+      }),
     ).toThrow(/Unsupported/);
     expect(() => registry.register(provider("../unsafe"))).toThrow(/invalid identifier/);
   });

@@ -21,6 +21,7 @@ RUN apk add --no-cache \
     git \
     github-cli=2.97.0-r1 \
     openssh-client-default=10.3_p1-r1 \
+    util-linux-misc=2.42.3-r1 \
     curl \
     nginx \
     supervisor \

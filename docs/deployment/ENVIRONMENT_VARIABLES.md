@@ -118,12 +118,13 @@ revokes their active credentials. The complete procedures are in
 
 **Production safeguard:** if `NODE_ENV=production` AND `MOIRA_HOST` is a public (non-localhost) host AND `DEPLOYMENT_MODE` is unset → startup is **rejected** (`evaluateUnsetModeSafeguard` in `env.ts`), so a hosted deploy does not silently start in `self-host` with the SaaS gates turned off. In non-production this is a warning. A hosted deploy must set `DEPLOYMENT_MODE=saas`; a public self-host must set it explicitly to `=self-host`.
 
-### GitHub workspace connection
+### GitHub workspace connection and Codespaces policy
 
 The optional workspace GitHub App is independent of Better Auth social login.
-When every workspace variable is absent the integration remains disabled. A
-partial or invalid group produces a safe configuration-error state in Settings
-without disabling unrelated authentication.
+When every GitHub connection variable is absent the integration remains
+disabled. A partial or invalid connection group produces a safe
+configuration-error state in Settings without disabling unrelated
+authentication.
 
 | Variable                                 | Requirement                                                         |
 | ---------------------------------------- | ------------------------------------------------------------------- |
@@ -155,8 +156,45 @@ openssl rand -hex 32
 
 Compose forwards these names from the operator environment with empty defaults,
 so adding the image does not enable the integration or bake a credential into an
-image layer. The complete connection lifecycle is documented in
-`docs/WORKSPACES.md` and the self-host user procedure is in the public
+image layer. Workspace creation and direct operations have a second, independent
+feature gate and remain disabled unless `WORKSPACE_CODESPACES_ENABLED=true`.
+
+The `workspaces` Compose profile runs the credential-bearing connector and its
+credential-free egress proxy from the same `MOIRA_IMAGE`. Enable it only after
+the GitHub App, vault and policy variables are configured:
+
+```bash
+docker compose --profile workspaces up -d
+```
+
+| Variable                                       | Default | Requirement or meaning                                        |
+| ---------------------------------------------- | ------: | ------------------------------------------------------------- |
+| `WORKSPACE_CODESPACES_ENABLED`                 | `false` | Enables resource creation and direct operations               |
+| `WORKSPACE_MAX_CPU_CORES`                      |       4 | Maximum selected Linux machine CPU cores                      |
+| `WORKSPACE_MAX_MEMORY_GB`                      |       8 | Maximum selected machine memory                               |
+| `WORKSPACE_MAX_STORAGE_GB`                     |      32 | Maximum selected machine storage                              |
+| `WORKSPACE_MAX_ACTIVE_PER_USER`                |       1 | Active resource reservations per user; maximum 64             |
+| `WORKSPACE_MAX_ACTIVE_GLOBAL`                  |       4 | Instance-wide active resource reservations; maximum 1024      |
+| `WORKSPACE_MAX_OPERATIONS_PER_DAY`             |      10 | Submitted lifecycle/direct operations per user/day; max 10000 |
+| `WORKSPACE_CREATE_THROTTLE_SECONDS`            |      60 | Minimum interval between creation reservations                |
+| `WORKSPACE_REMOTE_TTL_MINUTES`                 |     120 | Codespaces idle timeout requested at creation; minimum 5      |
+| `WORKSPACE_PERSISTENT_RETENTION_DAYS`          |      30 | Provider retention requested for stopped workspaces; max 30   |
+| `WORKSPACE_CREATE_DEADLINE_MINUTES`            |      15 | Create reconciliation deadline                                |
+| `WORKSPACE_CLEANUP_DEADLINE_MINUTES`           |      15 | Lifecycle cleanup deadline and result retention               |
+| `WORKSPACE_CLAIM_LEASE_SECONDS`                |      30 | Cross-process reconciliation claim lease                      |
+| `WORKSPACE_RECONCILE_INTERVAL_SECONDS`         |      30 | Background reconciliation interval                            |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER` |       2 | Concurrent direct operations per user; maximum 32             |
+| `WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL`   |      20 | Instance-wide concurrent direct operations; maximum 256       |
+| `WORKSPACE_MAX_OPERATION_INPUT_KB`             |    1024 | Direct-operation stdin; maximum 4096 KiB                      |
+| `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout per operation; maximum 8192 KiB                        |
+| `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr per operation; maximum 8192 KiB                        |
+| `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Direct-operation duration; maximum 900 seconds                |
+
+The global active-resource limit must be at least the per-user limit. The same
+constraint applies to global and per-user operation concurrency. Invalid policy
+values fail configuration rather than silently weakening a limit. The complete
+connection, lifecycle, operation and isolation contracts are documented in
+`docs/WORKSPACES.md`; the website connection procedure remains in the public
 Self-Hosting guide.
 
 ### First-start secret auto-generation (self-host)
@@ -394,13 +432,35 @@ GITHUB_CLIENT_SECRET=<production-oauth-secret>
 GOOGLE_CLIENT_ID=<production-oauth-id>
 GOOGLE_CLIENT_SECRET=<production-oauth-secret>
 
-# Optional GitHub workspace connection (all values are required together)
+# Optional GitHub workspace connection (all connection values are required together)
 WORKSPACE_GITHUB_APP_CLIENT_ID=<github-app-client-id>
 WORKSPACE_GITHUB_APP_CLIENT_SECRET=<github-app-client-secret>
 WORKSPACE_GITHUB_APP_CALLBACK_URL=https://${MOIRA_HOST}/api/integrations/github/callback
 WORKSPACE_GITHUB_APP_INSTALL_URL=https://github.com/apps/<github-app-slug>/installations/new
 WORKSPACE_CREDENTIAL_VAULT_KEY=<random-64-hex-key>
 WORKSPACE_CREDENTIAL_VAULT_KEY_VERSION=v1
+
+# Optional Codespaces lifecycle and direct operations
+WORKSPACE_CODESPACES_ENABLED=true
+WORKSPACE_MAX_CPU_CORES=4
+WORKSPACE_MAX_MEMORY_GB=8
+WORKSPACE_MAX_STORAGE_GB=32
+WORKSPACE_MAX_ACTIVE_PER_USER=1
+WORKSPACE_MAX_ACTIVE_GLOBAL=4
+WORKSPACE_MAX_OPERATIONS_PER_DAY=10
+WORKSPACE_CREATE_THROTTLE_SECONDS=60
+WORKSPACE_REMOTE_TTL_MINUTES=120
+WORKSPACE_PERSISTENT_RETENTION_DAYS=30
+WORKSPACE_CREATE_DEADLINE_MINUTES=15
+WORKSPACE_CLEANUP_DEADLINE_MINUTES=15
+WORKSPACE_CLAIM_LEASE_SECONDS=30
+WORKSPACE_RECONCILE_INTERVAL_SECONDS=30
+WORKSPACE_MAX_CONCURRENT_OPERATIONS_PER_USER=2
+WORKSPACE_MAX_CONCURRENT_OPERATIONS_GLOBAL=20
+WORKSPACE_MAX_OPERATION_INPUT_KB=1024
+WORKSPACE_MAX_OPERATION_STDOUT_KB=1024
+WORKSPACE_MAX_OPERATION_STDERR_KB=256
+WORKSPACE_MAX_OPERATION_SECONDS=900
 
 # Environment
 NODE_ENV=production

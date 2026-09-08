@@ -1,4 +1,4 @@
-export const WORKSPACE_PROVIDER_CONTRACT_VERSION = 1 as const;
+export const WORKSPACE_PROVIDER_CONTRACT_VERSION = 2 as const;
 
 export interface WorkspaceRepositoryTarget {
   id: string;
@@ -10,6 +10,10 @@ export type WorkspaceResourceState =
   | "create_pending"
   | "create_submitted"
   | "usable"
+  | "start_pending"
+  | "stop_pending"
+  | "stopped"
+  | "delete_pending"
   | "cleanup_pending"
   | "deleted"
   | "rejected"
@@ -49,6 +53,7 @@ export interface WorkspaceProviderAdapter {
   readonly contractVersion: typeof WORKSPACE_PROVIDER_CONTRACT_VERSION;
   readonly capabilities: Readonly<{
     disposable: boolean;
+    persistent: boolean;
     exactLifecycle: boolean;
     personalBillingOnly: boolean;
     connector: string;
@@ -72,6 +77,7 @@ export interface WorkspaceProviderAdapter {
   ): Promise<WorkspaceCreateProviderResult>;
   listOwned(credential: string): Promise<WorkspaceProviderResource[]>;
   getExact(credential: string, resourceName: string): Promise<WorkspaceProviderResource | null>;
+  startExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
   stopExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
   deleteExact(credential: string, resourceName: string): Promise<"accepted" | "absent">;
   probeConnector(credential: string, resourceName: string): Promise<void>;
@@ -87,16 +93,24 @@ export interface WorkspaceResourcePolicy {
   maxOperationsPerDay: number;
   createThrottleMs: number;
   remoteTtlMs: number;
+  persistentRetentionMs?: number;
   createDeadlineMs: number;
   cleanupDeadlineMs: number;
   claimLeaseMs: number;
   reconcileIntervalMs: number;
+  maxConcurrentOperationsPerUser?: number;
+  maxConcurrentOperationsGlobal?: number;
+  maxOperationInputBytes?: number;
+  maxOperationStdoutBytes?: number;
+  maxOperationStderrBytes?: number;
+  maxOperationMs?: number;
 }
 
 export interface WorkspaceResourceRecord {
   id: string;
   userId: string;
   connectionId: string;
+  authorizationGeneration: number;
   provider: string;
   repositoryId: string;
   repositoryFullName: string;
@@ -107,6 +121,10 @@ export interface WorkspaceResourceRecord {
   billableOwnerId: string | null;
   machine: WorkspaceMachine;
   state: WorkspaceResourceState;
+  retentionPolicy: "legacy_disposable" | "persistent";
+  desiredState: "running" | "stopped" | "deleted";
+  observedState:
+    "unknown" | "provisioning" | "running" | "stopped" | "deleting" | "absent" | "failed";
   generation: number;
   createDeadlineAt: number;
   remoteExpiresAt: number;
@@ -124,8 +142,95 @@ export type WorkspaceResourceErrorCode =
   | "WORKSPACE_POLICY_LIMIT"
   | "WORKSPACE_CREATE_REJECTED"
   | "WORKSPACE_CREATE_PENDING"
+  | "WORKSPACE_NOT_RUNNING"
+  | "WORKSPACE_GENERATION_CONFLICT"
   | "WORKSPACE_RESOURCE_INVALID"
   | "WORKSPACE_NOT_FOUND";
+
+export type WorkspaceOperationState =
+  | "reserved"
+  | "running"
+  | "cancel_pending"
+  | "reconcile_pending"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+
+export interface WorkspaceOperationRecord {
+  id: string;
+  userId: string;
+  resourceId: string;
+  resourceGeneration: number;
+  authorizationGeneration: number;
+  provider: string;
+  providerResourceName: string;
+  remoteMarker: string;
+  kind: "exec";
+  state: WorkspaceOperationState;
+  inputBytes: number;
+  stdoutLimitBytes: number;
+  stderrLimitBytes: number;
+  outputBytes: number;
+  exitCode: number | null;
+  remoteCleanupPending: 0 | 1;
+  resultExpiresAt: number | null;
+  deadlineAt: number;
+  claimId: string | null;
+  claimExpiresAt: number | null;
+  lastOutcome: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type WorkspaceByteSource =
+  | { kind: "inline"; bytes: Uint8Array }
+  | { kind: "reference"; referenceId: string; declaredBytes: number };
+
+export interface WorkspaceExecRequest {
+  argv: readonly string[];
+  cwd: string;
+  stdin: WorkspaceByteSource;
+  timeoutMs: number;
+  maxStdoutBytes?: number;
+  maxStderrBytes?: number;
+}
+
+export interface WorkspaceOperationResult {
+  state: "succeeded" | "failed" | "cancelled" | "timed_out";
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+export interface WorkspaceOperationResponse {
+  operation: WorkspaceOperationRecord;
+  result: WorkspaceOperationResult | null;
+}
+
+export interface WorkspaceOperationTransport {
+  execute(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceExecRequest,
+  ): Promise<WorkspaceOperationResult | { state: "running" }>;
+  inspect(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }>;
+  cancel(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ): Promise<WorkspaceOperationResult | { state: "running" } | { state: "absent" }>;
+  finalize(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ): Promise<void>;
+}
 
 export class WorkspaceResourceError extends Error {
   constructor(

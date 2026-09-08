@@ -54,6 +54,8 @@ class FakeProvider implements WorkspaceProviderAdapter {
   createObservation: (() => void) | null = null;
   machineObservation: (() => void) | null = null;
   createGate: Promise<void> | null = null;
+  startGate: Promise<void> | null = null;
+  startObservation: (() => void) | null = null;
   returnedMachine: WorkspaceMachine = machine;
   returnedBillableOwnerId = "101";
   returnedState: WorkspaceProviderResource["state"] = "available";
@@ -65,6 +67,7 @@ class FakeProvider implements WorkspaceProviderAdapter {
   readonly machineCalls = jest.fn();
   readonly createCalls = jest.fn();
   readonly connectorCalls = jest.fn();
+  readonly startCalls = jest.fn();
   readonly stopCalls = jest.fn();
   readonly deleteCalls = jest.fn();
 
@@ -74,6 +77,7 @@ class FakeProvider implements WorkspaceProviderAdapter {
   ) {
     this.capabilities = {
       disposable: true,
+      persistent: true,
       exactLifecycle: true,
       personalBillingOnly,
       connector: id === WORKSPACE_PROVIDER_GITHUB ? "github-cli-ssh" : "managed-connector",
@@ -129,6 +133,14 @@ class FakeProvider implements WorkspaceProviderAdapter {
   }
   async stopExact() {
     this.stopCalls();
+    if (this.resource) this.resource = { ...this.resource, state: "shutdown" };
+    return "accepted" as const;
+  }
+  async startExact() {
+    this.startCalls();
+    if (this.resource) this.resource = { ...this.resource, state: "available" };
+    this.startObservation?.();
+    if (this.startGate) await this.startGate;
     return "accepted" as const;
   }
   async deleteExact() {
@@ -199,7 +211,6 @@ function fixture(policyOverrides: Partial<WorkspaceResourcePolicy> = {}) {
       credentials: { getCredential: tokenCalls },
       providerId: WORKSPACE_PROVIDER_GITHUB,
       requiredCapabilities: {
-        disposable: true,
         exactLifecycle: true,
         personalBillingOnly: true,
       },
@@ -225,7 +236,7 @@ function fixture(policyOverrides: Partial<WorkspaceResourcePolicy> = {}) {
   };
 }
 
-describe("durable disposable workspace lifecycle", () => {
+describe("durable persistent workspace lifecycle", () => {
   test("binds the same core lifecycle to a non-GitHub provider without installation concepts", async () => {
     const value = fixture({ maxOperationsPerDay: 10 });
     try {
@@ -242,7 +253,7 @@ describe("durable disposable workspace lifecycle", () => {
         repositories: value.repository,
         registry,
         providerId: "managed-cloud",
-        requiredCapabilities: { disposable: true, exactLifecycle: true },
+        requiredCapabilities: { exactLifecycle: true },
         credentials: {
           getCredential: async (userId, providerId) => `${userId}:${providerId}:opaque`,
         },
@@ -311,7 +322,6 @@ describe("durable disposable workspace lifecycle", () => {
           credentials: { getCredential: async () => "ghu_access" },
           providerId: WORKSPACE_PROVIDER_GITHUB,
           requiredCapabilities: {
-            disposable: true,
             exactLifecycle: true,
             personalBillingOnly: true,
           },
@@ -363,8 +373,165 @@ describe("durable disposable workspace lifecycle", () => {
     }
   });
 
-  test("persists intent, quota and only a capability digest before provider mutation", async () => {
-    const value = fixture();
+  test("rejects a repository grant removed before durable reservation", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      value.provider.machineObservation = () => {
+        value.sqlite
+          .prepare("DELETE FROM workspaceConnectionRepository WHERE connectionId = 'connection-1'")
+          .run();
+      };
+
+      await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
+        code: "REPOSITORY_NOT_ALLOWED",
+      });
+      expect(value.provider.createCalls).not.toHaveBeenCalled();
+      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceResource").get()).toEqual({
+        count: 0,
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("cancels an unsubmitted persistent create before disconnect", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      const reserved = value.repository.reserveCreate({
+        userId: "user-1",
+        provider: WORKSPACE_PROVIDER_GITHUB,
+        connectionId: "connection-1",
+        authorizationGeneration: 1,
+        repository: { id: "301", fullName: "owner/repository", private: true },
+        requestedRef: "refs/heads/main",
+        machine,
+        externalAccountId: "101",
+        policy: value.policy,
+        now,
+      });
+      expect(reserved.outcome).toBe("reserved");
+
+      await expect(value.service.cleanupBeforeDisconnect("user-1")).resolves.toBeUndefined();
+      expect(value.service.listResources("user-1")[0]).toMatchObject({
+        state: "rejected",
+        desiredState: "deleted",
+        observedState: "absent",
+      });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("lets stop win while a submitted create has not returned its provider identity", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      let releaseCreate!: () => void;
+      let observeCreate!: () => void;
+      const enteredCreate = new Promise<void>((resolve) => {
+        observeCreate = resolve;
+      });
+      value.provider.createObservation = observeCreate;
+      value.provider.createGate = new Promise<void>((resolve) => {
+        releaseCreate = resolve;
+      });
+
+      const creating = value.service.create("user-1", "301", "refs/heads/main");
+      await enteredCreate;
+      const workspaceId = value.service.listResources("user-1")[0].id;
+      const stopping = value.createService().stopWorkspace("user-1", workspaceId);
+      await expect(stopping).resolves.toMatchObject({
+        state: "stopped",
+        desiredState: "stopped",
+        observedState: "stopped",
+      });
+      releaseCreate();
+      await expect(creating).resolves.toMatchObject({
+        resource: { state: "stopped", desiredState: "stopped" },
+      });
+      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("records a provider-deleted persistent workspace as absent instead of retrying stop", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.provider.resource = null;
+      await expect(
+        value.service.stopWorkspace("user-1", created.resource.id),
+      ).resolves.toMatchObject({
+        state: "deleted",
+        desiredState: "deleted",
+        observedState: "absent",
+        lastOutcome: "verified_externally_absent",
+      });
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("does not advance lifecycle generation for repeated pending start or delete intent", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopWorkspace("user-1", created.resource.id);
+
+      const firstStart = value.repository.requestStart(
+        "user-1",
+        created.resource.id,
+        value.policy,
+        now + 1,
+      );
+      if (!firstStart || typeof firstStart === "string") throw new Error("start was not reserved");
+      expect(firstStart).toMatchObject({ state: "start_pending" });
+      const repeatedStart = value.repository.requestStart(
+        "user-1",
+        created.resource.id,
+        value.policy,
+        now + 2,
+      );
+      if (!repeatedStart || typeof repeatedStart === "string")
+        throw new Error("pending start disappeared");
+      expect(repeatedStart).toMatchObject({ generation: firstStart.generation });
+
+      const firstDelete = value.repository.requestDelete(
+        "user-1",
+        created.resource.id,
+        repeatedStart.generation,
+        now + 3,
+      );
+      if (!firstDelete || typeof firstDelete === "string")
+        throw new Error("delete was not reserved");
+      expect(firstDelete).toMatchObject({ state: "delete_pending" });
+      const repeatedDelete = value.repository.requestDelete(
+        "user-1",
+        created.resource.id,
+        firstDelete.generation,
+        now + 4,
+      );
+      if (!repeatedDelete || typeof repeatedDelete === "string")
+        throw new Error("pending delete disappeared");
+      expect(repeatedDelete).toMatchObject({ generation: firstDelete.generation });
+      expect(
+        value.sqlite
+          .prepare("SELECT kind, COUNT(*) count FROM workspaceProviderMutation GROUP BY kind")
+          .all(),
+      ).toEqual(
+        expect.arrayContaining([
+          { kind: "start", count: 1 },
+          { kind: "delete", count: 1 },
+        ]),
+      );
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("persists workspace data across stop/start and deletes only on an explicit delete", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
     try {
       value.provider.createObservation = () => {
         expect(value.sqlite.prepare("SELECT state FROM workspaceResource").get()).toEqual({
@@ -407,8 +574,26 @@ describe("durable disposable workspace lifecycle", () => {
       expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
 
       await value.service.release("user-1", created.resource.id, created.lifecycleCapability);
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
+      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+        state: "stopped",
+        retentionPolicy: "persistent",
+        desiredState: "stopped",
+        observedState: "stopped",
+      });
       expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+
+      await value.service.startWorkspace("user-1", created.resource.id);
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
+      expect(value.provider.startCalls).toHaveBeenCalledTimes(1);
+
+      const deletable = value.service.getWorkspace("user-1", created.resource.id);
+      await expect(
+        value.service.deleteWorkspace("user-1", created.resource.id, deletable.generation - 1),
+      ).rejects.toMatchObject({ code: "WORKSPACE_GENERATION_CONFLICT" });
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+      await value.service.deleteWorkspace("user-1", created.resource.id, deletable.generation);
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
       expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
       expect(
         value.sqlite
@@ -416,17 +601,19 @@ describe("durable disposable workspace lifecycle", () => {
             "SELECT submittedOperations, requiredCleanupOperations FROM workspacePolicyUsage",
           )
           .get(),
-      ).toEqual({ submittedOperations: 3, requiredCleanupOperations: 2 });
+      ).toEqual({ submittedOperations: 4, requiredCleanupOperations: 0 });
       expect(
         value.sqlite
           .prepare("SELECT kind FROM workspaceProviderMutation ORDER BY createdAt, kind")
           .all(),
-      ).toEqual([{ kind: "create" }, { kind: "delete" }, { kind: "stop" }]);
+      ).toEqual([{ kind: "create" }, { kind: "delete" }, { kind: "start" }, { kind: "stop" }]);
       expect(
         value.audits.map(({ action, state, outcome }) => ({ action, state, outcome })),
       ).toEqual([
         { action: "create", state: "usable", outcome: "verified_usable" },
-        { action: "cleanup", state: "deleted", outcome: "verified_absent" },
+        { action: "stop", state: "stopped", outcome: "verified_stopped" },
+        { action: "start", state: "usable", outcome: "verified_running" },
+        { action: "delete", state: "deleted", outcome: "verified_absent" },
       ]);
       for (const event of value.audits) {
         expect(Object.keys(event).sort()).toEqual([
@@ -515,18 +702,105 @@ describe("durable disposable workspace lifecycle", () => {
     }
   });
 
-  test("expires a usable remote TTL through exact cleanup on a restarted service", async () => {
+  test("does not delete a persistent workspace when the legacy remote TTL expires", async () => {
     const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       value.advance(policy.remoteTtlMs);
       const restartedService = value.createService();
-      await restartedService.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe(
-        "cleanup_pending",
+      await expect(restartedService.reconcileOnce("user-1")).resolves.toBe(false);
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("usable");
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("prevents another tenant from listing, getting, stopping or deleting a workspace", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      expect(value.service.listResources("user-2")).toEqual([]);
+      expect(() => value.service.getWorkspace("user-2", created.resource.id)).toThrow(
+        WorkspaceResourceError,
       );
-      await restartedService.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
+      await expect(
+        value.service.stopWorkspace("user-2", created.resource.id),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
+      await expect(
+        value.service.deleteWorkspace("user-2", created.resource.id, created.resource.generation),
+      ).rejects.toMatchObject({ code: "WORKSPACE_NOT_FOUND" });
+      expect(value.provider.stopCalls).not.toHaveBeenCalled();
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test.each([
+    ["same account and grant", false, false, 1],
+    ["different account", true, false, 0],
+    ["revoked repository grant", false, true, 0],
+  ] as const)(
+    "reauthorization rebinds only after exact verification for %s",
+    async (_name, changeAccount, removeGrant, expectedRebound) => {
+      const value = fixture({ maxOperationsPerDay: 10 });
+      try {
+        const created = await value.service.create("user-1", "301", "refs/heads/main");
+        value.sqlite
+          .prepare(
+            `UPDATE workspaceConnection SET credentialGeneration = 2,
+             externalAccountId = ?, updatedAt = updatedAt + 1 WHERE id = 'connection-1'`,
+          )
+          .run(changeAccount ? "999" : "101");
+        if (removeGrant) {
+          value.sqlite
+            .prepare(
+              "DELETE FROM workspaceConnectionRepository WHERE connectionId = 'connection-1'",
+            )
+            .run();
+        }
+
+        await expect(value.service.rebindAfterAuthorization("user-1")).resolves.toBe(
+          expectedRebound,
+        );
+        expect(
+          value.repository.getOwned("user-1", created.resource.id)?.authorizationGeneration,
+        ).toBe(expectedRebound === 1 ? 2 : 1);
+      } finally {
+        value.sqlite.close();
+      }
+    },
+  );
+
+  test("lets a concurrent stop generation win over an in-flight start", async () => {
+    const value = fixture({ maxOperationsPerDay: 10 });
+    try {
+      const created = await value.service.create("user-1", "301", "refs/heads/main");
+      await value.service.stopWorkspace("user-1", created.resource.id);
+      let releaseStart!: () => void;
+      let observeStart!: () => void;
+      const enteredStart = new Promise<void>((resolve) => {
+        observeStart = resolve;
+      });
+      value.provider.startObservation = observeStart;
+      value.provider.startGate = new Promise<void>((resolve) => {
+        releaseStart = resolve;
+      });
+
+      const starting = value.service.startWorkspace("user-1", created.resource.id);
+      await enteredStart;
+      await value.createService().stopWorkspace("user-1", created.resource.id);
+      releaseStart();
+      await starting;
+
+      expect(value.repository.getOwned("user-1", created.resource.id)).toMatchObject({
+        state: "stopped",
+        desiredState: "stopped",
+        observedState: "stopped",
+      });
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }
@@ -599,8 +873,15 @@ describe("durable disposable workspace lifecycle", () => {
       );
       expect(value.tokenCalls).toHaveBeenCalledTimes(tokenCount);
       expect(value.sqlite.prepare("SELECT state FROM workspaceResource").get()).toEqual({
-        state: "cleanup_pending",
+        state: "stop_pending",
       });
+      expect(
+        value.sqlite
+          .prepare(
+            "SELECT submittedOperations, requiredCleanupOperations FROM workspacePolicyUsage",
+          )
+          .get(),
+      ).toEqual({ submittedOperations: 2, requiredCleanupOperations: 1 });
     } finally {
       value.sqlite.close();
     }
@@ -653,7 +934,11 @@ describe("durable disposable workspace lifecycle", () => {
     const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
-      await value.service.release("user-1", created.resource.id, created.lifecycleCapability);
+      await value.service.deleteWorkspace(
+        "user-1",
+        created.resource.id,
+        created.resource.generation,
+      );
       await expect(value.service.create("user-1", "301", "refs/heads/main")).rejects.toMatchObject({
         code: "WORKSPACE_POLICY_LIMIT",
       });
@@ -708,7 +993,7 @@ describe("durable disposable workspace lifecycle", () => {
     }
   });
 
-  test("a kill switch racing an accepted create retains exact cleanup authority", async () => {
+  test("a kill switch racing an accepted create retains exact stop authority", async () => {
     const value = fixture();
     try {
       value.provider.createObservation = () => {
@@ -723,13 +1008,14 @@ describe("durable disposable workspace lifecycle", () => {
       };
       const result = await value.service.create("user-1", "301", "refs/heads/main");
       expect(result.resource).toMatchObject({
-        state: "cleanup_pending",
+        state: "stop_pending",
         providerResourceName: "silver-space-123",
       });
 
       await value.service.reconcileOnce("user-1");
-      expect(value.repository.getOwned("user-1", result.resource.id)?.state).toBe("deleted");
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
+      expect(value.repository.getOwned("user-1", result.resource.id)?.state).toBe("stopped");
+      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }
@@ -739,6 +1025,9 @@ describe("durable disposable workspace lifecycle", () => {
     const value = fixture({ maxOperationsPerDay: 10 });
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
+      value.sqlite
+        .prepare("UPDATE workspaceResource SET retentionPolicy = 'legacy_disposable' WHERE id = ?")
+        .run(created.resource.id);
       expect(
         value.repository.requestCleanup(
           "user-1",
@@ -761,19 +1050,20 @@ describe("durable disposable workspace lifecycle", () => {
     }
   });
 
-  test("cleans every exact resource before connection revocation may continue", async () => {
+  test("stops every persistent workspace before connection revocation may continue", async () => {
     const value = fixture({ maxOperationsPerDay: 10 });
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       await value.createService().cleanupBeforeDisconnect("user-1");
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("deleted");
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stopped");
+      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }
   });
 
-  test("a kill switch recovers and deletes an accepted create whose response was lost", async () => {
+  test("a kill switch recovers and stops an accepted create whose response was lost", async () => {
     const value = fixture();
     try {
       value.provider.loseCreateResponse = true;
@@ -790,27 +1080,28 @@ describe("durable disposable workspace lifecycle", () => {
 
       await value.service.reconcileOnce("user-1");
       expect(value.repository.getOwned("user-1", result.resource.id)).toMatchObject({
-        state: "deleted",
+        state: "stopped",
         providerResourceName: "silver-space-123",
       });
       expect(value.provider.createCalls).toHaveBeenCalledTimes(1);
-      expect(value.provider.deleteCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.stopCalls).toHaveBeenCalledTimes(1);
+      expect(value.provider.deleteCalls).not.toHaveBeenCalled();
     } finally {
       value.sqlite.close();
     }
   });
 
-  test("refuses to delete an exact name whose immutable identity no longer matches", async () => {
+  test("refuses to stop an exact name whose immutable identity no longer matches", async () => {
     const value = fixture();
     try {
       const created = await value.service.create("user-1", "301", "refs/heads/main");
       value.provider.resource = { ...value.provider.resource!, ownerId: "999" };
-      await value.service.release("user-1", created.resource.id, created.lifecycleCapability);
+      await expect(
+        value.service.stopWorkspace("user-1", created.resource.id),
+      ).rejects.toMatchObject({ code: "WORKSPACE_RESOURCE_INVALID" });
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
       expect(value.provider.deleteCalls).not.toHaveBeenCalled();
-      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe(
-        "cleanup_pending",
-      );
+      expect(value.repository.getOwned("user-1", created.resource.id)?.state).toBe("stop_pending");
     } finally {
       value.sqlite.close();
     }
@@ -870,13 +1161,15 @@ describe("durable disposable workspace lifecycle", () => {
     const value = fixture();
     try {
       value.provider.returnedState = "provisioning";
-      await expect(value.service.create("user-1", "301", "refs/heads/main")).resolves.toMatchObject({
-        resource: {
-          state: "create_submitted",
-          providerResourceName: "silver-space-123",
-          lastOutcome: "provisioning",
+      await expect(value.service.create("user-1", "301", "refs/heads/main")).resolves.toMatchObject(
+        {
+          resource: {
+            state: "create_submitted",
+            providerResourceName: "silver-space-123",
+            lastOutcome: "provisioning",
+          },
         },
-      });
+      );
       expect(value.provider.connectorCalls).not.toHaveBeenCalled();
       expect(value.provider.stopCalls).not.toHaveBeenCalled();
       expect(value.provider.deleteCalls).not.toHaveBeenCalled();

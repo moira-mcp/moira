@@ -147,19 +147,12 @@ export class WorkspaceConnectionRepository {
         this.sqlite
           .prepare(
             `UPDATE workspaceConnection
-             SET externalAccountId = ?, externalLogin = ?, status = 'connecting',
+             SET status = 'connecting',
                  lastErrorCode = NULL, refreshLeaseId = NULL, refreshLeaseExpiresAt = NULL,
                  updatedAt = ?
              WHERE id = ? AND userId = ? AND provider = ?`,
           )
-          .run(
-            input.externalAccountId,
-            input.externalLogin,
-            input.now,
-            id,
-            input.userId,
-            input.provider,
-          );
+          .run(input.now, id, input.userId, input.provider);
       } else {
         this.sqlite
           .prepare(
@@ -186,8 +179,12 @@ export class WorkspaceConnectionRepository {
   completeConnection(input: ConnectedWorkspaceInput): void {
     const tx = this.sqlite.transaction(() => {
       const owned = this.sqlite
-        .prepare("SELECT id FROM workspaceConnection WHERE id = ? AND userId = ? AND provider = ?")
-        .get(input.connectionId, input.userId, input.provider);
+        .prepare(
+          `SELECT id, externalAccountId, credentialGeneration FROM workspaceConnection
+           WHERE id = ? AND userId = ? AND provider = ?`,
+        )
+        .get(input.connectionId, input.userId, input.provider) as
+        { id: string; externalAccountId: string; credentialGeneration: number } | undefined;
       if (!owned) throw new Error("Workspace connection is not owned by user");
 
       this.sqlite
@@ -461,13 +458,7 @@ export class WorkspaceConnectionRepository {
          WHERE id = ? AND userId = ? AND status = 'connected'
            AND credentialGeneration = ? AND refreshLeaseId = ?`,
       )
-      .run(
-        input.now,
-        input.connectionId,
-        input.userId,
-        input.expectedGeneration,
-        input.leaseId,
-      );
+      .run(input.now, input.connectionId, input.userId, input.expectedGeneration, input.leaseId);
     return result.changes === 1;
   }
 
@@ -543,6 +534,35 @@ export class WorkspaceConnectionRepository {
       if (vaultResult.changes !== 1) {
         throw new Error("Workspace credential generation changed during refresh");
       }
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET authorizationGeneration = ?, updatedAt = ?
+           WHERE connectionId = ? AND userId = ? AND authorizationGeneration = ?
+             AND state NOT IN ('deleted', 'rejected')`,
+        )
+        .run(
+          input.envelope.generation,
+          input.now,
+          input.connectionId,
+          input.userId,
+          input.expectedGeneration,
+        );
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceOperation SET authorizationGeneration = ?, updatedAt = ?
+           WHERE userId = ? AND authorizationGeneration = ?
+             AND resourceId IN (SELECT id FROM workspaceResource WHERE connectionId = ?)
+             AND (state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
+               OR (remoteCleanupPending = 1
+                 AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')))`,
+        )
+        .run(
+          input.envelope.generation,
+          input.now,
+          input.userId,
+          input.expectedGeneration,
+          input.connectionId,
+        );
       return true;
     });
     return tx();

@@ -33,6 +33,7 @@ export {
   digestWorkspaceCapability,
   type ReserveWorkspaceResult,
 } from "../workspaces/resource-repository.js";
+export { WorkspaceOperationRepository } from "../workspaces/operation-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {
   WorkflowReconciliationRepository,

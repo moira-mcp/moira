@@ -12,6 +12,10 @@ const ACTIVE_STATES = [
   "create_pending",
   "create_submitted",
   "usable",
+  "start_pending",
+  "stop_pending",
+  "stopped",
+  "delete_pending",
   "cleanup_pending",
   "ambiguous",
 ] as const;
@@ -170,7 +174,9 @@ export class WorkspaceResourceRepository {
         .prepare(
           `SELECT c.id FROM workspaceConnection c
            WHERE c.userId = ? AND c.provider = ? AND c.status = 'connected'
-             AND c.externalAccountId = ? AND c.id = ? AND c.credentialGeneration = ?`,
+             AND c.externalAccountId = ? AND c.id = ? AND c.credentialGeneration = ?
+             AND EXISTS (SELECT 1 FROM workspaceConnectionRepository grantRow
+               WHERE grantRow.connectionId = c.id AND grantRow.externalRepositoryId = ?)`,
         )
         .get(
           input.userId,
@@ -178,8 +184,8 @@ export class WorkspaceResourceRepository {
           input.externalAccountId,
           input.connectionId,
           input.authorizationGeneration,
-        ) as
-        { id: string } | undefined;
+          input.repository.id,
+        ) as { id: string } | undefined;
       if (!connection) {
         return { outcome: "not_approved", reason: "Repository is not approved" } as const;
       }
@@ -233,16 +239,19 @@ export class WorkspaceResourceRepository {
       this.sqlite
         .prepare(
           `INSERT INTO workspaceResource
-           (id, userId, connectionId, provider, repositoryId, repositoryFullName,
+           (id, userId, connectionId, authorizationGeneration, provider, repositoryId, repositoryFullName,
             requestedRef, operationMarker, machineName, machineDisplayName,
             machineOperatingSystem, machineCpuCores, machineMemoryBytes, machineStorageBytes,
-            state, generation, createDeadlineAt, remoteExpiresAt, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'create_pending', 1, ?, ?, ?, ?)`,
+            state, retentionPolicy, desiredState, observedState, generation,
+            createDeadlineAt, remoteExpiresAt, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            'create_pending', 'persistent', 'running', 'provisioning', 1, ?, ?, ?, ?)`,
         )
         .run(
           id,
           input.userId,
           connection.id,
+          input.authorizationGeneration,
           input.provider,
           input.repository.id,
           input.repository.fullName,
@@ -304,6 +313,23 @@ export class WorkspaceResourceRepository {
     return row ? mapRow(row) : null;
   }
 
+  hasCurrentAuthorization(userId: string, resourceId: string): boolean {
+    return Boolean(
+      this.sqlite
+        .prepare(
+          `SELECT 1 FROM workspaceResource r
+           JOIN workspaceConnection c ON c.id = r.connectionId
+           JOIN workspaceConnectionRepository grantRow
+             ON grantRow.connectionId = c.id AND grantRow.externalRepositoryId = r.repositoryId
+           WHERE r.id = ? AND r.userId = ? AND c.userId = r.userId
+             AND c.provider = r.provider AND c.status = 'connected'
+             AND (r.externalOwnerId IS NULL OR c.externalAccountId = r.externalOwnerId)
+             AND c.credentialGeneration = r.authorizationGeneration`,
+        )
+        .get(resourceId, userId),
+    );
+  }
+
   getByCapability(userId: string, capability: string): WorkspaceResourceRecord | null {
     const row = this.sqlite
       .prepare(
@@ -322,6 +348,100 @@ export class WorkspaceResourceRepository {
         )
         .all(userId, provider) as ResourceRow[]
     ).map(mapRow);
+  }
+
+  listAuthorizationRebindCandidates(
+    userId: string,
+    provider: string,
+  ): Array<{ resource: WorkspaceResourceRecord; authorizationGeneration: number }> {
+    const rows = this.sqlite
+      .prepare(
+        `SELECT r.*, c.credentialGeneration currentAuthorizationGeneration
+         FROM workspaceResource r
+         JOIN workspaceConnection c ON c.id = r.connectionId
+         JOIN workspaceConnectionRepository grantRow
+           ON grantRow.connectionId = c.id AND grantRow.externalRepositoryId = r.repositoryId
+         WHERE r.userId = ? AND r.provider = ? AND c.userId = r.userId
+           AND c.provider = r.provider AND c.status = 'connected'
+           AND c.externalAccountId = r.externalOwnerId
+           AND c.credentialGeneration != r.authorizationGeneration
+           AND r.state NOT IN ('deleted', 'rejected')`,
+      )
+      .all(userId, provider) as Array<ResourceRow & { currentAuthorizationGeneration: number }>;
+    return rows.map(({ currentAuthorizationGeneration, ...row }) => ({
+      resource: mapRow(row),
+      authorizationGeneration: currentAuthorizationGeneration,
+    }));
+  }
+
+  nextAuthorizationRebindUser(provider: string, userId?: string): string | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT r.userId FROM workspaceResource r
+         JOIN workspaceConnection c ON c.id = r.connectionId
+         JOIN workspaceConnectionRepository grantRow
+           ON grantRow.connectionId = c.id AND grantRow.externalRepositoryId = r.repositoryId
+         WHERE r.provider = ? AND (? IS NULL OR r.userId = ?)
+           AND c.userId = r.userId AND c.provider = r.provider AND c.status = 'connected'
+           AND c.externalAccountId = r.externalOwnerId
+           AND c.credentialGeneration != r.authorizationGeneration
+           AND r.state NOT IN ('deleted', 'rejected')
+         ORDER BY r.updatedAt, r.id LIMIT 1`,
+      )
+      .get(provider, userId ?? null, userId ?? null) as { userId: string } | undefined;
+    return row?.userId ?? null;
+  }
+
+  rebindAuthorization(input: {
+    userId: string;
+    resourceId: string;
+    resourceGeneration: number;
+    expectedAuthorizationGeneration: number;
+    authorizationGeneration: number;
+    now: number;
+  }): boolean {
+    const transaction = this.sqlite.transaction(() => {
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET authorizationGeneration = ?,
+           lastOutcome = 'authorization_reverified', updatedAt = ?
+           WHERE id = ? AND userId = ? AND generation = ? AND authorizationGeneration = ?
+             AND EXISTS (SELECT 1 FROM workspaceConnection c
+               JOIN workspaceConnectionRepository grantRow ON grantRow.connectionId = c.id
+               WHERE c.id = workspaceResource.connectionId AND c.userId = workspaceResource.userId
+                 AND c.provider = workspaceResource.provider AND c.status = 'connected'
+                 AND c.externalAccountId = workspaceResource.externalOwnerId
+                 AND c.credentialGeneration = ?
+                 AND grantRow.externalRepositoryId = workspaceResource.repositoryId)`,
+        )
+        .run(
+          input.authorizationGeneration,
+          input.now,
+          input.resourceId,
+          input.userId,
+          input.resourceGeneration,
+          input.expectedAuthorizationGeneration,
+          input.authorizationGeneration,
+        ).changes;
+      if (changed !== 1) return false;
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceOperation SET authorizationGeneration = ?, updatedAt = ?
+           WHERE resourceId = ? AND userId = ? AND authorizationGeneration = ?
+             AND (state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
+               OR (remoteCleanupPending = 1
+                 AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')))`,
+        )
+        .run(
+          input.authorizationGeneration,
+          input.now,
+          input.resourceId,
+          input.userId,
+          input.expectedAuthorizationGeneration,
+        );
+      return true;
+    });
+    return transaction.immediate();
   }
 
   markSubmitted(input: {
@@ -375,7 +495,8 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = 'rejected', generation = generation + 1,
+          `UPDATE workspaceResource SET state = 'rejected', desiredState = 'deleted',
+           observedState = 'absent', generation = generation + 1,
            lastOutcome = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND generation = ? AND claimId = ? AND state = 'create_submitted'`,
         )
@@ -394,7 +515,8 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = ?, generation = generation + 1,
+          `UPDATE workspaceResource SET state = ?, desiredState = 'deleted',
+         observedState = 'absent', generation = generation + 1,
          lastOutcome = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND state = ?`,
         )
@@ -418,7 +540,8 @@ export class WorkspaceResourceRepository {
       this.sqlite
         .prepare(
           `UPDATE workspaceResource SET providerResourceName = ?, externalOwnerId = ?,
-         billableOwnerId = ?, state = ?, generation = generation + 1, lastOutcome = ?,
+         billableOwnerId = ?, state = ?, desiredState = ?, observedState = ?,
+         generation = generation + 1, lastOutcome = ?,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND state = 'create_submitted'`,
         )
@@ -427,6 +550,8 @@ export class WorkspaceResourceRepository {
           input.ownerId,
           input.billableOwnerId,
           input.state,
+          input.state === "usable" ? "running" : "deleted",
+          input.state === "usable" ? "running" : "failed",
           input.outcome,
           input.cleanupDeadlineAt ?? null,
           input.now,
@@ -508,7 +633,8 @@ export class WorkspaceResourceRepository {
         .prepare(
           `UPDATE workspaceResource SET providerResourceName = ?, externalOwnerId = ?,
            billableOwnerId = ?, lastOutcome = 'create_returned_during_cleanup', updatedAt = ?
-           WHERE id = ? AND state = 'cleanup_pending' AND providerResourceName IS NULL`,
+           WHERE id = ? AND state IN ('cleanup_pending', 'stop_pending', 'delete_pending')
+             AND providerResourceName IS NULL`,
         )
         .run(input.resourceName, input.ownerId, input.billableOwnerId, input.now, input.resourceId)
         .changes === 1
@@ -537,7 +663,8 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = 'cleanup_pending', generation = generation + 1,
+          `UPDATE workspaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
+         generation = generation + 1,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND userId = ? AND state NOT IN ('deleted', 'rejected')
            AND EXISTS (SELECT 1 FROM workspaceLifecycleCapability c
@@ -557,12 +684,381 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = 'cleanup_pending', generation = generation + 1,
+          `UPDATE workspaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
+         generation = generation + 1,
          cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND state = 'usable'`,
         )
         .run(deadlineAt, now, resourceId, generation).changes === 1
     );
+  }
+
+  requestStart(
+    userId: string,
+    resourceId: string,
+    policy: WorkspaceResourcePolicy,
+    now: number,
+  ): WorkspaceResourceRecord | "disabled" | "limit" | null {
+    const transaction = this.sqlite.transaction(() => {
+      const current = this.getOwned(userId, resourceId);
+      if (
+        !current ||
+        current.retentionPolicy !== "persistent" ||
+        ["deleted", "rejected", "delete_pending"].includes(current.state)
+      ) {
+        return null;
+      }
+      if (
+        current.desiredState === "running" &&
+        ["create_pending", "create_submitted", "usable", "start_pending"].includes(current.state)
+      ) {
+        return current;
+      }
+      if (!current.providerResourceName) return null;
+      if (this.isDisabled(current.provider)) return "disabled";
+      const usage = this.sqlite
+        .prepare(
+          `SELECT submittedOperations FROM workspacePolicyUsage
+           WHERE userId = ? AND provider = ? AND utcDay = ?`,
+        )
+        .get(userId, current.provider, utcDay(now)) as { submittedOperations: number } | undefined;
+      if ((usage?.submittedOperations ?? 0) >= policy.maxOperationsPerDay) return "limit";
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET desiredState = 'running', state = 'start_pending',
+           generation = generation + 1, lastOutcome = 'start_requested', claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ? WHERE id = ? AND userId = ? AND generation = ?`,
+        )
+        .run(now, resourceId, userId, current.generation).changes;
+      if (changed !== 1) return null;
+      this.recordLifecycleMutation(
+        resourceId,
+        userId,
+        current.provider,
+        current.generation + 1,
+        "start",
+        now,
+      );
+      return this.requireById(resourceId);
+    });
+    return transaction.immediate();
+  }
+
+  requestStop(userId: string, resourceId: string, now: number): WorkspaceResourceRecord | null {
+    const transaction = this.sqlite.transaction(() => {
+      const current = this.getOwned(userId, resourceId);
+      if (
+        !current ||
+        current.retentionPolicy !== "persistent" ||
+        ["deleted", "rejected", "delete_pending"].includes(current.state)
+      ) {
+        return null;
+      }
+      if (
+        current.desiredState === "stopped" &&
+        ["stop_pending", "stopped"].includes(current.state)
+      ) {
+        return current;
+      }
+      if (current.state === "create_pending") {
+        const cancelled = this.sqlite
+          .prepare(
+            `UPDATE workspaceResource SET desiredState = 'deleted', observedState = 'absent',
+             state = 'deleted', generation = generation + 1,
+             lastOutcome = 'stop_before_submission', updatedAt = ?
+             WHERE id = ? AND userId = ? AND generation = ? AND state = 'create_pending'`,
+          )
+          .run(now, resourceId, userId, current.generation).changes;
+        if (cancelled !== 1) return null;
+        this.recordLifecycleMutation(
+          resourceId,
+          userId,
+          current.provider,
+          current.generation + 1,
+          "stop",
+          now,
+        );
+        return this.requireById(resourceId);
+      }
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET desiredState = 'stopped', state = 'stop_pending',
+           generation = generation + 1, lastOutcome = 'stop_requested', claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ? WHERE id = ? AND userId = ? AND generation = ?`,
+        )
+        .run(now, resourceId, userId, current.generation).changes;
+      if (changed !== 1) return null;
+      this.cancelOperationsForGeneration(
+        resourceId,
+        current.generation + 1,
+        now,
+        "workspace_stop_requested",
+      );
+      this.recordLifecycleMutation(
+        resourceId,
+        userId,
+        current.provider,
+        current.generation + 1,
+        "stop",
+        now,
+      );
+      return this.requireById(resourceId);
+    });
+    return transaction.immediate();
+  }
+
+  requestDelete(
+    userId: string,
+    resourceId: string,
+    expectedGeneration: number,
+    now: number,
+  ): WorkspaceResourceRecord | "conflict" | null {
+    const transaction = this.sqlite.transaction(() => {
+      const current = this.getOwned(userId, resourceId);
+      if (!current || ["deleted", "rejected"].includes(current.state)) return null;
+      if (current.generation !== expectedGeneration) return "conflict";
+      if (current.desiredState === "deleted" && current.state === "delete_pending") return current;
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET desiredState = 'deleted', state = 'delete_pending',
+           generation = generation + 1, lastOutcome = 'delete_requested', claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ? WHERE id = ? AND userId = ? AND generation = ?`,
+        )
+        .run(now, resourceId, userId, current.generation).changes;
+      if (changed !== 1) return null;
+      this.cancelOperationsForGeneration(
+        resourceId,
+        current.generation + 1,
+        now,
+        "workspace_delete_requested",
+      );
+      this.recordLifecycleMutation(
+        resourceId,
+        userId,
+        current.provider,
+        current.generation + 1,
+        "delete",
+        now,
+      );
+      return this.requireById(resourceId);
+    });
+    return transaction.immediate();
+  }
+
+  completeLifecycle(input: {
+    resourceId: string;
+    generation: number;
+    desiredState: "running" | "stopped" | "deleted";
+    observedState: "running" | "stopped" | "absent";
+    state: "usable" | "stopped" | "deleted";
+    outcome: string;
+    now: number;
+  }): boolean {
+    const transaction = this.sqlite.transaction(() => {
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET state = ?, observedState = ?, lastOutcome = ?,
+           claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+           WHERE id = ? AND generation = ? AND desiredState = ?`,
+        )
+        .run(
+          input.state,
+          input.observedState,
+          input.outcome,
+          input.now,
+          input.resourceId,
+          input.generation,
+          input.desiredState,
+        ).changes;
+      if (changed !== 1) return false;
+      if (input.desiredState !== "running") {
+        this.sqlite
+          .prepare(
+            `UPDATE workspaceOperation SET state = 'cancelled',
+             lastOutcome = 'exact_workspace_stopped', claimId = NULL,
+             claimExpiresAt = NULL, updatedAt = ? WHERE resourceId = ?
+             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
+          )
+          .run(input.now, input.resourceId);
+        if (input.desiredState === "deleted") {
+          this.sqlite
+            .prepare(
+              `UPDATE workspaceOperation SET remoteCleanupPending = 0, updatedAt = ?
+               WHERE resourceId = ? AND remoteCleanupPending = 1`,
+            )
+            .run(input.now, input.resourceId);
+        }
+      }
+      return true;
+    });
+    return transaction.immediate();
+  }
+
+  completeAbsentPersistentLifecycle(
+    resourceId: string,
+    generation: number,
+    desiredState: "running" | "stopped",
+    outcome: string,
+    now: number,
+  ): boolean {
+    const transaction = this.sqlite.transaction(() => {
+      const changed = this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET state = 'deleted', desiredState = 'deleted',
+           observedState = 'absent', lastOutcome = ?, claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ?
+           WHERE id = ? AND generation = ? AND desiredState = ?
+             AND retentionPolicy = 'persistent'`,
+        )
+        .run(outcome, now, resourceId, generation, desiredState).changes;
+      if (changed !== 1) return false;
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceOperation SET state = 'cancelled', remoteCleanupPending = 0,
+           lastOutcome = 'exact_workspace_absent', claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ? WHERE resourceId = ?
+             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
+        )
+        .run(now, resourceId);
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceOperation SET remoteCleanupPending = 0, updatedAt = ?
+           WHERE resourceId = ? AND remoteCleanupPending = 1`,
+        )
+        .run(now, resourceId);
+      return true;
+    });
+    return transaction.immediate();
+  }
+
+  markLifecyclePending(
+    resourceId: string,
+    generation: number,
+    outcome: string,
+    observedState: WorkspaceResourceRecord["observedState"],
+    now: number,
+  ): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET observedState = ?, lastOutcome = ?, claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ?
+           WHERE id = ? AND generation = ?`,
+        )
+        .run(observedState, outcome, now, resourceId, generation).changes === 1
+    );
+  }
+
+  bindLifecycleIdentity(input: {
+    resourceId: string;
+    generation: number;
+    resourceName: string;
+    ownerId: string;
+    billableOwnerId: string;
+    now: number;
+  }): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceResource SET providerResourceName = ?, externalOwnerId = ?,
+           billableOwnerId = ?, lastOutcome = 'lifecycle_resource_discovered', updatedAt = ?
+           WHERE id = ? AND generation = ? AND providerResourceName IS NULL`,
+        )
+        .run(
+          input.resourceName,
+          input.ownerId,
+          input.billableOwnerId,
+          input.now,
+          input.resourceId,
+          input.generation,
+        ).changes === 1
+    );
+  }
+
+  requestPersistentStopsForUser(userId: string, provider: string, now: number): number {
+    const transaction = this.sqlite.transaction(() => {
+      const rows = this.sqlite
+        .prepare(
+          `SELECT id, generation, provider FROM workspaceResource WHERE userId = ? AND provider = ?
+           AND retentionPolicy = 'persistent'
+           AND state IN ('create_submitted', 'usable', 'ambiguous', 'start_pending')`,
+        )
+        .all(userId, provider) as Array<{ id: string; generation: number; provider: string }>;
+      let changed = 0;
+      for (const row of rows) {
+        const result = this.sqlite
+          .prepare(
+            `UPDATE workspaceResource SET desiredState = 'stopped', state = 'stop_pending',
+             generation = generation + 1, lastOutcome = 'disconnect_stop_requested',
+             claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+             WHERE id = ? AND generation = ?`,
+          )
+          .run(now, row.id, row.generation);
+        if (result.changes === 1) {
+          changed++;
+          this.cancelOperationsForGeneration(
+            row.id,
+            row.generation + 1,
+            now,
+            "disconnect_stop_requested",
+          );
+          this.recordLifecycleMutation(
+            row.id,
+            userId,
+            row.provider,
+            row.generation + 1,
+            "stop",
+            now,
+            true,
+          );
+        }
+      }
+      return changed;
+    });
+    return transaction.immediate();
+  }
+
+  private recordLifecycleMutation(
+    resourceId: string,
+    userId: string,
+    provider: string,
+    generation: number,
+    kind: "start" | "stop" | "delete",
+    now: number,
+    required = false,
+  ): void {
+    this.sqlite
+      .prepare(
+        `INSERT INTO workspaceProviderMutation
+         (id, resourceId, userId, provider, generation, kind, attempt, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      )
+      .run(randomUUID(), resourceId, userId, provider, generation, kind, now);
+    this.sqlite
+      .prepare(
+        `INSERT INTO workspacePolicyUsage
+         (userId, provider, utcDay, submittedOperations, requiredCleanupOperations, updatedAt)
+         VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(userId, provider, utcDay) DO UPDATE SET
+         submittedOperations = submittedOperations + 1,
+         requiredCleanupOperations = requiredCleanupOperations + excluded.requiredCleanupOperations,
+         updatedAt = excluded.updatedAt`,
+      )
+      .run(userId, provider, utcDay(now), required ? 1 : 0, now);
+  }
+
+  private cancelOperationsForGeneration(
+    resourceId: string,
+    newGeneration: number,
+    now: number,
+    outcome: string,
+  ): void {
+    this.sqlite
+      .prepare(
+        `UPDATE workspaceOperation SET state = 'cancel_pending', lastOutcome = ?, updatedAt = ?
+         WHERE resourceId = ? AND resourceGeneration < ?
+           AND state IN ('reserved', 'running', 'reconcile_pending')`,
+      )
+      .run(outcome, now, resourceId, newGeneration);
   }
 
   requestAllCleanupForUser(
@@ -575,7 +1071,8 @@ export class WorkspaceResourceRepository {
       .transaction(() => {
         this.sqlite
           .prepare(
-            `UPDATE workspaceResource SET state = 'rejected', generation = generation + 1,
+            `UPDATE workspaceResource SET state = 'rejected', desiredState = 'deleted',
+           observedState = 'absent', generation = generation + 1,
            lastOutcome = 'disconnect_before_submission', claimId = NULL,
            claimExpiresAt = NULL, updatedAt = ?
            WHERE userId = ? AND provider = ? AND state = 'create_pending'`,
@@ -583,9 +1080,11 @@ export class WorkspaceResourceRepository {
           .run(now, userId, provider);
         return this.sqlite
           .prepare(
-            `UPDATE workspaceResource SET state = 'cleanup_pending', generation = generation + 1,
+            `UPDATE workspaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
+           generation = generation + 1,
            cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE userId = ? AND provider = ?
+             AND retentionPolicy = 'legacy_disposable'
              AND state IN ('create_submitted', 'usable', 'ambiguous')`,
           )
           .run(deadlineAt, now, userId, provider).changes;
@@ -603,11 +1102,14 @@ export class WorkspaceResourceRepository {
       const row = this.sqlite
         .prepare(
           `SELECT id, generation FROM workspaceResource
-           WHERE state IN ('create_pending', 'create_submitted', 'cleanup_pending', 'ambiguous', 'usable')
+           WHERE state IN ('create_pending', 'create_submitted', 'cleanup_pending', 'ambiguous',
+                           'usable', 'start_pending', 'stop_pending', 'delete_pending')
              AND (? IS NULL OR userId = ?)
              AND (claimExpiresAt IS NULL OR claimExpiresAt <= ?)
-             AND (state != 'usable' OR remoteExpiresAt <= ?)
-           ORDER BY CASE state WHEN 'cleanup_pending' THEN 0 WHEN 'ambiguous' THEN 1 ELSE 2 END,
+             AND (state != 'usable' OR retentionPolicy != 'persistent' AND remoteExpiresAt <= ?)
+           ORDER BY CASE state
+             WHEN 'delete_pending' THEN 0 WHEN 'stop_pending' THEN 1 WHEN 'cleanup_pending' THEN 2
+             WHEN 'start_pending' THEN 3 WHEN 'ambiguous' THEN 4 ELSE 5 END,
                     updatedAt LIMIT 1`,
         )
         .get(userId ?? null, userId ?? null, now, now) as
@@ -701,7 +1203,8 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = 'deleted', generation = generation + 1,
+          `UPDATE workspaceResource SET state = 'deleted', desiredState = 'deleted',
+         observedState = 'absent', generation = generation + 1,
          lastOutcome = 'verified_absent', claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND providerResourceName IS NOT NULL`,
         )
@@ -718,7 +1221,8 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = 'deleted', generation = generation + 1,
+          `UPDATE workspaceResource SET state = 'deleted', desiredState = 'deleted',
+           observedState = 'absent', generation = generation + 1,
            lastOutcome = 'verified_never_created', claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
            WHERE id = ? AND generation = ? AND claimId = ? AND state = 'cleanup_pending'
              AND providerResourceName IS NULL`,
@@ -731,7 +1235,8 @@ export class WorkspaceResourceRepository {
     return (
       this.sqlite
         .prepare(
-          `UPDATE workspaceResource SET state = 'rejected', generation = generation + 1,
+          `UPDATE workspaceResource SET state = 'rejected', desiredState = 'deleted',
+         observedState = 'absent', generation = generation + 1,
          lastOutcome = 'submission_not_started', claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
          WHERE id = ? AND generation = ? AND claimId = ? AND state = 'create_pending'`,
         )
@@ -761,34 +1266,86 @@ export class WorkspaceResourceRepository {
       const pending = provider
         ? this.sqlite
             .prepare(
-              `UPDATE workspaceResource SET state = 'rejected', generation = generation + 1,
+              `UPDATE workspaceResource SET state = 'rejected', desiredState = 'deleted',
+               observedState = 'absent', generation = generation + 1,
                lastOutcome = 'provider_disabled_before_submission', updatedAt = ?
                WHERE provider = ? AND state = 'create_pending'`,
             )
             .run(input.now, provider)
         : this.sqlite
             .prepare(
-              `UPDATE workspaceResource SET state = 'rejected', generation = generation + 1,
+              `UPDATE workspaceResource SET state = 'rejected', desiredState = 'deleted',
+               observedState = 'absent', generation = generation + 1,
                lastOutcome = 'provider_disabled_before_submission', updatedAt = ?
                WHERE state = 'create_pending'`,
             )
             .run(input.now);
+      const persistentRows = (
+        provider
+          ? this.sqlite
+              .prepare(
+                `SELECT id, generation, userId, provider FROM workspaceResource WHERE provider = ?
+               AND retentionPolicy = 'persistent'
+               AND state IN ('create_submitted', 'usable', 'ambiguous', 'start_pending')`,
+              )
+              .all(provider)
+          : this.sqlite
+              .prepare(
+                `SELECT id, generation, userId, provider FROM workspaceResource
+               WHERE retentionPolicy = 'persistent'
+               AND state IN ('create_submitted', 'usable', 'ambiguous', 'start_pending')`,
+              )
+              .all()
+      ) as Array<{ id: string; generation: number; userId: string; provider: string }>;
+      let persistentChanged = 0;
+      for (const row of persistentRows) {
+        const stopped = this.sqlite
+          .prepare(
+            `UPDATE workspaceResource SET desiredState = 'stopped', state = 'stop_pending',
+             generation = generation + 1, lastOutcome = 'provider_disabled_stop_requested',
+             claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
+             WHERE id = ? AND generation = ?`,
+          )
+          .run(input.now, row.id, row.generation);
+        if (stopped.changes === 1) {
+          persistentChanged++;
+          this.cancelOperationsForGeneration(
+            row.id,
+            row.generation + 1,
+            input.now,
+            "provider_disabled_stop_requested",
+          );
+          this.recordLifecycleMutation(
+            row.id,
+            row.userId,
+            row.provider,
+            row.generation + 1,
+            "stop",
+            input.now,
+            true,
+          );
+        }
+      }
       const result = provider
         ? this.sqlite
             .prepare(
-              `UPDATE workspaceResource SET state = 'cleanup_pending', generation = generation + 1,
+              `UPDATE workspaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
+             generation = generation + 1,
              cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
-             WHERE provider = ? AND state IN ('create_submitted', 'usable', 'ambiguous')`,
+             WHERE provider = ? AND retentionPolicy = 'legacy_disposable'
+               AND state IN ('create_submitted', 'usable', 'ambiguous')`,
             )
             .run(input.cleanupDeadlineAt, input.now, provider)
         : this.sqlite
             .prepare(
-              `UPDATE workspaceResource SET state = 'cleanup_pending', generation = generation + 1,
+              `UPDATE workspaceResource SET state = 'cleanup_pending', desiredState = 'deleted',
+             generation = generation + 1,
              cleanupDeadlineAt = ?, claimId = NULL, claimExpiresAt = NULL, updatedAt = ?
-             WHERE state IN ('create_submitted', 'usable', 'ambiguous')`,
+             WHERE retentionPolicy = 'legacy_disposable'
+               AND state IN ('create_submitted', 'usable', 'ambiguous')`,
             )
             .run(input.cleanupDeadlineAt, input.now);
-      return pending.changes + result.changes;
+      return pending.changes + persistentChanged + result.changes;
     });
     return transaction.immediate();
   }
