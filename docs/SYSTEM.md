@@ -44,6 +44,23 @@ an immediate transaction, records a fingerprint of `input` plus `teleportTo`, an
 with a monotonically increasing token. The worker opens one lease handle with an immediate
 compare-and-set renewal; a five-second heartbeat then renews the 30-second lease.
 
+Materialize and progress-image grants bind context-derived content to an independent context
+revision as well as their execution/node or workflow-step constraints. Metadata changes therefore
+do not masquerade as step transitions, while a URL cannot render different context after issuance.
+
+The execution revision is the workflow-step generation. It advances only when an original `step`
+persists workflow state; receipt replay and session mutations such as note, parent, reminder, or
+runtime-variable changes do not advance it or invalidate the presented attempt. Those mutations
+guard the field or stored snapshot they actually change with independent opaque parent, context,
+and reminder revisions returned by the corresponding read and mutation surfaces.
+
+For a paused execution with no persisted Step attempt, `current_step` atomically installs one without
+executing the node. A presented attempt whose node and workflow bindings still match can be rebound
+from an obsolete revision and returned as the authoritative current attempt. Executing,
+`outcome_unknown`, node-stale, and workflow-stale attempts are not rebound. `current_step` reports a
+node- or workflow-stale live presentation as `CURRENT_PRESENTATION_STALE` and never recommends its
+unusable attempt ID.
+
 For an executing prepared Start, that handle opens immediately after the atomic claim and before
 lifecycle metrics, audit, execution reads, or graph work. The same handle remains active through
 attempt finalization and is passed into the executor rather than replaced by a second timer.
@@ -55,7 +72,9 @@ transaction. Replaying the same attempt with the same fingerprint returns the ex
 a different fingerprint, user, execution state, or stale presentation is rejected. Concurrent
 duplicates wait up to ten seconds for the first owner's receipt and otherwise return
 `ATTEMPT_PROCESSING`. If ownership or durable outcome cannot be proven, the attempt becomes
-`outcome_unknown` and is never automatically executed again.
+`outcome_unknown` and is never automatically executed again. `ATTEMPT_STALE` is rejected before
+handler work and directs the caller to refresh `current_step` automatically; it does not require a
+human recovery decision.
 
 Startup and recurring maintenance fence expired executing attempts every ten seconds. Completed
 receipts remain available for seven days, with at most 1,000 retained per execution, and cleanup runs
@@ -332,10 +351,11 @@ start({ action: "execute", startAttemptId: preparedChild.startAttemptId });
 
 The parent must be a running execution owned by the authenticated user. A running execution can
 attach, replace, or detach (`parentExecutionId: "none"`) its parent with
-`session({ action: "set-parent", executionId, parentExecutionId, expectedRevision })`. The guarded
-operation rejects stale revisions, cross-owner links, completed new parents, and ancestry cycles;
-repeating the current value is an idempotent no-op. Parent linkage carries continuation only, not
-variables or authority.
+`session({ action: "set-parent", executionId, parentExecutionId, expectedRevision,
+expectedParentRevision })`. Read both revisions from `execution_context`; a successful mutation
+returns the next `parentRevision`. The guarded operation rejects a stale step generation or parent
+snapshot, cross-owner links, completed new parents, and ancestry cycles; repeating the current value
+is an idempotent no-op. Parent linkage carries continuation only, not variables or authority.
 
 When child workflow completes, response includes continuation reminder:
 

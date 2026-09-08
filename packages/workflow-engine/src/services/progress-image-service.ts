@@ -1,4 +1,10 @@
-import { getBaseUrl, TokenManager, ValidationError, type WorkflowToken } from "@mcp-moira/shared";
+import {
+  getBaseUrl,
+  metadataRevision,
+  TokenManager,
+  ValidationError,
+  type WorkflowToken,
+} from "@mcp-moira/shared";
 import type { IDataRepository } from "../interfaces/data-repository.js";
 import {
   normalizeProgressVisualOptions,
@@ -14,6 +20,7 @@ export interface ProgressImageGrant {
   options: Required<ProgressVisualOptions>;
   workflowVersion: string;
   executionRevision: number;
+  contextRevision: string;
 }
 
 export interface ProgressImageTokenStore {
@@ -52,13 +59,17 @@ export class ProgressImageService {
     const normalized = normalizeProgressVisualOptions(options);
     const ttlMs = TokenManager.PROGRESS_IMAGE_TTL_MS;
     const issuedAt = Date.now();
+    const contextRevision = metadataRevision(execution.globalContext);
     const token = this.tokens.createProgressImageToken(
       execution.executionId,
       execution.workflowId,
       execution.userId,
       graph.metadata.version,
       execution.revision,
-      JSON.stringify(normalized),
+      JSON.stringify({
+        options: normalized,
+        contextRevision,
+      }),
       ttlMs,
     );
     return {
@@ -68,6 +79,7 @@ export class ProgressImageService {
       options: normalized,
       workflowVersion: graph.metadata.version,
       executionRevision: execution.revision,
+      contextRevision,
     };
   }
 
@@ -93,7 +105,14 @@ export class ProgressImageService {
     if (!graph?.progress || graph.metadata.version !== grant.workflowVersion) return null;
     let options: ProgressVisualOptions;
     try {
-      options = JSON.parse(grant.optionsJson) as ProgressVisualOptions;
+      const stored = JSON.parse(grant.optionsJson) as
+        ProgressVisualOptions | { options: ProgressVisualOptions; contextRevision: string };
+      if ("options" in stored) {
+        if (metadataRevision(execution.globalContext) !== stored.contextRevision) return null;
+        options = stored.options;
+      } else {
+        options = stored;
+      }
     } catch {
       return null;
     }

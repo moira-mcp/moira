@@ -252,7 +252,22 @@ export const getSessionInfoHandlerSchema = z.object({
     .string()
     .optional()
     .describe('Parent execution UUID or "none" for set-parent'),
-  expectedRevision: z.number().int().min(0).optional().describe("Expected execution revision"),
+  expectedRevision: z.number().int().min(0).optional().describe("Expected workflow-step revision"),
+  expectedParentRevision: z
+    .string()
+    .length(64)
+    .optional()
+    .describe("Parent target revision returned by execution_context or set-parent"),
+  expectedRemindersRevision: z
+    .string()
+    .length(64)
+    .optional()
+    .describe("Reminder collection revision returned by reminders or a reminder mutation"),
+  expectedContextRevision: z
+    .string()
+    .length(64)
+    .optional()
+    .describe("Context target revision returned by variables, execution_context, or set-variable"),
   reminderId: z.string().optional().describe("Reminder ID"),
   reminderText: z.string().optional().describe("Reminder text"),
   idempotencyKey: z.string().optional().describe("Idempotency key for add-reminder"),

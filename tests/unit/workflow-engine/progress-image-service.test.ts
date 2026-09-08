@@ -117,6 +117,7 @@ describe("progress image grants", () => {
       downloadUrl: "https://moira.test/api/public/execution-progress-image/opaque",
       workflowVersion: "2.0.0",
       executionRevision: 4,
+      contextRevision: expect.stringMatching(/^[a-f0-9]{64}$/),
       options: { theme: "dark", viewportWidth: 480 },
       mimeType: "image/png",
     });
@@ -144,6 +145,16 @@ describe("progress image grants", () => {
     f.execution.revision++;
     const normal = new ProgressImageService(f.repository, f.tokens);
     expect(await normal.redeem("opaque")).toBeNull();
+    expect(f.wasClaimed()).toBe(false);
+  });
+
+  test("rejects a grant after context changes within the same step revision", async () => {
+    const f = fixture();
+    const service = new ProgressImageService(f.repository, f.tokens);
+    await service.mint("execution", "owner");
+    f.execution.globalContext.variables.changed = true;
+
+    expect(await service.redeem("opaque")).toBeNull();
     expect(f.wasClaimed()).toBe(false);
   });
 

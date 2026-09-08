@@ -45,56 +45,76 @@ describe("execution parent API", () => {
     });
     expect(response.status).toBe(200);
     return (await response.json()) as {
-      data: { execution: { parentExecutionId: string | null; revision: number } };
+      data: {
+        execution: {
+          parentExecutionId: string | null;
+          revision: number;
+          metadataRevisions: { parent: string };
+        };
+      };
     };
   }
 
-  async function setParent(parentExecutionId: string, expectedRevision: number) {
+  async function setParent(
+    parentExecutionId: string,
+    expectedRevision: number,
+    expectedParentRevision: string,
+  ) {
     return fetch(`${BASE_URL}/api/executions/${childId}/parent`, {
       method: "POST",
       headers: {
         Cookie: `better-auth.session_token=${cookie}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ parentExecutionId, expectedRevision }),
+      body: JSON.stringify({ parentExecutionId, expectedRevision, expectedParentRevision }),
     });
   }
 
-  test("attach, idempotent repeat, replace, detach, and stale rejection share revision semantics", async () => {
+  test("parent mutations keep step revision while previous-generation writes are rejected", async () => {
     const initial = (await detail()).data.execution;
 
-    const attached = await setParent(parentId, initial.revision);
+    const attached = await setParent(parentId, initial.revision, initial.metadataRevisions.parent);
     expect(attached.status).toBe(200);
     const attachedBody = (await attached.json()) as {
       data: { parentExecutionId: string; revision: number };
     };
-    expect(attachedBody.data).toEqual({
+    expect(attachedBody.data).toMatchObject({
       executionId: childId,
       parentExecutionId: parentId,
-      revision: initial.revision + 1,
+      revision: initial.revision,
     });
 
-    const repeated = await setParent(parentId, initial.revision);
+    const repeated = await setParent(parentId, initial.revision, initial.metadataRevisions.parent);
     expect(repeated.status).toBe(200);
     expect(((await repeated.json()) as { data: { revision: number } }).data.revision).toBe(
-      initial.revision + 1,
+      initial.revision,
     );
 
-    const replaced = await setParent(replacementId, initial.revision + 1);
+    const attachedState = (await detail()).data.execution;
+    const replaced = await setParent(
+      replacementId,
+      initial.revision,
+      attachedState.metadataRevisions.parent,
+    );
     expect(replaced.status).toBe(200);
     expect((await detail()).data.execution).toMatchObject({
       parentExecutionId: replacementId,
-      revision: initial.revision + 2,
+      revision: initial.revision,
     });
 
-    const stale = await setParent(parentId, initial.revision + 1);
+    const stale = await setParent(parentId, initial.revision, initial.metadataRevisions.parent);
     expect(stale.status).toBe(409);
 
-    const detached = await setParent("none", initial.revision + 2);
+    const replacementState = (await detail()).data.execution;
+    const detached = await setParent(
+      "none",
+      initial.revision,
+      replacementState.metadataRevisions.parent,
+    );
     expect(detached.status).toBe(200);
     expect((await detail()).data.execution).toMatchObject({
       parentExecutionId: null,
-      revision: initial.revision + 3,
+      revision: initial.revision,
     });
   });
 });

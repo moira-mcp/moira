@@ -18,6 +18,7 @@ import { getAuditSource } from "../logging/context.js";
 import { createLogger, Component } from "../logging/logger.js";
 import { AuditAction } from "../audit/actions.js";
 import { ConflictError, ValidationError } from "../errors/index.js";
+import { metadataRevision } from "../utils/metadata-revision.js";
 import { applyExecutionReminderMutation } from "./execution-reminder-domain.js";
 
 export class ExecutionService {
@@ -300,12 +301,14 @@ export class ExecutionService {
     parentExecutionId: string | null,
     userId: string,
     expectedRevision: number,
+    expectedParentRevision: string,
   ): Promise<WorkflowExecution> {
     const updated = await this.executionRepo.setParent(
       executionId,
       parentExecutionId,
       userId,
       expectedRevision,
+      expectedParentRevision,
     );
     await this.auditRepo.log({
       userId,
@@ -326,6 +329,7 @@ export class ExecutionService {
     executionId: string,
     userId: string,
     expectedRevision: number,
+    expectedRemindersRevision: string,
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult> {
     const execution = await this.executionRepo.get(executionId);
@@ -336,16 +340,37 @@ export class ExecutionService {
       throw new ValidationError("Only running executions accept reminder mutations");
     const applied = applyExecutionReminderMutation(execution.reminders ?? [], mutation);
     if (!applied.changed)
-      return { reminder: applied.reminder, revision: execution.revision, changed: false };
+      return {
+        reminder: applied.reminder,
+        revision: execution.revision,
+        remindersRevision: metadataRevision(execution.reminders ?? []),
+        changed: false,
+      };
+    if (metadataRevision(execution.reminders ?? []) !== expectedRemindersRevision)
+      throw new ConflictError("Execution reminders changed; reload before changing reminders", {
+        executionId,
+        expectedRemindersRevision,
+      });
     if (execution.revision !== expectedRevision)
       throw new ConflictError("Execution state changed; reload before changing reminders", {
         executionId,
         expectedRevision,
         currentRevision: execution.revision,
       });
-    execution.reminders = applied.reminders;
-    execution.updatedAt = Date.now();
-    await this.executionRepo.save(execution);
+    const expectedReminders = execution.reminders ?? [];
+    const stored = await this.executionRepo.updateReminders(
+      executionId,
+      userId,
+      expectedRevision,
+      expectedReminders,
+      applied.reminders,
+    );
+    if (!stored) {
+      throw new ConflictError("Execution reminders changed; reload before changing reminders", {
+        executionId,
+        expectedRevision,
+      });
+    }
     await this.auditRepo.log({
       userId,
       action: AuditAction.EXECUTION_UPDATE_CONTEXT,
@@ -358,7 +383,12 @@ export class ExecutionService {
         revision: execution.revision,
       }),
     });
-    return { reminder: applied.reminder, revision: execution.revision, changed: true };
+    return {
+      reminder: applied.reminder,
+      revision: execution.revision,
+      remindersRevision: metadataRevision(applied.reminders),
+      changed: true,
+    };
   }
 
   /**

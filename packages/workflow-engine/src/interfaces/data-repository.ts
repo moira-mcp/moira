@@ -258,14 +258,23 @@ export interface IDataRepository {
     parentExecutionId: string | null,
     userId: string,
     expectedRevision: number,
+    expectedParentRevision: string,
   ): Promise<WorkflowExecution>;
 
   mutateExecutionReminder(
     executionId: string,
     userId: string,
     expectedRevision: number,
+    expectedRemindersRevision: string,
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult>;
+
+  updateExecutionContext(
+    executionId: string,
+    context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
+    expectedRevision: number,
+    expectedContextRevision: string,
+  ): Promise<boolean>;
 
   prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void>;
   claimStartExecutionAttempt(
@@ -289,6 +298,9 @@ export interface IDataRepository {
   ): Promise<boolean>;
 
   createPresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void>;
+  ensureCurrentPresentedExecutionAttempt(
+    attempt: PresentedExecutionAttempt,
+  ): Promise<ExecutionAttempt>;
   getExecutionAttempt(attemptId: string): Promise<ExecutionAttempt | null>;
   updatePresentedExecutionAttemptResponse(
     attemptId: string,

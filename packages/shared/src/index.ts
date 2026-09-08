@@ -76,6 +76,7 @@ export * from "./utils/version-utils.js";
 
 // Canonical JSON identity
 export * from "./utils/canonical-json.js";
+export * from "./utils/metadata-revision.js";
 
 // API Token utilities
 export * from "./utils/api-token.js";

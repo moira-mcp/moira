@@ -87,9 +87,10 @@ mcp__moira__step({
 
 It throws `ConflictError` when a completed attempt is replayed with different input, the attempt is
 stale, another caller still owns it after the bounded wait (`ATTEMPT_PROCESSING`), or a previously
-claimed mutation has an unknown durable outcome (`ATTEMPT_OUTCOME_UNKNOWN`). Only
-`ATTEMPT_PROCESSING` is automatically retryable, and it must use the same attempt and identical
-input. For a start attempt with unknown outcome, use the returned Process ID with `session` to inspect
+claimed mutation has an unknown durable outcome (`ATTEMPT_OUTCOME_UNKNOWN`). For
+`ATTEMPT_PROCESSING`, retry the same attempt and identical input. `ATTEMPT_STALE` performed no
+handler work: read `current_step` automatically and retry once with its authoritative attempt.
+For a start attempt with unknown outcome, use the returned Process ID with `session` to inspect
 the attached execution instead of preparing or executing another start. The owner may retire a
 blocked execution with `session({ action: "cancel-execution", executionId, expectedRevision })`;
 the expected revision prevents a stale cancellation from deleting newer work.
@@ -122,8 +123,13 @@ mcp__moira__session({
 
 For a paused `materialize` node, `current_step` re-presents that node without traversing a
 connection or changing execution state. It issues a fresh five-minute URL each time; each URL can
-be downloaded repeatedly only while the execution remains waiting on that node. For every paused
-node, `current_step` returns the authoritative current Step attempt ID.
+be downloaded repeatedly only while the execution remains waiting on that node with the same
+context snapshot. For every paused
+node, `current_step` returns the authoritative current Step attempt ID. When a paused execution has
+no persisted attempt, `current_step` creates a bound presentation without executing the node. A
+presented revision-only stale attempt is repaired in place; a node or workflow mismatch is not.
+Such a mismatched live presentation returns `CURRENT_PRESENTATION_STALE`, does not expose its old
+attempt as usable, and requires inspection rather than automatic replay.
 
 ### Recovery After Interruption
 
@@ -141,6 +147,12 @@ claim their server-issued attempts before running a handler. Execution state, th
 receipt, and the next attempt are persisted atomically, so duplicate calls with the same input return
 the original response and cannot advance twice. Calls for different executions do not share a
 serialization lock.
+
+`workflowExecution.revision` advances only when an original `step` persists workflow state. Session
+updates to notes, parent links, reminders, context, and declared runtime variables retain the same
+revision and do not invalidate the current attempt. Parent, context, and reminder mutations use
+their own opaque revisions from the corresponding read result, so a stale metadata snapshot cannot
+overwrite a newer one merely because both belong to the same workflow step.
 
 A live owner renews a 30-second lease every five seconds. A concurrent duplicate waits up to ten
 seconds for the stored result, then reports `ATTEMPT_PROCESSING`. Expired or otherwise indeterminate

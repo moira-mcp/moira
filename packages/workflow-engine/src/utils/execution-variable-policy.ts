@@ -1,4 +1,4 @@
-import { ConflictError, ValidationError } from "@mcp-moira/shared";
+import { ConflictError, metadataRevision, ValidationError } from "@mcp-moira/shared";
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { WorkflowExecution } from "../types/base-types.js";
 import { PathResolver } from "./path-resolver.js";
@@ -71,6 +71,7 @@ export function queryExecutionVariables(
     variables,
     unknownNames: [...requested].filter((name) => !(name in registry)),
     revision: execution.revision,
+    contextRevision: metadataRevision(execution.globalContext),
     appliedFilters: filters,
   };
 }
@@ -81,8 +82,15 @@ export function prepareExecutionVariableWrite(
   name: string,
   value: unknown,
   expectedRevision: number,
+  expectedContextRevision: string,
 ): WorkflowExecution {
-  assertExecutionVariableWriteAllowed(execution, graph, name, expectedRevision);
+  assertExecutionVariableWriteAllowed(
+    execution,
+    graph,
+    name,
+    expectedRevision,
+    expectedContextRevision,
+  );
   const registry = graph.variableRegistry!;
   validateDeclaredRegistryValues({ [name]: value }, registry, "execution.set-variable", true);
   const updated = structuredClone(execution);
@@ -96,6 +104,7 @@ function assertExecutionVariableWriteAllowed(
   graph: WorkflowGraph,
   name: string,
   expectedRevision: number,
+  expectedContextRevision: string,
 ): void {
   if (execution.status !== "running" || execution.waitingForInputNodeId !== execution.currentNodeId)
     throw new ValidationError("Execution must be running and paused");
@@ -109,6 +118,8 @@ function assertExecutionVariableWriteAllowed(
     throw new ValidationError("Variable is not externally editable at this step");
   if (execution.revision !== expectedRevision)
     throw new ConflictError("Execution revision is stale");
+  if (metadataRevision(execution.globalContext) !== expectedContextRevision)
+    throw new ConflictError("Execution context is stale");
 }
 
 export function prepareExecutionVariablePathWrite(
@@ -117,6 +128,7 @@ export function prepareExecutionVariablePathWrite(
   path: Array<string | number>,
   value: unknown,
   expectedRevision: number,
+  expectedContextRevision: string,
 ): WorkflowExecution {
   if (path.length === 0 || typeof path[0] !== "string")
     throw new ValidationError("Variable path must start with a declared variable name");
@@ -125,7 +137,13 @@ export function prepareExecutionVariablePathWrite(
     throw new ValidationError("Variable path contains a forbidden segment");
 
   const name = path[0];
-  assertExecutionVariableWriteAllowed(execution, graph, name, expectedRevision);
+  assertExecutionVariableWriteAllowed(
+    execution,
+    graph,
+    name,
+    expectedRevision,
+    expectedContextRevision,
+  );
   const updated = structuredClone(execution);
   const pathText = path
     .map((segment, index) =>

@@ -113,6 +113,7 @@ describe("MCP Messages Module", () => {
   describe("AGENT_INSTRUCTIONS", () => {
     it("should have all required agent instruction categories", () => {
       expect(AGENT_INSTRUCTIONS.workflow_not_found).toBeDefined();
+      expect(AGENT_INSTRUCTIONS.stale_attempt).toBeDefined();
       expect(AGENT_INSTRUCTIONS.process_not_found).toBeDefined();
       expect(AGENT_INSTRUCTIONS.validation_failed).toBeDefined();
       expect(AGENT_INSTRUCTIONS.auth_required).toBeDefined();
@@ -127,10 +128,12 @@ describe("MCP Messages Module", () => {
       }
     });
 
-    it("should contain STOP instruction in each category", () => {
-      for (const [, instructions] of Object.entries(AGENT_INSTRUCTIONS)) {
+    it("should contain STOP instruction only in categories that require a user boundary", () => {
+      for (const [category, instructions] of Object.entries(AGENT_INSTRUCTIONS)) {
+        if (category === "stale_attempt") continue;
         expect(instructions.toLowerCase()).toContain("stop");
       }
+      expect(AGENT_INSTRUCTIONS.stale_attempt.toLowerCase()).not.toContain("stop");
     });
 
     it("should contain numbered steps", () => {
@@ -180,6 +183,15 @@ describe("MCP Messages Module", () => {
       expect(result).toContain("AGENT INSTRUCTIONS:");
       expect(result).toContain("list()");
       expect(result).toContain("Troubleshooting:");
+    });
+
+    it("should make stale attempts automatically recoverable without a user stop", () => {
+      const result = formatErrorWithAgentInstructions(
+        "ATTEMPT_STALE: this attempt no longer matches the current workflow step",
+      );
+      expect(result).toContain("session({ action: 'current_step'");
+      expect(result).toContain("No user guidance is required");
+      expect(result.toLowerCase()).not.toContain("stop");
     });
 
     it("should detect process_not_found errors", () => {

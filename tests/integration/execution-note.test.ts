@@ -321,6 +321,7 @@ describe("Execution Note Field", () => {
     // Verify initial note
     let execution = await executor.getExecutionState(executionId);
     expect(execution!.note).toBe(initialNote);
+    const revisionBeforeUpdate = execution!.revision;
 
     // Update note via repository method
     const updatedNote = "Updated via repository";
@@ -329,6 +330,7 @@ describe("Execution Note Field", () => {
     // Verify note was updated
     execution = await executor.getExecutionState(executionId);
     expect(execution!.note).toBe(updatedNote);
+    expect(execution!.revision).toBe(revisionBeforeUpdate);
   });
 
   test("should pass execution_note through to graph engine for validation", async () => {

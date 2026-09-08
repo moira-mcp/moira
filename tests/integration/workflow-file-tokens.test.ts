@@ -6,7 +6,12 @@
 import { describe, test, expect, beforeEach, afterEach, jest } from "@jest/globals";
 import express from "express";
 import request from "supertest";
-import { DatabaseError, getSqliteInstance, TokenManager } from "@mcp-moira/shared";
+import {
+  DatabaseError,
+  getSqliteInstance,
+  metadataRevision,
+  TokenManager,
+} from "@mcp-moira/shared";
 import type { WorkflowExecution, WorkflowGraph } from "@mcp-moira/workflow-engine";
 import { createExecutionMaterializeRoutes } from "../../packages/web-backend/src/routes/execution-materialize.js";
 
@@ -400,6 +405,7 @@ describe("Workflow File Tokens", () => {
       "materialize-token-execution",
       "materialize",
       testUserId,
+      metadataRevision(execution.globalContext),
     );
     const url = `/api/public/executions/materialize/${token}`;
 
@@ -411,6 +417,10 @@ describe("Workflow File Tokens", () => {
       .get(url)
       .expect(200)
       .expect("Content-Type", /application\/x-tar/);
+
+    execution.globalContext.variables.changed = true;
+    await request(app).get(url).expect(401);
+    execution.globalContext.variables = {};
 
     getSqliteInstance()
       .prepare(

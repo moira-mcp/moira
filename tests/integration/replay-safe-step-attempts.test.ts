@@ -13,6 +13,7 @@ import {
 import {
   activeExecutionsGauge,
   executionMutationAttemptsTotal,
+  metadataRevision,
   metricsRegistry,
   workflowExecutionsTotal,
 } from "@mcp-moira/shared";
@@ -112,6 +113,118 @@ describe("replay-safe workflow step attempts", () => {
     expect(metrics).not.toContain(
       (await repository.getExecutionAttempt(firstAttempt))?.inputFingerprint ?? "missing",
     );
+  });
+
+  test("current_step rebinds a revision-only stale presentation without advancing", async () => {
+    const repository = new InMemoryRepository();
+    const graph = twoEmptyStepsGraph("replay-recover-stale-presentation");
+    await repository.saveWorkflow(graph, USER_ID);
+    const executor = new UniversalGraphExecutor(repository);
+    const executionId = await executor.startWorkflow(graph, undefined, USER_ID);
+    await executor.executeStep(executionId);
+    const execution = (await repository.getExecution(executionId))!;
+    const coordinator = new ExecutionMutationCoordinator(repository);
+    const staleAttemptId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const stale = coordinator.newPresentedAttempt(execution, graph, null, staleAttemptId);
+    stale.executionRevision -= 1;
+    await repository.createPresentedExecutionAttempt(stale);
+    const beforeRecovery = await repository.getExecution(executionId);
+
+    const [left, right] = await Promise.all([
+      executor.presentCurrentStep(executionId),
+      executor.presentCurrentStep(executionId),
+    ]);
+    expect(attemptId(left!)).toBe(staleAttemptId);
+    expect(attemptId(right!)).toBe(staleAttemptId);
+    expect(await repository.getExecution(executionId)).toEqual(beforeRecovery);
+    expect((await repository.getExecutionAttempt(staleAttemptId))?.executionRevision).toBe(
+      execution.revision,
+    );
+
+    const next = await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      attemptId: staleAttemptId,
+    });
+    expect(next).toContain("Second empty response");
+    expect((await repository.getExecution(executionId))?.revision).toBe(execution.revision + 1);
+  });
+
+  test("non-step execution mutations preserve the current attempt and step revision", async () => {
+    const { repository, executor, graph, executionId, first } = await setup(
+      "replay-metadata-does-not-stale",
+    );
+    const initial = (await repository.getExecution(executionId))!;
+    const parentId = await executor.startWorkflow(graph, undefined, USER_ID);
+
+    await repository.updateExecutionNote(executionId, "renamed");
+    await repository.setExecutionParent(
+      executionId,
+      parentId,
+      USER_ID,
+      initial.revision,
+      metadataRevision(null),
+    );
+    await repository.mutateExecutionReminder(
+      executionId,
+      USER_ID,
+      initial.revision,
+      metadataRevision([]),
+      {
+        action: "add",
+        text: "deliver after completion",
+        idempotencyKey: "delivery",
+      },
+    );
+    await repository.updateExecutionContext(
+      executionId,
+      { variables: { externallyUpdated: true } },
+      initial.revision,
+      metadataRevision(initial.globalContext),
+    );
+    await repository.appendError(executionId, {
+      timestamp: 1,
+      nodeId: "first",
+      errorType: "validation",
+      message: "preserved diagnostic",
+    });
+
+    const afterMetadata = (await repository.getExecution(executionId))!;
+    expect(afterMetadata).toMatchObject({
+      revision: initial.revision,
+      note: "renamed",
+      parentExecutionId: parentId,
+      globalContext: { variables: { externallyUpdated: true } },
+      reminders: [expect.objectContaining({ idempotencyKey: "delivery" })],
+      errors: [expect.objectContaining({ message: "preserved diagnostic" })],
+    });
+    expect((await repository.getCurrentExecutionAttempt(executionId, USER_ID))?.attemptId).toBe(
+      attemptId(first),
+    );
+
+    const next = await executor.executeStep(executionId, {}, undefined, {
+      userId: USER_ID,
+      attemptId: attemptId(first),
+    });
+    expect(next).toContain("Second empty response");
+    expect((await repository.getExecution(executionId))?.revision).toBe(initial.revision + 1);
+  });
+
+  test("cancelling outside step completes execution without consuming a step revision", async () => {
+    const { repository, executor, executionId, first } = await setup("replay-cancel-revision");
+    const before = (await repository.getExecution(executionId))!;
+    const cancelled = await repository.cancelExecution(executionId, {
+      timestamp: 2,
+      nodeId: "first",
+      errorType: "system",
+      message: "cancelled",
+    });
+    expect(cancelled.execution).toMatchObject({ status: "completed", revision: before.revision });
+    await expect(
+      executor.executeStep(executionId, {}, undefined, {
+        userId: USER_ID,
+        attemptId: attemptId(first),
+      }),
+    ).rejects.toThrow("ATTEMPT_STALE");
   });
 
   test("concurrent identical submissions coalesce into one external notification", async () => {
@@ -383,6 +496,7 @@ describe("replay-safe workflow step attempts", () => {
         fence: claim.kind === "claimed" ? claim.fence : 0,
         inputFingerprint: "fingerprint",
         execution,
+        expectedExecution: execution,
         response: "must not commit",
       }),
     ).toBe(false);
@@ -429,6 +543,7 @@ describe("replay-safe workflow step attempts", () => {
         fence: claim.kind === "claimed" ? claim.fence : 0,
         inputFingerprint: "fingerprint",
         execution: { ...execution, status: "completed", currentNodeId: null },
+        expectedExecution: execution,
         response: "completed by live owner",
       }),
     ).toBe(true);
@@ -917,6 +1032,7 @@ describe("replay-safe workflow step attempts", () => {
         fence: claim.kind === "claimed" ? claim.fence : 0,
         inputFingerprint: stepMutationFingerprint({}),
         execution: { ...execution, currentNodeId: "second", waitingForInputNodeId: "second" },
+        expectedExecution: execution,
         response: "must not commit",
         nextAttempt: {
           attemptId: currentAttempt,
@@ -967,6 +1083,7 @@ describe("replay-safe workflow step attempts", () => {
         fence: claim.kind === "claimed" ? claim.fence : 0,
         inputFingerprint: stepMutationFingerprint({ answer: "different" }),
         execution: { ...execution, currentNodeId: "second", waitingForInputNodeId: "second" },
+        expectedExecution: execution,
         response: "must not commit",
         nextAttempt: {
           attemptId: nextAttemptId,

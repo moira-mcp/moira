@@ -219,10 +219,17 @@ export const VALIDATION_HELP = {
 // ============================================
 
 /**
- * Agent instructions embedded in error messages to ensure agents STOP and WAIT
- * when encountering errors instead of continuing independently.
+ * Agent instructions embedded in error messages to make the safe recovery boundary explicit.
+ * Deterministically rejected stale attempts recover automatically; ambiguous effects stop.
  */
 export const AGENT_INSTRUCTIONS = {
+  stale_attempt: `
+AGENT INSTRUCTIONS:
+1. This stale attempt was rejected before workflow handler work
+2. Call session({ action: 'current_step', executionId: '<Process ID>' }) automatically
+3. Retry the intended step once with the Step attempt ID returned by current_step
+Do NOT reuse the stale attempt ID. No user guidance is required for this recovery.`,
+
   // Workflow not found - agent should verify ID and use list()
   workflow_not_found: `
 AGENT INSTRUCTIONS:
@@ -285,6 +292,7 @@ Do NOT continue independently. Do NOT ignore this error.`,
  * Error categories that map to specific agent instructions
  */
 export type ErrorCategory =
+  | "stale_attempt"
   | "workflow_not_found"
   | "process_not_found"
   | "validation_failed"
@@ -359,7 +367,9 @@ export function formatErrorWithAgentInstructions(message: string): string {
   let helpCategory: keyof typeof VALIDATION_HELP | undefined;
   let agentCategory: ErrorCategory | undefined;
 
-  if (lowerMessage.includes("workflow") && lowerMessage.includes("not found")) {
+  if (lowerMessage.includes("attempt_stale")) {
+    agentCategory = "stale_attempt";
+  } else if (lowerMessage.includes("workflow") && lowerMessage.includes("not found")) {
     helpCategory = "workflow_troubleshooting";
     agentCategory = "workflow_not_found";
   } else if (

@@ -288,12 +288,14 @@ export class DatabaseRepository implements IDataRepository {
     parentExecutionId: string | null,
     userId: string,
     expectedRevision: number,
+    expectedParentRevision: string,
   ): Promise<WorkflowExecution> {
     return await this.executionService.setParent(
       executionId,
       parentExecutionId,
       userId,
       expectedRevision,
+      expectedParentRevision,
     );
   }
 
@@ -301,21 +303,40 @@ export class DatabaseRepository implements IDataRepository {
     executionId: string,
     userId: string,
     expectedRevision: number,
+    expectedRemindersRevision: string,
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult> {
-    return this.executionService.mutateReminder(executionId, userId, expectedRevision, mutation);
+    return this.executionService.mutateReminder(
+      executionId,
+      userId,
+      expectedRevision,
+      expectedRemindersRevision,
+      mutation,
+    );
   }
 
   async updateExecutionContext(
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
+    expectedContextRevision: string,
   ): Promise<boolean> {
-    return await this.executionRepo.updateContext(executionId, context, expectedRevision);
+    return await this.executionRepo.updateContext(
+      executionId,
+      context,
+      expectedRevision,
+      expectedContextRevision,
+    );
   }
 
   async createPresentedExecutionAttempt(attempt: PresentedExecutionAttempt): Promise<void> {
     this.executionAttemptRepo.createPresented(attempt);
+  }
+
+  async ensureCurrentPresentedExecutionAttempt(
+    attempt: PresentedExecutionAttempt,
+  ): Promise<ExecutionAttempt> {
+    return this.executionAttemptRepo.ensureCurrentPresented(attempt);
   }
 
   async prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void> {

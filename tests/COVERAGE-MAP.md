@@ -157,7 +157,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/messages.test.ts`
+- `tests/unit/mcp-server/messages.test.ts` — error categorization, including automatic `current_step` recovery for pre-handler stale attempts and retained stop boundaries for unrecoverable states
 - `tests/unit/workflow-engine/telegram-error-messages.test.ts` — actionable Telegram categories with provider/template detail redacted from generic API error projections
 
 **integration**
@@ -177,7 +177,7 @@ level headings classify the tracked test paths listed beneath them.
 **integration**
 
 - `tests/integration/execution-context-tools.test.ts`
-- `tests/integration/execution-context-per-key-update.test.ts`
+- `tests/integration/execution-context-per-key-update.test.ts` — per-key context merging plus target-revision rejection of sequential and simultaneous stale snapshots without consuming the workflow-step generation
 - `tests/integration/subgraph-context-mapping.test.ts`
 
 **mcp-tools**
@@ -284,9 +284,9 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/integration/execution-attempt-persistence-migration.test.ts` — additive attempt-storage migration, durable step/start receipts, forced transactional claim rollback, restart-stable unknown-start attachment, revision- and blocking-row-bound atomic cancellation, fenced ownership across SQLite connections, post-eviction no-create behavior, and independent preparation/receipt age/count retention
 - `tests/integration/replay-safe-start-attempts.test.ts` — no-effect preparation, execute-only ordinary/lock preflight, intentional distinct starts, concurrent external-effect coalescing, exact replay without lifecycle metric duplication, foreign non-disclosure, independent digest/version/access binding, start heartbeat reconciliation, stable changed-precondition receipt, expiry rejection, and owner-visible/revision-bound outcome-unknown recovery
-- `tests/integration/replay-safe-step-attempts.test.ts` — exact replay, conflicting/foreign/stale binding rejection, coalesced external effects, unrelated-execution concurrency, fenced leases and recurring recovery, atomic completion/current presentation, materialize/teleport behavior, retention, and terminal metrics
+- `tests/integration/replay-safe-step-attempts.test.ts` — exact replay, legacy missing-attempt adoption, revision-only stale presentation recovery, metadata-stable step generations, cancellation semantics, conflicting/foreign binding rejection, coalesced external effects, fenced leases, atomic completion/current presentation, materialize/teleport behavior, retention, and terminal metrics
 - `tests/integration/replay-safe-step-audit.test.ts` — bounded content-free audit and Prometheus classifications for all applicable step/start outcomes plus proof that a start replay creates no duplicate execution-start business audit transition
-- `tests/integration/replay-safe-step-mcp-boundary.test.ts` — public parsing, exact replay, conflict projection, and expired-receipt rejection without execution mutation
+- `tests/integration/replay-safe-step-mcp-boundary.test.ts` — public parsing, exact replay, automatic stale-attempt `current_step` recovery without a user stop, conflict projection, and expired-receipt rejection without execution mutation
 - `tests/integration/execution-filters.test.ts`
 - `tests/integration/parent-execution-continuation.test.ts`
 - `tests/integration/start-workflow-parent-execution.test.ts`
@@ -491,7 +491,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/integration/cli-mcp-parity.test.ts`
 - `tests/integration/workflow-schema-cli.test.ts` — public schema command output, shared `structure --graph` rendering, canonical equivalence across permuted JSON object keys, terminal-control-safe decoded JSON, source-byte preservation, and non-zero ambiguous-graph failure
 - `tests/integration/essential-cases-split.test.ts`
-- `tests/integration/get-current-step-enhanced.test.ts` — including read-only materialize re-presentation versus empty public `step()` completion
+- `tests/integration/get-current-step-enhanced.test.ts` — public SQLite-backed legacy/revision-only attempt recovery, truthful node-stale rejection, concurrent `current_step` convergence, metadata-stable public variable writes with continued claimability, and read-only materialize re-presentation versus empty public `step()` completion
 - `tests/integration/mcp-text-service.test.ts`
 - `tests/integration/step-response-child-info.test.ts`
 
@@ -538,7 +538,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/execution-note.test.ts`
+- `tests/integration/execution-note.test.ts` — start/step/repository note persistence, including repository note updates that leave the current workflow-step revision unchanged
 
 **api**
 
@@ -800,21 +800,21 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/web-frontend/workflow-transformer.test.ts` — including materialize registration on the shared CompactNode, factory output, frontend validation boundaries, content-free file summary data, success/error edge styling, and no fallback warning
 - `tests/unit/workflow-engine/variable-resolver.test.ts`
 - `tests/unit/workflow-engine/workflow-schema-keywords.test.ts` — ordered unique-reference plans, deep evidence-prefix correlation, protected plan prefixes, non-mutating blocked responses, global-input inlining, and GraphValidator keyword registration
-- `tests/unit/workflow-engine/execution-parent-revision.test.ts` — optimistic execution revision rejects stale full saves and context mutations; same-owner running parent attach, replace, detach and idempotent repetition preserve revision semantics, while foreign, completed, cyclic and stale changes leave state untouched; database integration additionally proves concurrent inverse changes cannot commit a cycle
-- `tests/unit/workflow-engine/execution-reminders.test.ts` — standalone/child completion-only reminder delivery, literal template-like text, no intermediate leakage, idempotent add/conflict, targeted update/cancel and sibling preservation
+- `tests/unit/workflow-engine/execution-parent-revision.test.ts` — workflow-step revision rejects stale full saves and previous-generation context writes; an independent parent revision rejects stale same-generation parent snapshots; valid same-owner attach, replace, detach and idempotent repetition leave the step generation unchanged; database integration additionally proves concurrent inverse changes cannot commit a cycle
+- `tests/unit/workflow-engine/execution-reminders.test.ts` — standalone/child completion-only reminder delivery without consuming step revision, independent collection-revision conflicts, literal template-like text, no intermediate leakage, idempotent add, targeted update/cancel and sibling preservation
 - `tests/unit/workflow-engine/execution-progress.test.ts` — static progress schema/semantic validation, template rendering, index-derived loop/replan state, completion-vs-cancellation persistence shape, many-to-one focus metadata and projection immutability
 - `tests/unit/workflow-engine/sdf-execution-progress.test.ts` — real bundled SDF progress topology and concrete current/completed state, label, revision and version projection across every forward phase plus feedback-repair and replan loops
 - `tests/unit/workflow-engine/execution-progress-image.test.ts` — shared horizontal visual model, forward/backward geometry, deterministic light/dark PNG bytes, state differences, bounds and image decoding
 - `tests/unit/workflow-engine/execution-progress-wrapper.test.ts` — public workflow/execution image API metadata and byte parity, null no-progress behavior, render failure propagation, and input immutability
-- `tests/unit/workflow-engine/progress-image-service.test.ts` — normalized revision/version/options-bound grants, successful single use, render-failure non-consumption and stale-revision denial
+- `tests/unit/workflow-engine/progress-image-service.test.ts` — normalized step-revision/context-revision/version/options-bound grants, successful single use, render-failure non-consumption and stale-state denial
 - `tests/unit/workflow-engine/telegram-client-photo.test.ts` — reusable MIME-aware Telegram multipart photo/document transport with exact bytes, caption/options, empty/oversized photo pre-allocation rejection, and token/destination/content log redaction
 - `tests/unit/workflow-engine/user-communication.test.ts` — mutable shared channel registry, least-authority configuration/payload boundary, mixed Telegram/second-channel fan-out, channel-scoped test delivery through shared limits, sanitized aggregate outcomes, skipped-capability routing, absent-user isolation, portable progress attachments, workflow/direct shared provider budgets with independent providers, concurrent bounded availability, bounded-key rate/concurrency budgets, deadlines, quotas, and long attachment text
 - `tests/unit/web-backend/notifications-route.test.ts` — metadata and same-user readiness projection without secret values, extension trusted-state visibility, body-free selected-channel testing through the common service, browser authority refusal and unknown-channel denial
 - `tests/unit/web-backend/execution-progress-image.test.ts` — progress image reservation completion on response finish and release on close/write failure
 - `tests/unit/web-frontend/execution-progress-strip.test.tsx` — shared-model progress states/back edge, current accessibility and deterministic technical-node focus callbacks
-- `tests/api/execution-parent-api.test.ts` — authenticated HTTP parent attach, idempotent repetition, replacement, detach, detail projection, and stale-revision conflict against executions created through the public MCP start surface
-- `tests/api/execution-reminders-api.test.ts` — authenticated HTTP reminder add/idempotent retry/filter/update/cancel and revisioned retained history against an execution created through public MCP start
-- `tests/mcp-tools/execution-variables.test.ts` — MCP/HTTP runtime ownership, filters (including false/current/other branches), unknown versus unset, effective editability/denial reasons, revisioned schema-valid top-level and inspector-path mutation, unchanged sibling/node state on path rejection, audit redaction, definition discovery and HTTP policy authoring/invalid-policy reporting; progress create/edit preservation, strict rejection without mutation of forbidden progress/node/connection fields, transport identity, owner/administrator/foreign access, and absent-definition errors
+- `tests/api/execution-parent-api.test.ts` — authenticated HTTP parent attach, idempotent repetition, replacement, detach, detail projection, unchanged step revision, and stale parent-target conflict against executions created through the public MCP start surface
+- `tests/api/execution-reminders-api.test.ts` — authenticated HTTP reminder add/idempotent retry/filter/update/cancel with unchanged step revision and collection-revision continuity against an execution created through public MCP start
+- `tests/mcp-tools/execution-variables.test.ts` — MCP/HTTP runtime ownership, filters (including false/current/other branches), unknown versus unset, effective editability/denial reasons, schema-valid top-level and inspector-path mutation with unchanged step revision and stale context-token rejection, unchanged sibling/node state on path rejection, audit redaction, definition discovery and HTTP policy authoring/invalid-policy reporting; progress create/edit preservation, strict rejection without mutation of forbidden progress/node/connection fields, transport identity, owner/administrator/foreign access, and absent-definition errors
 - `tests/unit/workflow-engine/registry-converter.test.ts`
 - `tests/unit/workflow-engine/node-output-scope.test.ts` — incl. whole-descriptor inlining: enum/items/pattern/properties + end-to-end rejection
 - `tests/unit/workflow-engine/strict-schema-validation.test.ts` — recursive strict JSON Schema normalization
@@ -823,7 +823,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/workflow-file-tokens.test.ts` — upload/download lifecycle, five-minute materialize TTL boundary, reusable materialize HTTP authorization with user/execution/node binding and transition rejection, real SQLite grant-failure normalization, and revision/version-bound progress-image grants with atomic one-use claims
+- `tests/integration/workflow-file-tokens.test.ts` — upload/download lifecycle, five-minute materialize TTL boundary, reusable materialize HTTP authorization with user/execution/node/context binding and transition rejection, real SQLite grant-failure normalization, and step-revision/context-revision/version-bound progress-image grants with atomic one-use claims
 - `tests/integration/agent-response-contract.test.ts`
 - `tests/integration/workflow-catalog-loader.test.ts` — owner/visibility mapping and three-way visibility changes, baseline adoption/divergence, distinct previous/current/incoming candidate content and canonical digests, upstream/user/two-sided changes, semver regression and same-version divergent content, catalog-wide preflight, user soft/hard deletion, upstream removal/tombstone/reintroduction and lifecycle resolution, conflict recovery across declared previous-slug migration for every selection route, required inspected revisions, durable resolution context, cross-snapshot staged portability that recomputes the actual incoming catalog on a fresh target while applying safe additions/updates and preserving unrelated target data, runtime validation of serialized staged artifacts, source/catalog/conflict-set/revision fail-closed behavior, local image CLI status/diff/get/validate/choose/apply with invalid merged-file rejection, catalog/target drift retention without partial mutation, no database mutation before complete apply, and committed-state bundle retirement semantics, lightweight summaries that do not parse malformed candidate bodies, multi-directory overlays, real SQLite rollback on a later apply failure, stale workflow/conflict/baseline guards across graph/visibility/lifecycle/alias changes, competing resolutions, real catalog evidence replacement, baseline creation/update/rename races, malformed baseline failure, explicit recovery, structured MCP response, administrator resolution, and SaaS CLI failure on a copied database without source mutation
 - `tests/integration/mcp-reconciliation-notice.test.ts` — real in-memory MCP initialization and ordinary registered tool call both expose the graph-free managed-workflow reconciliation notice

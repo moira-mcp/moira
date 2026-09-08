@@ -33,9 +33,11 @@ describe("execution reminders API", () => {
     "Content-Type": "application/json",
   });
 
-  test("add, idempotent retry, filter, update and cancel preserve revisioned history", async () => {
+  test("reminder history changes without consuming workflow-step revision", async () => {
     const detail = await fetch(`${BASE_URL}/api/executions/${executionId}`, { headers: headers() });
-    const initial = (await detail.json()) as { data: { execution: { revision: number } } };
+    const initial = (await detail.json()) as {
+      data: { execution: { revision: number; metadataRevisions: { reminders: string } } };
+    };
     const created = await fetch(`${BASE_URL}/api/executions/${executionId}/reminders`, {
       method: "POST",
       headers: headers(),
@@ -43,19 +45,22 @@ describe("execution reminders API", () => {
         text: "Open PR",
         idempotencyKey: "pr",
         expectedRevision: initial.data.execution.revision,
+        expectedRemindersRevision: initial.data.execution.metadataRevisions.reminders,
       }),
     });
     expect(created.status).toBe(200);
     const createdData = (await created.json()) as {
-      data: { reminder: { id: string }; revision: number };
+      data: { reminder: { id: string }; revision: number; remindersRevision: string };
     };
+    expect(createdData.data.revision).toBe(initial.data.execution.revision);
     const repeated = await fetch(`${BASE_URL}/api/executions/${executionId}/reminders`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({
         text: "Open PR",
         idempotencyKey: "pr",
-        expectedRevision: createdData.data.revision - 1,
+        expectedRevision: createdData.data.revision,
+        expectedRemindersRevision: initial.data.execution.metadataRevisions.reminders,
       }),
     });
     expect(
@@ -76,19 +81,29 @@ describe("execution reminders API", () => {
         body: JSON.stringify({
           text: "Open and review PR",
           expectedRevision: createdData.data.revision,
+          expectedRemindersRevision: createdData.data.remindersRevision,
         }),
       },
     );
-    const updatedData = (await updated.json()) as { data: { revision: number } };
+    const updatedData = (await updated.json()) as {
+      data: { revision: number; remindersRevision: string };
+    };
+    expect(updatedData.data.revision).toBe(initial.data.execution.revision);
     const cancelled = await fetch(
       `${BASE_URL}/api/executions/${executionId}/reminders/${createdData.data.reminder.id}`,
       {
         method: "DELETE",
         headers: headers(),
-        body: JSON.stringify({ expectedRevision: updatedData.data.revision }),
+        body: JSON.stringify({
+          expectedRevision: updatedData.data.revision,
+          expectedRemindersRevision: updatedData.data.remindersRevision,
+        }),
       },
     );
     expect(cancelled.status).toBe(200);
+    expect(((await cancelled.json()) as { data: { revision: number } }).data.revision).toBe(
+      initial.data.execution.revision,
+    );
     const cancelledList = await fetch(
       `${BASE_URL}/api/executions/${executionId}/reminders?status=cancelled`,
       { headers: headers() },

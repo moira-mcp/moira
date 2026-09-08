@@ -216,14 +216,18 @@ describe("runtime execution variables", () => {
       variableName: "editable_value",
       variableValue: "new",
       expectedRevision: queried.revision,
+      expectedContextRevision: queried.contextRevision,
     });
     expect(changed).toMatchObject({ name: "editable_value", value: "new" });
+    expect(changed.revision).toBe(queried.revision);
+    expect(changed.contextRevision).not.toBe(queried.contextRevision);
     const denied = await callMCPToolRaw(client, "session", {
       action: "set-variable",
       executionId,
       variableName: "denied_value",
       variableValue: "new",
       expectedRevision: changed.revision,
+      expectedContextRevision: changed.contextRevision,
     });
     expect(denied).toContain("not externally editable");
     const invalid = await callMCPToolRaw(client, "session", {
@@ -232,6 +236,7 @@ describe("runtime execution variables", () => {
       variableName: "editable_value",
       variableValue: "invalid",
       expectedRevision: changed.revision,
+      expectedContextRevision: changed.contextRevision,
     });
     expect(invalid).toContain("Invalid declared variable");
     const httpQuery = await fetch(
@@ -239,7 +244,12 @@ describe("runtime execution variables", () => {
       { headers: { Cookie: `better-auth.session_token=${cookie}` } },
     );
     const httpData = (await httpQuery.json()) as {
-      data: { variables: Array<{ name: string }>; unknownNames: string[]; revision: number };
+      data: {
+        variables: Array<{ name: string }>;
+        unknownNames: string[];
+        revision: number;
+        contextRevision: string;
+      };
     };
     expect(httpData.data).toMatchObject({ unknownNames: ["missing"] });
     expect(httpData.data.variables).toEqual([expect.objectContaining({ name: "editable_value" })]);
@@ -264,17 +274,25 @@ describe("runtime execution variables", () => {
           Cookie: `better-auth.session_token=${cookie}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ value: "old", expectedRevision: httpData.data.revision }),
+        body: JSON.stringify({
+          value: "old",
+          expectedRevision: httpData.data.revision,
+          expectedContextRevision: httpData.data.contextRevision,
+        }),
       },
     );
     expect(httpSet.status).toBe(200);
-    const httpSetData = (await httpSet.json()) as { data: { revision: number } };
+    const httpSetData = (await httpSet.json()) as {
+      data: { revision: number; contextRevision: string };
+    };
+    expect(httpSetData.data.revision).toBe(httpData.data.revision);
     const stale = await callMCPToolRaw(client, "session", {
       action: "set-variable",
       executionId,
       variableName: "editable_value",
       variableValue: "new",
       expectedRevision: httpData.data.revision,
+      expectedContextRevision: httpData.data.contextRevision,
     });
     expect(stale).toContain("stale");
 
@@ -292,9 +310,13 @@ describe("runtime execution variables", () => {
         variablePath: ["object_value", "count"],
         value: 2,
         expectedRevision: httpSetData.data.revision,
+        expectedContextRevision: httpSetData.data.contextRevision,
       }),
     });
     expect(pathSet.status).toBe(200);
+    expect(((await pathSet.clone().json()) as { data: { revision: number } }).data.revision).toBe(
+      httpSetData.data.revision,
+    );
     const afterPath = await callMCPTool<any>(client, "session", {
       action: "variables",
       executionId,
@@ -314,6 +336,7 @@ describe("runtime execution variables", () => {
         variablePath: ["denied_value"],
         value: "new",
         expectedRevision: afterPath.revision,
+        expectedContextRevision: afterPath.contextRevision,
       }),
     });
     expect(deniedPath.status).toBe(400);
@@ -327,6 +350,7 @@ describe("runtime execution variables", () => {
         variablePath: ["object_value", "count"],
         value: "not-a-number",
         expectedRevision: afterPath.revision,
+        expectedContextRevision: afterPath.contextRevision,
       }),
     });
     expect(invalidPath.status).toBe(400);
@@ -340,6 +364,7 @@ describe("runtime execution variables", () => {
         variablePath: ["object_value", "count"],
         value: 3,
         expectedRevision: httpSetData.data.revision,
+        expectedContextRevision: httpSetData.data.contextRevision,
       }),
     });
     expect(stalePath.status).toBe(409);
@@ -361,7 +386,8 @@ describe("runtime execution variables", () => {
       },
       body: JSON.stringify({
         nodeStates: { task: "fake" },
-        expectedRevision: httpData.data.revision + 1,
+        expectedRevision: httpData.data.revision,
+        expectedContextRevision: afterPath.contextRevision,
       }),
     });
     expect(legacy.status).toBe(400);
@@ -377,6 +403,7 @@ describe("runtime execution variables", () => {
       variableName: "editable_value",
       variableValue: "new",
       expectedRevision: afterPath.revision,
+      expectedContextRevision: afterPath.contextRevision,
     });
     expect(foreignSet).toContain("execution belongs to another user");
     const foreignHttpQuery = await fetch(
@@ -392,7 +419,11 @@ describe("runtime execution variables", () => {
           Cookie: `better-auth.session_token=${foreignCookie}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ value: "new", expectedRevision: afterPath.revision }),
+        body: JSON.stringify({
+          value: "new",
+          expectedRevision: afterPath.revision,
+          expectedContextRevision: afterPath.contextRevision,
+        }),
       },
     );
     expect(foreignHttpSet.status).toBe(401);
@@ -408,6 +439,7 @@ describe("runtime execution variables", () => {
           variablePath: ["object_value", "count"],
           value: 3,
           expectedRevision: afterPath.revision,
+          expectedContextRevision: afterPath.contextRevision,
         }),
       },
     );
@@ -827,6 +859,7 @@ describe("runtime execution variables", () => {
       variableName: "editable_value",
       variableValue: currentEditable.variables[0].value === "old" ? "new" : "old",
       expectedRevision: httpGrantBody.data.executionRevision,
+      expectedContextRevision: currentEditable.contextRevision,
     });
     expect(
       (await fetch(`${getTestBaseUrl()}${new URL(httpGrantBody.data.downloadUrl).pathname}`))
@@ -967,6 +1000,7 @@ describe("runtime execution variables", () => {
       variableName: "visual_validation_preference",
       variableValue: "html_report",
       expectedRevision: variables.revision,
+      expectedContextRevision: variables.contextRevision,
     });
     expect(denied).toContain("not externally editable");
     const after = await callMCPTool<any>(client, "session", {
@@ -995,6 +1029,7 @@ describe("runtime execution variables", () => {
       reminderText,
       idempotencyKey: "sdf-authorized-release-pr",
       expectedRevision: reminderState.revision,
+      expectedRemindersRevision: reminderState.remindersRevision,
     });
     expect(addedReminder).toMatchObject({
       changed: true,
