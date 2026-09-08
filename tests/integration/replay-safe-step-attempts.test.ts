@@ -829,9 +829,7 @@ describe("replay-safe workflow step attempts", () => {
         attemptId: attemptId(first),
       }),
     ).rejects.toThrow("injected formatting failure");
-    expect((await repository.getExecutionAttempt(attemptId(first)))?.state).toBe(
-      "outcome_unknown",
-    );
+    expect((await repository.getExecutionAttempt(attemptId(first)))?.state).toBe("outcome_unknown");
   });
 
   test("a losing materialize refresh returns authoritative consumed state", async () => {

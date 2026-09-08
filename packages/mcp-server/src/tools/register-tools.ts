@@ -8,11 +8,7 @@ import { sanitizeMcpError } from "../utils/error-sanitizer.js";
 import { wrapToolSchemaWithAutoparse } from "../utils/flexible-json-parser.js";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { invokeToolDefinition } from "./tool-bindings.js";
-import {
-  TOOL_DEFINITIONS,
-  getToolJsonSchema,
-  resolveToolDescription,
-} from "./tool-definitions.js";
+import { TOOL_DEFINITIONS, getToolJsonSchema, resolveToolDescription } from "./tool-definitions.js";
 
 export function registerTools(
   mcpServer: McpServer,

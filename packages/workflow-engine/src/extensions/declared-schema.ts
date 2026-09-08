@@ -10,8 +10,7 @@
  */
 
 import * as AjvModule from "ajv";
-export { canonicalJson } from "@mcp-moira/shared";
-import { canonicalJson } from "@mcp-moira/shared";
+export { canonicalJson } from "@mcp-moira/shared/canonical-json";
 
 /**
  * Options every Ajv instance that compiles an extension-declared schema must use.

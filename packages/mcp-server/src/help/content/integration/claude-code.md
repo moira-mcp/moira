@@ -118,14 +118,14 @@ Add workflow process IDs to your CLAUDE.md for easy resumption after session int
 
 The core workflow lifecycle uses these tools:
 
-| Tool       | Description                               |
-| ---------- | ----------------------------------------- |
-| `list`     | List available workflows                  |
+| Tool       | Description                                     |
+| ---------- | ----------------------------------------------- |
+| `list`     | List available workflows                        |
 | `start`    | Prepare or execute a replay-safe workflow start |
-| `step`     | Submit result, get next directive         |
-| `help`     | Get documentation                         |
-| `settings` | User settings management                  |
-| `session`  | Session and execution info                |
+| `step`     | Submit result, get next directive               |
+| `help`     | Get documentation                               |
+| `settings` | User settings management                        |
+| `session`  | Session and execution info                      |
 
 See the [MCP tools reference](/docs/reference/tools/) for the complete current catalog,
 input schemas, actions, and examples.

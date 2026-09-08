@@ -98,8 +98,7 @@ async function startedExecutionMetric(workflowId: string): Promise<number> {
 async function startUnknownMetric(): Promise<number> {
   return (
     (await executionMutationAttemptsTotal.get()).values.find(
-      (value) =>
-        value.labels.operation === "start" && value.labels.outcome === "outcome_unknown",
+      (value) => value.labels.operation === "start" && value.labels.outcome === "outcome_unknown",
     )?.value ?? 0
   );
 }
