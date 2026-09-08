@@ -11,9 +11,11 @@ import { Aside } from '@astrojs/starlight/components';
 
 ```js
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/infinite-task-loop",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Исходный запрос уже может содержать первую задачу. Флоу использует её и не задаёт повторный вопрос. Иначе он ждёт следующую конкретную задачу от пользователя. Просьба остановиться, выйти или закончить обрабатывается штатным teleport выхода и никогда не записывается как рабочая задача.

@@ -15,28 +15,49 @@
 | Template Variable    | `{{variable}}` syntax for dynamic content                |
 | Connection           | Link between nodes defining flow direction               |
 | Materialize          | Five-minute node-bound tar delivery of registry files    |
+| Step attempt         | Server-issued identity of one presented workflow step    |
+| Start attempt        | Server-issued identity of one prepared workflow start    |
 
 ## Execution Management
 
 ### Starting Workflows
 
 ```typescript
-// MCP tool
-mcp__moira__start({ workflowId: "workflow-id", parentExecutionId: "none" });
+// Prepare reserves the requested start but creates no execution
+const prepared = mcp__moira__start({
+  action: "prepare",
+  workflowId: "workflow-id",
+  parentExecutionId: "none",
+});
+
+// Execute the exact prepared attempt
+mcp__moira__start({ action: "execute", startAttemptId: prepared.startAttemptId });
 
 // With note for identification
-mcp__moira__start({
+const preparedWithNote = mcp__moira__start({
+  action: "prepare",
   workflowId: "workflow-id",
   note: "Task: implement feature X",
   parentExecutionId: "none",
 });
+mcp__moira__start({ action: "execute", startAttemptId: preparedWithNote.startAttemptId });
 
 // With parent linking
-mcp__moira__start({
+const preparedChild = mcp__moira__start({
+  action: "prepare",
   workflowId: "child-workflow",
   parentExecutionId: "parent-process-id",
 });
+mcp__moira__start({ action: "execute", startAttemptId: preparedChild.startAttemptId });
 ```
+
+`prepare` validates and binds the workflow version, caller, parent reference, note, and notification policy
+options to a Start attempt, but does not create an execution or run a node. The attempt expires after
+15 minutes. `execute` revalidates mutable workflow, parent, account, lock-delivery, and communication
+preconditions, consumes the attempt, and returns the Process ID, first Step attempt ID, and first
+presentation. A failed mutable precondition returns one stable `START_PRECONDITION_CHANGED` receipt
+without an execution. Repeating `execute` with the same Start attempt ID replays the exact stored response;
+creating another Start attempt is an intentional separate execution.
 
 ### Executing Steps
 
@@ -44,12 +65,14 @@ mcp__moira__start({
 // Basic step execution
 mcp__moira__step({
   processId: "execution-id",
+  attemptId: "attempt-current",
   input: { field: "value" },
 });
 
 // String input for simple responses
 mcp__moira__step({
   processId: "execution-id",
+  attemptId: "attempt-current",
   input: "completed task",
 });
 ```
@@ -60,6 +83,16 @@ mcp__moira__step({
 
 - **Execution not found** — invalid processId
 - **Workflow already completed** — calling `step()` on a finished execution. Error message includes active child workflow ID if one exists, helping agents understand the execution context.
+- **Invalid or expired attempt** — the attempt is unavailable or no longer matches the current presentation
+
+It throws `ConflictError` when a completed attempt is replayed with different input, the attempt is
+stale, another caller still owns it after the bounded wait (`ATTEMPT_PROCESSING`), or a previously
+claimed mutation has an unknown durable outcome (`ATTEMPT_OUTCOME_UNKNOWN`). Only
+`ATTEMPT_PROCESSING` is automatically retryable, and it must use the same attempt and identical
+input. For a start attempt with unknown outcome, use the returned Process ID with `session` to inspect
+the attached execution instead of preparing or executing another start. The owner may retire a
+blocked execution with `session({ action: "cancel-execution", executionId, expectedRevision })`;
+the expected revision prevents a stale cancellation from deleting newer work.
 
 ```typescript
 // Example: step() on completed workflow
@@ -89,7 +122,8 @@ mcp__moira__session({
 
 For a paused `materialize` node, `current_step` re-presents that node without traversing a
 connection or changing execution state. It issues a fresh five-minute URL each time; each URL can
-be downloaded repeatedly only while the execution remains waiting on that node.
+be downloaded repeatedly only while the execution remains waiting on that node. For every paused
+node, `current_step` returns the authoritative current Step attempt ID.
 
 ### Recovery After Interruption
 
@@ -98,6 +132,21 @@ If agent session is interrupted:
 1. Find process ID in workspace: `cat ./moira-ws/*/process-id.txt`
 2. Get current step: `mcp__moira__session({ action: "current_step", executionId: "..." })`
 3. Continue from current step
+
+### Replay and concurrency contract
+
+Every successful `start({ action: "execute" })`, `step`, or `current_step` presentation includes the
+Step attempt ID needed for the next mutation. `start({ action: "execute" })` and `step()` atomically
+claim their server-issued attempts before running a handler. Execution state, the exact response
+receipt, and the next attempt are persisted atomically, so duplicate calls with the same input return
+the original response and cannot advance twice. Calls for different executions do not share a
+serialization lock.
+
+A live owner renews a 30-second lease every five seconds. A concurrent duplicate waits up to ten
+seconds for the stored result, then reports `ATTEMPT_PROCESSING`. Expired or otherwise indeterminate
+claimed work is fenced as `ATTEMPT_OUTCOME_UNKNOWN`; automatic retry is prohibited because an
+external node effect may already have occurred. Completed receipts are retained for seven days and
+bounded to the newest 1,000 per execution.
 
 ## Best Practices
 
@@ -629,7 +678,7 @@ Jump target reachable only via explicit teleport, not via normal connections. Be
 When a workflow contains teleport nodes, their hints are automatically appended to each step response under "Available Teleport Jumps". To jump to a teleport node, use the `teleportTo` parameter in `step()`:
 
 ```
-step({ processId: "abc123", teleportTo: "teleport-replan" })
+step({ processId: "abc123", attemptId: "attempt-current", teleportTo: "teleport-replan" })
 ```
 
 - Only teleport-type nodes can be targets
@@ -659,7 +708,7 @@ PIN-based execution gate. It delivers a generated PIN to the current user's conf
 
 **Behavior:**
 
-1. `start()` requires a valid-shaped Telegram bot token and chat ID for the current user before creating an execution whose graph contains a lock node. Neither `skipNotificationCheck` nor its deprecated `skipTelegramCheck` alias can bypass this check.
+1. `start({ action: "execute" })` requires a valid-shaped Telegram bot token and chat ID for the current user before creating an execution whose graph contains a lock node. Neither the `skipNotificationCheck` policy captured during prepare nor its deprecated `skipTelegramCheck` alias can bypass this check.
 2. On first visit, `LockHandler` asks the trusted-delivery service to create a hashed pending PIN, send the plaintext PIN to that configured chat, and activate the exact lock. It stores `_lockId` and pauses only after the service succeeds.
 3. Missing or malformed settings fail before PIN generation. Send or activation failure publishes no `_lockId`; pending and `delivery_failed` records are not active or public and re-entry starts a fresh delivery attempt.
 4. Subsequent visits check the referenced lock or validate a user-supplied PIN and route through `connections.unlocked` after resolution.
@@ -1267,9 +1316,11 @@ Link child workflow to parent for tracking and continuation:
 
 ```typescript
 mcp__moira__start({
+  action: "prepare",
   workflowId: "child-workflow",
   parentExecutionId: "parent-process-id",
 });
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" });
 ```
 
 **Behavior:**
@@ -1281,7 +1332,7 @@ mcp__moira__start({
    ```
    CONTINUATION REMINDER: This was a child workflow. Parent execution awaits continuation.
    Parent execution ID: <parent-id>
-   Use step(processId: "<parent-id>") to continue the parent workflow.
+   Read session({ action: "current_step", executionId: "<parent-id>" }) and continue with the returned step attempt.
    ```
 
 3. **Active Child Info**: When executing steps on parent workflow, response includes info about running children:

@@ -120,7 +120,17 @@ export interface IGraphExecutor {
    * Returns formatted text string when agent-directive node needs user input
    * @param teleportTo Optional teleport node ID to jump execution to
    */
-  executeStep(executionId: string, userInput?: unknown, teleportTo?: string): Promise<string>;
+  executeStep(
+    executionId: string,
+    userInput?: unknown,
+    teleportTo?: string,
+    mutation?: {
+      userId: string;
+      attemptId?: string;
+      createPresentation?: boolean;
+      onAttemptOutcome?: (outcome: "original" | "safe_replay") => void;
+    },
+  ): Promise<string>;
 
   /**
    * Re-present the persisted waiting node without advancing or saving the execution.

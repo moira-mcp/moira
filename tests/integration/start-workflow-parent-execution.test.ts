@@ -282,8 +282,9 @@ describe("Start Workflow parentExecutionId Tests", () => {
       const childResult = await runWithMCPContext({ userId: TEST_USER_ID }, async () =>
         startWorkflow({ workflowId: testWorkflowId, parentExecutionId: parentId }),
       );
-      expect(childResult.success).toBe(false);
-      expect(childResult.error).toContain("must be running");
+      expect(childResult.success).toBe(true);
+      expect(childResult.data).toContain("START_PRECONDITION_CHANGED");
+      expect(childResult.data).toContain("no longer running");
     });
   });
 
@@ -310,9 +311,9 @@ describe("Start Workflow parentExecutionId Tests", () => {
         });
       });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("not found");
-      expect(result.error).toContain('"none"');
+      expect(result.success).toBe(true);
+      expect(result.data).toContain("START_PRECONDITION_CHANGED");
+      expect(result.data).toContain("unavailable");
     });
 
     test("rejects empty string", async () => {

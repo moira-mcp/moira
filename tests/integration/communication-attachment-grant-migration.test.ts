@@ -8,19 +8,24 @@ import * as path from "node:path";
 
 const MIGRATIONS = path.resolve(process.cwd(), "packages/web-backend/drizzle");
 const TABLE = "communication_attachment_grant";
+const ATTEMPT_TABLE = "executionMutationAttempt";
+const MIGRATION_TAG = "0023_communication_attachment_grants";
 
 describe("communication attachment grant migration", () => {
   test("upgrades an existing database with the digest-only grant shape", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "moira-communication-migration-"));
     const sqlite = new Database(path.join(directory, "moira.db"));
     try {
+      const journal = JSON.parse(
+        fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ tag: string; when: number }> };
+      const migrationTimestamp = journal.entries.find((entry) => entry.tag === MIGRATION_TAG)!.when;
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
+      sqlite.exec(`DROP TABLE ${ATTEMPT_TABLE}`);
       sqlite.exec(`DROP TABLE ${TABLE}`);
       sqlite
-        .prepare(
-          "DELETE FROM __drizzle_migrations WHERE hash IN (SELECT hash FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1)",
-        )
-        .run();
+        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
+        .run(migrationTimestamp);
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
 
       const columns = (

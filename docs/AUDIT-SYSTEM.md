@@ -247,8 +247,8 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 
 ### Attempt Events
 
-- `WORKFLOW_START_ATTEMPT` - failed attempt to start a workflow (workflow not found, validation error)
-- `EXECUTION_STEP_ATTEMPT` - validation/handler errors that return pause without throwing exception
+- `WORKFLOW_START_ATTEMPT` - failed preparation before a Start attempt is issued (workflow not found, validation error)
+- `EXECUTION_STEP_ATTEMPT` - validation/handler errors that return pause, plus content-free replay-safety outcomes for start and step mutations
 
 **Logged via:** MCPEngine
 
@@ -267,6 +267,8 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 
 **EXECUTION_STEP_ATTEMPT Metadata:**
 
+Validation or handler pause:
+
 ```json
 {
   "workflowId": "workflow-uuid",
@@ -277,7 +279,21 @@ await workflowRepo.save(graph, userId, visibility); // Audit NOT logged!
 }
 ```
 
-**Note:** Three audit actions cover all execute-step scenarios:
+Replay-safety classification:
+
+```json
+{
+  "operation": "start|step",
+  "outcome": "original|safe_replay|conflicting_replay|stale_rejection|processing|outcome_unknown"
+}
+```
+
+Replay-safety entries use resource `execution_attempt` and the reserved Process ID as `resourceId`.
+They do not record the Start or Step attempt ID, input, fingerprint, response, owner, or fencing
+token. A successful start lifecycle still emits exactly one separate `EXECUTION_START` event.
+
+**Note:** Three audit actions cover all execute-step scenarios. Replay classification reuses
+`EXECUTION_STEP_ATTEMPT` without changing the successful transition record:
 
 - `EXECUTION_STEP` - successful node transition
 - `EXECUTION_STEP_ATTEMPT` - validation/handler errors (pause without exception)

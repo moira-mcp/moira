@@ -42,7 +42,8 @@ Workflow не объявляет PRD полным только из-за нал�
 Используйте квалифицированное публичное имя workflow:
 
 ~~~bash
-mcp__moira__start({ workflowId: "moira/prd-creation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/prd-creation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ~~~
 
 Если оркестрационный workflow запускает PRD Creation как дочерний, он также передаёт собственный

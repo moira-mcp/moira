@@ -23,6 +23,7 @@ const logger = createLogger({ component: "ExecuteStep" });
 
 interface ExecuteStepParams extends WorkflowSpecificParams {
   processId: string;
+  attemptId: string;
   input?: unknown;
   teleportTo?: string;
 }
@@ -113,6 +114,7 @@ export async function executeStep(params: ExecuteStepParams): Promise<ToolResult
       params.processId,
       stepParams,
       params.teleportTo,
+      params.attemptId,
     );
 
     return { success: true, data: formattedText };

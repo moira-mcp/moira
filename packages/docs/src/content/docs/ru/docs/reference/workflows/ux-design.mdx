@@ -19,7 +19,8 @@ UX Design превращает переданные требования и ра
 ## Запуск
 
 ```bash
-mcp__moira__start({ workflowId: "moira/ux-design", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/ux-design", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Если UX Design запускает оркестрационный workflow, вместо `none` передайте execution ID родителя.

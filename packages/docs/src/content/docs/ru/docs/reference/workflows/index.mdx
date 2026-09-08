@@ -172,7 +172,8 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 Запуск любого workflow:
 
 ```bash
-mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Список доступных workflows:

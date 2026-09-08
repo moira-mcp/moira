@@ -242,6 +242,14 @@ export const mcpToolCallsTotal = new promClient.Counter({
   registers: [metricsRegistry],
 });
 
+/** Replay protocol outcomes. Both labels are closed enums and contain no request data. */
+export const executionMutationAttemptsTotal = new promClient.Counter({
+  name: "moira_execution_mutation_attempts_total",
+  help: "Workflow mutation attempt outcomes",
+  labelNames: ["operation", "outcome"],
+  registers: [metricsRegistry],
+});
+
 /**
  * Audit action metrics
  */

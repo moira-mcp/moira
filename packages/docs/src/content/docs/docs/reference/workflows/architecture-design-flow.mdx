@@ -6,7 +6,8 @@ description: Evidence-backed architecture for new and existing systems with dura
 Architecture Design Flow produces a decision-ready, maintained architecture package for either a new system or an existing product. It combines scenario-appropriate discovery, evidence-backed decisions, quality attributes, crosscutting and operational concerns, limitations, deterministic package checks, and genuinely independent architecture review.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/architecture-design-flow", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/architecture-design-flow", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Use it when

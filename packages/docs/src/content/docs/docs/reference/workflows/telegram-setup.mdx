@@ -7,13 +7,15 @@ Telegram Setup configures or tests the current user's Moira Telegram notificatio
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
-`skipNotificationCheck: true` is required on an unconfigured account because the workflow contains its own legacy `telegram-notification` test node and would otherwise trigger ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior.
+Set `skipNotificationCheck: true` during prepare on an unconfigured account because the workflow contains its own legacy `telegram-notification` test node and execute would otherwise return `START_PRECONDITION_CHANGED` at ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior.
 
 ## Process
 

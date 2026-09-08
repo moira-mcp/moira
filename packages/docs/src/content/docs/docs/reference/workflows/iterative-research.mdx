@@ -12,7 +12,8 @@ Use it when the result needs repeated critique. Use [Verified Research](/docs/re
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/iterative-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/iterative-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 The workflow resolves these decisions before research:

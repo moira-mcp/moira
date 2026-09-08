@@ -64,11 +64,12 @@ Start the "development-flow" workflow in Moira
 
 Claude will:
 
-1. Call `start` with the workflow ID
-2. Receive the first step directive
-3. Execute the directive
-4. Submit results via `step`
-5. Continue until workflow completes
+1. Call `start` with `action: "prepare"` and the workflow ID
+2. Call `start` with `action: "execute"` and the returned Start attempt ID
+3. Receive the Process ID, Step attempt ID, and first directive
+4. Execute the directive
+5. Submit results via `step`
+6. Continue until workflow completes
 
 ### Continuing a Session
 
@@ -104,7 +105,7 @@ This project uses Moira for development workflows.
 
 To start a task, run the development workflow:
 
-1. Start `dev-flow` workflow
+1. Prepare and execute a start for the `dev-flow` workflow
 2. Follow each step directive
 3. Submit results before moving to next step
 ```
@@ -120,7 +121,7 @@ The core workflow lifecycle uses these tools:
 | Tool       | Description                               |
 | ---------- | ----------------------------------------- |
 | `list`     | List available workflows                  |
-| `start`    | Start a workflow, returns first directive |
+| `start`    | Prepare or execute a replay-safe workflow start |
 | `step`     | Submit result, get next directive         |
 | `help`     | Get documentation                         |
 | `settings` | User settings management                  |

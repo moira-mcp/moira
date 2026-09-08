@@ -1,22 +1,34 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createReconciliationAwareRegisterTool } from "../reconciliation-aware-server.js";
+import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  createReconciliationAwareRegisterTool,
+  type ReconciliationNoticeProvider,
+} from "../reconciliation-aware-server.js";
 import { sanitizeMcpError } from "../utils/error-sanitizer.js";
-import { wrapSchemaWithAutoparse } from "../utils/flexible-json-parser.js";
+import { wrapToolSchemaWithAutoparse } from "../utils/flexible-json-parser.js";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { invokeToolDefinition } from "./tool-bindings.js";
-import { TOOL_DEFINITIONS, resolveToolDescription } from "./tool-definitions.js";
+import {
+  TOOL_DEFINITIONS,
+  getToolJsonSchema,
+  resolveToolDescription,
+} from "./tool-definitions.js";
 
-export function registerTools(mcpServer: McpServer, context?: McpPromptContext): void {
-  const registerTool = createReconciliationAwareRegisterTool(mcpServer);
+export function registerTools(
+  mcpServer: McpServer,
+  context?: McpPromptContext,
+  getReconciliationNotice?: ReconciliationNoticeProvider,
+): void {
+  const registerTool = createReconciliationAwareRegisterTool(mcpServer, getReconciliationNotice);
 
   for (const definition of TOOL_DEFINITIONS) {
     registerTool(
       definition.name,
       {
         description: resolveToolDescription(definition, context),
-        inputSchema: wrapSchemaWithAutoparse(definition.schema.shape),
+        inputSchema: wrapToolSchemaWithAutoparse(definition.schema),
       },
-      async (params) => {
+      async (params: unknown) => {
         try {
           return await invokeToolDefinition(definition, params);
         } catch (error) {
@@ -27,4 +39,15 @@ export function registerTools(mcpServer: McpServer, context?: McpPromptContext):
       },
     );
   }
+
+  // SDK 1.x validates complete Zod schemas on tools/call, but tools/list serializes only ZodObject
+  // and otherwise advertises an empty schema. Publish the same typed registry directly so unions
+  // remain visible to clients; the high-level SDK still owns invocation and runtime validation.
+  mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: TOOL_DEFINITIONS.map((definition) => ({
+      name: definition.name,
+      description: resolveToolDescription(definition, context),
+      inputSchema: getToolJsonSchema(definition),
+    })),
+  }));
 }

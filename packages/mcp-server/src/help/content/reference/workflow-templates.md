@@ -38,24 +38,31 @@ Use the exact qualified identity returned by `list()`:
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/quick-task",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
-Set `parentExecutionId` to the real parent Process ID for child work. Parameters beyond identity and parent are workflow-specific. For example, Smart Purchase Assistant contains an optional `user-notification` node. When the current user has no configured communication channel, start it with `skipNotificationCheck: true`; that bypasses graph preflight but does not authorize notification:
+Set `parentExecutionId` to the real parent Process ID for child work. Parameters beyond identity and parent are workflow-specific. For example, Smart Purchase Assistant contains an optional `user-notification` node. When the current user has no configured communication channel, include `skipNotificationCheck: true` in prepare so execute skips graph preflight; this does not authorize notification:
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/smart-purchase-assistant",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
-The canonical flag bypasses only optional ordinary-notification preflight. `skipTelegramCheck` is a deprecated alias with the same behavior; conflicting values are rejected. If the selected workflow contains a `lock` node, the current user must first configure a valid Telegram bot token and chat ID for trusted PIN delivery. Neither field bypasses that requirement. Setup guidance without a Process ID is not a successful start.
+The canonical flag is captured by prepare and bypasses only optional ordinary-notification preflight during execute. `skipTelegramCheck` is a deprecated alias with the same behavior; conflicting values are rejected. If the selected workflow contains a `lock` node, the current user must configure a valid Telegram bot token and chat ID before execute can create an execution. Neither field bypasses that requirement. A failed mutable precondition returns a stable `START_PRECONDITION_CHANGED` receipt and no Process ID. A prepared attempt expires after 15 minutes and creates no execution until `start({ action: "execute", startAttemptId })` consumes it. Retry that same execute call after a lost response; preparing again intentionally requests a separate execution.
 
-After `start()` returns a Process ID, execute the current directive, verify its completion condition, and submit the exact `inputSchema` through `step()`. Continue until a terminal result or an explicit user decision is reached.
+After execute returns a Process ID and Step attempt ID, execute the current directive, verify its
+completion condition, and submit the exact `inputSchema` through `step()` with both identities.
+Continue with each newly returned attempt until a terminal result or an explicit user decision is
+reached.
 
 ## Create or edit a workflow
 

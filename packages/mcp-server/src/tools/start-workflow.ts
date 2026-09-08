@@ -8,7 +8,9 @@
  */
 
 import { MCPEngine } from "../core/mcp-engine.js";
-import { ToolResult, WorkflowSpecificParams } from "./interfaces/tool-interface.js";
+import { startRequestSchema } from "./tool-schemas.js";
+import type { z } from "zod";
+import { ToolResult } from "./interfaces/tool-interface.js";
 import { getUserContext } from "../core/request-context.js";
 import {
   formatError,
@@ -30,6 +32,7 @@ import {
   checkTrustedLockDeliveryConfiguration,
   getActiveCommunicationChannelRegistry,
   probeCommunicationChannelConfiguration,
+  workflowGraphDigest,
 } from "@mcp-moira/workflow-engine";
 import type {
   CommunicationChannelRegistry,
@@ -41,13 +44,7 @@ const logger = createLogger({ component: "StartWorkflow" });
 
 const MAX_NOTE_LENGTH = 500;
 
-interface StartWorkflowParams extends WorkflowSpecificParams {
-  workflowId: string;
-  note?: string;
-  parentExecutionId: string; // Required: "none" for standalone, UUID for child workflows
-  skipNotificationCheck?: boolean;
-  skipTelegramCheck?: boolean; // Deprecated alias for skipNotificationCheck
-}
+type StartWorkflowParams = z.infer<typeof startRequestSchema>;
 
 /**
  * Validate and sanitize note parameter
@@ -175,7 +172,7 @@ export function formatCommunicationPreflightResponse(workflowIdentifier: string)
   return (
     `Your next task: Configure at least one communication channel before starting workflow "${workflowIdentifier}". ` +
     `Open Settings > Notifications and complete an available channel. Telegram can also be configured through moira/telegram-setup. ` +
-    `To start without optional ordinary notifications, use start({ workflowId: "${workflowIdentifier}", skipNotificationCheck: true, parentExecutionId: "none" }).\n\n` +
+    `To continue without optional ordinary notifications, prepare a new attempt with start({ action: "prepare", workflowId: "${workflowIdentifier}", skipNotificationCheck: true, parentExecutionId: "none" }), then execute the returned Start attempt ID.\n\n` +
     `Success criteria: At least one channel is ready for the authenticated user, or the workflow is restarted with skipNotificationCheck: true.\n\n` +
     `No specific input format required. Send any data that fulfills the success criteria.`
   );
@@ -227,93 +224,129 @@ export function formatLockTelegramPreflightResponse(
   );
 }
 
-export async function startWorkflow(params: StartWorkflowParams): Promise<ToolResult<string>> {
+export async function startWorkflow(rawParams: unknown): Promise<ToolResult<string>> {
+  // Internal callers predating the public two-phase schema still use the exported library
+  // function. Keep them on the same safe protocol by composing prepare and execute; MCP clients
+  // cannot use this shape because the registered public schema requires action.
+  if (
+    rawParams &&
+    typeof rawParams === "object" &&
+    !("action" in rawParams) &&
+    "workflowId" in rawParams
+  ) {
+    const legacy = rawParams as {
+      workflowId: string;
+      note?: string;
+      parentExecutionId?: string;
+      skipNotificationCheck?: boolean;
+      skipTelegramCheck?: boolean;
+    };
+    const prepared = await startWorkflow({
+      action: "prepare",
+      workflowId: legacy.workflowId,
+      note: legacy.note,
+      parentExecutionId: legacy.parentExecutionId ?? "none",
+      skipNotificationCheck: legacy.skipNotificationCheck,
+      skipTelegramCheck: legacy.skipTelegramCheck,
+    });
+    if (!prepared.success || !prepared.data) return prepared;
+    const startAttemptId = prepared.data.match(/Start attempt ID:\s*([a-f0-9-]+)/i)?.[1];
+    if (!startAttemptId) return prepared;
+    return startWorkflow({ action: "execute", startAttemptId });
+  }
+  const params: StartWorkflowParams = startRequestSchema.parse(rawParams);
   let userId: string | undefined;
 
   try {
-    // Get authenticated user context
-    const context = getUserContext();
-    userId = context.userId;
-
-    // Validate parentExecutionId (required field)
-    const validatedParentId = await validateParentExecutionId(params.parentExecutionId, userId);
-
-    // Sanitize note
-    const sanitizedNote = sanitizeNote(params.note);
-
+    userId = getUserContext().userId;
     const engine = MCPEngine.getInstance();
 
-    const skipNotificationCheck = resolveSkipNotificationCheck(params);
+    if (params.action === "prepare") {
+      if (
+        params.parentExecutionId !== "none" &&
+        !isExecutionParentReference(params.parentExecutionId)
+      ) {
+        throw new Error(ERRORS.parent_execution_id_invalid_format);
+      }
+      const data = await engine.prepareWorkflowStart(params.workflowId, {
+        note: sanitizeNote(params.note) ?? null,
+        parentExecutionId: params.parentExecutionId === "none" ? null : params.parentExecutionId,
+        skipNotificationCheck: resolveSkipNotificationCheck(params),
+      });
+      return { success: true, data };
+    }
 
-    // Resolve once so lock delivery can remain mandatory even when ordinary
-    // notification pre-flight is explicitly skipped.
-    const resolved = await engine.repository.resolveWorkflow(params.workflowId, userId);
-    if (resolved) {
-      if (workflowHasLockNodes(resolved.workflow.nodes)) {
-        const trustedConfiguration = await checkTrustedLockDeliveryConfiguration(
+    const prepared = await engine.getPreparedWorkflowStart(params.startAttemptId);
+    if (prepared.attempt.state === "completed" && prepared.attempt.response !== null) {
+      return { success: true, data: await engine.replayPreparedWorkflowStart(prepared.attempt) };
+    }
+    if (prepared.attempt.state === "outcome_unknown") {
+      return { success: true, data: await engine.replayPreparedWorkflowStart(prepared.attempt) };
+    }
+    const resolved = await engine.repository.resolveWorkflow(prepared.attempt.workflowId, userId);
+    const reject = async (reason: string): Promise<ToolResult<string>> => ({
+      success: true,
+      data: await engine.rejectPreparedWorkflowStart(
+        params.startAttemptId,
+        `START_PRECONDITION_CHANGED: ${reason} Prepare a new start attempt.`,
+      ),
+    });
+    if (
+      !resolved ||
+      resolved.workflow.metadata.version !== prepared.attempt.workflowVersion ||
+      workflowGraphDigest(resolved.workflow) !== prepared.attempt.workflowDigest
+    ) {
+      return reject("The workflow is unavailable or its version changed.");
+    }
+    if (prepared.payload.parentExecutionId) {
+      try {
+        await validateParentExecutionId(prepared.payload.parentExecutionId, userId);
+      } catch {
+        return reject("The parent process is unavailable, foreign, or no longer running.");
+      }
+    }
+    if (workflowHasLockNodes(resolved.workflow.nodes)) {
+      const trustedConfiguration = await checkTrustedLockDeliveryConfiguration(
+        engine.repository,
+        userId,
+      );
+      if (!trustedConfiguration.configured) {
+        return reject(
+          formatLockTelegramPreflightResponse(
+            prepared.attempt.workflowId,
+            trustedConfiguration.reason,
+          ),
+        );
+      }
+    }
+    if (!prepared.payload.skipNotificationCheck) {
+      if (
+        workflowHasTelegramNodes(resolved.workflow.nodes) &&
+        !(await hasConfiguredCommunicationChannel(
+          getActiveCommunicationChannelRegistry(),
           engine.repository,
           userId,
-        );
-        if (!trustedConfiguration.configured) {
-          logger.info("Trusted lock delivery pre-flight check failed", {
-            workflowId: params.workflowId,
-            userId,
-            reason: trustedConfiguration.reason,
-          });
-          return {
-            success: true,
-            data: formatLockTelegramPreflightResponse(
-              params.workflowId,
-              trustedConfiguration.reason,
-            ),
-          };
-        }
+          "telegram",
+        ))
+      ) {
+        return reject(formatTelegramPreflightResponse(prepared.attempt.workflowId));
       }
-      if (!skipNotificationCheck) {
-        if (
-          workflowHasTelegramNodes(resolved.workflow.nodes) &&
-          !(await hasConfiguredCommunicationChannel(
-            getActiveCommunicationChannelRegistry(),
-            engine.repository,
-            userId,
-            "telegram",
-          ))
-        ) {
-          logger.info("Telegram pre-flight check: not configured", {
-            workflowId: params.workflowId,
-            userId,
-          });
-          return {
-            success: true,
-            data: formatTelegramPreflightResponse(params.workflowId),
-          };
-        }
-        if (
-          workflowHasUserNotificationNodes(resolved.workflow.nodes) &&
-          !(await hasConfiguredCommunicationChannel(
-            getActiveCommunicationChannelRegistry(),
-            engine.repository,
-            userId,
-          ))
-        ) {
-          logger.info("Communication pre-flight check: no configured channel", {
-            workflowId: params.workflowId,
-            userId,
-          });
-          return {
-            success: true,
-            data: formatCommunicationPreflightResponse(params.workflowId),
-          };
-        }
+      if (
+        workflowHasUserNotificationNodes(resolved.workflow.nodes) &&
+        !(await hasConfiguredCommunicationChannel(
+          getActiveCommunicationChannelRegistry(),
+          engine.repository,
+          userId,
+        ))
+      ) {
+        return reject(formatCommunicationPreflightResponse(prepared.attempt.workflowId));
       }
     }
 
-    // Use singleton MCPEngine for shared state management
-    // Note: MCPEngine.startWorkflow handles its own WORKFLOW_START_ATTEMPT logging for errors
-    const formattedText = await engine.startWorkflow(
-      params.workflowId,
-      sanitizedNote,
-      validatedParentId,
+    const formattedText = await engine.executePreparedWorkflowStart(
+      params.startAttemptId,
+      resolved.workflow,
+      { workflowIdentifier: prepared.attempt.workflowId, slug: resolved.slug },
     );
 
     return { success: true, data: formattedText };
@@ -325,7 +358,7 @@ export async function startWorkflow(params: StartWorkflowParams): Promise<ToolRe
     // Operational errors (user errors) = WARN, Programmer errors = ERROR
     const logLevel = isOperationalError(appError) ? "warn" : "error";
     logger[logLevel]("Failed to start workflow", appError, {
-      workflowId: params.workflowId,
+      workflowId: params.action === "prepare" ? params.workflowId : "prepared-start",
       code: appError.code,
       isOperational: appError.isOperational,
     });
@@ -335,11 +368,26 @@ export async function startWorkflow(params: StartWorkflowParams): Promise<ToolRe
     if (userId) {
       await logStartAttempt(
         userId,
-        params.workflowId,
+        params.action === "prepare" ? params.workflowId : "prepared-start",
         error as Error,
-        params.note,
-        params.parentExecutionId,
+        params.action === "prepare" ? params.note : undefined,
+        params.action === "prepare" ? params.parentExecutionId : undefined,
       );
+      if (params.action === "execute") {
+        const candidate = appError.context?.attemptOutcome;
+        const outcome =
+          candidate === "processing" ||
+          candidate === "outcome_unknown" ||
+          candidate === "conflicting_replay" ||
+          candidate === "safe_replay" ||
+          candidate === "original"
+            ? candidate
+            : "stale_rejection";
+        await MCPEngine.getInstance().recordRejectedStartAttempt(
+          outcome,
+          appError.context?.attemptMetricRecorded !== true,
+        );
+      }
     }
 
     // Add contextual hints and AGENT INSTRUCTIONS based on error type

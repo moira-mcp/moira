@@ -25,7 +25,8 @@ The three parts are an entry, an owner, and a re-entry.
 ## 1. The entry is a teleport
 
 A `teleport` node has no ordinary incoming connections, so no route walks into it: an agent reaches
-it only with `step({ processId, teleportTo: "..." })`. Its `hint` is appended to every step of the
+it only with `step({ processId, attemptId, teleportTo: "..." })`, using the attempt ID from the
+current presentation. Its `hint` is appended to every step of the
 run, which makes the hint the place to state both when the jump is legitimate and when it is abuse.
 The abuse boundary is the important half — a failing check, a flaky test, an unwelcome review
 finding or a task that is merely hard belong to their repair owners, not to a process change.

@@ -25,9 +25,11 @@ Start the management workflow:
 
 ```typescript
 mcp__moira__start({
+  action: "prepare",
   workflowId: "workflow-management-flow",
   parentExecutionId: "none",
 });
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" });
 ```
 
 Select "edit" when prompted for action.

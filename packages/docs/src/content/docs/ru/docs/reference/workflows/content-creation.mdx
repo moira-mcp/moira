@@ -6,7 +6,8 @@ description: Один независимо проверенный текстов
 Content Creation создаёт один ограниченный текстовый результат — статью, пост, документацию, сценарий, email, landing copy или другой запрошенный формат — из разрешённого brief.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/content-creation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/content-creation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Используйте его, когда результатом является сам текст. Для campaign positioning и multi-channel материалов выбирайте [Marketing Campaign](/ru/docs/reference/workflows/marketing-campaign/), для evidence discovery как результата — research workflow, для изменений репозитория — Software Development Flow.

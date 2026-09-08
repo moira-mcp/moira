@@ -10,6 +10,8 @@
  */
 
 import * as AjvModule from "ajv";
+export { canonicalJson } from "@mcp-moira/shared";
+import { canonicalJson } from "@mcp-moira/shared";
 
 /**
  * Options every Ajv instance that compiles an extension-declared schema must use.
@@ -65,18 +67,6 @@ const SCHEMA_VALUE_KEYWORDS = new Set([
   "unevaluatedItems",
   "unevaluatedProperties",
 ]);
-
-/** Stable JSON identity: object member order is irrelevant, array order remains significant. */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
 
 function declaredSchemaSafetyProblem(schema: unknown): string | null {
   const structureProblem = declaredSchemaStructureProblem(schema);

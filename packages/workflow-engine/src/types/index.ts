@@ -5,6 +5,7 @@
 
 // Base types and execution context
 export * from "./base-types.js";
+export * from "./execution-attempt.js";
 
 // Workflow types
 export * from "./workflow.js";

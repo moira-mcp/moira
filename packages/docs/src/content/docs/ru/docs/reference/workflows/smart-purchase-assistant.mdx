@@ -7,13 +7,15 @@ Smart Purchase Assistant превращает одну потребность в
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/smart-purchase-assistant",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
-`skipNotificationCheck: true` пропускает только graph-level preflight Moira для опциональной ноды `user-notification`. Он не разрешает уведомление. Реальная доставка через каналы выполняется только после independent review локального результата и только при явно выданном notification authority.
+`skipNotificationCheck: true` сохраняется во время prepare и пропускает только execute-time graph preflight Moira для опциональной ноды `user-notification`. Он не разрешает уведомление. Реальная доставка через каналы выполняется только после independent review локального результата и только при явно выданном notification authority.
 
 ## Результат и evidence
 

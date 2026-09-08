@@ -14,7 +14,8 @@ Use Quick Task when an agent has filesystem access and bounded non-development w
 ## Start
 
 ```bash
-mcp__moira__start({ workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## Process
@@ -100,7 +101,7 @@ Evidence is not returned through workflow context. If work is incomplete or bloc
 When the approved plan itself stops fitting reality — new facts appear, scope was missed, or an executed unit's outcome invalidates the remaining plan — the agent jumps to the replan entry instead of finishing a plan it knows is wrong:
 
 ```js
-mcp__moira__step({ processId, teleportTo: "teleport-replan" })
+mcp__moira__step({ processId, attemptId, teleportTo: "teleport-replan" })
 ```
 
 No step leads into that node, so a replan is always a deliberate decision, and it is not a way around the other owners: a blocking plan-review finding belongs to the plan repair loop, a defect in the produced result to the result fix loop, a plan you reject at the approval gate to the ordinary revision route, and a unit that is merely hard or blocked to the rule above.

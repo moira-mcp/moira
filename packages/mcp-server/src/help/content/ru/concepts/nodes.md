@@ -389,10 +389,11 @@ agent-directive: приостанавливается для ввода и ва�
 «Available Teleport Jumps». Для перехода передайте параметр `teleportTo` в `step()`:
 
 ```
-step({ processId: "abc123", teleportTo: "teleport-replan" })
+step({ processId: "abc123", attemptId: "attempt-current", teleportTo: "teleport-replan" })
 ```
 
 - Целью может быть только узел типа teleport
+- Используйте идентификатор попытки шага из текущего предъявления
 - Не передавайте `input` при переходе: teleport-узел сначала покажет собственную директиву
 - Контекст выполнения сохраняется целиком
 - После ввода для teleport-узла выполнение продолжается через `connections.success`

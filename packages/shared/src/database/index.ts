@@ -13,6 +13,7 @@ export {
 export type { ListQueryConfig, ListQueryParams, ListQueryResult } from "./list-query-builder.js";
 export { WorkflowRepository, MAX_WORKFLOW_SIZE_BYTES } from "./repositories/workflow-repository.js";
 export { ExecutionRepository } from "./repositories/execution-repository.js";
+export { ExecutionAttemptRepository } from "./repositories/execution-attempt-repository.js";
 export type { ExecutionFilter, ExecutionListResult } from "./repositories/execution-repository.js";
 export { SettingsRepository } from "./repositories/settings-repository.js";
 export { ExtensionSettingsRepository } from "./repositories/extension-settings-repository.js";

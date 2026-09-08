@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z, type ZodRawShape, type ZodTypeAny } from "zod";
+import type { ZodTypeAny } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { McpPromptContext } from "@mcp-moira/shared";
 import { toolDescriptions } from "./tool-descriptions.js";
@@ -38,7 +38,7 @@ export interface ToolDescriptions {
 
 export interface ToolDefinition<
   Name extends string = string,
-  Schema extends z.AnyZodObject = z.AnyZodObject,
+  Schema extends ZodTypeAny = ZodTypeAny,
 > {
   name: Name;
   descriptions: ToolDescriptions;
@@ -51,7 +51,7 @@ export interface ToolDefinition<
   };
 }
 
-type ToolDefinitionInput<Name extends string, Schema extends z.AnyZodObject> = Omit<
+type ToolDefinitionInput<Name extends string, Schema extends ZodTypeAny> = Omit<
   ToolDefinition<Name, Schema>,
   "descriptions"
 >;
@@ -67,7 +67,7 @@ function getStaticDescription(name: string): string {
   return description;
 }
 
-function defineTool<const Name extends string, Schema extends z.AnyZodObject>(
+function defineTool<const Name extends string, Schema extends ZodTypeAny>(
   definition: ToolDefinitionInput<Name, Schema>,
   agents?: ToolDescriptions["agents"],
 ): ToolDefinition<Name, Schema> {
@@ -123,15 +123,18 @@ export const TOOL_DEFINITIONS = [
     name: "start",
     schema: startSchema,
     responsePolicy: "text",
-    examples: [{ workflowId: "moira/quick-task", parentExecutionId: "none" }],
+    examples: [
+      { action: "prepare", workflowId: "moira/quick-task", parentExecutionId: "none" },
+      { action: "execute", startAttemptId: "00000000-0000-4000-8000-000000000000" },
+    ],
     documentation: {
       en: {
-        summary: "Start a workflow execution.",
-        result: "The process ID and first instruction.",
+        summary: "Prepare, then execute, a replay-safe workflow start.",
+        result: "A start attempt receipt or the process ID and first instruction.",
       },
       ru: {
-        summary: "Запускает выполнение процесса.",
-        result: "Идентификатор выполнения и первая инструкция.",
+        summary: "Подготавливает, затем выполняет защищённый от повторов запуск процесса.",
+        result: "Квитанция попытки запуска либо идентификатор выполнения и первая инструкция.",
       },
     },
   }),
@@ -141,16 +144,20 @@ export const TOOL_DEFINITIONS = [
       schema: stepSchema,
       responsePolicy: "text",
       examples: [
-        { processId: "00000000-0000-4000-8000-000000000000", input: { outcome: "completed" } },
+        {
+          processId: "00000000-0000-4000-8000-000000000000",
+          attemptId: "11111111-1111-4111-8111-111111111111",
+          input: { outcome: "completed" },
+        },
       ],
       documentation: {
         en: {
           summary: "Continue an existing workflow execution.",
-          result: "The next instruction or terminal result.",
+          result: "The next instruction with its step attempt ID, or a terminal result.",
         },
         ru: {
           summary: "Продолжает существующее выполнение процесса.",
-          result: "Следующая инструкция или итоговый результат.",
+          result: "Следующая инструкция с идентификатором попытки шага или итоговый результат.",
         },
       },
     },
@@ -346,10 +353,6 @@ export function getToolDefinition(name: McpToolName): AnyToolDefinition {
   return definition;
 }
 
-export function getToolInputShape(name: McpToolName): ZodRawShape {
-  return getToolDefinition(name).schema.shape;
-}
-
 export function resolveToolDescription(
   definition: Pick<ToolDefinition, "descriptions">,
   context?: McpPromptContext,
@@ -375,11 +378,12 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema">) {
-  return zodToJsonSchema(definition.schema as ZodTypeAny, {
+  const schema = zodToJsonSchema(definition.schema as ZodTypeAny, {
     $refStrategy: "none",
     strictUnions: true,
     pipeStrategy: "input",
   });
+  return "type" in schema ? schema : { ...schema, type: "object" };
 }
 
 export type ToolContractSource = Pick<
@@ -424,8 +428,15 @@ export const MCP_TOOLS_REVISION = computeToolContractRevision();
 export function getToolOperations(definition: AnyToolDefinition): readonly string[] {
   const schema = getToolJsonSchema(definition) as {
     properties?: { action?: { enum?: string[] } };
+    anyOf?: Array<{ properties?: { action?: { const?: string; enum?: string[] } } }>;
+    oneOf?: Array<{ properties?: { action?: { const?: string; enum?: string[] } } }>;
   };
-  return schema.properties?.action?.enum ?? [];
+  const direct = schema.properties?.action?.enum;
+  if (direct) return direct;
+  return [...(schema.anyOf ?? schema.oneOf ?? [])].flatMap((branch) => {
+    const action = branch.properties?.action;
+    return action?.enum ?? (action?.const ? [action.const] : []);
+  });
 }
 
 export function getToolReferenceModel(

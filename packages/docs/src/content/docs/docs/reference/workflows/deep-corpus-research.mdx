@@ -6,7 +6,8 @@ description: Separately authorized whole-corpus research with durable evidence, 
 Deep Corpus Research is the expensive research tier for one question whose answer depends on reading a defined body of sources as a whole. It requires explicit originating-user consent to that cost in both autonomous and interactive modes. Use [Verified Research](/docs/reference/workflows/verified-research/) for a proportionate bounded source set, [Iterative Research](/docs/reference/workflows/iterative-research/) for repeated critique, or [Universal Research](/docs/reference/workflows/universal-research-workflow/) when storage and method must remain portable.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/deep-corpus-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/deep-corpus-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 ## What it produces

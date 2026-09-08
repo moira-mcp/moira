@@ -55,19 +55,21 @@ If you're using Moira through an MCP client (Claude Code, Claude Desktop), you c
 
 ```
 start({
+  action: "prepare",
   workflowId: "moira/telegram-setup",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
+start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
-`skipNotificationCheck: true` is required for this bootstrap workflow when Telegram is not configured; otherwise its legacy `telegram-notification` test node prevents an execution from starting. The flag bypasses only optional ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior. Neither field can bypass trusted PIN delivery for a `lock` node.
+Set `skipNotificationCheck: true` while preparing this bootstrap workflow when Telegram is not configured; otherwise execute returns a stable `START_PRECONDITION_CHANGED` receipt because of its legacy `telegram-notification` test node. The flag bypasses only optional ordinary-notification preflight. `skipTelegramCheck` remains a deprecated alias with the same behavior. Neither field can bypass trusted PIN delivery for a `lock` node.
 
 The workflow inspects masked existing settings, lets you test or explicitly replace them, keeps credentials out of workflow output, verifies persisted settings, sends a secret-free test, and confirms actual receipt.
 
 ## Workflow locks
 
-A workflow containing a `lock` node starts only when the current user has a valid bot token and chat ID. When execution reaches the node, Moira sends the generated PIN only to that configured chat and activates the lock after the send succeeds. Missing or invalid settings return setup guidance without a Process ID. A later send failure leaves no usable lock from that attempt; retry the same node after delivery is available.
+A workflow containing a `lock` node starts only when the current user has a valid bot token and chat ID. Execute checks that configuration before creating the execution and stores a `START_PRECONDITION_CHANGED` receipt when it is unavailable. When execution reaches the node, Moira sends the generated PIN only to that configured chat and activates the lock after the send succeeds. A later send failure leaves no usable lock from that attempt; retry the same node after delivery is available.
 
 MCP and workflow responses do not reveal the generated PIN. Unlock by entering a PIN provided by the user or by using the Approve button in Telegram.
 

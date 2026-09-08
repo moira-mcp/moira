@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   index,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // ===== Better Auth Tables =====
 
@@ -250,6 +251,63 @@ export const workflowExecution = sqliteTable("workflowExecution", {
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
   completedAt: integer("completedAt", { mode: "timestamp_ms" }),
 });
+
+/** Durable replay and ownership state for state-changing MCP workflow operations. */
+export const executionMutationAttempt = sqliteTable(
+  "executionMutationAttempt",
+  {
+    attemptId: text("attemptId").primaryKey(),
+    operation: text("operation").notNull(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    executionId: text("executionId").references(() => workflowExecution.executionId, {
+      onDelete: "cascade",
+    }),
+    reservedExecutionId: text("reservedExecutionId"),
+    executionRevision: integer("executionRevision"),
+    nodeId: text("nodeId"),
+    workflowId: text("workflowId").notNull(),
+    workflowVersion: text("workflowVersion").notNull(),
+    workflowDigest: text("workflowDigest").notNull(),
+    requestPayload: text("requestPayload"),
+    inputFingerprint: text("inputFingerprint"),
+    state: text("state").notNull(),
+    ownerId: text("ownerId"),
+    fence: integer("fence").notNull().default(0),
+    heartbeatAt: integer("heartbeatAt", { mode: "timestamp_ms" }),
+    leaseExpiresAt: integer("leaseExpiresAt", { mode: "timestamp_ms" }),
+    response: text("response"),
+    nextAttemptId: text("nextAttemptId"),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+    completedAt: integer("completedAt", { mode: "timestamp_ms" }),
+  },
+  (table) => ({
+    executionStateIdx: index("attempt_execution_state_idx").on(
+      table.executionId,
+      table.state,
+      table.createdAt,
+    ),
+    userOperationStateIdx: index("attempt_user_operation_state_idx").on(
+      table.userId,
+      table.operation,
+      table.state,
+      table.createdAt,
+    ),
+    leaseIdx: index("attempt_state_lease_idx").on(table.state, table.leaseExpiresAt),
+    cleanupIdx: index("attempt_operation_completed_idx").on(table.operation, table.completedAt),
+    reservedExecutionIdx: uniqueIndex("attempt_reserved_execution_idx").on(
+      table.reservedExecutionId,
+    ),
+    currentStepIdx: uniqueIndex("attempt_current_step_idx")
+      .on(table.executionId)
+      .where(
+        sql`${table.operation} = 'step' AND ${table.state} IN ('presented', 'executing', 'outcome_unknown')`,
+      ),
+  }),
+);
 
 // ===== Universal Settings System =====
 

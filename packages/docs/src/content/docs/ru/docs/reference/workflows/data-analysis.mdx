@@ -11,9 +11,11 @@ import { Aside } from '@astrojs/starlight/components';
 
 ```js
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/data-analysis",
   parentExecutionId: "none"
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Передайте аналитический вопрос, решение, для которого нужен результат, объём, аудиторию, ограничения, критерии успеха, ожидаемые материалы, правила конфиденциальности и хотя бы один inline-, file- или API-источник. Для каждого источника укажите безопасный идентификатор, несекретный locator, разрешение, изначально известную доступность, классификацию данных и ограничения.

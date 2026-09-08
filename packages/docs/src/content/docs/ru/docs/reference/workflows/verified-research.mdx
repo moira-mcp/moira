@@ -10,7 +10,8 @@ Verified Research отвечает на один конкретный вопро
 ## Запуск
 
 ```bash
-mcp__moira__start({ workflowId: "moira/verified-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/verified-research", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 Workflow переиспользует явно заданный operating mode. В режиме `autonomous` пропускаются только ожидания пользователя; существенная неоднозначность становится blocked prerequisite, а не выдуманным вопросом. В режиме `interactive` workflow может запросить одно необходимое уточнение, а затем предложить принять результат, выбрать ограниченную доработку или прервать запуск.

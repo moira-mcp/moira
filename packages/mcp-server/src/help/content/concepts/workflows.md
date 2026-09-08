@@ -112,12 +112,15 @@ Nodes are the steps in your workflow. Each node has an `id` and a `type` that de
 
 When a workflow starts:
 
-1. Engine creates an execution instance with unique `processId`
+1. Engine creates an execution instance with a unique `processId`
 2. Finds the start node (type: `start`)
-3. Returns the first directive to the agent
-4. Agent executes and returns result
-5. Engine evaluates connections and moves to next node
+3. Returns the first directive and its server-issued Step attempt ID
+4. Agent executes and submits the result with that Process ID and Step attempt ID
+5. Engine atomically records the transition, exact response receipt, and next attempt
 6. Repeat until reaching an end node (type: `end`)
+
+Repeating the same attempt with the same input returns its stored response without advancing again.
+Each later paused presentation has a different attempt ID.
 
 ## Execution Context
 

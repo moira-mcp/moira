@@ -6,7 +6,8 @@ description: Executable test-code delivery with project-pattern reuse, real comm
 Test Generation adds or updates executable tests for one authorized target in an existing project.
 
 ```bash
-mcp__moira__start({ workflowId: "moira/test-generation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/test-generation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
 Use it when the deliverable is test code. Use [Test Planning](/docs/reference/workflows/test-planning/) for strategy without implementation, Test Suite Audit for evaluating an existing suite, or Software Development Flow when production code must change.

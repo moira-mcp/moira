@@ -385,10 +385,11 @@ unreachable node warnings during validation.
 When a workflow contains teleport nodes, their hints are automatically appended to each step response under "Available Teleport Jumps". To jump to a teleport node, use the `teleportTo` parameter in `step()`:
 
 ```
-step({ processId: "abc123", teleportTo: "teleport-replan" })
+step({ processId: "abc123", attemptId: "attempt-current", teleportTo: "teleport-replan" })
 ```
 
 - Only teleport-type nodes can be targets
+- Use the Step attempt ID from the current presentation
 - Do NOT provide `input` when teleporting — the teleport node will present its own directive
 - Execution context (all variables) is preserved across the teleport
 - After providing input to the teleport node, execution continues via its `connections.success`

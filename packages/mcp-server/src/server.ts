@@ -56,6 +56,7 @@ import {
   getExtensionRunnerUrl,
   HttpExtensionRunnerClient,
   DatabaseRepository,
+  ExecutionAttemptMaintenance,
   getActiveUserCommunicationService,
 } from "@mcp-moira/workflow-engine";
 import { runWithMCPContext } from "./core/request-context.js";
@@ -550,6 +551,9 @@ async function main() {
   try {
     // Config is validated automatically on first access (lazy initialization)
     const port = getMcpPort();
+    const stopAttemptMaintenance = await new ExecutionAttemptMaintenance(
+      new DatabaseRepository(),
+    ).start();
 
     // The MCP and API servers are separate processes, so each owns a registry and runner client.
     // This process is the single writer of the snapshot consumed by tools outside the container.
@@ -600,6 +604,7 @@ async function main() {
     // Graceful shutdown of HTTP server (stateless mode)
     process.on("SIGINT", () => {
       logger.info("Received SIGINT, shutting down HTTP server");
+      stopAttemptMaintenance();
       httpServer.close(() => {
         try {
           closeDatabase();
@@ -615,6 +620,7 @@ async function main() {
 
     process.on("SIGTERM", () => {
       logger.info("Received SIGTERM, shutting down HTTP server");
+      stopAttemptMaintenance();
       httpServer.close(() => {
         try {
           closeDatabase();

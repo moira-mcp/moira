@@ -11,6 +11,13 @@ import {
   UniversalGraphExecutor,
   IDataRepository,
   DatabaseRepository,
+  ExecutionMutationCoordinator,
+  currentAttemptGuidance,
+} from "@mcp-moira/workflow-engine";
+import type {
+  ExecutionAttempt,
+  StartAttemptRequestPayload,
+  WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import path from "path";
 import {
@@ -20,12 +27,32 @@ import {
   getDbPath,
   NotFoundError,
   AppError,
+  ConflictError,
   ValidationError,
   sanitizeInput,
   getLockService,
+  executionMutationAttemptsTotal,
+  activeExecutionsGauge,
+  workflowExecutionsTotal,
 } from "@mcp-moira/shared";
 import type { ServiceLogger } from "@mcp-moira/shared";
 import { getUserContext } from "./request-context.js";
+
+type AttemptAuditOutcome =
+  | "original"
+  | "safe_replay"
+  | "conflicting_replay"
+  | "stale_rejection"
+  | "processing"
+  | "outcome_unknown";
+const ATTEMPT_AUDIT_OUTCOMES = new Set<AttemptAuditOutcome>([
+  "original",
+  "safe_replay",
+  "conflicting_replay",
+  "stale_rejection",
+  "processing",
+  "outcome_unknown",
+]);
 
 /**
  * MCPEngine - Unified workflow execution engine
@@ -34,6 +61,7 @@ import { getUserContext } from "./request-context.js";
 class MCPEngineClass {
   public readonly repository: IDataRepository;
   public readonly executor: UniversalGraphExecutor;
+  private readonly mutationCoordinator: ExecutionMutationCoordinator;
   private logger: ServiceLogger;
 
   constructor(repository?: IDataRepository) {
@@ -55,6 +83,7 @@ class MCPEngineClass {
       }
 
       this.executor = new UniversalGraphExecutor(this.repository);
+      this.mutationCoordinator = new ExecutionMutationCoordinator(this.repository);
       this.logger.info("MCPEngine: Executor created");
 
       this.logger.info("MCP Engine initialized successfully");
@@ -93,32 +122,212 @@ class MCPEngineClass {
       });
     }
 
-    const { workflow, workflowId, slug } = resolved;
-
-    const executionId = await this.executor.startWorkflow(
-      workflow,
-      undefined,
-      userId,
-      note,
-      parentExecutionId,
-    );
-
-    // Audit logging (cast safe - repository is always DatabaseRepository in production)
-    // Note: source is automatically added from AsyncLocalStorage context
-    await logAuditEventDirect(this.repository as DatabaseRepository, {
-      userId,
-      action: AuditAction.EXECUTION_START,
-      resource: "execution",
-      resourceId: executionId,
-      metadata: { workflowId, slug, identifier: workflowIdentifier, note, parentExecutionId },
+    const prepared = await this.mutationCoordinator.prepareStart(userId, resolved.workflow, {
+      note: note ?? null,
+      parentExecutionId: parentExecutionId ?? null,
+      skipNotificationCheck: true,
     });
-
-    const formattedText = await this.executor.executeStep(executionId);
-
-    return formattedText;
+    return this.executePreparedWorkflowStart(prepared.attemptId, resolved.workflow, {
+      workflowIdentifier,
+      slug: resolved.slug,
+    });
   }
 
-  async executeStep(processId: string, input: unknown, teleportTo?: string): Promise<string> {
+  async prepareWorkflowStart(
+    workflowIdentifier: string,
+    payload: StartAttemptRequestPayload,
+  ): Promise<string> {
+    const { userId } = getUserContext();
+    const resolved = await this.repository.resolveWorkflow(workflowIdentifier, userId);
+    if (!resolved) {
+      throw new NotFoundError(`Workflow '${workflowIdentifier}' not found`, {
+        workflowIdentifier,
+      });
+    }
+    const attempt = await this.mutationCoordinator.prepareStart(userId, resolved.workflow, payload);
+    return [
+      `Process ID: ${attempt.reservedExecutionId}`,
+      `Start attempt ID: ${attempt.attemptId}`,
+      `Expires at: ${new Date(attempt.expiresAt).toISOString()}`,
+      "",
+      `Execute exactly: start({ action: "execute", startAttemptId: "${attempt.attemptId}" })`,
+    ].join("\n");
+  }
+
+  async getPreparedWorkflowStart(startAttemptId: string): Promise<{
+    attempt: ExecutionAttempt;
+    payload: StartAttemptRequestPayload;
+  }> {
+    const { userId } = getUserContext();
+    const attempt = await this.repository.getExecutionAttempt(startAttemptId);
+    if (
+      !attempt ||
+      attempt.operation !== "start" ||
+      attempt.userId !== userId ||
+      attempt.requestPayload === null
+    ) {
+      throw new ValidationError("ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable.", {
+        attemptOutcome: "stale_rejection",
+      });
+    }
+    return {
+      attempt,
+      payload: JSON.parse(attempt.requestPayload) as StartAttemptRequestPayload,
+    };
+  }
+
+  async rejectPreparedWorkflowStart(startAttemptId: string, response: string): Promise<string> {
+    const { userId } = getUserContext();
+    const attempt = await this.repository.getExecutionAttempt(startAttemptId);
+    const result = await this.mutationCoordinator.completeStartPrecondition(
+      startAttemptId,
+      userId,
+      response,
+    );
+    await this.logExecutionAttemptOutcome(
+      attempt?.reservedExecutionId ?? "unavailable",
+      userId,
+      result.outcome,
+      "start",
+    );
+    return result.response;
+  }
+
+  async replayPreparedWorkflowStart(attempt: ExecutionAttempt): Promise<string> {
+    const { userId } = getUserContext();
+    const outcome = attempt.state === "outcome_unknown" ? "outcome_unknown" : "safe_replay";
+    executionMutationAttemptsTotal.inc({ operation: "start", outcome });
+    await this.logExecutionAttemptOutcome(
+      attempt.executionId ?? attempt.reservedExecutionId ?? attempt.attemptId,
+      userId,
+      outcome,
+      "start",
+    );
+    if (attempt.state === "outcome_unknown") return currentAttemptGuidance(attempt);
+    if (attempt.response !== null) return attempt.response;
+    throw new ValidationError("ATTEMPT_INVALID_OR_EXPIRED: the replay receipt is unavailable.");
+  }
+
+  async recordRejectedStartAttempt(
+    outcome: AttemptAuditOutcome,
+    incrementMetric = true,
+  ): Promise<void> {
+    const { userId } = getUserContext();
+    if (incrementMetric) executionMutationAttemptsTotal.inc({ operation: "start", outcome });
+    await this.logExecutionAttemptOutcome("unavailable", userId, outcome, "start");
+  }
+
+  async executePreparedWorkflowStart(
+    startAttemptId: string,
+    graph: WorkflowGraph,
+    identifiers?: { workflowIdentifier?: string; slug?: string },
+  ): Promise<string> {
+    const { userId } = getUserContext();
+    const { attempt, payload } = await this.getPreparedWorkflowStart(startAttemptId);
+    if (!attempt.reservedExecutionId) {
+      throw new ValidationError("ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable.");
+    }
+    const execution = this.executor.createWorkflowExecution(
+      graph,
+      undefined,
+      userId,
+      payload.note ?? undefined,
+      payload.parentExecutionId ?? undefined,
+      attempt.reservedExecutionId,
+    );
+    const claim = await this.mutationCoordinator.claimStart(attempt, execution, graph);
+    if (claim.kind === "replay" || claim.kind === "outcome_unknown") {
+      await this.logExecutionAttemptOutcome(
+        execution.executionId,
+        userId,
+        claim.kind === "replay" ? "safe_replay" : "outcome_unknown",
+        "start",
+      );
+      return claim.response;
+    }
+
+    let lease: Awaited<ReturnType<ExecutionMutationCoordinator["openLease"]>> | undefined;
+    try {
+      lease = await this.mutationCoordinator.openLease(startAttemptId, claim.fence, claim.ownerId);
+      activeExecutionsGauge.inc();
+      workflowExecutionsTotal.inc({ status: "started", workflow_id: execution.workflowId });
+      await logAuditEventDirect(this.repository as DatabaseRepository, {
+        userId,
+        action: AuditAction.EXECUTION_START,
+        resource: "execution",
+        resourceId: execution.executionId,
+        metadata: {
+          workflowId: execution.workflowId,
+          slug: identifiers?.slug,
+          identifier: identifiers?.workflowIdentifier,
+          note: payload.note,
+          parentExecutionId: payload.parentExecutionId,
+        },
+      });
+
+      let attemptOutcome: "original" | "safe_replay" | undefined;
+      const response = await this.executor.executeStep(
+        execution.executionId,
+        undefined,
+        undefined,
+        {
+          userId,
+          preclaimedAttempt: {
+            attemptId: startAttemptId,
+            ownerId: claim.ownerId,
+            fence: claim.fence,
+            inputFingerprint: claim.inputFingerprint,
+            operation: "start",
+            lease,
+          },
+          onAttemptOutcome: (outcome) => {
+            attemptOutcome = outcome;
+          },
+        },
+      );
+      if (attemptOutcome)
+        await this.logExecutionAttemptOutcome(
+          execution.executionId,
+          userId,
+          attemptOutcome,
+          "start",
+        );
+      return response;
+    } catch (error) {
+      const markedUnknown = await this.repository.markExecutionAttemptOutcomeUnknown(
+        startAttemptId,
+        claim.ownerId,
+        claim.fence,
+        Date.now(),
+      );
+      if (markedUnknown) {
+        executionMutationAttemptsTotal.inc({ operation: "start", outcome: "outcome_unknown" });
+      }
+      const stored = await this.repository.getExecutionAttempt(startAttemptId);
+      if (stored?.state === "outcome_unknown") {
+        await this.logExecutionAttemptOutcome(
+          execution.executionId,
+          userId,
+          "outcome_unknown",
+          "start",
+        );
+        throw new ConflictError(
+          "ATTEMPT_OUTCOME_UNKNOWN: the claimed workflow start did not reach a provable durable outcome. Inspect the returned Process ID and do not retry automatically.",
+          { attemptOutcome: "outcome_unknown", attemptMetricRecorded: true },
+        );
+      }
+      throw error;
+    } finally {
+      lease?.stop();
+    }
+  }
+
+  async executeStep(
+    processId: string,
+    input: unknown,
+    teleportTo: string | undefined,
+    attemptId?: string,
+  ): Promise<string> {
     const { userId } = getUserContext();
     this.logger.info("Executing workflow step via MCPEngine", { processId, userId, teleportTo });
 
@@ -128,6 +337,25 @@ class MCPEngineClass {
     const statusBefore = executionBefore?.status ?? null;
     const workflowId = executionBefore?.workflowId;
     const errorCountBefore = executionBefore?.errors?.length ?? 0;
+
+    // Refuse a foreign or unavailable capability before reading lock or workflow details. The
+    // executor repeats the full revision/node/digest binding check atomically at claim time.
+    if (attemptId) {
+      const attempt = await this.repository.getExecutionAttempt(attemptId);
+      if (
+        !attempt ||
+        attempt.operation !== "step" ||
+        attempt.userId !== userId ||
+        attempt.executionId !== processId
+      ) {
+        executionMutationAttemptsTotal.inc({ operation: "step", outcome: "stale_rejection" });
+        await this.logExecutionAttemptOutcome(processId, userId, "stale_rejection");
+        throw new ValidationError(
+          "ATTEMPT_INVALID_OR_EXPIRED: the attempt is unavailable. Read session current_step and use its current attempt.",
+          { attemptOutcome: "stale_rejection" },
+        );
+      }
+    }
 
     // Block step if execution has an agent-created lock (not a lock-node lock)
     if (executionBefore && executionBefore.status === "running") {
@@ -157,7 +385,18 @@ class MCPEngineClass {
     }
 
     try {
-      const formattedText = await this.executor.executeStep(processId, input, teleportTo);
+      let attemptOutcome: "original" | "safe_replay" | undefined;
+      const formattedText = await this.executor.executeStep(processId, input, teleportTo, {
+        userId,
+        ...(attemptId ? { attemptId } : {}),
+        onAttemptOutcome: (outcome) => {
+          attemptOutcome = outcome;
+        },
+      });
+
+      if (attemptOutcome) {
+        await this.logExecutionAttemptOutcome(processId, userId, attemptOutcome);
+      }
 
       // Capture state AFTER step execution
       const executionAfter = await this.executor.getExecutionState(processId);
@@ -201,6 +440,21 @@ class MCPEngineClass {
 
       return formattedText;
     } catch (error) {
+      if (attemptId) {
+        const storedAttempt = await this.repository.getExecutionAttempt(attemptId);
+        const candidateOutcome =
+          error instanceof AppError ? error.context?.attemptOutcome : undefined;
+        const contextualOutcome =
+          typeof candidateOutcome === "string" &&
+          ATTEMPT_AUDIT_OUTCOMES.has(candidateOutcome as AttemptAuditOutcome)
+            ? (candidateOutcome as AttemptAuditOutcome)
+            : undefined;
+        const attemptOutcome =
+          storedAttempt?.state === "outcome_unknown" ? "outcome_unknown" : contextualOutcome;
+        if (attemptOutcome) {
+          await this.logExecutionAttemptOutcome(processId, userId, attemptOutcome);
+        }
+      }
       // Get execution context for audit trail (not for logging - boundary handles that)
       let executionContext: {
         workflowId?: string;
@@ -242,10 +496,40 @@ class MCPEngineClass {
       throw new NotFoundError(`Process ${processId} not found`, { processId });
     }
 
+    const blockingStart = await this.repository.getBlockingStartExecutionAttempt(
+      processId,
+      getUserContext().userId,
+    );
+    if (blockingStart) return currentAttemptGuidance(blockingStart);
+
     const presented = await this.executor.presentCurrentStep(processId);
     if (presented !== null) return presented;
 
-    return await this.executeStep(processId, undefined);
+    throw new ValidationError(
+      "No persisted current presentation is available for this legacy execution. Continue it with the step attempt shown by its latest response.",
+    );
+  }
+
+  private async logExecutionAttemptOutcome(
+    processId: string,
+    userId: string,
+    outcome: AttemptAuditOutcome,
+    operation: "step" | "start" = "step",
+  ): Promise<void> {
+    try {
+      await logAuditEventDirect(this.repository as DatabaseRepository, {
+        userId,
+        action: AuditAction.EXECUTION_STEP_ATTEMPT,
+        resource: "execution_attempt",
+        resourceId: processId,
+        metadata: { operation, outcome },
+      });
+    } catch (auditError) {
+      this.logger.warn("Failed to log execution attempt outcome", {
+        error: String(auditError),
+        outcome,
+      });
+    }
   }
 
   /**

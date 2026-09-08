@@ -93,11 +93,12 @@ End-to-end user journeys, from first contact to a working workflow.
 **Step 9: Starting the first workflow**
 
 - Picks a workflow from the list
-- Calls `mcp__moira__start({ workflowId: "...", parentExecutionId: "none" })`
-- If Telegram setup guidance is returned, completes the setup and calls `start` again
-- After successful execution creation, receives a processId
-- Calls `mcp__moira__step({ processId: "..." })`
-- Sees the first workflow directive
+- Calls `mcp__moira__start({ action: "prepare", workflowId: "...", parentExecutionId: "none" })`; this validates and reserves the start without creating an execution
+- Calls `mcp__moira__start({ action: "execute", startAttemptId: "..." })` with the returned Start attempt ID
+- If execute returns `START_PRECONDITION_CHANGED` notification setup guidance, completes the setup and prepares again
+- After successful execution creation, receives a Process ID, Step attempt ID, and the first workflow directive
+- Completes that directive and calls `mcp__moira__step({ processId: "...", attemptId: "...", input: { ... } })`
+- Receives the next directive with its new Step attempt ID, or the terminal result
 
 **Transition check:** ✅ The workflow starts, directives arrive
 

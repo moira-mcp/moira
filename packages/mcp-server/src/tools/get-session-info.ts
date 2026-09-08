@@ -23,6 +23,8 @@ import {
   getLockService,
   isExecutionParentReference,
   ValidationError,
+  activeExecutionsGauge,
+  workflowExecutionsTotal,
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
@@ -56,6 +58,7 @@ interface ExecutionItem {
   completedAt?: string;
   /** Number of errors in errors array (for list view badge) */
   errorCount?: number;
+  blockingAttempt?: { operation: "start"; state: "outcome_unknown" };
 }
 
 interface ExecutionsResponse {
@@ -90,6 +93,7 @@ interface ExecutionContextData {
     reason?: string;
     lockedAt: string;
   };
+  blockingAttempt?: { operation: "start"; state: "outcome_unknown" };
 }
 
 interface NoteUpdateResult {
@@ -110,6 +114,7 @@ type SessionInfoData =
   | ExecutionContextData
   | NoteUpdateResult
   | ParentUpdateResult
+  | { executionId: string; cancelled: true; revision: number }
   | { reminders: import("@mcp-moira/workflow-engine").ExecutionReminder[]; revision: number }
   | import("@mcp-moira/workflow-engine").ReminderMutationResult
   | { variables: Array<Record<string, unknown>>; unknownNames: string[]; revision: number }
@@ -165,7 +170,7 @@ export async function getSessionInfo(
       }
 
       case "executions": {
-        const repository = new DatabaseRepository();
+        const repository = MCPEngine.getInstance().repository;
 
         // Default to active status if not specified
         // Issue #386: 2-status model - "running" is the only active status now
@@ -213,25 +218,39 @@ export async function getSessionInfo(
           }),
         );
 
-        let executionsList: ExecutionItem[] = result.executions.map((exec) => {
-          const wfInfo = workflowInfoMap.get(exec.workflowId);
-          const isLocked = exec.status === "running" && lockedExecutionIds.has(exec.executionId);
-          return {
-            executionId: exec.executionId,
-            workflowId: exec.workflowId,
-            workflowSlug: wfInfo?.slug ?? exec.workflowId, // Fallback to ID if workflow not found
-            workflowOwnerHandle: wfInfo?.ownerHandle ?? "unknown",
-            status: isLocked ? "locked" : exec.status,
-            currentNodeId: exec.currentNodeId,
-            note: exec.note,
-            parentExecutionId: exec.parentExecutionId,
-            createdAt: new Date(exec.createdAt).toISOString(),
-            updatedAt: new Date(exec.updatedAt).toISOString(),
-            completedAt: exec.completedAt ? new Date(exec.completedAt).toISOString() : undefined,
-            // Issue #386: Include error count for list view
-            errorCount: exec.errors?.length ?? 0,
-          };
-        });
+        let executionsList: ExecutionItem[] = await Promise.all(
+          result.executions.map(async (exec) => {
+            const wfInfo = workflowInfoMap.get(exec.workflowId);
+            const isLocked = exec.status === "running" && lockedExecutionIds.has(exec.executionId);
+            const blockingAttempt = await repository.getBlockingStartExecutionAttempt(
+              exec.executionId,
+              userId,
+            );
+            return {
+              executionId: exec.executionId,
+              workflowId: exec.workflowId,
+              workflowSlug: wfInfo?.slug ?? exec.workflowId, // Fallback to ID if workflow not found
+              workflowOwnerHandle: wfInfo?.ownerHandle ?? "unknown",
+              status: isLocked ? "locked" : exec.status,
+              currentNodeId: exec.currentNodeId,
+              note: exec.note,
+              parentExecutionId: exec.parentExecutionId,
+              createdAt: new Date(exec.createdAt).toISOString(),
+              updatedAt: new Date(exec.updatedAt).toISOString(),
+              completedAt: exec.completedAt ? new Date(exec.completedAt).toISOString() : undefined,
+              // Issue #386: Include error count for list view
+              errorCount: exec.errors?.length ?? 0,
+              ...(blockingAttempt
+                ? {
+                    blockingAttempt: {
+                      operation: "start" as const,
+                      state: "outcome_unknown" as const,
+                    },
+                  }
+                : {}),
+            };
+          }),
+        );
 
         // If filtering by "locked", keep only locked executions
         let totalCount = result.total;
@@ -244,7 +263,7 @@ export async function getSessionInfo(
         }
 
         // Audit log for executions list
-        await logAuditEventDirect(repository, {
+        await logAuditEventDirect(repository as DatabaseRepository, {
           userId,
           action: AuditAction.MCP_SESSION_INFO,
           resource: "execution",
@@ -308,6 +327,10 @@ export async function getSessionInfo(
         const lockServiceCtx = getLockService();
         const activeLockCtx = await lockServiceCtx.getActiveLock(execution.executionId);
         const isLockedCtx = execution.status === "running" && activeLockCtx !== null;
+        const blockingAttempt = await repository.getBlockingStartExecutionAttempt(
+          execution.executionId,
+          userId,
+        );
 
         const contextData: ExecutionContextData = {
           executionId: execution.executionId,
@@ -340,6 +363,9 @@ export async function getSessionInfo(
                   lockedAt: new Date(activeLockCtx.createdAt).toISOString(),
                 },
               }
+            : {}),
+          ...(blockingAttempt
+            ? { blockingAttempt: { operation: "start", state: "outcome_unknown" } }
             : {}),
         };
 
@@ -410,6 +436,59 @@ export async function getSessionInfo(
         return {
           success: true,
           data: formattedText,
+        };
+      }
+
+      case "cancel-execution": {
+        if (!executionId || params.expectedRevision === undefined) {
+          return {
+            success: false,
+            error: "executionId and expectedRevision are required for cancel-execution",
+          };
+        }
+        const repository = MCPEngine.getInstance().repository;
+        const execution = await repository.getExecution(executionId);
+        if (!execution || execution.userId !== userId) {
+          return { success: false, error: ERRORS.execution_not_found(executionId) };
+        }
+        const blockingAttempt = await repository.getBlockingStartExecutionAttempt(
+          executionId,
+          userId,
+        );
+        if (!blockingAttempt) {
+          return { success: false, error: "Execution has no blocking start attempt" };
+        }
+        const timestamp = Date.now();
+        const cancelled = await repository.cancelExecutionWithStartAttempt(
+          executionId,
+          userId,
+          params.expectedRevision,
+          {
+            timestamp,
+            nodeId: execution.currentNodeId ?? "start",
+            errorType: "system",
+            message: "Cancelled during recovery from an unknown start outcome",
+          },
+        );
+        if (!cancelled) {
+          return {
+            success: false,
+            error: "Execution state changed; reload execution_context before cancelling",
+          };
+        }
+        activeExecutionsGauge.dec();
+        workflowExecutionsTotal.inc({ status: "cancelled", workflow_id: execution.workflowId });
+        await logAuditEventDirect(repository as DatabaseRepository, {
+          userId,
+          action: AuditAction.EXECUTION_CANCEL,
+          resource: "execution",
+          resourceId: executionId,
+          source: "mcp",
+          metadata: { reason: "start_outcome_unknown" },
+        });
+        return {
+          success: true,
+          data: { executionId, cancelled: true, revision: params.expectedRevision + 1 },
         };
       }
 

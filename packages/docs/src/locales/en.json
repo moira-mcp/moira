@@ -948,7 +948,7 @@
         "execute": {
           "title": "Follow the Workflow",
           "description": "Agent receives step-by-step directives with success criteria. Each step validated before proceeding.",
-          "code": "# Moira returns:\n{\n  \"directive\": \"Implement the feature\n    according to the approved plan\",\n  \"completionCondition\": \"All tests pass,\n    code follows project patterns\",\n  \"inputSchema\": { ... }\n}\n\n# Agent works → submits result\nmcp__moira__step({\n  processId: \"abc-123\",\n  input: { ... }\n})"
+          "code": "# Moira returns:\n{\n  \"attemptId\": \"attempt-current\",\n  \"directive\": \"Implement the feature\n    according to the approved plan\",\n  \"completionCondition\": \"All tests pass,\n    code follows project patterns\",\n  \"inputSchema\": { ... }\n}\n\n# Agent works → submits result\nmcp__moira__step({\n  processId: \"abc-123\",\n  attemptId: \"attempt-current\",\n  input: { ... }\n})"
         }
       }
     },

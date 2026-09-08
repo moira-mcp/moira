@@ -10,7 +10,8 @@ Startup Idea Validation превращает свободное описание
 ## Запуск
 
 ```bash
-mcp__moira__start({ workflowId: "moira/startup-idea-validation", parentExecutionId: "none" })
+mcp__moira__start({ action: "prepare", workflowId: "moira/startup-idea-validation", parentExecutionId: "none" })
+mcp__moira__start({ action: "execute", startAttemptId: "<ID попытки запуска из prepare>" })
 ```
 
 На вход передаётся идея в свободной форме. Первый шаг повторно использует уже заданные scope, ограничения, режим и полномочия на публикацию или уведомление. Вопрос задаётся только тогда, когда отсутствующий факт существенно меняет анализ и его нельзя безопасно выяснить.

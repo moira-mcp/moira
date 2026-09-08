@@ -7,13 +7,15 @@ Smart Purchase Assistant turns one product need into a durable, evidence-linked 
 
 ```bash
 mcp__moira__start({
+  action: "prepare",
   workflowId: "moira/smart-purchase-assistant",
   parentExecutionId: "none",
   skipNotificationCheck: true
 })
+mcp__moira__start({ action: "execute", startAttemptId: "<Start attempt ID from prepare>" })
 ```
 
-`skipNotificationCheck: true` bypasses only Moira's graph-level preflight for the optional `user-notification` node. It does not authorize a notification. Actual channel delivery is attempted only after the local result passes review and only when notification authority was explicitly granted.
+`skipNotificationCheck: true` is captured during prepare and bypasses only Moira's execute-time graph preflight for the optional `user-notification` node. It does not authorize a notification. Actual channel delivery is attempted only after the local result passes review and only when notification authority was explicitly granted.
 
 ## Result and evidence
 

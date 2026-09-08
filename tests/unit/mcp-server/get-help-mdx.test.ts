@@ -258,8 +258,9 @@ tags:
       const result = getTopicList();
 
       // Verify correct start command format for non-Claude agents
-      expect(result).toContain("mcp__moira__start({ workflowId:");
+      expect(result).toContain('mcp__moira__start({ action: "prepare", workflowId:');
       expect(result).toContain('parentExecutionId: "none"');
+      expect(result).toContain('action: "execute"');
     });
   });
 

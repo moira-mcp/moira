@@ -48,7 +48,7 @@ The core execution lifecycle uses these Moira tools:
 | Tool      | Description                                              |
 | --------- | -------------------------------------------------------- |
 | `list`    | List authorized workflows with pagination                |
-| `start`   | Start a standalone or parent-linked workflow execution   |
+| `start`   | Prepare or execute a standalone or parent-linked start   |
 | `step`    | Submit a verified step result and get the next directive |
 | `session` | Inspect and resume workflow executions                   |
 | `help`    | Get Moira documentation and help                         |
@@ -67,13 +67,16 @@ Agent: I'll start the full development workflow.
         and parentExecutionId: "none"]
 
 Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
+       Step attempt ID: 11111111-1111-4111-8111-111111111111
        Your next task: Analyze the requirements document...
        Success criteria: Requirements are documented...
 
 Agent: [analyzes requirements, produces output]
-       [calls step with the exact Process ID and schema-valid evidence]
+       [calls step with the exact Process ID, current Step attempt ID,
+        and schema-valid evidence]
 
 Moira: Process ID: 123e4567-e89b-42d3-a456-426614174000
+       Step attempt ID: 22222222-2222-4222-8222-222222222222
        Your next task: Create implementation plan...
        Success criteria: Plan covers all requirements...
 
