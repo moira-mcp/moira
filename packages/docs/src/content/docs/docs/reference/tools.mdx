@@ -50,6 +50,12 @@ one thousand live grants. Expired and completed grants do not consume issuance c
 
 `list` returns only workflows accessible to the authenticated user. Search, visibility, ordering, and pagination filters are combined; `total` describes all matches, not only the returned page. Every response includes the effective `offset` and `limit`, `returnedCount`, and `hasMore`. When another page exists, pass `nextOffset` as the next request's `offset`; the terminal page returns `nextOffset: null`.
 
+All tools publish a root-object input schema so MCP clients can discover the complete catalog. The
+public `start` schema therefore exposes `action` directly and lists the fields accepted by either
+phase. Runtime validation still enforces the selected phase exactly: `prepare` requires `workflowId`
+and `parentExecutionId`, while `execute` requires `startAttemptId`; fields belonging only to the other
+phase and unknown fields are rejected as MCP errors.
+
 `start({ action: "prepare" })` resolves and validates an authorized workflow, binds the workflow version and request options, and returns a Start attempt ID that expires after 15 minutes without creating an execution. `parentExecutionId` links a child to an existing parent; use `"none"` for a standalone execution. `skipNotificationCheck` records a policy to bypass only optional ordinary-notification preflight during execute. `skipTelegramCheck` remains a deprecated alias with the same behavior, and conflicting values are rejected.
 
 `start({ action: "execute", startAttemptId })` revalidates mutable workflow, parent, account, lock-delivery, and communication preconditions before consuming that exact reservation. A `user-notification` workflow with no configured channel returns channel-neutral Settings guidance; a legacy `telegram-notification` workflow returns Telegram setup guidance. A workflow containing a lock node always requires a valid Telegram bot token and chat ID for the current user; neither skip field bypasses trusted PIN delivery. A failed mutable precondition stores one replayable `START_PRECONDITION_CHANGED` receipt and creates no execution. Success returns the Process ID, first Step attempt ID, and first directive. A duplicate execute call replays the exact stored response and cannot create another execution; a separate preparation is an intentional separate start.

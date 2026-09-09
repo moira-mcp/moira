@@ -177,12 +177,14 @@ catalog that associates each public name with its static default and agent/model
 variants, schema, response policy, validated examples, localized factual metadata, reference model,
 and deterministic revision. `tool-bindings.ts` separately binds every catalog identity to its lazy
 runtime handler. `register-tools.ts` combines them through the reconciliation-aware SDK wrapper and
-publishes `tools/list` from the same typed projection. This preserves complete schemas such as the
-top-level Start discriminated union even though the installed SDK 1.x catalog serializer accepts
-only object schemas; SDK invocation validation still consumes the canonical Zod schema. Server
-bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions are not stored
-or overridden in `globalSetting`; database-backed system prompts remain a separate MCP `instructions`
-channel.
+publishes `tools/list` from the same typed projection. Every published tool schema is a root object,
+which keeps the complete catalog discoverable in MCP clients that do not support a root
+`anyOf`/`oneOf`. A handler may apply a narrower action-specific schema after SDK validation; `start`
+uses a flat public object schema and then validates the exact `prepare` or `execute` branch with its
+strict discriminated request schema. Validation failures at either boundary are returned as MCP
+errors. Server bootstrap does not repeat names, schemas, actions, or descriptions. Tool descriptions
+are not stored or overridden in `globalSetting`; database-backed system prompts remain a separate MCP
+`instructions` channel.
 
 The same structured reference model renders `help({ topic: "tools" })` and the English and Russian
 public reference pages directly. `MCP_TOOLS_REVISION` is computed once from stable client-visible

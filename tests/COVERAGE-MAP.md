@@ -276,7 +276,7 @@ level headings classify the tracked test paths listed beneath them.
 **unit**
 
 - `tests/unit/mcp-server/replay-safe-step-schema.test.ts` — required Step attempt identity in the public schema plus conflict and unavailable-step recovery in the runtime prompt and default/Cursor static descriptions, with rejection of attempt-less guidance
-- `tests/unit/mcp-server/replay-safe-start-schema.test.ts` — public two-phase start fields and exact runtime prepare/execute discrimination, including rejection of mixed authority
+- `tests/unit/mcp-server/replay-safe-start-schema.test.ts` — flat root-object public Start contract plus exact runtime prepare/execute discrimination, including rejection of cross-phase and unknown fields
 - `tests/unit/shared/execution-repository-errors.test.ts` — including terminal-result persistence, owner-identity validation, legacy null rows, and fail-closed empty/falsy payload handling
 - `tests/unit/shared/execution-status-mapping.test.ts` — legacy execution-status normalization
 
@@ -467,7 +467,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **unit**
 
-- `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, strict least-authority communication contract, exact normalized protocol schemas through real registration including mixed start-phase rejection and projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, and EN/RU renderer parity
+- `tests/unit/mcp-server/tool-definitions.test.ts` — unique typed catalog ownership, root-object schemas without top-level composition through real registration, flat Start discovery with mixed-phase runtime rejection, strict least-authority communication contract, projected blank-selector rejection, complete manage action projection, all-example/schema validity and rendering, deterministic client-visible revision boundaries, and EN/RU renderer parity
 - `tests/unit/mcp-server/tool-examples.test.ts` — exact-key, current notification-category, and all-settings registry examples reach the masked read projection
 - `tests/unit/mcp-server/mcp-catalog-lifecycle.test.ts` — SDK-valid singleton initialize classification, exact successful-result stamp ordering, error/other-result non-stamping, and successful-result suppression when the credential cannot be stamped
 - `tests/unit/mcp-server/mcp-tools-revision.test.ts` — deterministic matching, null, and stale catalog-revision decisions with package version retained only as diagnostic response data
@@ -504,6 +504,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
+- `tests/mcp-tools/tool-catalog.test.ts` — authenticated HTTP `tools/list` exposes every tool as a root object without top-level unions and keeps Start discoverable with its direct action enum and both phase field sets
 - `tests/mcp-tools/new-features.test.ts`
 
 **e2e**
