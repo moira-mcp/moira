@@ -109,3 +109,6 @@ export * from "./workspaces/resource-service.js";
 export * from "./workspaces/resource-policy.js";
 export * from "./workspaces/operation-repository.js";
 export * from "./workspaces/operation-service.js";
+export * from "./workspaces/transfer-repository.js";
+export * from "./workspaces/transfer-service.js";
+export * from "./workspaces/file-service.js";

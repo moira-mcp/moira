@@ -22,6 +22,14 @@ describe("workspace resource policy", () => {
       maxOperationStdoutBytes: 1024 * 1024,
       maxOperationStderrBytes: 256 * 1024,
       maxOperationMs: 900_000,
+      maxTransferFileBytes: 4 * 1024 ** 2,
+      maxTransferBytesPerUser: 100 * 1024 ** 2,
+      maxTransferBytesGlobal: 1024 * 1024 ** 2,
+      maxTransferObjectsPerUser: 10,
+      maxTransferObjectsGlobal: 1000,
+      maxTransferInflightBytesPerUser: 40 * 1024 ** 2,
+      maxTransferInflightBytesGlobal: 256 * 1024 ** 2,
+      transferTtlMs: 600_000,
     });
   });
 
@@ -51,5 +59,14 @@ describe("workspace resource policy", () => {
     expect(() => policy({ WORKSPACE_MAX_OPERATION_INPUT_KB: "4097" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_OPERATION_STDOUT_KB: "8193" })).toThrow(/between/);
     expect(() => policy({ WORKSPACE_MAX_OPERATION_SECONDS: "901" })).toThrow(/between/);
+    expect(() => policy({ WORKSPACE_MAX_TRANSFER_FILE_MB: "5" })).toThrow(/between/);
+    expect(() => policy({ WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER: "101" })).toThrow(/between/);
+    expect(() => policy({ WORKSPACE_TRANSFER_TTL_MINUTES: "61" })).toThrow(/between/);
+    expect(() =>
+      policy({
+        WORKSPACE_MAX_TRANSFER_FILE_MB: "4",
+        WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER: "2",
+      }),
+    ).toThrow(/aggregate limits/);
   });
 });

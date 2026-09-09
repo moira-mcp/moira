@@ -34,6 +34,7 @@ export {
   type ReserveWorkspaceResult,
 } from "../workspaces/resource-repository.js";
 export { WorkspaceOperationRepository } from "../workspaces/operation-repository.js";
+export { WorkspaceTransferRepository } from "../workspaces/transfer-repository.js";
 export type { AccountApprovalTransitionResult } from "./repositories/account-approval-repository.js";
 export {
   WorkflowReconciliationRepository,

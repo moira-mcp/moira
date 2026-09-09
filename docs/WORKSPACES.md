@@ -8,9 +8,9 @@ and different authorized clients may reuse the same workspace.
 
 GitHub authorization belongs to the authenticated website. Agents do not
 receive provider credentials, OAuth operations, SSH configuration or lifecycle
-capabilities. The public MCP workspace tools and website workspace-management
-screens are not exposed yet; the current runtime supplies the connection,
-lifecycle, direct-operation and reconciliation services they will use.
+capabilities. The current public runtime exposes the website GitHub connection only.
+Workspace lifecycle, direct-operation and reconciliation services are internal; no
+MCP workspace tools or website workspace-management endpoints are registered.
 
 ## Component boundary
 
@@ -23,6 +23,9 @@ lifecycle, direct-operation and reconciliation services they will use.
 - `packages/shared/src/workspaces/operation-service.ts` and
   `operation-repository.ts` own one durable record per direct operation,
   concurrency reservations, cancellation and terminal cleanup.
+- `packages/shared/src/workspaces/file-service.ts`, `transfer-service.ts` and
+  `transfer-repository.ts` own provider-neutral file operations, native byte
+  authority, quotas and private object lifecycle.
 - `packages/shared/src/workspaces/provider-registry.ts` enforces the versioned
   provider contract. GitHub Codespaces is the only registered provider.
 - `packages/shared/src/workspaces/credential-vault.ts` owns versioned
@@ -33,6 +36,9 @@ lifecycle, direct-operation and reconciliation services they will use.
 - `packages/web-backend/src/services/github-codespaces-connector*.{ts,mjs}`
   implement the Unix-socket connector, bounded worker, official GitHub CLI/SSH
   transport and remote direct-operation supervisor.
+- `packages/web-backend/src/services/workspace-native-reference-fetcher.ts` and
+  `packages/mcp-server/src/workspace-transfer-route.ts` own trusted inbound
+  download and private one-use outbound HTTP delivery.
 - `packages/web-backend/src/routes/workspace-connections.ts` and
   `packages/web-frontend/src/pages/settings/GitHubWorkspaceSettings.tsx` own the
   authenticated website authorization boundary.
@@ -89,9 +95,14 @@ stop, cancellation and cleanup work remains eligible for reconciliation.
 The provider-neutral operation service executes one command in a running
 workspace. A request contains an argv array, a workspace-relative working
 directory, bounded stdin and a timeout. Arguments are data and are never
-interpolated into a shell program. The current GitHub connector accepts inline
-stdin; native file-reference input belongs to the file-transfer layer and is not
-available yet.
+interpolated into a shell program. Stdin is either inline bytes or a tenant-bound
+private transfer reference with an exact declared size and MIME type. A native
+reference request reserves the authenticated running workspace and operation budget
+before source fetch. The resulting private object is claimed before credential lookup,
+consumed immediately after durable dispatch intent and materialized as exact binary
+connector input without model-context base64. `WorkspaceOperationService.executeNativeReference()`
+composes native reference validation/fetch/storage with that dispatch path; callers do
+not handle the internal `workspace-file://` capability.
 
 The remote supervisor runs the command directly as the ordinary Codespace user
 inside the selected repository. It keeps its opaque marker, process-group facts
@@ -124,15 +135,90 @@ stream and 15 minutes per command. Runtime policy may lower these ceilings but
 cannot raise them. An argv contains 1–128 non-empty arguments; each argument is
 at most 16 KiB, and the relative cwd is at most 4096 bytes.
 
+## File operations and native transfer
+
+The provider-neutral file service addresses the same persistent `workspace_id` as
+command execution. It supports stat, bounded literal or regular-expression search,
+byte-range read, atomic write, structured multi-file patch, native-reference upload
+and private download. Each request reserves a durable operation kind, workspace and
+authorization generation, deadline and byte budget before credential or connector
+contact. SQLite stores no path, query, patch or file content.
+
+Paths are repository-relative data. Empty components, `.`/`..`, absolute and drive
+paths, NUL bytes and overlong values are rejected. The Codespaces supervisor snapshots
+the verified repository identity, opens each directory component without following
+links and keeps the opened parent across staging and replacement. Final files must be
+single-link regular files. Symlinks, hard links, directories in file position, FIFOs,
+sockets and devices are rejected.
+
+Read returns an explicit byte offset, total size, content digest and a bounded byte
+range. Search is bounded by scanned/result bytes, match count and remote time and does
+not traverse links or special files. Regular expressions execute in a terminable worker;
+a match that reaches the search deadline returns a truncated result instead of blocking
+the supervisor event loop. The result-byte ceiling covers the complete serialized search
+envelope, including its action, match separators and `truncated` state. A typed file
+failure carries no file payload and therefore remains recordable even when the caller's
+success-payload budget is smaller than a JSON error envelope.
+
+Write requires an expected existence state and may require the previous size and
+SHA-256 digest. Patch supplies ordered byte edits for each file. A successful patch
+returns old/new versions and a content-free summary containing complete file, edit and
+inserted/deleted-byte totals. Ordered per-file summary entries fit a connector-selected
+4 KiB serialized budget and set `truncated` when the complete totals describe more files
+than can be listed. The remote supervisor applies the supplied internal budget only
+within its separate protocol safety range.
+
+All patch targets are staged before mutation; a repository-relative transaction journal,
+backups and ordered file/directory sync produce one original or one replacement set after
+interruption. Exact-marker ownership is published atomically from a complete process
+identity, so overlapping execute and reconciliation calls do not run the same mutation
+twice. Each journal entry also binds the opened parent device and inode. Commit and
+recovery re-resolve that repository-relative parent and fail before mutation if the
+namespace now points at another directory. The connector validates the complete remote
+result as untrusted input, including exact result variants, operation/action agreement,
+relative paths, byte ranges, versions, search coordinates and bounds, unique patch paths,
+summary totals and agreement between inner and outer success or failure state.
+
+Inbound native references contain a `sediment://file_...` identifier, HTTPS download
+URL, safe file name, supported MIME type and declared size. Only the reviewed OpenAI
+storage host families are accepted. Every redirect repeats issuer, DNS and connected-
+peer validation; IP literals and any mixed or non-public resolution are rejected.
+Declared, HTTP and observed sizes plus MIME must agree. Text is admitted as valid UTF-8;
+JSON must parse; PDF, ZIP, gzip, tar, PNG, JPEG, GIF and WebP declarations must match
+their format signatures. `application/octet-stream` remains intentionally opaque. The
+absolute transfer expiry also bounds a response that continues to produce data.
+
+Transfer bytes live under `<dirname(DB_PATH)>/workspace-transfers`, separate from
+public artifacts. SQLite stores only a digest of the capability, tenant, purpose,
+size/MIME/digest metadata, expiry, claim state and the creating process identity.
+Per-user and instance-wide object, aggregate-byte and in-flight-byte reservations occur
+before source I/O. For outbound download, the declared `maxBytes` capacity is reserved
+before credential or connector contact and atomically reduced to the observed file size
+when the object is published. Published directory entries are synced before their SQLite
+state becomes ready. Expired physical objects remain quota-bound until cleanup removes
+their bytes and metadata together. Startup and periodic cleanup preserve reservations
+owned by either live Moira process, verify each ready/claimed object's type, link count,
+size and digest, and remove dead, expired, consumed, partial, missing or invalid objects.
+If an upload becomes invalid after ingestion because its workspace generation, operation
+deadline, dispatch fence or credential lookup changed, the now-unreachable private object
+is discarded immediately.
+
+Outbound download uses the rate-limited
+`/api/workspaces/transfers/:token` capability route. It sends an attachment with
+`no-store`, `noindex`, `nosniff` and no-referrer controls and consumes the capability
+after complete or interrupted delivery. The raw capability is redacted from request
+logs. This internal route does not expose an MCP `resource_link`; public workspace tools
+are not registered.
+
 ## Trust and isolation
 
 Direct execution is not an agent sandbox. An authorized agent has the same
 repository, installed tools, network and configured Codespaces secrets available
 to the Codespace user. Repository content can influence the agent, and commands
 can read or transmit those values. A command may also create a detached daemon
-or modify startup files beyond the foreground process group. Moira therefore
-does not claim to protect workspace data from an agent the user authorized;
-restricted execution would require a separate opt-in mode.
+or modify startup files beyond the foreground process group. Moira therefore does
+not claim to protect workspace data from an agent the user authorized. Restricted
+execution is outside this contract.
 
 The connector boundary protects the multi-tenant Moira server:
 
@@ -199,9 +285,20 @@ not supplied:
 | `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Maximum stdout                                               |
 | `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Maximum stderr                                               |
 | `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Maximum direct-operation duration                            |
+| `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | Maximum native or file payload; maximum 4 MiB                |
+| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user                         |
+| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Live private-transfer bytes across the instance              |
+| `WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user                       |
+| `WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Live private-transfer objects across the instance            |
+| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed transfer bytes per user                     |
+| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Reserved/claimed transfer bytes across the instance          |
+| `WORKSPACE_TRANSFER_TTL_MINUTES`               |      10 | Private capability and object lifetime; maximum 60 minutes   |
 
-The global active-resource limit cannot be lower than the per-user limit; the
-same rule applies to operation concurrency. Configured operation input cannot
+The global active-resource limit cannot be lower than the per-user limit; the same
+rule applies to operation concurrency and the global/per-user byte and in-flight
+transfer pairs. Transfer byte and in-flight aggregates cannot be lower than the
+single-file ceiling.
+Configured operation input cannot
 exceed 4096 KiB, either output stream cannot exceed 8192 KiB, command duration
 cannot exceed 900 seconds and persistent retention cannot exceed 30 days.
 
@@ -250,16 +347,17 @@ accepts it.
 
 ## Persistence and audit
 
-Migrations `0025_workspace_connections.sql`, `0026_workspace_resources.sql` and
-`0027_persistent_workspace_operations.sql` own the connection, resource,
-lifecycle-capability, policy-usage, provider-mutation, provider-control and
-operation tables. Credential tables contain versioned ciphertext; resource and
-operation tables contain authority and accounting metadata but no command,
-content, result stream, provider token or SSH material.
+Migrations `0025_workspace_connections.sql`, `0026_workspace_resources.sql`,
+`0027_persistent_workspace_operations.sql` and `0028_workspace_transfers.sql` own
+the connection, resource, lifecycle-capability, policy-usage, provider-mutation,
+provider-control, operation and private-transfer metadata tables. Credential tables
+contain versioned ciphertext; resource, operation and transfer tables contain
+authority and accounting metadata but no command, path, query, patch, file content,
+native source URL, result stream, provider token or SSH material.
 
 Audit actions cover connection start/completion/refresh failure/disconnect;
-resource create/pending/rejection/cleanup/start/stop/delete; and operation
-reservation/reconciliation/terminal outcomes. Metadata is limited to opaque
+resource create/pending/rejection/cleanup/start/stop/delete; and typed exec/file
+operation reservation/reconciliation/terminal outcomes. Metadata is limited to opaque
 resource relationships, provider, state/outcome, selected machine facts, byte
 counts and exit code. Repository content, source, argv, cwd, stdin, stdout,
 stderr, OAuth code/state, session token and provider credentials are excluded.

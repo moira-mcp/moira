@@ -14,6 +14,12 @@ describe("sanitizeRequestUrl", () => {
     expect(sanitizeRequestUrl("/api/workflows/example")).toBe("/api/workflows/example");
   });
 
+  test("redacts private workspace transfer capabilities", () => {
+    expect(sanitizeRequestUrl("/api/workspaces/transfers/private-capability?download=true")).toBe(
+      "/api/workspaces/transfers/[REDACTED]?download=true",
+    );
+  });
+
   test("redacts progress image grants including filename suffixes", () => {
     expect(
       sanitizeRequestUrl("/api/public/execution-progress-image/secret-token?download=true"),

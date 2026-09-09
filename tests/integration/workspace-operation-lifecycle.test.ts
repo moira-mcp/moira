@@ -2,11 +2,15 @@ import { describe, expect, jest, test } from "@jest/globals";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   WorkspaceOperationRepository,
   WorkspaceOperationService,
   WorkspaceResourceRepository,
+  WorkspaceTransferRepository,
+  WorkspaceTransferService,
   type WorkspaceOperationResult,
   type WorkspaceOperationTransport,
   type WorkspaceResourcePolicy,
@@ -49,6 +53,7 @@ class FakeTransport implements WorkspaceOperationTransport {
   throwExecute = false;
   throwFinalize = false;
   lastWorkspace: Parameters<WorkspaceOperationTransport["execute"]>[1] | null = null;
+  lastRequest: Parameters<WorkspaceOperationTransport["execute"]>[3] | null = null;
   executeGate: Promise<void> | null = null;
   executeObservation: (() => void) | null = null;
   lastInspectedOperation: Parameters<WorkspaceOperationTransport["inspect"]>[2] | null = null;
@@ -60,9 +65,12 @@ class FakeTransport implements WorkspaceOperationTransport {
   async execute(
     _credential: string,
     workspace: Parameters<WorkspaceOperationTransport["execute"]>[1],
+    _operation: Parameters<WorkspaceOperationTransport["execute"]>[2],
+    request: Parameters<WorkspaceOperationTransport["execute"]>[3],
   ) {
     this.executeCalls();
     this.lastWorkspace = workspace;
+    this.lastRequest = request;
     if (this.throwExecute) throw new Error("ssh response lost");
     this.executeObservation?.();
     if (this.executeGate) await this.executeGate;
@@ -143,6 +151,352 @@ function fixture() {
 }
 
 describe("durable direct workspace operations", () => {
+  test("ingests a native reference and dispatches its exact binary bytes through one operation call", async () => {
+    const value = fixture();
+    const root = mkdtempSync(path.join(tmpdir(), "moira-native-operation-input-"));
+    const bytes = Buffer.from([0, 255, 17, 128, 4]);
+    const transfers = new WorkspaceTransferService({
+      repository: new WorkspaceTransferRepository(value.sqlite),
+      root,
+      policy: () => policy,
+      now: () => now,
+    });
+    const nativeFetch = jest.fn(async () => ({
+      contentLength: bytes.length,
+      mimeType: "application/octet-stream",
+      body: (async function* () {
+        yield bytes.subarray(0, 2);
+        yield bytes.subarray(2);
+      })(),
+    }));
+    const service = new WorkspaceOperationService({
+      repository: value.repository,
+      transport: value.transport,
+      credentials: value.credentials,
+      transfers,
+      nativeFetcher: { fetch: nativeFetch },
+      policy: () => policy,
+      now: () => now,
+    });
+    try {
+      const result = await service.executeNativeReference(
+        "user-1",
+        "workspace-1",
+        { argv: ["sha256sum"], cwd: ".", timeoutMs: 5_000 },
+        {
+          fileId: "sediment://file_000000000b1c8210a7cb1a2d896b2ee4",
+          downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=private",
+          fileName: "stdin.bin",
+          mimeType: "application/octet-stream",
+          declaredSize: bytes.length,
+        },
+      );
+      expect(result.operation.state).toBe("succeeded");
+      expect(value.transport.lastRequest?.stdin).toEqual({ kind: "inline", bytes });
+      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+        count: 0,
+      });
+      await expect(
+        service.executeNativeReference(
+          "user-1",
+          "workspace-1",
+          { argv: ["cat"], cwd: ".", timeoutMs: 5_000 },
+          {
+            fileId: "sediment://file_oversized",
+            downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=private",
+            fileName: "oversized.bin",
+            mimeType: "application/octet-stream",
+            declaredSize: 1025,
+          },
+        ),
+      ).rejects.toThrow(/input exceeds/);
+      expect(nativeFetch).toHaveBeenCalledTimes(1);
+      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+        count: 0,
+      });
+      expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceOperation").get()).toEqual({
+        count: 1,
+      });
+    } finally {
+      value.sqlite.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ["foreign", "user-2", "workspace-1", (_value: ReturnType<typeof fixture>) => undefined],
+    ["missing", "user-1", "workspace-missing", (_value: ReturnType<typeof fixture>) => undefined],
+    [
+      "stopped",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        value.sqlite
+          .prepare(
+            "UPDATE workspaceResource SET state = 'stopped', desiredState = 'stopped' WHERE id = 'workspace-1'",
+          )
+          .run();
+      },
+    ],
+    [
+      "disabled",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        new WorkspaceResourceRepository(value.sqlite).setControl({
+          scope: "global",
+          disabled: true,
+          reason: "incident",
+          updatedBy: null,
+          now,
+          cleanupDeadlineAt: now + 30_000,
+        });
+      },
+    ],
+    [
+      "busy",
+      "user-1",
+      "workspace-1",
+      (value: ReturnType<typeof fixture>) => {
+        value.repository.reserve({
+          userId: "user-1",
+          resourceId: "workspace-1",
+          inputBytes: 0,
+          stdoutLimitBytes: 16,
+          stderrLimitBytes: 16,
+          deadlineAt: now + 30_000,
+          policy,
+          now,
+        });
+      },
+    ],
+  ] as const)(
+    "rejects a %s workspace before native fetch or downstream contact",
+    async (_caseName, userId, workspaceId, arrange) => {
+      const value = fixture();
+      const root = mkdtempSync(path.join(tmpdir(), "moira-native-operation-authority-"));
+      const nativeFetch = jest.fn(async () => ({
+        contentLength: 1,
+        mimeType: "application/octet-stream",
+        body: (async function* () {
+          yield Buffer.from([1]);
+        })(),
+      }));
+      const service = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        transfers: new WorkspaceTransferService({
+          repository: new WorkspaceTransferRepository(value.sqlite),
+          root,
+          policy: () => policy,
+          now: () => now,
+        }),
+        nativeFetcher: { fetch: nativeFetch },
+        policy: () => policy,
+        now: () => now,
+      });
+      try {
+        arrange(value);
+        await expect(
+          service.executeNativeReference(
+            userId,
+            workspaceId,
+            { argv: ["cat"], cwd: ".", timeoutMs: 5_000 },
+            {
+              fileId: "sediment://file_000000000b1c8210a7cb1a2d896b2ee4",
+              downloadUrl: "https://oaisdmntprdenmarkeast.blob.core.windows.net/file?sig=private",
+              fileName: "stdin.bin",
+              mimeType: "application/octet-stream",
+              declaredSize: 1,
+            },
+          ),
+        ).rejects.toBeInstanceOf(Error);
+        expect(nativeFetch).not.toHaveBeenCalled();
+        expect(value.sqlite.prepare("SELECT COUNT(*) count FROM workspaceTransfer").get()).toEqual({
+          count: 0,
+        });
+        expect(value.credentials.getCredential).not.toHaveBeenCalled();
+        expect(value.transport.executeCalls).not.toHaveBeenCalled();
+      } finally {
+        value.sqlite.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("materializes native-reference stdin as exact binary bytes and consumes it after durable dispatch", async () => {
+    const value = fixture();
+    const bytes = Buffer.from([0, 255, 1, 2]);
+    const record = {
+      id: "transfer-1",
+      userId: "user-1",
+      purpose: "workspace_input",
+      state: "claimed",
+      fileName: "stdin.bin",
+      mimeType: "application/octet-stream",
+      declaredSize: bytes.length,
+      observedSize: bytes.length,
+      sha256: "a".repeat(64),
+      objectKey: "b".repeat(48),
+      ownerPid: process.pid,
+      ownerStartTime: null,
+      claimId: "claim-1",
+      claimExpiresAt: now + 10_000,
+      expiresAt: now + 60_000,
+      createdAt: now,
+      updatedAt: now,
+    } as const;
+    const transfers = {
+      claimInput: jest.fn(async () => ({ record, bytes })),
+      release: jest.fn(),
+      consume: jest.fn(async () => undefined),
+    };
+    const service = new WorkspaceOperationService({
+      repository: value.repository,
+      transport: value.transport,
+      credentials: value.credentials,
+      transfers,
+      policy: () => policy,
+      now: () => now,
+    });
+    try {
+      const result = await service.execute("user-1", "workspace-1", {
+        argv: ["sha256sum"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://abcdefghijklmnopqrstuvwxyzABCDEFGH123456789",
+          declaredBytes: bytes.length,
+          declaredMimeType: "application/octet-stream",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(result.operation.state).toBe("succeeded");
+      expect(value.transport.lastRequest?.stdin).toEqual({ kind: "inline", bytes });
+      expect(transfers.consume).toHaveBeenCalledWith(record);
+      expect(transfers.release).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
+  test("rejects unavailable and size-mismatched native stdin before credentials or connector contact", async () => {
+    const value = fixture();
+    const unavailableTransfers = {
+      claimInput: jest.fn(async () => {
+        throw new Error("expired, consumed or foreign reference");
+      }),
+      release: jest.fn(),
+      consume: jest.fn(async () => undefined),
+    };
+    const service = new WorkspaceOperationService({
+      repository: value.repository,
+      transport: value.transport,
+      credentials: value.credentials,
+      transfers: unavailableTransfers,
+      policy: () => policy,
+      now: () => now,
+    });
+    try {
+      const unavailable = await service.execute("user-1", "workspace-1", {
+        argv: ["cat"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://unavailable",
+          declaredBytes: 4,
+          declaredMimeType: "application/octet-stream",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(unavailable).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "native_input_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+
+      const record = {
+        id: "transfer-2",
+        userId: "user-1",
+        purpose: "workspace_input",
+        state: "claimed",
+        fileName: "stdin.bin",
+        mimeType: "application/octet-stream",
+        declaredSize: 4,
+        observedSize: 4,
+        sha256: "a".repeat(64),
+        objectKey: "b".repeat(48),
+        ownerPid: process.pid,
+        ownerStartTime: null,
+        claimId: "claim-2",
+        claimExpiresAt: now + 10_000,
+        expiresAt: now + 60_000,
+        createdAt: now,
+        updatedAt: now,
+      } as const;
+      const mismatchTransfers = {
+        claimInput: jest.fn(async () => ({ record, bytes: Buffer.from([1, 2, 3, 4]) })),
+        release: jest.fn(),
+        consume: jest.fn(async () => undefined),
+      };
+      const mismatchService = new WorkspaceOperationService({
+        repository: value.repository,
+        transport: value.transport,
+        credentials: value.credentials,
+        transfers: mismatchTransfers,
+        policy: () => policy,
+        now: () => now,
+      });
+      const mismatch = await mismatchService.execute("user-1", "workspace-1", {
+        argv: ["cat"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://size-mismatch",
+          declaredBytes: 3,
+          declaredMimeType: "application/octet-stream",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(mismatch).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "native_input_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+      const mimeMismatch = await mismatchService.execute("user-1", "workspace-1", {
+        argv: ["cat"],
+        cwd: ".",
+        stdin: {
+          kind: "reference",
+          referenceId: "workspace-file://mime-mismatch",
+          declaredBytes: 4,
+          declaredMimeType: "text/plain",
+        },
+        timeoutMs: 5_000,
+      });
+      expect(mimeMismatch).toMatchObject({
+        operation: {
+          state: "cancelled",
+          lastOutcome: "native_input_unavailable_before_dispatch",
+          remoteCleanupPending: 0,
+        },
+        result: null,
+      });
+      expect(mismatchTransfers.release).toHaveBeenCalledWith(record);
+      expect(value.credentials.getCredential).not.toHaveBeenCalled();
+      expect(value.transport.executeCalls).not.toHaveBeenCalled();
+    } finally {
+      value.sqlite.close();
+    }
+  });
+
   test("preserves argv boundaries and exact exit 23 without persisting command or stdin", async () => {
     const value = fixture();
     try {

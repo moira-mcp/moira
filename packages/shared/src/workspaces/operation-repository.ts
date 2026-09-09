@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type {
   WorkspaceOperationRecord,
+  WorkspaceOperationKind,
   WorkspaceOperationResult,
   WorkspaceResourcePolicy,
   WorkspaceResourceRecord,
@@ -43,6 +44,7 @@ export class WorkspaceOperationRepository {
     deadlineAt: number;
     policy: WorkspaceResourcePolicy;
     now: number;
+    kind?: WorkspaceOperationKind;
   }): ReserveOperationResult {
     const transaction = this.sqlite.transaction(() => {
       if (!input.policy.enabled) return { outcome: "disabled" } as ReserveOperationResult;
@@ -99,6 +101,17 @@ export class WorkspaceOperationRepository {
       ) {
         return { outcome: "limit" } as ReserveOperationResult;
       }
+      if (
+        ["write", "apply_patch", "upload"].includes(input.kind ?? "exec") &&
+        this.sqlite
+          .prepare(
+            `SELECT 1 FROM workspaceOperation WHERE resourceId = ?
+             AND state IN (${activeSql}) LIMIT 1`,
+          )
+          .get(input.resourceId, ...ACTIVE_OPERATION_STATES)
+      ) {
+        return { outcome: "limit" } as ReserveOperationResult;
+      }
       const utcDay = new Date(input.now).toISOString().slice(0, 10);
       const usage = this.sqlite
         .prepare(
@@ -119,7 +132,7 @@ export class WorkspaceOperationRepository {
             providerResourceName, remoteMarker, kind, state, inputBytes,
             stdoutLimitBytes, stderrLimitBytes, deadlineAt,
             createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'exec', 'reserved', ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -130,6 +143,7 @@ export class WorkspaceOperationRepository {
           workspace.provider,
           workspace.providerResourceName,
           remoteMarker,
+          input.kind ?? "exec",
           input.inputBytes,
           input.stdoutLimitBytes,
           input.stderrLimitBytes,
@@ -351,6 +365,34 @@ export class WorkspaceOperationRepository {
         expectedGeneration,
       ).changes;
     return changed === 1 ? { ...result, state: terminalState, stdout, stderr } : null;
+  }
+
+  completeMetadata(
+    userId: string,
+    operationId: string,
+    expectedGeneration: number,
+    outputBytes: number,
+    resultExpiresAt: number,
+    now: number,
+    state: "succeeded" | "failed" = "succeeded",
+  ): boolean {
+    return (
+      this.sqlite
+        .prepare(
+          `UPDATE workspaceOperation SET state = ?, outputBytes = ?, exitCode = NULL,
+           resultExpiresAt = ?, lastOutcome = 'remote_terminal', claimId = NULL,
+           claimExpiresAt = NULL, updatedAt = ?
+           WHERE id = ? AND userId = ? AND resourceGeneration = ?
+             AND state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')
+             AND EXISTS (SELECT 1 FROM workspaceResource resource
+               WHERE resource.id = workspaceOperation.resourceId
+                 AND resource.userId = workspaceOperation.userId
+                 AND resource.generation = workspaceOperation.resourceGeneration
+                 AND resource.desiredState = 'running' AND resource.state = 'usable')`,
+        )
+        .run(state, outputBytes, resultExpiresAt, now, operationId, userId, expectedGeneration)
+        .changes === 1
+    );
   }
 
   markReconcilePending(userId: string, operationId: string, outcome: string, now: number): boolean {
