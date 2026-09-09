@@ -281,7 +281,10 @@ MCP clients use OAuth 2.1 authorization flow:
 3. Fetches `/.well-known/oauth-protected-resource`
 4. Fetches `/.well-known/oauth-authorization-server`
 5. Opens `authorization_endpoint` in browser
-6. User logs in at `/oauth/authorize`
+6. User logs in at `/oauth/authorize`, or `/app/oauth/authorize` in a build with
+   `APP_BASE_PATH=/app` — the login and consent pages follow the Web UI base path.
+   Clients that open the bare `authorization_endpoint` are redirected to the
+   prefixed page.
 7. User sees consent screen with requested permissions
 8. User clicks Allow to grant access
 9. Consent saved to database for future auto-approval
