@@ -171,37 +171,47 @@ describe("MCP tool definitions", () => {
     expect(settings.examples).toContainEqual({ action: "get" });
   });
 
-  it("publishes the exact discriminated Start contract to MCP clients", async () => {
+  it("publishes every MCP tool with a root-object input schema", async () => {
+    const published = await inspectPublishedContract("root object schemas");
+
+    for (const tool of published.tools) {
+      const schema = dereferenceLocalJsonSchema(tool.inputSchema) as Record<string, unknown>;
+      expect(schema.type).toBe("object");
+      expect(schema).not.toHaveProperty("anyOf");
+      expect(schema).not.toHaveProperty("oneOf");
+    }
+  });
+
+  it("publishes a flat Start catalog contract with both action field sets", async () => {
     const published = await inspectPublishedContract("start schema");
     const start = published.tools.find((tool) => tool.name === "start");
     expect(start).toBeDefined();
     const schema = dereferenceLocalJsonSchema(start!.inputSchema) as {
-      anyOf?: Array<{
-        additionalProperties?: boolean;
-        properties?: Record<string, { const?: string }>;
-        required?: string[];
-      }>;
-      oneOf?: Array<{
-        additionalProperties?: boolean;
-        properties?: Record<string, { const?: string }>;
-        required?: string[];
-      }>;
+      type?: string;
+      additionalProperties?: boolean;
+      properties?: Record<string, { enum?: string[]; description?: string }>;
+      required?: string[];
     };
-    const branches = schema.anyOf ?? schema.oneOf ?? [];
-    const prepare = branches.find((branch) => branch.properties?.action?.const === "prepare");
-    const execute = branches.find((branch) => branch.properties?.action?.const === "execute");
 
-    expect(prepare).toMatchObject({
+    expect(schema).toMatchObject({
+      type: "object",
       additionalProperties: false,
-      required: expect.arrayContaining(["action", "workflowId", "parentExecutionId"]),
+      required: ["action"],
     });
-    expect(prepare?.properties).not.toHaveProperty("startAttemptId");
-    expect(execute).toMatchObject({
-      additionalProperties: false,
-      required: expect.arrayContaining(["action", "startAttemptId"]),
-    });
-    expect(execute?.properties).not.toHaveProperty("workflowId");
-    expect(execute?.properties).not.toHaveProperty("parentExecutionId");
+    expect(schema.properties?.action?.enum).toEqual(["prepare", "execute"]);
+    expect(Object.keys(schema.properties ?? {})).toEqual(
+      expect.arrayContaining([
+        "action",
+        "workflowId",
+        "note",
+        "parentExecutionId",
+        "skipNotificationCheck",
+        "skipTelegramCheck",
+        "startAttemptId",
+      ]),
+    );
+    expect(schema.properties?.workflowId?.description).toContain("prepare");
+    expect(schema.properties?.startAttemptId?.description).toContain("execute");
   });
 
   it("derives the complete operation inventory from schemas", () => {
@@ -401,9 +411,10 @@ describe("MCP tool definitions", () => {
       });
       expect(result.isError).toBe(true);
       expect(result.content[0]).toMatchObject({ type: "text" });
-      expect((result.content[0] as { type: "text"; text: string }).text).toContain(
-        "Input validation error",
-      );
+      const errorText = (result.content[0] as { type: "text"; text: string }).text;
+      expect(errorText).toContain("Unrecognized key");
+      expect(errorText).toContain("workflowId");
+      expect(errorText).not.toContain("must-not-be-read");
     } finally {
       await client.close();
       await server.close();

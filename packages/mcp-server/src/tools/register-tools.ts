@@ -30,15 +30,16 @@ export function registerTools(
         } catch (error) {
           return {
             content: [{ type: "text" as const, text: `Error: ${sanitizeMcpError(error)}` }],
+            isError: true,
           };
         }
       },
     );
   }
 
-  // SDK 1.x validates complete Zod schemas on tools/call, but tools/list serializes only ZodObject
-  // and otherwise advertises an empty schema. Publish the same typed registry directly so unions
-  // remain visible to clients; the high-level SDK still owns invocation and runtime validation.
+  // Publish the same typed registry directly so tools/list, contract revisions, and generated
+  // references use one serialized schema. The SDK validates this public shape on tools/call;
+  // handlers may additionally enforce narrower action-specific invariants.
   mcpServer.server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOL_DEFINITIONS.map((definition) => ({
       name: definition.name,

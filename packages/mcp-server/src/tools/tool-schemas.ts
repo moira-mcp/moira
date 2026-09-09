@@ -360,36 +360,61 @@ export const manageReconciliationSchema = z.object({
   visibility: z.enum(["public", "private"]).optional(),
 });
 
-export const startSchema = z.discriminatedUnion("action", [
+const startPrepareShape = {
+  workflowId: z
+    .string()
+    .describe("Workflow ID to prepare (required for prepare; use list() for available workflows)"),
+  note: z.string().max(500).optional().describe("Optional prepare execution note (max 500 chars)"),
+  parentExecutionId: z
+    .string()
+    .describe('Required for prepare. Use "none" for standalone, or a parent process UUID.'),
+  skipNotificationCheck: z
+    .boolean()
+    .optional()
+    .describe(
+      "Prepare only. Skip optional ordinary channel checks; lock PIN delivery remains mandatory",
+    ),
+  skipTelegramCheck: z
+    .boolean()
+    .optional()
+    .describe("Prepare only. Deprecated alias for skipNotificationCheck"),
+};
+
+const startExecuteShape = {
+  startAttemptId: z
+    .string()
+    .uuid()
+    .describe("Required for execute. Start attempt ID returned by prepare"),
+};
+
+export const startSchema = z
+  .object({
+    action: z
+      .enum(["prepare", "execute"])
+      .describe("Start phase: prepare reserves an attempt; execute consumes that attempt"),
+    workflowId: startPrepareShape.workflowId.optional(),
+    note: startPrepareShape.note,
+    parentExecutionId: startPrepareShape.parentExecutionId.optional(),
+    skipNotificationCheck: startPrepareShape.skipNotificationCheck,
+    skipTelegramCheck: startPrepareShape.skipTelegramCheck,
+    startAttemptId: startExecuteShape.startAttemptId.optional(),
+  })
+  .strict();
+
+export const startRequestSchema = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("prepare"),
-      workflowId: z
-        .string()
-        .describe("Workflow ID to prepare (use list() for available workflows)"),
-      note: z.string().max(500).optional().describe("Short execution note (max 500 chars)"),
-      parentExecutionId: z
-        .string()
-        .describe('Required. Use "none" for standalone, or a parent process UUID.'),
-      skipNotificationCheck: z
-        .boolean()
-        .optional()
-        .describe("Skip optional ordinary channel checks; lock PIN delivery remains mandatory"),
-      skipTelegramCheck: z
-        .boolean()
-        .optional()
-        .describe("Deprecated alias for skipNotificationCheck"),
+      ...startPrepareShape,
     })
     .strict(),
   z
     .object({
       action: z.literal("execute"),
-      startAttemptId: z.string().uuid().describe("Start attempt ID returned by prepare"),
+      ...startExecuteShape,
     })
     .strict(),
 ]);
-
-export const startRequestSchema = startSchema;
 
 export const stepSchema = z.object({
   processId: z.string().describe("Process ID from start() or previous step() response"),
