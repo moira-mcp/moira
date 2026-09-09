@@ -42,6 +42,10 @@ import {
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
   CommunicationAttachmentGrantService,
+  WorkspaceTransferRepository,
+  WorkspaceTransferService,
+  getDbPath,
+  getWorkspaceResourcePolicy,
   logAuditEvent,
 } from "@mcp-moira/shared";
 
@@ -73,6 +77,8 @@ import { evaluateMcpToolsRevision } from "./auth/mcp-tools-revision.js";
 import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.js";
 import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
 import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
+import { createWorkspaceTransferDownloadHandler } from "./workspace-transfer-route.js";
+import { dirname, join } from "node:path";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -451,6 +457,13 @@ const app = express();
 
 const attachmentGrantService = new CommunicationAttachmentGrantService();
 const attachmentInflight = new CommunicationAttachmentInflightLimiter();
+const workspaceTransferService = new WorkspaceTransferService({
+  repository: new WorkspaceTransferRepository(getSqliteInstance()),
+  policy: getWorkspaceResourcePolicy,
+  root: join(dirname(getDbPath()), "workspace-transfers"),
+  onCleanupError: (error) => logger.error("Workspace transfer cleanup failed", error),
+});
+workspaceTransferService.start();
 
 // Prometheus metrics middleware FIRST
 app.use(metricsMiddleware());
@@ -479,6 +492,11 @@ app.post(
     audit: logAuditEvent,
     logger,
   }),
+);
+app.get(
+  "/api/workspaces/transfers/:token",
+  mcpLimiter,
+  createWorkspaceTransferDownloadHandler(workspaceTransferService),
 );
 
 app.use(express.json({ limit: "10mb" }));

@@ -189,10 +189,20 @@ docker compose --profile workspaces up -d
 | `WORKSPACE_MAX_OPERATION_STDOUT_KB`            |    1024 | Stdout per operation; maximum 8192 KiB                        |
 | `WORKSPACE_MAX_OPERATION_STDERR_KB`            |     256 | Stderr per operation; maximum 8192 KiB                        |
 | `WORKSPACE_MAX_OPERATION_SECONDS`              |     900 | Direct-operation duration; maximum 900 seconds                |
+| `WORKSPACE_MAX_TRANSFER_FILE_MB`               |       4 | File/native payload ceiling; maximum 4 MiB                    |
+| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER`     |     100 | Live private-transfer bytes per user; maximum 1024 MiB        |
+| `WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL`       |    1024 | Instance live private-transfer bytes; maximum 16384 MiB       |
+| `WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER`      |      10 | Live private-transfer objects per user; maximum 100           |
+| `WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL`        |    1000 | Instance live private-transfer objects; maximum 10000         |
+| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER`  |      40 | Reserved/claimed bytes per user; maximum 256 MiB              |
+| `WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL`    |     256 | Instance reserved/claimed bytes; maximum 4096 MiB             |
+| `WORKSPACE_TRANSFER_TTL_MINUTES`               |      10 | Private object/capability lifetime; maximum 60 minutes        |
 
 The global active-resource limit must be at least the per-user limit. The same
-constraint applies to global and per-user operation concurrency. Invalid policy
-values fail configuration rather than silently weakening a limit. The complete
+constraint applies to global and per-user operation concurrency. A transfer aggregate
+must contain the maximum single file; each global byte or in-flight ceiling must be
+at least its per-user counterpart. Invalid policy values fail configuration
+rather than silently weakening a limit. The complete
 connection, lifecycle, operation and isolation contracts are documented in
 `docs/WORKSPACES.md`; the website connection procedure remains in the public
 Self-Hosting guide.
@@ -461,6 +471,14 @@ WORKSPACE_MAX_OPERATION_INPUT_KB=1024
 WORKSPACE_MAX_OPERATION_STDOUT_KB=1024
 WORKSPACE_MAX_OPERATION_STDERR_KB=256
 WORKSPACE_MAX_OPERATION_SECONDS=900
+WORKSPACE_MAX_TRANSFER_FILE_MB=4
+WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER=100
+WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL=1024
+WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER=10
+WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL=1000
+WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER=40
+WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL=256
+WORKSPACE_TRANSFER_TTL_MINUTES=10
 
 # Environment
 NODE_ENV=production

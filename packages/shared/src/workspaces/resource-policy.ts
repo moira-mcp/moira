@@ -48,6 +48,35 @@ export function evaluateWorkspaceResourcePolicy(
     256,
   );
   const persistentRetentionDays = integer("WORKSPACE_PERSISTENT_RETENTION_DAYS", 30);
+  const maxTransferFileBytes = scaledInteger("WORKSPACE_MAX_TRANSFER_FILE_MB", 4, 1024 ** 2, 1, 4);
+  const maxTransferBytesPerUser = scaledInteger(
+    "WORKSPACE_MAX_TRANSFER_TOTAL_MB_PER_USER",
+    100,
+    1024 ** 2,
+    1,
+    1024,
+  );
+  const maxTransferBytesGlobal = scaledInteger(
+    "WORKSPACE_MAX_TRANSFER_TOTAL_MB_GLOBAL",
+    1024,
+    1024 ** 2,
+    1,
+    16_384,
+  );
+  const maxTransferInflightBytesPerUser = scaledInteger(
+    "WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_PER_USER",
+    40,
+    1024 ** 2,
+    1,
+    256,
+  );
+  const maxTransferInflightBytesGlobal = scaledInteger(
+    "WORKSPACE_MAX_TRANSFER_INFLIGHT_MB_GLOBAL",
+    256,
+    1024 ** 2,
+    1,
+    4096,
+  );
   if (maxActiveGlobal < maxActivePerUser) {
     throw new Error(
       "WORKSPACE_MAX_ACTIVE_GLOBAL cannot be lower than WORKSPACE_MAX_ACTIVE_PER_USER",
@@ -60,6 +89,16 @@ export function evaluateWorkspaceResourcePolicy(
   }
   if (persistentRetentionDays > 30) {
     throw new Error("WORKSPACE_PERSISTENT_RETENTION_DAYS cannot exceed 30");
+  }
+  if (
+    maxTransferBytesPerUser < maxTransferFileBytes ||
+    maxTransferBytesGlobal < maxTransferBytesPerUser ||
+    maxTransferInflightBytesPerUser < maxTransferFileBytes ||
+    maxTransferInflightBytesGlobal < maxTransferInflightBytesPerUser
+  ) {
+    throw new Error(
+      "Workspace transfer aggregate limits cannot be lower than their contained limit",
+    );
   }
   return {
     enabled: enabledValue === "true",
@@ -88,5 +127,13 @@ export function evaluateWorkspaceResourcePolicy(
     ),
     maxOperationStderrBytes: scaledInteger("WORKSPACE_MAX_OPERATION_STDERR_KB", 256, 1024, 1, 8192),
     maxOperationMs: scaledInteger("WORKSPACE_MAX_OPERATION_SECONDS", 900, 1000, 1, 900),
+    maxTransferFileBytes,
+    maxTransferBytesPerUser,
+    maxTransferBytesGlobal,
+    maxTransferObjectsPerUser: integer("WORKSPACE_MAX_TRANSFER_OBJECTS_PER_USER", 10, 1, 100),
+    maxTransferObjectsGlobal: integer("WORKSPACE_MAX_TRANSFER_OBJECTS_GLOBAL", 1000, 1, 10_000),
+    maxTransferInflightBytesPerUser,
+    maxTransferInflightBytesGlobal,
+    transferTtlMs: scaledInteger("WORKSPACE_TRANSFER_TTL_MINUTES", 10, 60_000, 1, 60),
   };
 }

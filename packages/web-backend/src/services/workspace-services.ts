@@ -7,24 +7,35 @@ import {
   WorkspaceProviderRegistry,
   WorkspaceOperationRepository,
   WorkspaceOperationService,
+  WorkspaceFileService,
+  WorkspaceTransferRepository,
+  WorkspaceTransferService,
   WorkspaceResourceRepository,
   WorkspaceResourceService,
   getDatabase,
   getSqliteInstance,
   getWorkspaceGitHubConfig,
   getWorkspaceResourcePolicy,
+  getDbPath,
   logAuditEventDirect,
+  createLogger,
   type WorkspaceConnectionAuditEvent,
   type WorkspaceResourceAuditEvent,
   type WorkspaceOperationAuditEvent,
 } from "@mcp-moira/shared";
+import { dirname, join } from "node:path";
+
+const workspaceLogger = createLogger({ component: "WorkspaceTransfer" });
 import { GitHubCodespacesConnector } from "./github-codespaces-connector.js";
+import { OpenAINativeReferenceFetcher } from "./workspace-native-reference-fetcher.js";
 import { HttpGitHubWorkspaceClient } from "./github-workspace-client.js";
 
 interface WorkspaceServices {
   connection: WorkspaceConnectionService;
   resource: WorkspaceResourceService | null;
   operation: WorkspaceOperationService | null;
+  file: WorkspaceFileService | null;
+  transfer: WorkspaceTransferService | null;
 }
 
 let services: WorkspaceServices | null = null;
@@ -78,6 +89,8 @@ function initializeWorkspaceServices(): WorkspaceServices {
   const config = getWorkspaceGitHubConfig();
   let resource: WorkspaceResourceService | null = null;
   let operation: WorkspaceOperationService | null = null;
+  let file: WorkspaceFileService | null = null;
+  let transfer: WorkspaceTransferService | null = null;
   const connection = new WorkspaceConnectionService({
     repository: new WorkspaceConnectionRepository(getSqliteInstance()),
     config: getWorkspaceGitHubConfig,
@@ -145,6 +158,14 @@ function initializeWorkspaceServices(): WorkspaceServices {
         });
       },
     });
+    transfer = new WorkspaceTransferService({
+      repository: new WorkspaceTransferRepository(getSqliteInstance()),
+      policy: getWorkspaceResourcePolicy,
+      root: join(dirname(getDbPath()), "workspace-transfers"),
+      onCleanupError: (error) => workspaceLogger.error("Workspace transfer cleanup failed", error),
+    });
+    transfer.start();
+    const nativeFetcher = new OpenAINativeReferenceFetcher();
     operation = new WorkspaceOperationService({
       repository: new WorkspaceOperationRepository(getSqliteInstance()),
       credentials: {
@@ -157,6 +178,8 @@ function initializeWorkspaceServices(): WorkspaceServices {
       },
       transport: connector,
       policy: getWorkspaceResourcePolicy,
+      transfers: transfer,
+      nativeFetcher,
       audit: async (event) => {
         await logAuditEventDirect(auditRepository, {
           userId: event.userId,
@@ -167,6 +190,39 @@ function initializeWorkspaceServices(): WorkspaceServices {
             workspaceId: event.workspaceId,
             provider: event.provider,
             state: event.state,
+            kind: event.kind,
+            inputBytes: event.inputBytes,
+            outputBytes: event.outputBytes,
+            exitCode: event.exitCode,
+          },
+        });
+      },
+    });
+    file = new WorkspaceFileService({
+      repository: new WorkspaceOperationRepository(getSqliteInstance()),
+      credentials: {
+        getCredential: async (userId, providerId) => {
+          if (providerId !== WORKSPACE_PROVIDER_GITHUB) {
+            throw new Error("Workspace credential provider does not match the service binding");
+          }
+          return connection.getAccessToken(userId);
+        },
+      },
+      transport: connector,
+      policy: getWorkspaceResourcePolicy,
+      transfers: transfer,
+      nativeFetcher,
+      audit: async (event) => {
+        await logAuditEventDirect(auditRepository, {
+          userId: event.userId,
+          action: operationAuditAction(event),
+          resource: "workspace_operation",
+          resourceId: event.operationId,
+          metadata: {
+            workspaceId: event.workspaceId,
+            provider: event.provider,
+            state: event.state,
+            kind: event.kind,
             inputBytes: event.inputBytes,
             outputBytes: event.outputBytes,
             exitCode: event.exitCode,
@@ -176,7 +232,7 @@ function initializeWorkspaceServices(): WorkspaceServices {
     });
   }
 
-  services = { connection, resource, operation };
+  services = { connection, resource, operation, file, transfer };
   return services;
 }
 
@@ -190,4 +246,12 @@ export function getWorkspaceResourceService(): WorkspaceResourceService | null {
 
 export function getWorkspaceOperationService(): WorkspaceOperationService | null {
   return initializeWorkspaceServices().operation;
+}
+
+export function getWorkspaceFileService(): WorkspaceFileService | null {
+  return initializeWorkspaceServices().file;
+}
+
+export function getWorkspaceTransferService(): WorkspaceTransferService | null {
+  return initializeWorkspaceServices().transfer;
 }

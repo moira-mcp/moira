@@ -104,6 +104,14 @@ export interface WorkspaceResourcePolicy {
   maxOperationStdoutBytes?: number;
   maxOperationStderrBytes?: number;
   maxOperationMs?: number;
+  maxTransferFileBytes?: number;
+  maxTransferBytesPerUser?: number;
+  maxTransferBytesGlobal?: number;
+  maxTransferObjectsPerUser?: number;
+  maxTransferObjectsGlobal?: number;
+  maxTransferInflightBytesPerUser?: number;
+  maxTransferInflightBytesGlobal?: number;
+  transferTtlMs?: number;
 }
 
 export interface WorkspaceResourceRecord {
@@ -166,7 +174,7 @@ export interface WorkspaceOperationRecord {
   provider: string;
   providerResourceName: string;
   remoteMarker: string;
-  kind: "exec";
+  kind: WorkspaceOperationKind;
   state: WorkspaceOperationState;
   inputBytes: number;
   stdoutLimitBytes: number;
@@ -183,9 +191,17 @@ export interface WorkspaceOperationRecord {
   updatedAt: number;
 }
 
+export type WorkspaceOperationKind =
+  "exec" | "stat" | "search" | "read" | "write" | "apply_patch" | "upload" | "download";
+
 export type WorkspaceByteSource =
   | { kind: "inline"; bytes: Uint8Array }
-  | { kind: "reference"; referenceId: string; declaredBytes: number };
+  | {
+      kind: "reference";
+      referenceId: string;
+      declaredBytes: number;
+      declaredMimeType: string;
+    };
 
 export interface WorkspaceExecRequest {
   argv: readonly string[];
@@ -230,6 +246,150 @@ export interface WorkspaceOperationTransport {
     workspace: WorkspaceResourceRecord,
     operation: WorkspaceOperationRecord,
   ): Promise<void>;
+}
+
+export interface WorkspaceFileVersion {
+  size: number;
+  sha256: string;
+  modifiedAt: number;
+}
+
+export interface WorkspaceFileStat {
+  path: string;
+  type: "file" | "directory";
+  size: number;
+  mode: number;
+  modifiedAt: number;
+  version: WorkspaceFileVersion | null;
+}
+
+export interface WorkspaceSearchMatch {
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+}
+
+export interface WorkspacePatchSummaryEntry {
+  path: string;
+  edits: number;
+  insertedBytes: number;
+  deletedBytes: number;
+}
+
+export interface WorkspacePatchSummary {
+  filesChanged: number;
+  editsApplied: number;
+  insertedBytes: number;
+  deletedBytes: number;
+  entries: WorkspacePatchSummaryEntry[];
+  truncated: boolean;
+}
+
+export type WorkspaceFileRequest =
+  | { action: "stat"; path: string }
+  | {
+      action: "search";
+      path: string;
+      query: string;
+      mode: "literal" | "regex";
+      maxMatches: number;
+      maxBytes: number;
+    }
+  | { action: "read"; path: string; offset: number; length: number }
+  | {
+      action: "write" | "upload";
+      path: string;
+      bytes: Uint8Array;
+      expected: { exists: boolean; size?: number; sha256?: string };
+    }
+  | {
+      action: "apply_patch";
+      files: readonly {
+        path: string;
+        expected: { exists: boolean; size?: number; sha256?: string };
+        edits: readonly { start: number; end: number; bytes: Uint8Array }[];
+      }[];
+    }
+  | { action: "download"; path: string; maxBytes: number };
+
+export type WorkspaceFileResult =
+  | {
+      action: Exclude<WorkspaceOperationKind, "exec">;
+      state: "failed";
+      code: "WORKSPACE_FILE_REJECTED";
+    }
+  | { action: "stat"; stat: WorkspaceFileStat }
+  | { action: "search"; matches: WorkspaceSearchMatch[]; truncated: boolean }
+  | {
+      action: "read" | "download";
+      path: string;
+      offset: number;
+      totalSize: number;
+      bytes: Uint8Array;
+      sha256: string;
+    }
+  | {
+      action: "write" | "upload";
+      path: string;
+      previous: WorkspaceFileVersion | null;
+      current: WorkspaceFileVersion;
+    }
+  | {
+      action: "apply_patch";
+      files: {
+        path: string;
+        previous: WorkspaceFileVersion | null;
+        current: WorkspaceFileVersion;
+      }[];
+      summary: WorkspacePatchSummary;
+    };
+
+export interface WorkspaceFileOperationResponse {
+  operation: WorkspaceOperationRecord;
+  result: WorkspaceFileResult | null;
+}
+
+export interface WorkspaceFileTransport {
+  executeFile(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+    request: WorkspaceFileRequest,
+  ): Promise<WorkspaceFileResult | { state: "running" }>;
+  inspectFile(
+    credential: string,
+    workspace: WorkspaceResourceRecord,
+    operation: WorkspaceOperationRecord,
+  ): Promise<WorkspaceFileResult | { state: "running" } | { state: "absent" }>;
+}
+
+export interface WorkspaceNativeFileReference {
+  fileId: string;
+  downloadUrl: string;
+  fileName: string;
+  mimeType: string;
+  declaredSize: number;
+}
+
+export interface WorkspaceTransferRecord {
+  id: string;
+  userId: string;
+  purpose: "workspace_input" | "workspace_download";
+  state: "reserved" | "ready" | "claimed" | "consumed";
+  fileName: string;
+  mimeType: string;
+  declaredSize: number;
+  observedSize: number | null;
+  sha256: string | null;
+  objectKey: string;
+  ownerPid: number;
+  ownerStartTime: string | null;
+  claimId: string | null;
+  claimExpiresAt: number | null;
+  expiresAt: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export class WorkspaceResourceError extends Error {

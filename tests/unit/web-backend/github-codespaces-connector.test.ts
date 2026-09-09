@@ -57,6 +57,11 @@ const operation = {
   stdoutLimitBytes: 4096,
   stderrLimitBytes: 4096,
 } as WorkspaceOperationRecord;
+const version = { size: 3, sha256: "a".repeat(64), modifiedAt: 1 };
+
+function fileOperation(kind: WorkspaceOperationRecord["kind"]): WorkspaceOperationRecord {
+  return { ...operation, kind };
+}
 
 describe("GitHub Codespaces connector boundary", () => {
   test("passes credentials only in the Unix-socket request body", async () => {
@@ -162,6 +167,316 @@ describe("GitHub Codespaces connector boundary", () => {
       action: "finalize",
       remoteMarker: operation.remoteMarker,
     });
+  });
+
+  test("transports typed binary file requests and results without shell reinterpretation", async () => {
+    const output = Buffer.from([9, 0, 255]);
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "src/a value;$(false).bin",
+          offset: 0,
+          totalSize: output.length,
+          bytesBase64: output.toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.executeFile("ghu_topsecret", workspace, fileOperation("read"), {
+        action: "read",
+        path: "src/a value;$(false).bin",
+        offset: 0,
+        length: 3,
+      }),
+    ).resolves.toEqual({
+      action: "read",
+      path: "src/a value;$(false).bin",
+      offset: 0,
+      totalSize: 3,
+      bytes: output,
+      sha256: "a".repeat(64),
+    });
+    const job = JSON.parse(harness.calls[0].body).job;
+    expect(job.action).toBe("file-execute");
+    expect(job.request).toEqual({
+      action: "read",
+      path: "src/a value;$(false).bin",
+      offset: 0,
+      length: 3,
+    });
+  });
+
+  test("owns and transmits the remote patch-summary byte budget", async () => {
+    const harness = requestHarness(() => ({ value: JSON.stringify({ state: "running" }) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.executeFile("ghu_topsecret", workspace, fileOperation("apply_patch"), {
+        action: "apply_patch",
+        files: [
+          {
+            path: "file.bin",
+            expected: { exists: true },
+            edits: [{ start: 0, end: 1, bytes: Buffer.from("b") }],
+          },
+        ],
+      }),
+    ).resolves.toEqual({ state: "running" });
+    expect(JSON.parse(harness.calls[0].body).job.request).toMatchObject({
+      action: "apply_patch",
+      summaryMaxBytes: 4096,
+      files: [
+        {
+          path: "file.bin",
+          edits: [{ start: 0, end: 1, bytesBase64: Buffer.from("b").toString("base64") }],
+        },
+      ],
+    });
+  });
+
+  test.each([
+    [
+      "negative read offset",
+      "read",
+      {
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "file.bin",
+          offset: -1,
+          totalSize: 3,
+          bytesBase64: Buffer.from("abc").toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      },
+    ],
+    [
+      "read range beyond total size",
+      "read",
+      {
+        state: "succeeded",
+        value: {
+          action: "read",
+          path: "file.bin",
+          offset: 2,
+          totalSize: 3,
+          bytesBase64: Buffer.from("ab").toString("base64"),
+          sha256: "a".repeat(64),
+        },
+      },
+    ],
+    [
+      "file stat without a version",
+      "stat",
+      {
+        state: "succeeded",
+        value: {
+          action: "stat",
+          stat: {
+            path: "file.bin",
+            type: "file",
+            size: 3,
+            mode: 0o600,
+            modifiedAt: 1,
+            version: null,
+          },
+        },
+      },
+    ],
+    [
+      "directory stat with file metadata",
+      "stat",
+      {
+        state: "succeeded",
+        value: {
+          action: "stat",
+          stat: { path: "src", type: "directory", size: 3, mode: 0o755, modifiedAt: 1, version },
+        },
+      },
+    ],
+    [
+      "search noncanonical traversal path",
+      "search",
+      {
+        state: "succeeded",
+        value: {
+          action: "search",
+          matches: [{ path: "..\\secret", line: 1, column: 1, preview: "secret" }],
+          truncated: false,
+        },
+      },
+    ],
+    [
+      "nonpositive search coordinate",
+      "search",
+      {
+        state: "succeeded",
+        value: {
+          action: "search",
+          matches: [{ path: "file.txt", line: 0, column: 1, preview: "text" }],
+          truncated: false,
+        },
+      },
+    ],
+    [
+      "write with malformed previous version",
+      "write",
+      {
+        state: "succeeded",
+        value: {
+          action: "write",
+          path: "file.bin",
+          previous: { ...version, sha256: "invalid" },
+          current: version,
+        },
+      },
+    ],
+    [
+      "patch with duplicate paths",
+      "apply_patch",
+      {
+        state: "succeeded",
+        value: {
+          action: "apply_patch",
+          files: [
+            { path: "file.bin", previous: version, current: version },
+            { path: "file.bin", previous: version, current: version },
+          ],
+          summary: {
+            filesChanged: 2,
+            editsApplied: 2,
+            insertedBytes: 2,
+            deletedBytes: 2,
+            entries: [
+              { path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 },
+              { path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 },
+            ],
+            truncated: false,
+          },
+        },
+      },
+    ],
+    [
+      "patch with inconsistent summary",
+      "apply_patch",
+      {
+        state: "succeeded",
+        value: {
+          action: "apply_patch",
+          files: [{ path: "file.bin", previous: version, current: version }],
+          summary: {
+            filesChanged: 1,
+            editsApplied: 2,
+            insertedBytes: 2,
+            deletedBytes: 2,
+            entries: [{ path: "file.bin", edits: 1, insertedBytes: 1, deletedBytes: 1 }],
+            truncated: false,
+          },
+        },
+      },
+    ],
+    [
+      "successful envelope with failure value",
+      "write",
+      {
+        state: "succeeded",
+        value: { action: "write", state: "failed", code: "WORKSPACE_FILE_REJECTED" },
+      },
+    ],
+    [
+      "failed envelope with success value",
+      "write",
+      {
+        state: "failed",
+        value: { action: "write", path: "file.bin", previous: null, current: version },
+      },
+    ],
+    [
+      "operation/result action mismatch",
+      "write",
+      {
+        state: "succeeded",
+        value: { action: "upload", path: "file.bin", previous: null, current: version },
+      },
+    ],
+    [
+      "unexpected result field",
+      "write",
+      {
+        state: "succeeded",
+        value: { action: "write", path: "file.bin", previous: null, current: version, secret: "x" },
+      },
+    ],
+  ] as const)("rejects malformed file result: %s", async (_name, kind, envelope) => {
+    const harness = requestHarness(() => ({ value: JSON.stringify(envelope) }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation(kind)),
+    ).rejects.toThrow(/invalid|inconsistent/);
+  });
+
+  test("accepts a complete bounded patch result from the remote trust boundary", async () => {
+    const patchResult = {
+      action: "apply_patch",
+      files: [{ path: "file.bin", previous: version, current: version }],
+      summary: {
+        filesChanged: 1,
+        editsApplied: 1,
+        insertedBytes: 3,
+        deletedBytes: 3,
+        entries: [{ path: "file.bin", edits: 1, insertedBytes: 3, deletedBytes: 3 }],
+        truncated: false,
+      },
+    } as const;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value: patchResult }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation("apply_patch")),
+    ).resolves.toEqual(patchResult);
+  });
+
+  test("accepts truncated patch entries when aggregate totals remain complete", async () => {
+    const patchResult = {
+      action: "apply_patch",
+      files: [
+        { path: "one.bin", previous: version, current: version },
+        { path: "two.bin", previous: version, current: version },
+      ],
+      summary: {
+        filesChanged: 2,
+        editsApplied: 2,
+        insertedBytes: 6,
+        deletedBytes: 6,
+        entries: [{ path: "one.bin", edits: 1, insertedBytes: 3, deletedBytes: 3 }],
+        truncated: true,
+      },
+    } as const;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value: patchResult }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation("apply_patch")),
+    ).resolves.toEqual(patchResult);
+  });
+
+  test("accepts the repository root as a directory stat result", async () => {
+    const statResult = {
+      action: "stat",
+      stat: { path: ".", type: "directory", size: 0, mode: 0o755, modifiedAt: 1, version: null },
+    } as const;
+    const harness = requestHarness(() => ({
+      value: JSON.stringify({ state: "succeeded", value: statResult }),
+    }));
+    const connector = new GitHubCodespacesConnector(harness.requestImpl);
+    await expect(
+      connector.inspectFile("ghu_topsecret", workspace, fileOperation("stat")),
+    ).resolves.toEqual(statResult);
   });
 
   test("fails closed when the sidecar returns token-bearing output", async () => {

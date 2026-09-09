@@ -218,6 +218,13 @@
       "when": 1788944580000,
       "tag": "0029_persistent_workspace_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1788944640000,
+      "tag": "0030_workspace_transfers",
+      "breakpoints": true
     }
   ]
 }

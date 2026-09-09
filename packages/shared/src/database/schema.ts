@@ -433,6 +433,41 @@ export const workspaceOperation = sqliteTable(
   }),
 );
 
+/** Metadata-only authority for private, expiring workspace byte transfers. */
+export const workspaceTransfer = sqliteTable(
+  "workspaceTransfer",
+  {
+    id: text("id").primaryKey(),
+    tokenDigest: text("tokenDigest").notNull().unique(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    purpose: text("purpose").notNull(),
+    state: text("state").notNull(),
+    fileName: text("fileName").notNull(),
+    mimeType: text("mimeType").notNull(),
+    declaredSize: integer("declaredSize").notNull(),
+    observedSize: integer("observedSize"),
+    sha256: text("sha256"),
+    objectKey: text("objectKey").notNull().unique(),
+    ownerPid: integer("ownerPid").notNull(),
+    ownerStartTime: text("ownerStartTime"),
+    claimId: text("claimId"),
+    claimExpiresAt: integer("claimExpiresAt", { mode: "timestamp_ms" }),
+    expiresAt: integer("expiresAt", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => ({
+    ownerStateExpiryIdx: index("workspace_transfer_owner_state_expiry_idx").on(
+      table.userId,
+      table.state,
+      table.expiresAt,
+    ),
+    stateExpiryIdx: index("workspace_transfer_state_expiry_idx").on(table.state, table.expiresAt),
+  }),
+);
+
 // ===== MCP Moira Workflow Tables =====
 
 export const workflow = sqliteTable(

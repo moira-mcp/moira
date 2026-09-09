@@ -5,11 +5,20 @@ import type {
   WorkspaceOperationResponse,
   WorkspaceOperationResult,
   WorkspaceOperationTransport,
+  WorkspaceFileTransport,
+  WorkspaceNativeFileReference,
   WorkspaceResourcePolicy,
 } from "./resource-types.js";
 import { WorkspaceResourceError } from "./resource-types.js";
 import type { WorkspaceCredentialResolver } from "./resource-service.js";
 import { randomUUID } from "node:crypto";
+import { workspaceFileResultBytes } from "./file-service.js";
+import type { WorkspaceTransferRecord } from "./resource-types.js";
+import type {
+  WorkspaceNativeReferenceFetcher,
+  WorkspaceTransferHandle,
+  WorkspaceTransferService,
+} from "./transfer-service.js";
 
 const CONNECTOR_MAX_INPUT_BYTES = 4 * 1024 * 1024;
 const CONNECTOR_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
@@ -29,6 +38,7 @@ export interface WorkspaceOperationAuditEvent {
   operationId: string;
   provider: string;
   state: WorkspaceOperationRecord["state"];
+  kind: WorkspaceOperationRecord["kind"];
   inputBytes: number;
   outputBytes: number;
   exitCode: number | null;
@@ -114,12 +124,79 @@ export class WorkspaceOperationService {
     private readonly dependencies: {
       repository: WorkspaceOperationRepository;
       credentials: WorkspaceCredentialResolver;
-      transport: WorkspaceOperationTransport;
+      transport: WorkspaceOperationTransport & Partial<WorkspaceFileTransport>;
       policy: () => WorkspaceResourcePolicy;
       now?: () => number;
       audit?: (event: WorkspaceOperationAuditEvent) => Promise<void> | void;
+      transfers?: Pick<WorkspaceTransferService, "ingest" | "claimInput" | "release" | "consume">;
+      nativeFetcher?: WorkspaceNativeReferenceFetcher;
     },
   ) {}
+
+  async executeNativeReference(
+    userId: string,
+    workspaceId: string,
+    request: Omit<WorkspaceExecRequest, "stdin">,
+    reference: WorkspaceNativeFileReference,
+  ): Promise<WorkspaceOperationResponse> {
+    if (!this.dependencies.transfers || !this.dependencies.nativeFetcher) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_PROVIDER_UNAVAILABLE",
+        "Native operation input is unavailable",
+      );
+    }
+    const nativeRequest: WorkspaceExecRequest = {
+      ...request,
+      stdin: {
+        kind: "reference",
+        referenceId: reference.fileId,
+        declaredBytes: reference.declaredSize,
+        declaredMimeType: reference.mimeType,
+      },
+    };
+    const prepared = await this.reserve(userId, workspaceId, nativeRequest);
+    let handle: WorkspaceTransferHandle | null = null;
+    try {
+      handle = await this.dependencies.transfers.ingest(
+        userId,
+        reference,
+        this.dependencies.nativeFetcher,
+      );
+      const response = await this.executePrepared(
+        userId,
+        {
+          ...request,
+          stdin: {
+            kind: "reference",
+            referenceId: handle.referenceId,
+            declaredBytes: handle.size,
+            declaredMimeType: handle.mimeType,
+          },
+        },
+        prepared,
+      );
+      if (response.operation.state === "cancelled") {
+        await this.discardNativeInput(userId, handle.referenceId);
+      }
+      return response;
+    } catch (error) {
+      if (handle) await this.discardNativeInput(userId, handle.referenceId);
+      if (
+        this.dependencies.repository.cancelBeforeDispatch(
+          userId,
+          prepared.operation.id,
+          this.now(),
+          "native_input_unavailable_before_dispatch",
+        )
+      ) {
+        await this.emit(
+          "terminal",
+          this.dependencies.repository.getOwned(userId, prepared.operation.id)!,
+        );
+      }
+      throw error;
+    }
+  }
 
   private now(): number {
     return (this.dependencies.now ?? Date.now)();
@@ -138,6 +215,11 @@ export class WorkspaceOperationService {
     workspaceId: string,
     request: WorkspaceExecRequest,
   ): Promise<WorkspaceOperationResponse> {
+    const prepared = await this.reserve(userId, workspaceId, request);
+    return this.executePrepared(userId, request, prepared);
+  }
+
+  private async reserve(userId: string, workspaceId: string, request: WorkspaceExecRequest) {
     const policy = this.dependencies.policy();
     const { inputBytes, stdoutLimitBytes, stderrLimitBytes } = validateRequest(request, policy);
     const reservation = this.dependencies.repository.reserve({
@@ -163,8 +245,19 @@ export class WorkspaceOperationService {
     }
     const { operation, workspace } = reservation;
     await this.emit("reserve", operation);
+    return { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace };
+  }
+
+  private async executePrepared(
+    userId: string,
+    request: WorkspaceExecRequest,
+    prepared: Awaited<ReturnType<WorkspaceOperationService["reserve"]>>,
+  ): Promise<WorkspaceOperationResponse> {
+    const { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace } = prepared;
     let terminalResult: WorkspaceOperationResult | null = null;
     let remoteContacted = false;
+    let claimedInput: WorkspaceTransferRecord | null = null;
+    let preDispatchOutcome = "credential_unavailable_before_dispatch";
     try {
       if (!this.dependencies.repository.canDispatch(userId, operation.id, this.now())) {
         this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
@@ -173,6 +266,33 @@ export class WorkspaceOperationService {
           result: null,
         };
       }
+      let materializedRequest = request;
+      if (request.stdin.kind === "reference") {
+        preDispatchOutcome = "native_input_unavailable_before_dispatch";
+        if (!this.dependencies.transfers) {
+          throw new WorkspaceResourceError(
+            "WORKSPACE_RESOURCE_INVALID",
+            "Native operation input is unavailable",
+          );
+        }
+        const claimed = await this.dependencies.transfers.claimInput(
+          userId,
+          request.stdin.referenceId,
+        );
+        if (
+          claimed.bytes.byteLength !== request.stdin.declaredBytes ||
+          claimed.record.mimeType !== request.stdin.declaredMimeType
+        ) {
+          this.dependencies.transfers.release(claimed.record);
+          throw new WorkspaceResourceError(
+            "WORKSPACE_RESOURCE_INVALID",
+            "Native operation input size changed",
+          );
+        }
+        claimedInput = claimed.record;
+        materializedRequest = { ...request, stdin: { kind: "inline", bytes: claimed.bytes } };
+      }
+      preDispatchOutcome = "credential_unavailable_before_dispatch";
       const credential = await this.dependencies.credentials.getCredential(
         userId,
         workspace.provider,
@@ -188,6 +308,7 @@ export class WorkspaceOperationService {
           dispatchNow,
         )
       ) {
+        if (claimedInput) this.dependencies.transfers?.release(claimedInput);
         this.dependencies.repository.cancelBeforeDispatch(userId, operation.id, this.now());
         return {
           operation: this.dependencies.repository.getOwned(userId, operation.id)!,
@@ -195,8 +316,9 @@ export class WorkspaceOperationService {
         };
       }
       remoteContacted = true;
+      if (claimedInput) await this.dependencies.transfers!.consume(claimedInput);
       const result = await this.dependencies.transport.execute(credential, workspace, operation, {
-        ...request,
+        ...materializedRequest,
         maxStdoutBytes: stdoutLimitBytes,
         maxStderrBytes: stderrLimitBytes,
       });
@@ -226,11 +348,12 @@ export class WorkspaceOperationService {
         );
         await this.emit("reconcile", this.dependencies.repository.getOwned(userId, operation.id)!);
       } else {
+        if (claimedInput) this.dependencies.transfers?.release(claimedInput);
         this.dependencies.repository.cancelBeforeDispatch(
           userId,
           operation.id,
           this.now(),
-          "credential_unavailable_before_dispatch",
+          preDispatchOutcome,
         );
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       }
@@ -363,6 +486,48 @@ export class WorkspaceOperationService {
         );
         return true;
       }
+      if (operation.kind !== "exec") {
+        if (!this.dependencies.transport.inspectFile) {
+          throw new Error("Workspace file reconciliation transport is unavailable");
+        }
+        const fileResult = await this.dependencies.transport.inspectFile(
+          credential,
+          context.workspace,
+          operation,
+        );
+        if ("state" in fileResult && fileResult.state === "running") {
+          this.dependencies.repository.releaseClaim(
+            operation.id,
+            claimId,
+            "remote_running",
+            this.now(),
+          );
+        } else if ("state" in fileResult && fileResult.state === "absent") {
+          this.dependencies.repository.releaseClaim(
+            operation.id,
+            claimId,
+            "remote_inspection_required",
+            this.now(),
+          );
+        } else {
+          const completed = this.dependencies.repository.completeMetadata(
+            operation.userId,
+            operation.id,
+            operation.resourceGeneration,
+            workspaceFileResultBytes(fileResult),
+            this.now() + policy.cleanupDeadlineMs,
+            this.now(),
+            "state" in fileResult && fileResult.state === "failed" ? "failed" : "succeeded",
+          );
+          if (completed) {
+            await this.emit(
+              "terminal",
+              this.dependencies.repository.getOwned(operation.userId, operation.id)!,
+            );
+          }
+        }
+        return true;
+      }
       const shouldCancel =
         operation.state === "cancel_pending" || this.now() >= operation.deadlineAt;
       const result = shouldCancel
@@ -484,9 +649,19 @@ export class WorkspaceOperationService {
       operationId: operation.id,
       provider: operation.provider,
       state: operation.state,
+      kind: operation.kind,
       inputBytes: operation.inputBytes,
       outputBytes: operation.outputBytes,
       exitCode: operation.exitCode,
     });
+  }
+
+  private async discardNativeInput(userId: string, referenceId: string): Promise<void> {
+    try {
+      const claimed = await this.dependencies.transfers!.claimInput(userId, referenceId);
+      await this.dependencies.transfers!.consume(claimed.record);
+    } catch {
+      // Claim validation removes invalid objects; consumed or unavailable references need no work.
+    }
   }
 }
