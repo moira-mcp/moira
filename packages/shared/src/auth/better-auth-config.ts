@@ -18,6 +18,7 @@ import { user, oauthAccessToken } from "../database/schema.js";
 import { and, eq } from "drizzle-orm";
 import { getBaseUrl, getAuthUrl, getMcpUrl, isProduction } from "../config/urls.js";
 import {
+  getAppPrefix,
   getBetterAuthSecret,
   getGitHubClientId,
   getGitHubClientSecret,
@@ -226,6 +227,32 @@ function isValidLoadTestRequest(
   }
 }
 
+// The Web UI serves the OAuth authorize/consent pages under the deployment's
+// base-path prefix (getAppPrefix(): "" for self-host root, "/app" for our
+// hosted deploy). Better Auth's mcp/oidc-provider plugin interpolates
+// loginPage/consentPage directly into its own redirects, so these must be
+// prefix-aware here rather than relying on the web backend's compensating
+// GET /oauth/authorize redirect, which only covers requests that hit that
+// exact bare-path route.
+//
+// Note: mcp() overwrites oidcConfig.loginPage with the top-level loginPage,
+// so only the top-level loginPage and oidcConfig.consentPage reach a redirect.
+// Both are set consistently so neither the live nor the shadowed value can
+// drift back to an unprefixed path.
+export function buildMcpPluginOptions() {
+  const appPrefix = getAppPrefix();
+  const loginPage = `${appPrefix}/oauth/authorize`;
+
+  return {
+    loginPage,
+    resource: getMcpUrl(),
+    oidcConfig: {
+      loginPage,
+      consentPage: `${appPrefix}/oauth/consent`,
+    },
+  };
+}
+
 // Base configuration (shared between services)
 // Note: baseURL must include basePath for correct URL generation in emails
 const baseConfig = {
@@ -376,16 +403,7 @@ const baseConfig = {
     },
   },
 
-  plugins: [
-    mcp({
-      loginPage: "/oauth/authorize",
-      resource: getMcpUrl(),
-      oidcConfig: {
-        loginPage: "/oauth/authorize",
-        consentPage: "/oauth/consent",
-      },
-    }),
-  ],
+  plugins: [mcp(buildMcpPluginOptions())],
 
   databaseHooks: {
     user: {
