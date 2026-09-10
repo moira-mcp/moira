@@ -54,8 +54,8 @@ An existing early responsibility resolves the canonical workspace path and retur
 adding judgment.
 
 When stable files come from workflow registry defaults, place a `materialize` node immediately after
-that owner. It creates the destination and extracts all declared files through one bounded archive,
-without putting their bodies in the agent context:
+that owner. It creates the destination and extracts all declared files through one bounded archive, keeping
+their bodies out of the agent context on that route:
 
 ```json
 {

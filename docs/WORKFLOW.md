@@ -781,15 +781,20 @@ The five-minute token is bound to user, execution, and node. The same token can 
 downloads while that execution remains running and waiting on the node, and becomes invalid as soon
 as the execution advances or the absolute TTL expires. When the step is presented, the handler
 renders `basePath` and the file-path summary shown in the directive; that rendered `basePath` is
-embedded in the issued shell command. The built-in directive explains the retry window and reminds
-the agent that delivery does not prove reading. When the HTTP request arrives, the route reloads the
+embedded in the issued shell command. The built-in directive explains the retry window, offers the
+context-delivery fallback below as conditional and non-preferred, and reminds the agent that delivery
+does not prove reading on either route. When the HTTP request arrives, the route reloads the
 current workflow and re-renders each archive entry path and registry-backed content with the bound
 execution context, including system variables such as `executionId`. A workflow change after
 issuance can therefore change the downloaded archive paths or contents, but it cannot change the
 destination in the already-issued command. Re-presenting the paused node through `current_step`
-creates a new grant and recomputes the directive without advancing the graph. The UI and MCP response
-show paths and counts only, never rendered content. Later consumer directives must explicitly require
-reading their applicable files. There is no textual fallback; a failed client command is a blocker.
+creates a new grant and recomputes the directive without advancing the graph. The UI and the presented
+directive show paths and counts only, never rendered content. Later consumer directives must
+explicitly require reading their applicable files. A host that cannot run the issued command has one
+fallback, which the directive itself names: `session({ action: "materialize", executionId })` returns
+the same rendered bodies in the tool response under the same bindings and window, subject to a
+smaller total-size ceiling for context delivery. A failed client command with no fallback available
+is a blocker.
 
 ### End Node
 

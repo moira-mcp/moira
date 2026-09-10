@@ -85,7 +85,7 @@ curl http://localhost:${DOCKER_PORT}/api/health        # Backend API health
 - **teleport** - Jump target only reachable via explicit teleport, behaves like agent-directive
 - **subgraph** - Delegates to another workflow, maps input/output context
 - **lock** - Pauses at a PIN/Telegram approval gate until unlocked
-- **materialize** - Pauses with a five-minute node-bound command that can retry delivery of registry-backed files as a tar archive
+- **materialize** - Pauses with a five-minute node-bound command that can retry delivery of registry-backed files as a tar archive; a host that cannot run the command can instead read the same bodies through `session({ action: "materialize", executionId })`
 - **end** - Auto-executes, collects final data, completes
 
 Automatic node types (execute without agent interaction):

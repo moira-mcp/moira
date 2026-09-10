@@ -707,7 +707,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/workflow-file-tokens.test.ts` — including fixed five-minute materialize TTL, reusable same-node authorization, binding rejection, and repeated HTTP download until expiry or node transition
+- `tests/integration/workflow-file-tokens.test.ts` — including fixed five-minute materialize TTL, reusable same-node authorization, binding rejection, and repeated HTTP download until expiry or node transition, plus current-presentation grant resolution that ignores superseded grants, other users, and expired windows
 
 **mcp-tools**
 
@@ -794,6 +794,8 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/unit/config/nginx-sensitive-logging.test.ts` — both shipped nginx modes suppress path grants from access logs and route bounded authenticated communication uploads to MCP without JSON MIME rewriting
 - `tests/unit/shared/logging/express-middleware.test.ts` — materialize grant redaction with routing/query preservation and unrelated-URL non-regression
 - `tests/unit/web-backend/execution-materialize.test.ts` — current-definition fetch, execution binding, repeated concurrent tar responses, late authorization, render-overflow handling, and expected-4xx versus unexpected-boundary error mapping
+- `tests/unit/mcp-server/deliver-materialize.test.ts` — context delivery of rendered bodies for the caller's current presentation, fallback-specific counting that leaves the archive series untouched, refusal without partial data for a missing grant or an oversized set, and a single indistinguishable refusal message across conditions
+- `tests/unit/workflow-engine/materialize-context-delivery.test.ts` — byte-identical delivery between the archive channel and the in-context fallback for one grant, the resolver's expired-grant, node-transition, foreign-owner, stale-context-revision and lost-authorization refusals, aggregate context-budget refusal without truncation, and verbatim per-file block presentation; its `workflow_node_unavailable` refusal is not yet exercised
 - `tests/unit/logging/compute-changes.test.ts`
 - `tests/unit/shared/workflow-query-service.test.ts` — incl. setWorkflowVariable preserves rich schema
 - `tests/unit/shared/workflow-catalog.test.ts` — catalog identity/ownership metadata is excluded from the executable graph; readWorkflowCatalogs multi-dir merge: union, later-dir-wins precedence on (owner,slug) collision, per-owner duplicate slugs preserved, missing/empty dirs skipped, single-dir == readWorkflowCatalog; getWorkflowsDirs config: default, WORKFLOWS_DIR fallback, colon-separated WORKFLOWS_DIRS, empty-segment drop
@@ -859,7 +861,7 @@ level headings classify the tracked test paths listed beneath them.
 - `tests/workflow/engine/max-nodes-validation.test.ts`
 - `tests/workflow/engine/node-handlers.test.ts` — including strict empty/nested/missing End projection, runtime-input rejection, and engine-owned system context-path resolution
 - `tests/workflow/engine/node-type-validation.test.ts`
-- `tests/workflow/engine/materialize-node.test.ts` — materialize schema/source-default contract, handler directive summary, expected/unexpected preparation failures, isolated re-presentation that cannot traverse an error connection, shell encoding, current-registry rendering, tar output, path safety, collision detection, and exact resource boundaries
+- `tests/workflow/engine/materialize-node.test.ts` — materialize schema/source-default contract, handler directive summary including the conditional non-preferred context fallback offered after the primary command and success criteria that accept delivery by either route, expected/unexpected preparation failures, isolated re-presentation that cannot traverse an error connection, shell encoding, current-registry rendering, tar output, path safety, collision detection, and exact resource boundaries
 - `tests/workflow/engine/note-handlers.test.ts`
 - `tests/workflow/engine/note-node-validation.test.ts`
 - `tests/workflow/engine/path-resolver.test.ts`
@@ -887,6 +889,7 @@ level headings classify the tracked test paths listed beneath them.
 
 **mcp-tools**
 
+- `tests/mcp-tools/materialize-fallback.test.ts` — live authenticated MCP delivery of materialize file bodies into the tool response while the node is presented, refusal after the execution advances, and the published `materialize` session action; cross-user scoping is asserted at the unit and integration levels instead of a third time here
 - `tests/mcp-tools/workflow-crud.test.ts`
 - `tests/mcp-tools/workflow-documentation.test.ts` — live authenticated MCP-owned help catalog with canonical special-`tools` discoverability, presentation-model-derived client/quickstart/agent-instruction content, configured endpoint and authentication guidance, ordinary topic semantics, Markdown shape, unknown-topic guidance, and direct typed tools detail
 - `tests/mcp-tools/workflow-ownership.test.ts`

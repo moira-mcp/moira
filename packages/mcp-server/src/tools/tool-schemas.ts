@@ -223,12 +223,15 @@ export const getSessionInfoHandlerSchema = z.object({
       "set-variable",
       "progress",
       "progress-image-token",
+      "materialize",
     ])
     .describe("Action to perform"),
   executionId: z
     .string()
     .optional()
-    .describe("Execution ID for execution_context, current_step, or update-note actions"),
+    .describe(
+      "Execution ID for execution_context, current_step, update-note, or materialize actions",
+    ),
   // Parameters for executions action
   // Issue #386: 2-status model - "running" (active) and "completed" (finished)
   // Old values "waiting" and "failed" accepted for backward compatibility (mapped to new values)

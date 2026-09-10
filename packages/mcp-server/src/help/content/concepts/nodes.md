@@ -425,9 +425,11 @@ MCP and workflow responses never contain the generated PIN. The user can enter a
 
 ## Materialize Node
 
-Delivers author-defined files to the agent filesystem without placing their rendered contents in
-the agent context. The server creates a five-minute, node-bound tar grant; the agent runs or retries
-the exact command in the generated directive and then completes the step with `null` or `{}`.
+Delivers author-defined files to the agent filesystem, keeping their rendered contents out of the
+agent context. The server creates a five-minute, node-bound tar grant; the agent runs or retries the
+exact command in the generated directive and then completes the step with `null` or `{}`. A host that
+cannot run that command uses the directive's context-delivery fallback instead, which spends context
+and completes the step the same way.
 
 ```json
 {

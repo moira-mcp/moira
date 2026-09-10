@@ -69,7 +69,15 @@ export const TOOL_BINDINGS = {
   },
   communication: async (params) =>
     (await import("./manage-communication.js")).manageCommunication(params),
-  session: async (params) => (await import("./get-session-info.js")).getSessionInfo(params),
+  session: async (params) => {
+    const result = await (await import("./get-session-info.js")).getSessionInfo(params);
+    if (params.action !== "materialize" || !result.success) {
+      return renderToolResult(result, "json-or-text");
+    }
+    const { formatMaterializeDelivery } = await import("../messages/index.js");
+    const { files } = result.data as { files: Array<{ path: string; content: string }> };
+    return { content: formatMaterializeDelivery(files) };
+  },
   notes: async (params) => (await import("./manage-notes.js")).manageNotes(params),
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),

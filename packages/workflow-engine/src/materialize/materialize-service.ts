@@ -9,6 +9,16 @@ export const MATERIALIZE_MAX_FILES = 100;
 export const MATERIALIZE_MAX_FILE_BYTES = 1024 * 1024;
 export const MATERIALIZE_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
 
+/**
+ * Ceiling for a materialize set delivered into an agent's context instead of onto a filesystem.
+ *
+ * The archive bound above protects a disk and is three orders of magnitude larger than anything
+ * that belongs in a context window. This ceiling is several times larger than the biggest set the
+ * bundled catalog materializes, so no bundled workflow is refused, while a set that would flood the
+ * caller still is.
+ */
+export const MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES = 256 * 1024;
+
 export interface RenderedMaterializeFile {
   path: string;
   content: Buffer;
@@ -143,6 +153,24 @@ export async function renderMaterializeFiles(
   }
 
   return rendered;
+}
+
+/**
+ * Refuse a set that is too large to hand to an agent directly.
+ *
+ * Refusal is the whole point: a truncated guide reads exactly like a complete one, so an agent
+ * given a shortened file proceeds as if it had read all of it. Failing loudly keeps the agent's
+ * knowledge of what it received accurate.
+ */
+export function assertMaterializeContextBudget(files: RenderedMaterializeFile[]): void {
+  const totalBytes = files.reduce((total, file) => total + file.content.byteLength, 0);
+  if (totalBytes > MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES) {
+    throw new ValidationError(
+      `Materialize set is ${totalBytes} bytes, which exceeds the ` +
+        `${MATERIALIZE_CONTEXT_MAX_TOTAL_BYTES} byte limit for delivery into agent context. ` +
+        `Download the archive with the presented command instead.`,
+    );
+  }
 }
 
 export async function createMaterializeTar(files: RenderedMaterializeFile[]): Promise<Buffer> {

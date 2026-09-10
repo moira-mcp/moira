@@ -151,6 +151,57 @@ describe("Workflow File Tokens", () => {
     expect(tokenManager.validateToken(token, "materialize")).toBeNull();
   });
 
+  test("current materialize grant resolves the newest presentation and ignores superseded ones", () => {
+    seedMaterializeExecution();
+    const superseded = tokenManager.createMaterializeToken(
+      "materialize-token-execution",
+      "materialize",
+      testUserId,
+    );
+    const clock = jest.spyOn(Date, "now");
+    clock.mockReturnValue(Date.now() + 1000);
+    const current = tokenManager.createMaterializeToken(
+      "materialize-token-execution",
+      "materialize",
+      testUserId,
+    );
+    clock.mockRestore();
+
+    // Serving the superseded grant would deliver a presentation the agent is no longer on.
+    const resolved = tokenManager.getCurrentMaterializeGrant(
+      "materialize-token-execution",
+      testUserId,
+    );
+    expect(resolved?.token).toBe(current);
+    expect(resolved?.token).not.toBe(superseded);
+    expect(resolved?.nodeId).toBe("materialize");
+  });
+
+  test("current materialize grant is absent for another user and after expiry", () => {
+    seedMaterializeExecution();
+    const token = tokenManager.createMaterializeToken(
+      "materialize-token-execution",
+      "materialize",
+      testUserId,
+    );
+    const expiresAt = tokenManager.getTokenData(token)!.expiresAt;
+
+    expect(
+      tokenManager.getCurrentMaterializeGrant("materialize-token-execution", "someone-else"),
+    ).toBeNull();
+
+    const clock = jest.spyOn(Date, "now");
+    clock.mockReturnValue(expiresAt - 1);
+    expect(
+      tokenManager.getCurrentMaterializeGrant("materialize-token-execution", testUserId),
+    ).not.toBeNull();
+    clock.mockReturnValue(expiresAt);
+    expect(
+      tokenManager.getCurrentMaterializeGrant("materialize-token-execution", testUserId),
+    ).toBeNull();
+    clock.mockRestore();
+  });
+
   test("materialize grant creation converts a real SQLite failure to DatabaseError", () => {
     let caught: unknown;
     try {

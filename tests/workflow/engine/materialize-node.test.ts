@@ -348,6 +348,39 @@ const owner = "Moira";
     ).rejects.toThrow(`${MATERIALIZE_MAX_TOTAL_BYTES}`);
   });
 
+  test("offers the fallback under a condition while the command stays the primary instruction", async () => {
+    const handler = new MaterializeHandler(
+      { createMaterializeToken: () => "grant-token" },
+      () => "https://moira.example",
+    );
+    const queue = new AgentMessageQueue();
+
+    await handler.execute(node, context, queue, {} as never, {} as never);
+    const message = queue.flush("execution-1").messages[0];
+    if (message.type !== "directive") throw new Error("Expected directive");
+
+    // Precedence, not mere presence: two routes offered as equals would migrate shell-capable
+    // agents onto the context-spending path, so the fallback must be conditional and marked
+    // non-preferred, and it must appear after the command it falls back from.
+    const commandAt = message.directive.indexOf("curl -sSf --");
+    const fallbackAt = message.directive.indexOf('session({ action: "materialize"');
+    expect(commandAt).toBeGreaterThan(-1);
+    expect(fallbackAt).toBeGreaterThan(commandAt);
+    expect(message.directive).toContain("Only if this host cannot run shell commands");
+    expect(message.directive).toContain("is not the preferred one");
+
+    // The fallback needs the caller's own execution to resolve its grant.
+    expect(message.directive).toContain(`executionId: "${context.executionId}"`);
+
+    // The reading obligation must cover both routes rather than read as an exception to one.
+    expect(message.directive).toContain("Either way, delivery does not prove that you read them");
+
+    // The success criteria must not define success as running the command: a shell-less agent
+    // reading that is back to failing or completing falsely, which is the whole defect.
+    expect(message.completionCondition).toContain("either route");
+    expect(message.completionCondition).not.toContain("Run the command successfully");
+  });
+
   test("shell-quotes every dynamic argument and exposes a closed completion schema", async () => {
     const grants = {
       createMaterializeToken: () => "tok'en",
@@ -380,7 +413,7 @@ const owner = "Moira";
     expect(message.directive).toContain("Retry the same command");
     expect(message.directive).toContain("execution advances");
     expect(message.directive).toContain("does not prove that you read them");
-    expect(message.directive).toContain("explicitly read every materialized file required");
+    expect(message.directive).toContain("read every materialized file required");
     expect(message.directive).toContain('Files:\n- "README.md"');
     expect(message.directive).toContain("the contents never pass through your context");
     expect(message.directive).not.toContain("# {{name}}");
