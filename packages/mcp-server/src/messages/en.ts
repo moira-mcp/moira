@@ -48,6 +48,9 @@ export const ERRORS = {
   execution_access_denied: "Access denied: execution belongs to another user",
   execution_not_waiting: (status: string) =>
     `Execution is not waiting for input (current state: ${status})`,
+  materialize_unavailable:
+    "No materialize delivery is available. This action serves your own execution only while it " +
+    "is paused on a materialize node and that node's five-minute window is still open.",
 
   // Parent execution errors
   parent_execution_id_invalid_format:
@@ -463,6 +466,32 @@ export function formatErrorWithAgentInstructions(message: string): string {
   }
 
   return formatError(message, helpCategory, agentCategory);
+}
+
+/**
+ * Present materialized files as one text block each, headed by the file's path.
+ *
+ * A JSON envelope would escape every body, which is precisely what makes a guide unreadable to the
+ * agent this delivery exists for, so the bodies are carried verbatim and the path attribution
+ * rides in a header line.
+ */
+export function formatMaterializeDelivery(
+  files: Array<{ path: string; content: string }>,
+): Array<{ type: "text"; text: string }> {
+  const inventory = files.map((file) => `- ${JSON.stringify(file.path)}`).join("\n");
+  return [
+    {
+      type: "text",
+      text:
+        `Materialized ${files.length} ${files.length === 1 ? "file" : "files"} into this response ` +
+        `instead of onto a filesystem. Read every file below that a later directive requires, ` +
+        `then complete the step normally.\n\nFiles:\n${inventory}`,
+    },
+    ...files.map((file) => ({
+      type: "text" as const,
+      text: `===== FILE: ${file.path} =====\n${file.content}`,
+    })),
+  ];
 }
 
 /**

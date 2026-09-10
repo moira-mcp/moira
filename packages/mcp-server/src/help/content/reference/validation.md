@@ -261,7 +261,8 @@ rendering against the current execution context. Runtime rendering additionally 
 file and 10 MiB total uncompressed content. A failure while preparing the step routes through the
 optional `connections.error`; otherwise it is raised. Every HTTP download revalidates the
 five-minute grant and its user/execution/node binding; repeats are accepted only while the bound
-execution remains waiting on that node.
+execution remains waiting on that node. Context delivery revalidates the same bindings and adds one
+further bound: a set over 256 KiB in total is refused rather than truncated.
 
 ## Best Practices
 

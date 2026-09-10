@@ -137,6 +137,7 @@ type SessionInfoData =
   | { name: string; value: unknown; revision: number; contextRevision: string }
   | import("@mcp-moira/workflow-engine").ExecutionProgress
   | import("@mcp-moira/workflow-engine").ProgressImageGrant
+  | import("./deliver-materialize.js").MaterializeDeliveryData
   | string;
 
 export async function getSessionInfo(
@@ -690,6 +691,13 @@ export async function getSessionInfo(
         const progress = projectExecutionProgress(graph, execution);
         if (!progress) return { success: false, error: "Workflow has no progress graph" };
         return { success: true, data: progress };
+      }
+
+      case "materialize": {
+        if (!executionId)
+          return { success: false, error: ERRORS.execution_id_required("materialize") };
+        const { deliverMaterializeToContext } = await import("./deliver-materialize.js");
+        return deliverMaterializeToContext(executionId, userId);
       }
 
       case "progress-image-token": {

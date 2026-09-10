@@ -3,9 +3,10 @@ title: Materialize Files
 description: Deliver bounded registry-backed files through a short-lived reusable tar grant
 ---
 
-A `materialize` node delivers workflow-authored files to the agent filesystem without placing their
-rendered bodies in the step response. Moira issues a short-lived archive command, pauses the
-execution, and advances only after the agent runs the command and submits an empty completion.
+A `materialize` node delivers workflow-authored files to the agent filesystem, keeping their rendered
+bodies out of the step response. Moira issues a short-lived archive command, pauses the execution,
+and advances only after the agent submits an empty completion. A host that cannot run that command
+delivers through the context fallback described below and completes the step the same way.
 
 Use this node for stable files owned by the workflow definition, such as instructions, standards,
 or empty directory skeletons. Files whose contents depend on the agent's analysis remain the
@@ -70,7 +71,8 @@ execution is still waiting on this node. After extraction succeeds, complete the
 or `{}`. No other input shape is accepted.
 
 The generated directive states the lifetime and retry behavior, warns that advancing the execution
-invalidates the URL, and explains that delivery does not prove reading. Calling
+invalidates the URL, names the context-delivery fallback below as conditional on this host being
+unable to run the command, and explains that delivery does not prove reading on either route. Calling
 `session({ action: "current_step" })` while the execution is paused issues a fresh command and grant
 without advancing the graph. A later directive must still explicitly require the agent to read each
 materialized file it uses.
@@ -104,17 +106,47 @@ every request against those bindings, so the same grant supports repeated downlo
 absolute five-minute window but stops working immediately after the execution advances. Request
 logging redacts the credential from the materialize URL.
 
-| Failure                                                                                                                    | Result                                                                              |
-| -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Invalid node definition, rendered destination, configuration, database access, or grant issuance while presenting the step | Follow `connections.error` when present; otherwise the execution surfaces the error |
-| Invalid, expired, or incorrectly bound URL                                                                                 | HTTP 401 with `Invalid or expired materialize token`                                |
-| Invalid rendered archive path, missing registry source, template failure, or size-limit violation                          | HTTP 400 with `Materialize archive could not be generated`                          |
-| Local `curl`, pipe, filesystem, or `tar` failure                                                                           | The agent reports the blocker and does not complete the step                        |
+| Failure                                                                                                                    | Result                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Invalid node definition, rendered destination, configuration, database access, or grant issuance while presenting the step | Follow `connections.error` when present; otherwise the execution surfaces the error                                                                    |
+| Invalid, expired, or incorrectly bound URL                                                                                 | HTTP 401 with `Invalid or expired materialize token`                                                                                                   |
+| Invalid rendered archive path, missing registry source, template failure, or size-limit violation                          | HTTP 400 with `Materialize archive could not be generated`                                                                                             |
+| Local `curl`, pipe, filesystem, or `tar` failure                                                                           | Unreachable network qualifies for the context fallback; a local filesystem or `tar` failure is a blocker the agent reports without completing the step |
+| Context delivery of a set larger than 256 KiB                                                                              | The tool answers with a named refusal and delivers no files                                                                                            |
 
 :::caution
 `connections.error` cannot catch a download or extraction failure because those operations happen
-after the step has already been presented. There is no textual fallback for file bodies.
+after the step has already been presented.
 :::
+
+## Deliver into the agent's context instead
+
+A host that cannot run a shell command or reach the network in the current turn has a second route:
+
+```text
+session({ action: "materialize", executionId: "<process-id>" })
+```
+
+It returns the same rendered bodies the archive would have contained, one text block per file headed
+by that file's path, and writes nothing to a filesystem. It takes no grant: the server resolves the
+grant of the node's current presentation from the caller's own execution, so the archive URL never
+has to travel through the response.
+
+This route spends context, so it is the fallback rather than the default, and the presented directive
+says so. Prefer the emitted command whenever the host can run it.
+
+Its authorization is the archive channel's: the same user, the same execution still waiting at that
+same node, the same context revision, the same five-minute window. Every refusal answers with one
+message that does not say which condition failed, so a refusal never reveals whether an execution
+belongs to someone else.
+
+Because the bodies land in a context window rather than on a disk, this route also refuses a set
+larger than 256 KiB in total, well below the archive limits above. It refuses rather than truncating:
+a shortened file is indistinguishable from a complete one to the agent reading it, and the emitted
+command remains available for a set that large.
+
+Delivery still does not prove reading. Read each delivered file that a later directive requires,
+then complete the step with `null` or `{}` as usual.
 
 ## Apply it in Workflow Management Flow
 

@@ -600,7 +600,8 @@ describe("Robust Task cause-aware contract", () => {
     expect(presented.nextNodeId).toBeUndefined();
     expect(queue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
-      completionCondition: "Run the command successfully, then complete this step with null or {}.",
+      completionCondition:
+        "Deliver the files by either route above, then complete this step with null or {}.",
     });
     expect((queue.peekNext() as { directive: string }).directive).toContain("workflow-guide.md");
 
@@ -621,7 +622,8 @@ describe("Robust Task cause-aware contract", () => {
     expect(rePresentedAfterClientFailure.nextNodeId).toBeUndefined();
     expect(retryQueue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
-      completionCondition: "Run the command successfully, then complete this step with null or {}.",
+      completionCondition:
+        "Deliver the files by either route above, then complete this step with null or {}.",
     });
     expect((retryQueue.peekNext() as { directive: string }).directive).toContain(
       "workflow-guide.md",

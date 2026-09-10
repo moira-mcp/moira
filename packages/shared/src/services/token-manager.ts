@@ -28,6 +28,50 @@ export interface WorkflowToken {
   createdAt: number;
 }
 
+interface TokenRow {
+  token: string;
+  workflowId: string | null;
+  executionId: string | null;
+  nodeId: string | null;
+  userId: string;
+  type: string;
+  expiresAt: number;
+  used: number;
+  createdAt: number;
+  workflowVersion: string | null;
+  executionRevision: number | null;
+  optionsJson: string | null;
+  claimId: string | null;
+  claimedAt: number | null;
+}
+
+const TOKEN_SELECT_COLUMNS = `
+      SELECT token, workflow_id as workflowId, execution_id as executionId, node_id as nodeId,
+             user_id as userId, type, workflow_version as workflowVersion,
+             execution_revision as executionRevision, options_json as optionsJson,
+             claim_id as claimId, claimed_at as claimedAt,
+             expires_at as expiresAt, used, created_at as createdAt
+      FROM workflow_tokens`;
+
+function toWorkflowToken(row: TokenRow): WorkflowToken {
+  return {
+    token: row.token,
+    workflowId: row.workflowId,
+    executionId: row.executionId,
+    nodeId: row.nodeId,
+    userId: row.userId,
+    type: row.type as WorkflowToken["type"],
+    expiresAt: row.expiresAt,
+    used: row.used === 1,
+    createdAt: row.createdAt,
+    workflowVersion: row.workflowVersion,
+    executionRevision: row.executionRevision,
+    optionsJson: row.optionsJson,
+    claimId: row.claimId,
+    claimedAt: row.claimedAt,
+  };
+}
+
 export class TokenManager {
   static readonly MATERIALIZE_TTL_MS = 5 * 60 * 1000;
   static readonly PROGRESS_IMAGE_TTL_MS = 5 * 60 * 1000;
@@ -133,6 +177,31 @@ export class TokenManager {
     }
   }
 
+  /**
+   * Resolve the materialize grant of the execution's current presentation.
+   *
+   * A materialize node mints a fresh grant every time it is presented, so an execution can hold
+   * several live grants. The newest unexpired one belongs to the presentation the agent is acting
+   * on; older rows belong to superseded presentations and must never be served. Scoping the lookup
+   * by user means an execution the caller does not own is indistinguishable from one that does not
+   * exist.
+   */
+  getCurrentMaterializeGrant(executionId: string, userId: string): WorkflowToken | null {
+    const db = getSqliteInstance();
+    const row = db
+      .prepare(
+        `${TOKEN_SELECT_COLUMNS}
+      WHERE type = 'materialize' AND execution_id = ? AND user_id = ?
+        AND used = 0 AND expires_at > ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `,
+      )
+      .get(executionId, userId, Date.now()) as TokenRow | undefined;
+
+    return row ? toWorkflowToken(row) : null;
+  }
+
   createProgressImageToken(
     executionId: string,
     workflowId: string,
@@ -175,35 +244,13 @@ export class TokenManager {
       expectedType,
     });
 
-    interface ValidatedTokenRow {
-      token: string;
-      workflowId: string | null;
-      executionId: string | null;
-      nodeId: string | null;
-      userId: string;
-      type: string;
-      expiresAt: number;
-      used: number;
-      createdAt: number;
-      workflowVersion: string | null;
-      executionRevision: number | null;
-      optionsJson: string | null;
-      claimId: string | null;
-      claimedAt: number | null;
-    }
     const row = db
       .prepare(
-        `
-      SELECT token, workflow_id as workflowId, execution_id as executionId, node_id as nodeId,
-             user_id as userId, type, workflow_version as workflowVersion,
-             execution_revision as executionRevision, options_json as optionsJson,
-             claim_id as claimId, claimed_at as claimedAt,
-             expires_at as expiresAt, used, created_at as createdAt
-      FROM workflow_tokens
+        `${TOKEN_SELECT_COLUMNS}
       WHERE token = ? AND type = ? AND used = 0 AND expires_at > ?
     `,
       )
-      .get(token, expectedType, now) as ValidatedTokenRow | undefined;
+      .get(token, expectedType, now) as TokenRow | undefined;
 
     logger.debug("Token validation result", { valid: !!row });
 
@@ -211,22 +258,7 @@ export class TokenManager {
       return null;
     }
 
-    return {
-      token: row.token,
-      workflowId: row.workflowId,
-      executionId: row.executionId,
-      nodeId: row.nodeId,
-      userId: row.userId,
-      type: row.type as WorkflowToken["type"],
-      expiresAt: row.expiresAt,
-      used: row.used === 1,
-      createdAt: row.createdAt,
-      workflowVersion: row.workflowVersion,
-      executionRevision: row.executionRevision,
-      optionsJson: row.optionsJson,
-      claimId: row.claimId,
-      claimedAt: row.claimedAt,
-    };
+    return toWorkflowToken(row);
   }
 
   reserveProgressImageToken(token: string, claimId: string): boolean {

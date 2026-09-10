@@ -283,7 +283,8 @@ describe("todo-list minimal sequential checklist", () => {
     expect(firstPresentation.nextNodeId).toBeUndefined();
     expect(firstQueue.peekNext()).toMatchObject({
       nodeId: "materialize-workflow-guide",
-      completionCondition: "Run the command successfully, then complete this step with null or {}.",
+      completionCondition:
+        "Deliver the files by either route above, then complete this step with null or {}.",
     });
     expect((firstQueue.peekNext() as { directive: string }).directive).toContain(
       "workflow-guide.md",
