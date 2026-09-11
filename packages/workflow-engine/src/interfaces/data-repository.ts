@@ -7,6 +7,7 @@
 import { WorkflowGraph } from "./core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
 } from "../types/base-types.js";
@@ -269,11 +270,17 @@ export interface IDataRepository {
     mutation: ReminderMutation,
   ): Promise<ReminderMutationResult>;
 
+  /**
+   * Merge variables/node states into the execution context under both revision guards. An
+   * optional `visit` is appended to the execution's route log in the same write, so a runtime
+   * adjustment is recorded exactly when its value lands.
+   */
   updateExecutionContext(
     executionId: string,
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
     expectedContextRevision: string,
+    visit?: Omit<ExecutionVisit, "seq">,
   ): Promise<boolean>;
 
   prepareStartExecutionAttempt(attempt: PreparedStartExecutionAttempt): Promise<void>;

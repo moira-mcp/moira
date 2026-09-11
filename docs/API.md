@@ -306,21 +306,39 @@ Authentication: Required
 
 ### Execution progress
 
-`GET /api/executions/:id/progress` returns the workflow's read-only user-facing progress projection
-for the execution owner or an administrator. It contains the execution-note `taskTitle`, rendered
-workflow title and goal, bounded generic facts, active progress node, ordered
-`completed|current|pending` nodes with rendered structured content, static display connections,
-deterministic primary-node focus targets, workflow version, execution revision and diagnostics.
+`GET /api/executions/:id/progress` returns the execution's read-only run projection for the
+execution owner or an administrator; `session({ action: "progress" })` returns the same object.
+It contains the execution-note `taskTitle`, rendered workflow title and goal, bounded generic
+facts, `activeNodeId`, the ordered blocks (`nodes`) with rendered structured content, display
+connections (the next block in process order), deterministic primary-node focus targets, workflow
+version, execution revision, execution status and diagnostics, plus:
 
-Progress is derived from the current primary node's `progressNodeId` and never changes execution
-state. With `status=completed` and `currentNodeId=null`, the last persisted mapped
-`waitingForInputNodeId` bounds the terminal completion frontier; later milestones stay pending after
-an early stopped terminal. Older records without a usable mapped frontier retain the all-completed
-fallback. Pending milestones suppress `content.outcome` while retaining summary, details, and next
+- per block: `status` (`pending | active | done | repeated | skipped | waiting`), `iterations`
+  (completed passes through the block's working steps), `visits`, `currentNodeId` (for the active
+  or waiting block) and the coarse `state` (`completed | current | pending`) derived from
+  `status` for older clients;
+- `process`: the derived process (blocks, transitions with labels and cycles, hubs, diagnostics),
+  the same object `GET /api/workflows/:id/process` returns;
+- `route`: the recorded visits in order — `seq`, `nodeId`, `blockId`, `exitKey`, the names of
+  what the visit `changed`, `waited`, `adjusted` with its `actor`, and `loop` on a repeated node
+  or a re-entered block;
+- `variables`: every global variable and node-local output (`nodeId.field`) with its current
+  value, its history (`seq`, `nodeId`, `value`, `adjusted`) and whether the current value came
+  from an adjustment;
+- `routeRecorded` and `source: "trace"`.
+
+Statuses are projected from the route the engine recorded, never inferred from block order: a
+visited block is done or repeated, the block of the last visit is active or waiting, a block whose
+work never ran or that the run bypassed is skipped, everything else pending; a finished run has no
+active block unless it stopped on an open wait. An execution without a recorded route reports only
+its current block as active or waiting, everything else pending, and `routeRecorded: false`.
+Pending and skipped blocks suppress `content.outcome` while retaining summary, details, and next
 guidance, preventing a result from an earlier revision or unit from appearing current.
 
 Within the engine, `renderExecutionProgressImage(workflow, execution, options?)` is the supported
-workflow/execution-level image API. It returns `null` for a workflow without progress and otherwise
+workflow/execution-level image API; it projects the execution's recorded route, so a caller that
+renders mid-cycle (the notification handlers) passes `withInFlightVisit(execution, nodeId)`, an
+unpersisted copy with an open visit of the node being rendered. It returns `null` for a workflow without progress and otherwise
 returns the PNG buffer, `image/png`, dimensions, workflow version, step revision, and context
 revision. Failures
 remain errors rather than an empty image. `progressActiveLabel` may replace only the active

@@ -70,7 +70,8 @@ export { detectCycles } from "./validation/cycle-detector.js";
 export * from "./utils/schema-validator.js";
 export * from "./utils/registry-value-validator.js";
 export * from "./utils/execution-variable-policy.js";
-export * from "./utils/execution-progress.js";
+export * from "./utils/execution-run-projection.js";
+export * from "./utils/execution-visits.js";
 export * from "./utils/process-derivation.js";
 export {
   buildExecutionProgressVisualModel,

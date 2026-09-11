@@ -860,16 +860,23 @@ describe("UserNotificationHandler", () => {
         { channelId: "mail", status: "failed" as const },
       ],
     }));
+    const renderedFor: Array<{ currentNodeId: string | null; lastVisitNode?: string }> = [];
     const handler = new UserNotificationHandler(
       { deliver } as unknown as UserCommunicationService,
-      async () => ({
-        buffer: Buffer.from("png"),
-        mimeType: "image/png",
-        width: 10,
-        height: 10,
-        workflowVersion: "1.0.0",
-        executionRevision: 1,
-      }),
+      async (_workflow, execution) => {
+        renderedFor.push({
+          currentNodeId: execution.currentNodeId,
+          lastVisitNode: execution.visits?.at(-1)?.nodeId,
+        });
+        return {
+          buffer: Buffer.from("png"),
+          mimeType: "image/png",
+          width: 10,
+          height: 10,
+          workflowVersion: "1.0.0",
+          executionRevision: 1,
+        };
+      },
     );
     const node: UserNotificationNode = {
       type: "user-notification",
@@ -886,7 +893,11 @@ describe("UserNotificationHandler", () => {
     };
     const repo = {
       getWorkflowGraph: async () => graph,
-      getExecution: async () => ({ revision: 1 }),
+      getExecution: async () => ({
+        revision: 1,
+        currentNodeId: "previous-wait",
+        visits: [{ seq: 0, nodeId: "previous-wait", exitKey: null, changes: {}, waited: true }],
+      }),
       getWorkflow: async () => ({ metadata: graph.metadata }),
     } as unknown as IDataRepository;
     const result = await handler.execute(
@@ -918,6 +929,8 @@ describe("UserNotificationHandler", () => {
       }),
       repo,
     );
+    // The image is rendered as of this node, not of the wait the persisted route still ends on.
+    expect(renderedFor).toEqual([{ currentNodeId: "notify", lastVisitNode: "notify" }]);
   });
 
   test("never substitutes a system identity when the execution has no user", async () => {

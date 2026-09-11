@@ -1,13 +1,17 @@
 import type {
+  ExecutionBlockStatus,
   ExecutionProgress,
   ExecutionProgressContent,
   ExecutionProgressState,
   ProgressFactTone,
 } from "./execution-progress-contract.js";
 export type {
+  ExecutionBlockStatus,
   ExecutionProgress,
   ExecutionProgressNode,
   ExecutionProgressState,
+  ExecutionRouteEntry,
+  ExecutionVariableState,
 } from "./execution-progress-contract.js";
 
 export type ProgressTheme = "light" | "dark";
@@ -39,6 +43,9 @@ export interface ProgressVisualNode {
   labelLines: string[];
   lines: ProgressVisualLine[];
   state: ExecutionProgressState;
+  status: ExecutionBlockStatus;
+  /** Completed passes; shown for repeated blocks. */
+  iterations: number;
   row: number;
   x: number;
   y: number;
@@ -225,6 +232,8 @@ export function buildExecutionProgressVisualModel(
       labelLines,
       lines,
       state: node.state,
+      status: node.status,
+      iterations: node.iterations,
       row: Math.floor(index / actualColumns),
       x: PADDING_X + (index % actualColumns) * (cardWidth + CARD_GAP_X),
       y: 0,

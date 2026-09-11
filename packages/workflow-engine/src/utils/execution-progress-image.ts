@@ -1,6 +1,6 @@
 import type { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import type { WorkflowExecution } from "../types/base-types.js";
-import { projectExecutionProgress } from "./execution-progress.js";
+import { projectExecutionRun } from "./execution-run-projection.js";
 import { renderExecutionProgressPng } from "./execution-progress-renderer.js";
 import type { ProgressVisualOptions } from "./execution-progress-visual.js";
 
@@ -23,7 +23,7 @@ export function createExecutionProgressImageRenderer(
     execution: WorkflowExecution,
     options: ProgressVisualOptions = {},
   ): Promise<RenderedExecutionProgressImage | null> {
-    const progress = projectExecutionProgress(workflow, execution);
+    const progress = projectExecutionRun(workflow, execution);
     if (!progress) return null;
     const { png, model } = await renderer(progress, options);
     return {

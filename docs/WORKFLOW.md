@@ -439,8 +439,8 @@ Node task-1: unclosed template bracket '{{' at position 15
 process order. Each block has `id`, `label`, structured `content` with a mandatory `summary`
 (the block description) and optional `details`, `outcome`, `next`, and an optional display-only
 default connection that the derivation ignores. A primary node's `progressNodeId` names the block
-it belongs to and activates that block while the node is current. The engine derives ordered
-completed/current/pending state without persistence and renders labels through the existing template
+it belongs to and activates that block while the node is current. Block statuses come from the
+execution's recorded route (below) and labels are rendered through the existing template
 processor. Progress connections never participate in execution routing.
 
 When `progress` exists the block contract applies and every violation is a validation error with a
@@ -457,11 +457,32 @@ CLI `derive` command and `GET /api/workflows/:id/process` share; the CLI's `set-
 `edit-block`, `set-label` and `clear-label` commands author the contract one mutation at a time
 (`docs/WORKFLOW-TOOLS.md`). Workflows without `progress` are
 unaffected. Multiple primary nodes may map to one block. The active primary node is that
-milestone's focus target, while every other milestone deterministically focuses its first mapped
-primary node in workflow order. At terminal completion, the last persisted mapped waiting node is
-the completion frontier: that milestone and earlier milestones are complete, while later milestones
-remain pending. This lets an early stopped terminal preserve its actual reach. Older completion
-records without a usable mapped frontier retain the fully-complete fallback.
+block's focus target, while every other block deterministically focuses its first mapped primary
+node in workflow order.
+
+**Route log and run projection.** Every execution records its route: the engine appends one
+visit per node it runs — `{ seq, nodeId, exitKey, changes, waited?, adjusted?, actor? }` — where
+`exitKey` is the connection taken (`null` while the node waits or at completion, `"teleport"`
+when a jump left it), `changes` holds the globals and node-local outputs (`nodeId.field`) the
+visit changed, and `waited` marks a pause for input. A resumed wait continues its open visit
+instead of opening another. The log is the `visits` column of the execution row, part of the
+revisioned state written by every step. Setting a variable from outside the flow (`session
+set-variable`, the HTTP variable routes) appends a visit flagged `adjusted` with its `actor`
+(`agent` or `user` and the user id) in the same guarded write as the value.
+`projectExecutionRun(workflow, execution)` projects the route onto the derived process: the block
+of the engine's last visit is `active`, or `waiting` when that visit is open on the node the
+execution waits for; a visited block is `done`, or `repeated` with the pass count of its working
+steps (start, condition and expression nodes are not passes unless the block consists of routing
+nodes alone); a block whose working step never ran, and an unvisited block before the furthest
+visited block in process order, are `skipped`; the rest are `pending`. A finished run has no
+active block unless it stopped on an open wait, which stays its frontier. Nothing unvisited is
+ever reported done. An execution with an empty log (created before routes were recorded) reports
+only the block it is on as active or waiting, everything else pending, and `routeRecorded: false`;
+nothing is inferred from block order. The projection also carries the route with block ids and
+loop markers, and every variable with its current value and history. A notification node that
+attaches a progress image renders it inside the cycle that reached it, before that cycle's visits
+are persisted; the handlers therefore project an unpersisted copy of the execution with an open
+visit of the notification node, so the image shows that node's block as active.
 
 A user-visible waiting node may set template-enabled `progressActiveLabel`. The projection uses it
 only while that exact primary node is current; inactive milestones keep the stable base label from

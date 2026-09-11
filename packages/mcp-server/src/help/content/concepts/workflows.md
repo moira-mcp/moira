@@ -42,20 +42,24 @@ stale values from an earlier plan.
 Resolved text is checked against the same bounds after interpolation. Oversized runtime data fails
 the projection explicitly rather than being silently truncated into a misleading summary.
 
-Progress array order defines state: milestones before the active one are completed, the active one
-is current, and later ones are pending. Returning to an earlier milestone through repair, a loop, or
-replan automatically reopens it. Connections never route execution, and progress has no variables,
-conditions, stored status, history, or cursor.
+Block status comes from the execution's recorded route, never from block order. Every execution
+records one visit per node it runs — the node, the connection it left through (`teleport` for a
+jump), the variables it changed, and whether it paused — and `session({ action: "progress" })`
+projects that route onto the process: the block of the last visit is `active`, or `waiting` when
+the run pauses there; a visited block is `done`, or `repeated` with the number of passes through
+its working steps; a block whose work never ran or that the run bypassed is `skipped`; the rest
+are `pending`. Returning to an earlier block through repair, a loop, or replan makes it active
+again and counts another pass. Nothing unvisited is ever reported done, and an execution created
+before routes were recorded reports only its current block as active with `routeRecorded: false`.
+The same projection lists the route with loop markers and every variable with its history;
+values set from outside the flow appear as adjustments with their actor. Connections never route
+execution.
 
 When `progress` is present, every primary node maps to an existing block, as described above.
-Multiple primary nodes may map to one block. The currently active primary node is the focus target for its milestone; other
-milestones focus their first mapped primary node in workflow order. A completed execution shows all
-milestones through its last persisted mapped waiting node as complete and leaves later milestones
-pending. Completion after a final mapped responsibility therefore completes every milestone, while
-any terminal with an earlier mapped frontier leaves later milestones pending. Older completion
-records without a usable mapped frontier retain the all-completed fallback. Pending milestones keep
-summary, details, and next guidance but hide `outcome`, so an older revision or unit result cannot
-appear current during an engine-owned transition.
+Multiple primary nodes may map to one block. The currently active primary node is the focus target
+for its block; other blocks focus their first mapped primary node in workflow order. Pending and
+skipped blocks keep summary, details, and next guidance but hide `outcome`, so an older revision
+or unit result cannot appear current during an engine-owned transition.
 
 The engine exposes one shared content-rich visual model and a bounded light/dark PNG renderer. The
 model keeps the complete task, goal, facts, completed outcomes, current activity, details and next

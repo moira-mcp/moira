@@ -60,6 +60,8 @@ describe("Migrating a database created before the extension value store", () => 
       sqlite.exec(`DROP TABLE ${ATTEMPT_TABLE}`);
       sqlite.exec(`DROP TABLE ${LATER_TABLE}`);
       sqlite.exec(`DROP TABLE ${NEW_TABLE}`);
+      // The route-log column arrived later still; an old database has none.
+      sqlite.exec("ALTER TABLE workflowExecution DROP COLUMN visits");
       sqlite
         .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
         .run(newMigrationTimestamp);
@@ -86,7 +88,12 @@ describe("Migrating a database created before the extension value store", () => 
       delete schemaAfter[NEW_TABLE];
       delete schemaAfter[LATER_TABLE];
       delete schemaAfter[ATTEMPT_TABLE];
-      // Every other table is byte-for-byte the definition it had before.
+      // The execution table gained only the later route-log column; every other table is
+      // byte-for-byte the definition it had before.
+      expect(schemaBefore.workflowExecution).not.toContain("`visits`");
+      expect(schemaAfter.workflowExecution).toContain("`visits` text DEFAULT '[]' NOT NULL");
+      delete schemaBefore.workflowExecution;
+      delete schemaAfter.workflowExecution;
       expect(schemaAfter).toEqual(schemaBefore);
 
       const kept = sqlite

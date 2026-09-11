@@ -18,6 +18,7 @@ import type {
   NotificationMessage,
 } from "../services/agent-message-queue.js";
 import { GraphExecutionEngine } from "./graph-execution-engine.js";
+import { appendEngineVisits } from "../utils/execution-visits.js";
 import {
   createLogger,
   WorkflowLogger,
@@ -356,6 +357,7 @@ export class UniversalGraphExecutor implements IGraphExecutor {
 
       // Update execution with results from stateless engine
       execution.globalContext = executionResult.context;
+      appendEngineVisits(execution, executionResult.visits ?? [], teleportTo);
       if (executionResult.nextNodeId !== undefined) {
         execution.currentNodeId = executionResult.nextNodeId;
       }

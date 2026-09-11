@@ -1,0 +1,1 @@
+ALTER TABLE `workflowExecution` ADD `visits` text DEFAULT '[]' NOT NULL;

@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import type { ExecutionProgress } from "./execution-progress.js";
+import type { ExecutionProgress } from "./execution-progress-contract.js";
 import {
   buildExecutionProgressVisualModel,
   type ProgressVisualModel,
@@ -122,9 +122,30 @@ export function renderProgressVisualSvg(model: ProgressVisualModel): string {
           : node.state === "completed"
             ? palette.success
             : palette.border;
-      const mark = node.state === "completed" ? "✓" : node.state === "current" ? "●" : "○";
+      const mark =
+        node.status === "repeated"
+          ? `✓×${node.iterations}`
+          : node.status === "done"
+            ? "✓"
+            : node.status === "waiting"
+              ? "◐"
+              : node.status === "active"
+                ? "●"
+                : node.status === "skipped"
+                  ? "–"
+                  : "○";
       const state =
-        node.state === "completed" ? "Completed" : node.state === "current" ? "Current" : "Pending";
+        node.status === "repeated"
+          ? `Repeated ×${node.iterations}`
+          : node.status === "done"
+            ? "Completed"
+            : node.status === "waiting"
+              ? "Waiting"
+              : node.status === "active"
+                ? "Current"
+                : node.status === "skipped"
+                  ? "Skipped"
+                  : "Pending";
       const labelY = node.y + 26;
       const label = textLines(
         node.labelLines,

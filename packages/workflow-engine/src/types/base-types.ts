@@ -102,11 +102,30 @@ export interface WorkflowExecution {
   parentExecutionId?: string | null; // Links to parent execution for continuation
   revision: number; // Workflow-step generation; metadata targets use independent revisions
   reminders?: ExecutionReminder[]; // Durable caller follow-ups returned at completion
+  visits?: ExecutionVisit[]; // Append-only route log written by the executor on every node transition
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
   error?: string; // DEPRECATED: kept for migration, use errors array instead
   errors?: ExecutionError[]; // Persistent error log (Issue #386)
+}
+
+/** Who produced a runtime adjustment: the agent through MCP, or a person through the web UI. */
+export type ExecutionVisitActorRole = "agent" | "user";
+
+/**
+ * One entry of an execution's route log: the node that ran, the connection it left through
+ * (`null` while it waits or at completion; `"teleport"` when a jump left it), the variables it
+ * changed, whether it paused for input, and — for a runtime adjustment — the actor.
+ */
+export interface ExecutionVisit {
+  seq: number;
+  nodeId: string;
+  exitKey: string | null;
+  changes: Record<string, unknown>;
+  waited?: boolean;
+  adjusted?: boolean;
+  actor?: { role: ExecutionVisitActorRole; userId: string };
 }
 
 export interface ExecutionReminder {

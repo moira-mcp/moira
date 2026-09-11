@@ -4,6 +4,7 @@
 
 import { WorkflowGraph, ExecutionContext } from "../types/index.js";
 import { AgentMessageQueue } from "../services/agent-message-queue.js";
+import type { EngineVisit } from "../utils/execution-visits.js";
 
 export interface IGraphExecutionEngine {
   executeGraph(
@@ -31,6 +32,7 @@ export interface GraphExecutionResult {
   context: ExecutionContext;
   nextNodeId?: string;
   visitedNodes?: string[]; // All nodes visited during this execution cycle
+  visits?: EngineVisit[]; // Route log entries of this cycle, in order
   // Note: "error" action removed in Issue #386 - errors are logged to execution.errors
   // and execution stays in "running" state for retry
 }

@@ -116,12 +116,18 @@ describe("execution attempt migration and persistence", () => {
     const sqlite = new Database(filename);
     try {
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });
+      // A database as it was before the attempt store: that table and everything after it gone.
+      const journal = JSON.parse(
+        fs.readFileSync(path.join(MIGRATIONS, "meta/_journal.json"), "utf8"),
+      ) as { entries: Array<{ tag: string; when: number }> };
+      const attemptMigration = journal.entries.find(
+        (entry) => entry.tag === "0024_execution_mutation_attempts",
+      )!;
       sqlite.exec("DROP TABLE executionMutationAttempt");
+      sqlite.exec("ALTER TABLE workflowExecution DROP COLUMN visits");
       sqlite
-        .prepare(
-          "DELETE FROM __drizzle_migrations WHERE created_at = (SELECT max(created_at) FROM __drizzle_migrations)",
-        )
-        .run();
+        .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
+        .run(attemptMigration.when);
       seedBaseline(sqlite);
 
       migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS });

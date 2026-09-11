@@ -21,10 +21,19 @@ function progress(active = 1): ExecutionProgress {
     executionRevision: 3,
     executionStatus: "running",
     diagnostics: [],
+    process: { blocks: [], hubs: [], backEdges: [], diagnostics: [] },
+    route: [],
+    variables: [],
+    routeRecorded: true,
+    source: "trace",
     nodes: [0, 1, 2].map((index) => ({
       id: `n${index}`,
       label: index === 1 ? "Review" : `Stage ${index}`,
       state: index < active ? "completed" : index === active ? "current" : "pending",
+      status: index < active ? "done" : index === active ? "active" : "pending",
+      iterations: index < active ? 1 : 0,
+      visits: index <= active ? 1 : 0,
+      currentNodeId: index === active ? `p${index}` : null,
       connections: { default: index === 2 ? "n0" : `n${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
@@ -102,6 +111,10 @@ describe("execution progress visual model and PNG", () => {
       id: `s${index}`,
       label: `Stage ${index}`,
       state: index === 4 ? "current" : "completed",
+      status: index === 4 ? "active" : "done",
+      iterations: 1,
+      visits: 1,
+      currentNodeId: index === 4 ? `p${index}` : null,
       connections: { default: index === 4 ? "s0" : `s${index + 1}` },
       primaryNodeIds: [`p${index}`],
       focusNodeId: `p${index}`,
@@ -154,6 +167,29 @@ describe("execution progress visual model and PNG", () => {
     expect(first.model).toEqual(
       buildExecutionProgressVisualModel(progress(), { theme: "light", viewportWidth: 720 }),
     );
+  });
+
+  test("renders the block status vocabulary: pass counts for repeated, marks for skipped and waiting", () => {
+    const statuses = progress();
+    statuses.nodes[0] = { ...statuses.nodes[0], status: "repeated", iterations: 3 };
+    statuses.nodes[1] = {
+      ...statuses.nodes[1],
+      status: "skipped",
+      state: "pending",
+      iterations: 0,
+    };
+    statuses.nodes[2] = {
+      ...statuses.nodes[2],
+      status: "waiting",
+      state: "current",
+      iterations: 1,
+    };
+    const svg = renderProgressVisualSvg(buildExecutionProgressVisualModel(statuses));
+    expect(svg).toContain("Repeated ×3: Stage 0");
+    expect(svg).toContain("✓×3");
+    expect(svg).toContain("Skipped: Review");
+    expect(svg).toContain("Waiting: Stage 2");
+    expect(svg).toContain("◐");
   });
 
   test("escapes authored title and label data in the SVG adapter", () => {

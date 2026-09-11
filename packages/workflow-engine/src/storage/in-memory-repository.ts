@@ -13,6 +13,7 @@ import {
 import { WorkflowGraph } from "../interfaces/core-interfaces.js";
 import {
   WorkflowExecution,
+  type ExecutionVisit,
   type ReminderMutation,
   type ReminderMutationResult,
 } from "../types/base-types.js";
@@ -586,6 +587,7 @@ export class InMemoryRepository implements IDataRepository {
     context: { variables?: Record<string, unknown>; nodeStates?: Record<string, unknown> },
     expectedRevision: number,
     expectedContextRevision: string,
+    visit?: Omit<ExecutionVisit, "seq">,
   ): Promise<boolean> {
     const execution = this.executions.get(executionId);
     if (!execution) {
@@ -616,6 +618,10 @@ export class InMemoryRepository implements IDataRepository {
         ...execution.globalContext.nodeStates,
         ...context.nodeStates,
       };
+    }
+    if (visit) {
+      const visits = (execution.visits ??= []);
+      visits.push({ seq: visits.length, ...structuredClone(visit) });
     }
     execution.updatedAt = Date.now();
     return true;

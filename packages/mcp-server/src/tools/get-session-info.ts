@@ -29,7 +29,8 @@ import {
 } from "@mcp-moira/shared";
 import {
   DatabaseRepository,
-  projectExecutionProgress,
+  adjustmentVisit,
+  projectExecutionRun,
   prepareExecutionVariableWrite,
   queryExecutionVariables,
 } from "@mcp-moira/workflow-engine";
@@ -688,7 +689,7 @@ export async function getSessionInfo(
           return { success: false, error: ERRORS.execution_access_denied };
         const graph = await repository.getWorkflowGraph(execution.workflowId, userId);
         if (!graph) return { success: false, error: "Workflow not found" };
-        const progress = projectExecutionProgress(graph, execution);
+        const progress = projectExecutionRun(graph, execution);
         if (!progress) return { success: false, error: "Workflow has no progress graph" };
         return { success: true, data: progress };
       }
@@ -752,6 +753,11 @@ export async function getSessionInfo(
           },
           params.expectedRevision,
           params.expectedContextRevision,
+          adjustmentVisit(
+            execution,
+            { [params.variableName]: updated.globalContext.variables[params.variableName] },
+            { role: "agent", userId },
+          ),
         );
         await logAuditEventDirect(repository as DatabaseRepository, {
           userId,

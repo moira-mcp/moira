@@ -247,6 +247,7 @@ export const workflowExecution = sqliteTable("workflowExecution", {
   parentExecutionId: text("parentExecutionId"), // Links to parent execution for continuation
   revision: integer("revision").notNull().default(0), // Workflow-step generation
   reminders: text("reminders").notNull().default("[]"), // JSON ExecutionReminder[]
+  visits: text("visits").notNull().default("[]"), // JSON ExecutionVisit[]: the append-only route log
   createdAt: integer("createdAt", { mode: "timestamp_ms" }),
   updatedAt: integer("updatedAt", { mode: "timestamp_ms" }),
   completedAt: integer("completedAt", { mode: "timestamp_ms" }),

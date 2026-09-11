@@ -10,7 +10,8 @@ import {
   GraphValidator,
   MaterializeHandler,
   detectCycles,
-  projectExecutionProgress,
+  projectExecutionRun,
+  type ExecutionVisit,
   type WorkflowGraph,
 } from "@mcp-moira/workflow-engine";
 import { calculateCoverage, exportCoverageReport } from "../../helpers/coverage-calculator.js";
@@ -1385,14 +1386,60 @@ describe("software-development-flow", () => {
   });
 
   test("projects truthful progress across unit loops, replan, finalization and completion", () => {
+    /**
+     * The shortest authored route to `target`, left open there: from the start node, or — for a
+     * node reachable only after a jump — through the implementation step, a teleport exit and the
+     * teleport node's own connections.
+     */
+    const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
+    const pathFrom = (source: string, target: string) => {
+      const previous = new Map<string, { from: string; key: string }>();
+      const queue = [source];
+      const seen = new Set([source]);
+      while (queue.length) {
+        const id = queue.shift()!;
+        if (id === target) break;
+        const connections = (byId.get(id)?.connections ?? {}) as Record<string, string>;
+        for (const [key, next] of Object.entries(connections)) {
+          if (seen.has(next)) continue;
+          seen.add(next);
+          previous.set(next, { from: id, key });
+          queue.push(next);
+        }
+      }
+      if (source !== target && !previous.has(target)) return null;
+      const path: Array<{ nodeId: string; exitKey: string | null; waited?: boolean }> = [
+        { nodeId: target, exitKey: null, waited: true },
+      ];
+      for (let cursor = target; cursor !== source;) {
+        const step = previous.get(cursor)!;
+        path.unshift({ nodeId: step.from, exitKey: step.key });
+        cursor = step.from;
+      }
+      return path;
+    };
+    const routeTo = (target: string): ExecutionVisit[] => {
+      const start = workflow.nodes.find((node) => node.type === "start")!;
+      const direct = pathFrom(start.id, target);
+      if (direct) return direct.map((entry, seq) => ({ seq, changes: {}, ...entry }));
+      for (const teleport of workflow.nodes.filter((node) => node.type === "teleport")) {
+        const tail = pathFrom(teleport.id, target);
+        if (!tail) continue;
+        const head = pathFrom(start.id, "implement-plan-unit")!;
+        head[head.length - 1] = { nodeId: "implement-plan-unit", exitKey: "teleport" };
+        return [...head, ...tail].map((entry, seq) => ({ seq, changes: {}, ...entry }));
+      }
+      throw new Error(`${target} is unreachable`);
+    };
     const projectionAt = (
       currentNodeId: string | null,
       status: "running" | "completed" = "running",
       variables: Record<string, unknown> = {},
       waitingForInputNodeId: string | null = currentNodeId,
     ) =>
-      projectExecutionProgress(workflow, {
+      projectExecutionRun(workflow, {
         id: "progress-scenario",
+        visits: currentNodeId ? routeTo(currentNodeId) : [],
         workflowId: workflow.id ?? "software-development-flow",
         userId: "scenario-user",
         status,
@@ -1420,7 +1467,7 @@ describe("software-development-flow", () => {
           workflowId: workflow.id ?? "software-development-flow",
           currentNodeId,
         },
-      } as unknown as Parameters<typeof projectExecutionProgress>[1]);
+      } as unknown as Parameters<typeof projectExecutionRun>[1]);
 
     const cases = [
       ["capture-task-and-context", "intake", "Capture task and repository context"],
@@ -1527,20 +1574,17 @@ describe("software-development-flow", () => {
         ?.content.outcome,
     ).toContain("5 executable units");
 
+    // A completed execution without a route log infers nothing from block order: no block is
+    // done and the projection says so.
     const blockCount = workflow.progress!.nodes.length;
     expect(blockCount).toBe(15);
-    expect(projectionAt(null, "completed", {}, null)?.nodes.map((node) => node.state)).toEqual(
-      Array(blockCount).fill("completed"),
-    );
-    // create-final-report sits in final-review (twelfth block): replan, finalize and stopped stay pending.
-    expect(
-      projectionAt(null, "completed", {}, "create-final-report")?.nodes.map((node) => node.state),
-    ).toEqual([...Array(12).fill("completed"), ...Array(blockCount - 12).fill("pending")]);
-    // review-architecture sits in unit-validation (sixth block): that block and everything before it
-    // count as completed, the rest stays pending.
-    expect(
-      projectionAt(null, "completed", {}, "review-architecture")?.nodes.map((node) => node.state),
-    ).toEqual([...Array(6).fill("completed"), ...Array(blockCount - 6).fill("pending")]);
+    for (const waitingNode of [null, "create-final-report", "review-architecture"]) {
+      const completed = projectionAt(null, "completed", {}, waitingNode);
+      expect(completed?.routeRecorded).toBe(false);
+      expect(completed?.nodes.map((node) => node.status)).toEqual(
+        Array(blockCount).fill("pending"),
+      );
+    }
   });
 
   test.each([

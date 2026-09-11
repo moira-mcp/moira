@@ -8,7 +8,8 @@ import { asyncHandler, createApiError } from "../middleware/error-middleware.js"
 import {
   DatabaseRepository,
   WorkflowExecution,
-  projectExecutionProgress,
+  adjustmentVisit,
+  projectExecutionRun,
   ProgressImageService,
   prepareExecutionVariablePathWrite,
   prepareExecutionVariableWrite,
@@ -70,7 +71,7 @@ router.get(
     }
     const graph = await repository.getWorkflowGraph(execution.workflowId, execution.userId);
     if (!graph) throw createApiError.notFound("Workflow not found");
-    const progress = projectExecutionProgress(graph, execution);
+    const progress = projectExecutionRun(graph, execution);
     if (!progress) throw createApiError.notFound("Workflow has no progress graph");
     res.json({ success: true, data: progress, timestamp: new Date().toISOString() });
   }),
@@ -412,6 +413,11 @@ router.put(
       { variables: { [req.params.name]: updated.globalContext.variables[req.params.name] } },
       req.body.expectedRevision,
       req.body.expectedContextRevision,
+      adjustmentVisit(
+        execution,
+        { [req.params.name]: updated.globalContext.variables[req.params.name] },
+        { role: "user", userId },
+      ),
     );
     await logAuditEventDirect(repository, {
       userId,
@@ -554,6 +560,13 @@ router.put(
         },
         expectedRevision,
         expectedContextRevision,
+        adjustmentVisit(
+          execution,
+          {
+            [String(variablePath[0])]: updated.globalContext.variables[String(variablePath[0])],
+          },
+          { role: "user", userId },
+        ),
       );
       const variablePathText = variablePath
         .map((segment, index) =>
