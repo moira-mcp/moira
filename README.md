@@ -644,24 +644,24 @@ listed alongside those file-backed topics and renders directly from the typed MC
 
 For contributors working on the codebase (implementation detail, not end-user docs).
 
-| File                   | Covers                                                                   | Path                                                              |
-| ---------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Development setup      | Build, Docker, local dev, project structure                              | `docs/DEVELOPMENT.md`                                             |
-| Testing                | Test types, runner, fixtures, antipatterns                               | `docs/TESTING.md` + `docs/testing/`                               |
-| API                    | Backend & admin HTTP API reference                                       | `docs/API.md`                                                     |
-| System architecture    | Engine, storage, MCP transport, handlers, validation                     | `docs/SYSTEM.md`                                                  |
-| Authentication         | Better Auth, OAuth 2.1, API tokens                                       | `docs/AUTHENTICATION.md`                                          |
-| Web UI                 | Frontend architecture, components                                        | `docs/WEB-UI.md`                                                  |
-| Audit system           | Audit logging design                                                     | `docs/AUDIT-SYSTEM.md`                                            |
-| Workflows              | Workflow authoring, tools, catalog                                       | `docs/WORKFLOW.md`, `docs/WORKFLOWS.md`, `docs/WORKFLOW-TOOLS.md` |
-| Design system          | UI design tokens and components                                          | `docs/DESIGN-SYSTEM.md`                                           |
-| Documentation style    | How to write internal **and** public docs                                | `docs/DOCUMENTATION-STYLE-GUIDE.md`                               |
-| Logging                | Structured logging conventions                                           | `docs/LOGGING.md`                                                 |
-| Workspaces             | GitHub authorization, persistent lifecycle, direct operations, isolation | `docs/WORKSPACES.md`                                              |
-| Issue management       | GitHub issue conventions                                                 | `docs/ISSUE-MANAGEMENT.md`                                        |
-| Architecture decisions | ADRs (licensing, OSS model, …)                                           | `docs/adr/`                                                       |
-| Deployment             | Environment variables, restart procedures                                | `docs/deployment/`                                                |
-| Legal                  | License/legal notes                                                      | `docs/legal/`                                                     |
+| File                   | Covers                                                                                                                | Path                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Development setup      | Build, Docker, local dev, project structure                                                                           | `docs/DEVELOPMENT.md`                                             |
+| Testing                | Test types, runner, fixtures, antipatterns                                                                            | `docs/TESTING.md` + `docs/testing/`                               |
+| API                    | Backend & admin HTTP API reference                                                                                    | `docs/API.md`                                                     |
+| System architecture    | Engine, storage, MCP transport, handlers, validation                                                                  | `docs/SYSTEM.md`                                                  |
+| Authentication         | Better Auth, OAuth 2.1, API tokens                                                                                    | `docs/AUTHENTICATION.md`                                          |
+| Web UI                 | Frontend architecture, components                                                                                     | `docs/WEB-UI.md`                                                  |
+| Audit system           | Audit logging design                                                                                                  | `docs/AUDIT-SYSTEM.md`                                            |
+| Workflows              | Workflow authoring, tools, catalog                                                                                    | `docs/WORKFLOW.md`, `docs/WORKFLOWS.md`, `docs/WORKFLOW-TOOLS.md` |
+| Design system          | UI design tokens and components                                                                                       | `docs/DESIGN-SYSTEM.md`                                           |
+| Documentation style    | How to write internal **and** public docs                                                                             | `docs/DOCUMENTATION-STYLE-GUIDE.md`                               |
+| Logging                | Structured logging conventions                                                                                        | `docs/LOGGING.md`                                                 |
+| Workspaces             | GitHub authorization, persistent lifecycle, MCP tools, website management, readiness/metrics/kill switches, isolation | `docs/WORKSPACES.md`                                              |
+| Issue management       | GitHub issue conventions                                                                                              | `docs/ISSUE-MANAGEMENT.md`                                        |
+| Architecture decisions | ADRs (licensing, OSS model, …)                                                                                        | `docs/adr/`                                                       |
+| Deployment             | Environment variables, restart procedures                                                                             | `docs/deployment/`                                                |
+| Legal                  | License/legal notes                                                                                                   | `docs/legal/`                                                     |
 
 ## Contributing
 

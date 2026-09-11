@@ -76,7 +76,7 @@ frontend/src/
 │   ├── AdminExecutions.tsx      # Admin executions monitoring (PageShell + DataListView)
 │   ├── AdminExecutionInspectorPage.tsx # Admin execution inspector wrapper
 │   ├── AdminUserDetail.tsx      # Admin user detail and security management
-│   ├── AdminSettingsUnified.tsx # Unified admin settings (Definitions, Values, Maintenance tabs)
+│   ├── AdminSettingsUnified.tsx # Unified admin settings (Definitions, Values, Maintenance, Workspaces tabs)
 │   ├── AuditLog.tsx             # Admin audit log viewer (AuditLogCard grid)
 │   ├── SystemSettings.tsx       # Admin system settings (embedded mode for unified view)
 │   ├── AdminSettings.tsx        # Admin global settings (embedded mode for unified view)
@@ -205,7 +205,7 @@ Application routes:
 /admin/executions (protected)      - Admin executions monitoring (PageShell + DataListView + ExecutionCard)
 /admin/executions/:id (protected)  - Admin execution inspector
 /admin/audit-log (protected)       - Audit log viewer (PageShell + AuditLogCard + total-based pagination)
-/admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance tabs)
+/admin/settings (protected)        - Unified settings (Definitions, Values, Maintenance, Workspaces tabs)
 /admin/admin-settings (protected)  - Redirects to /admin/settings
 /admin/analytics (protected)       - Redirects to /admin
 /admin/analytics/operational (protected) - Operational metrics dashboard (OperationalDashboard.tsx)
@@ -268,6 +268,8 @@ Single scrollable page at `/settings` with all sections rendered flat (no tabs).
 - Profile (`ProfileSettings.tsx`): Name editing, email display with verification badge, handle management with AlertDialog confirmation
 - Security (`SecuritySettings.tsx`): Password change form with Progress-based strength indicator
 - Integrations (`GitHubWorkspaceSettings.tsx`): website-only GitHub App connect/reconnect, verified account and repository grants, disconnect confirmation, disabled/configuration/revocation states, and explicit external-grant recovery for unreadable credentials or an untracked refresh successor
+- Integrations (`GitHubWorkspaceManagement.tsx`): Cloud workspaces card with instance readiness badge, agent-authority disclosure, create form (approved repository select, ref, active/limit hint), per-workspace cards with repository/ref, provider and machine context, state badge, desired/observed state and generation, Start/Stop/Delete actions disabled while pending, destructive delete via `ConfirmDialog` that returns focus to its trigger; never mentions chats or sessions
+- Admin Settings → Workspaces (`AdminWorkspaceControls.tsx`): readiness facts (configuration, resource creation, connector, reconciliation backlog, active resources/operations and transfer bytes against limits) and the global/provider kill switches with a reason field and confirmed stop/resume
 - OAuth Authorizations (`OAuthSettings.tsx`): DataListView with consent cards, empty state with KeyRound icon, revoke with ConfirmDialog
 - Active Sessions (`SessionsSettings.tsx`): DataListView with session cards, Current Session badge, revoke disabled for current session
 - API Tokens (`ApiTokensSettings.tsx`): DataListView with token cards showing name, prefix (monospace), dates, status badge (Active/Expired/Revoked). Create dialog with name input and expiration select (30d/90d/365d/never). One-time token display dialog with copy button and warning. Revoke with ConfirmDialog (variant="destructive").

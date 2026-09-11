@@ -30,6 +30,7 @@ export enum AuditAction {
   WORKSPACE_OPERATION_RESERVE = "workspace:operation_reserve",
   WORKSPACE_OPERATION_RECONCILE = "workspace:operation_reconcile",
   WORKSPACE_OPERATION_TERMINAL = "workspace:operation_terminal",
+  WORKSPACE_CONTROL_UPDATE = "workspace:control_update",
 
   // Workflow events
   WORKFLOW_CREATE = "workflow:create",

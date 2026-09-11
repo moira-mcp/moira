@@ -180,6 +180,12 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
       readiness: { state: "disabled", reason: "NOT_CONFIGURED" },
+      instance: {
+        state: "disabled",
+        reason: "NOT_CONFIGURED",
+        provider: "github-codespaces",
+        connector: "not_applicable",
+      },
       repositories: [],
       workspaces: [],
     });
@@ -192,6 +198,25 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
     const text = result.content.find((item) => item.type === "text");
     expect(text?.type).toBe("text");
     expect(JSON.parse((text as { text: string }).text)).toEqual(result.structuredContent);
+  });
+
+  test("should report the same readiness decision through MCP health as through workspace_list", async () => {
+    const listed = CallToolResultSchema.parse(
+      await client.callTool({ name: "workspace_list", arguments: {} }),
+    );
+    const instance = listed.structuredContent?.instance as { state: string; provider: string };
+    const health = JSON.parse(dockerExecSync(["curl", "-s", "http://localhost:3000/health"])) as {
+      status: string;
+      workspaces: Record<string, unknown>;
+    };
+    // The public liveness surface carries only the decision, never operator detail.
+    expect(health.workspaces).toEqual({
+      state: instance.state,
+      provider: instance.provider,
+      degraded: false,
+    });
+    // A disabled feature must not degrade the MCP process.
+    expect(health.status).toBe("healthy");
   });
 
   test("should route an invalid public download capability to the private transfer handler", async () => {

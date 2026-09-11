@@ -81,6 +81,59 @@ export class WorkspaceResourceRepository {
     return Boolean(row);
   }
 
+  listControls(provider: string): Array<{
+    scope: "global" | `provider:${string}`;
+    disabled: boolean;
+    reason: string | null;
+    updatedAt: number | null;
+  }> {
+    const rows = this.sqlite
+      .prepare(
+        `SELECT scope, disabled, reason, updatedAt FROM workspaceProviderControl
+         WHERE scope IN ('global', ?)`,
+      )
+      .all(`provider:${provider}`) as Array<{
+      scope: string;
+      disabled: number;
+      reason: string | null;
+      updatedAt: number;
+    }>;
+    const byScope = new Map(rows.map((row) => [row.scope, row]));
+    return (["global", `provider:${provider}`] as const).map((scope) => {
+      const row = byScope.get(scope);
+      return {
+        scope,
+        disabled: row ? row.disabled === 1 : false,
+        reason: row?.reason ?? null,
+        updatedAt: row?.updatedAt ?? null,
+      };
+    });
+  }
+
+  countActive(provider: string): number {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT COUNT(*) count FROM workspaceResource
+           WHERE provider = ? AND state IN (${placeholders(ACTIVE_STATES)})`,
+        )
+        .get(provider, ...ACTIVE_STATES) as { count: number }
+    ).count;
+  }
+
+  /** Records that the reconciliation loop would claim now, regardless of active claims. */
+  dueSummary(now: number): { count: number; oldestUpdatedAt: number | null } {
+    const row = this.sqlite
+      .prepare(
+        `SELECT COUNT(*) count, MIN(updatedAt) oldest FROM workspaceResource
+         WHERE state IN ('create_pending', 'create_submitted', 'cleanup_pending', 'ambiguous',
+                         'usable', 'start_pending', 'stop_pending', 'delete_pending')
+           AND (state != 'usable' OR retentionPolicy != 'persistent' AND remoteExpiresAt <= ?)`,
+      )
+      .get(now) as { count: number; oldest: number | null };
+    return { count: row.count, oldestUpdatedAt: row.count > 0 ? row.oldest : null };
+  }
+
   getControl(provider: string): { disabled: boolean; reason: string | null } {
     const rows = this.sqlite
       .prepare(

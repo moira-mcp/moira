@@ -602,6 +602,77 @@
           "channel_error": "The channel could not deliver the test message."
         }
       },
+      "workspaces": {
+        "title": "Cloud workspaces",
+        "description": "Persistent Codespaces created by Moira for approved repositories. Agents work in them through the MCP workspace tools by workspace ID; the same workspace can be reused from any connected client.",
+        "loadFailed": "Failed to load cloud workspaces",
+        "loadFailedDescription": "Your other settings are still available. Retry this request.",
+        "retry": "Retry",
+        "refresh": "Refresh",
+        "requestFailed": "The workspace request was rejected",
+        "created": "Workspace creation was accepted",
+        "started": "Workspace start was requested",
+        "stopped": "Workspace stopped; repository data is preserved",
+        "deleted": "Workspace deletion was requested",
+        "disclosureTitle": "Agents get full Codespace access",
+        "disclosureDescription": "Inside a workspace the agent acts as the Codespace user: it can read the repository, use the network and read any secrets configured for that Codespace. Moira protects this server and other users, not the workspace from the agent you authorize.",
+        "instanceStates": {
+          "disabled": "Disabled on this instance",
+          "misconfigured": "Server configuration is invalid",
+          "control_disabled": "Stopped by an administrator",
+          "connector_unavailable": "Connector unavailable",
+          "ready": "Ready"
+        },
+        "instanceDescriptions": {
+          "disabled": "An administrator must configure the GitHub App, vault and workspace policy before workspaces can be created.",
+          "misconfigured": "Ask an administrator to correct the GitHub App or vault configuration.",
+          "control_disabled": "An administrator paused workspace work. Existing files are preserved.",
+          "connector_unavailable": "The credential connector is not answering. Try again later or contact an administrator.",
+          "ready": "Workspaces can be created and used."
+        },
+        "connectFirstTitle": "Connect GitHub first",
+        "connectFirstDescription": "Workspaces are created for repositories approved in the GitHub connection above.",
+        "repository": "Repository",
+        "ref": "Branch or ref",
+        "create": "Create workspace",
+        "createHint": "{{active}} of {{max}} active workspaces are in use on this instance. Codespaces are billed to your personal GitHub account.",
+        "list": "Your workspaces",
+        "empty": "No workspaces yet.",
+        "providerLine": "GitHub Codespaces · personal billing · {{machine}}",
+        "detailLine": "Desired {{desired}}, observed {{observed}} · generation {{generation}} · updated {{updated}}",
+        "states": {
+          "create_pending": "Creating",
+          "create_submitted": "Creating",
+          "usable": "Running",
+          "start_pending": "Starting",
+          "stop_pending": "Stopping",
+          "stopped": "Stopped (data kept)",
+          "delete_pending": "Deleting",
+          "cleanup_pending": "Cleaning up",
+          "deleted": "Deleted",
+          "rejected": "Rejected",
+          "ambiguous": "Needs reconciliation"
+        },
+        "desired": {
+          "running": "running",
+          "stopped": "stopped",
+          "deleted": "deleted"
+        },
+        "observed": {
+          "unknown": "unknown",
+          "provisioning": "provisioning",
+          "running": "running",
+          "stopped": "stopped",
+          "deleting": "deleting",
+          "absent": "absent",
+          "failed": "failed"
+        },
+        "start": "Start",
+        "stop": "Stop",
+        "delete": "Delete",
+        "confirmDeleteTitle": "Delete this workspace?",
+        "confirmDeleteDescription": "The Codespace for {{repository}} and every uncommitted change inside it will be removed permanently. Use Stop instead to keep the data."
+      },
       "github": {
         "title": "GitHub workspaces",
         "description": "Connect GitHub on this website so Moira can use approved, user-owned Codespaces. Agents never receive GitHub credentials or authorization links.",
@@ -1517,8 +1588,60 @@
       "tabs": {
         "definitions": "Definitions",
         "values": "Values",
-        "maintenance": "Maintenance"
+        "maintenance": "Maintenance",
+        "workspaces": "Workspaces"
       }
+    },
+    "workspaces": {
+      "loadFailed": "Failed to load cloud workspace status",
+      "retry": "Retry",
+      "refresh": "Refresh",
+      "readinessTitle": "Cloud workspace readiness",
+      "readinessDescription": "One shared decision for the website, MCP tools and health checks. A disabled feature is healthy; invalid configuration or an unreachable connector degrades the instance.",
+      "reason": "Reason: {{reason}}",
+      "states": {
+        "disabled": "Disabled",
+        "misconfigured": "Misconfigured",
+        "control_disabled": "Stopped by control",
+        "connector_unavailable": "Connector unavailable",
+        "ready": "Ready"
+      },
+      "configuration": {
+        "absent": "Not configured",
+        "invalid": "Invalid",
+        "available": "Configured"
+      },
+      "connector": {
+        "available": "Available",
+        "unavailable": "Unavailable",
+        "not_applicable": "Not started"
+      },
+      "facts": {
+        "configuration": "GitHub App configuration",
+        "resources": "Workspace creation",
+        "connector": "Credential connector",
+        "reconciliation": "Reconciliation backlog",
+        "activeResources": "Active workspaces / limit",
+        "activeOperations": "Active operations / limit",
+        "transferBytes": "Live transfer bytes / limit"
+      },
+      "reconciliationValue": "{{resources}} workspaces, {{operations}} operations, oldest {{age}}",
+      "controlsTitle": "Emergency controls",
+      "controlsDescription": "Disabling a control refuses new workspace creation, start and agent operations and stops running workspaces. Repository data is preserved; nothing is deleted.",
+      "scopes": {
+        "global": "All providers",
+        "provider": "Provider {{provider}}"
+      },
+      "stopped": "Stopped",
+      "accepting": "Accepting work",
+      "reasonLabel": "Reason shown to operators",
+      "enable": "Resume",
+      "disable": "Stop new work",
+      "confirmDisableTitle": "Stop workspace work?",
+      "confirmDisableDescription": "New workspaces, starts and agent operations will be refused and running workspaces will be stopped. Files stay in the workspaces; no data is deleted.",
+      "disabledToast": "Workspace control disabled new work",
+      "enabledToast": "Workspace control resumed",
+      "saveFailed": "Failed to update the workspace control"
     },
     "systemSettings": {
       "title": "System Settings",

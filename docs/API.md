@@ -1125,6 +1125,97 @@ Errors:
 
 Authentication: Via token (no session required)
 
+## Workspace Management API
+
+Website management of the user's persistent cloud workspaces. These routes are
+mounted under `/api/integrations/github/workspaces` behind `requireAuth`, use the same
+domain services as the MCP `workspace_*` tools, and return `Cache-Control: no-store`
+and `Referrer-Policy: no-referrer`. Responses contain the sanitized workspace summary
+(opaque `workspace_id`, provider, repository, ref, machine, state, retention policy,
+desired/observed state, generation, timestamps) and never provider resource names,
+markers, claims, capabilities or credentials.
+
+### GET /api/integrations/github/workspaces
+
+Returns the instance readiness view, the connection view, approved repositories and
+the user's workspaces.
+
+```typescript
+{
+  success: true;
+  data: {
+    readiness: WorkspaceReadinessView;
+    connection: WorkspaceConnectionView;
+    repositories: Array<{ repository_id: string; name: string; private: boolean }>;
+    workspaces: WorkspaceSummaryView[];
+  }
+}
+```
+
+### POST /api/integrations/github/workspaces
+
+Body: `{ "repository_id": string, "ref": string }`. Returns `201` with the sanitized
+workspace, which may still be pending. `400` for malformed input; `503`
+`WORKSPACE_NOT_CONFIGURED` with `settings_url` when the feature is not configured.
+
+### GET /api/integrations/github/workspaces/:workspaceId
+
+Returns one owned workspace and up to twenty recent metadata-only operations
+(`operation_id`, kind, state, byte counts, exit code, deadline, result expiry,
+timestamps). Unknown, malformed and foreign IDs return `404 WORKSPACE_NOT_FOUND`.
+
+### POST /api/integrations/github/workspaces/:workspaceId/start | /stop
+
+Records the desired running or stopped state and returns the workspace with
+`data_preserved: true`. Stop keeps the repository data.
+
+### DELETE /api/integrations/github/workspaces/:workspaceId
+
+Body: `{ "confirm_delete": true, "expected_generation": number }`. Without both the
+route returns `400 WORKSPACE_DELETE_CONFIRMATION_REQUIRED` and calls no service. A
+stale generation returns `409 WORKSPACE_GENERATION_CONFLICT`. Success returns the
+workspace in its delete-pending state with `data_preserved: false`.
+
+Error mapping for every route: `WORKSPACE_GENERATION_CONFLICT`,
+`WORKSPACE_NOT_RUNNING`, `WORKSPACE_CREATE_PENDING` and
+`WORKSPACE_AUTHORIZATION_REQUIRED` → 409; `WORKSPACE_POLICY_LIMIT` and
+`WORKSPACE_OPERATION_BUSY` → 429; `WORKSPACE_PROVIDER_DISABLED` and
+`WORKSPACE_PROVIDER_UNAVAILABLE` → 503; `WORKSPACE_RESOURCE_INVALID` → 400. Messages
+are fixed safe texts; provider detail is never returned.
+
+Authentication: Required
+
+### GET /api/admin/workspaces
+
+Administrator readiness and kill switches. Mounted behind the admin namespace guard.
+
+```typescript
+{
+  success: true;
+  data: {
+    readiness: WorkspaceReadinessView;
+    controls: Array<{
+      scope: "global" | `provider:${string}`;
+      disabled: boolean;
+      reason: string | null;
+      updated_at: number | null;
+    }>;
+  }
+}
+```
+
+### PUT /api/admin/workspaces/controls/:scope
+
+Body: `{ "disabled": boolean, "reason"?: string }` (reason at most 500 characters).
+Scope is `global` or `provider:github-codespaces`. Disabling refuses new workspace
+creation, start and agent operations and requests stop for persistent workspaces; it
+never deletes data. Returns the updated readiness and controls. `400` for an invalid
+body or a scope the provider does not manage; `503 WORKSPACE_NOT_CONFIGURED` while
+the feature is not configured. Every change is audited as
+`WORKSPACE_CONTROL_UPDATE`.
+
+Authentication: Required (administrator)
+
 ## Workspace Transfer Download API
 
 ### GET /api/workspaces/transfers/:token
@@ -2344,6 +2435,7 @@ Response:
     systemHealth: {
       backendStatus: "healthy" | "degraded";
       databaseSize: number;
+      workspaces: WorkspaceReadinessView; // shared cloud-workspace readiness decision
       workflowReconciliation: {
         status: "ok" | "error";
         code: string;
@@ -2386,6 +2478,7 @@ Response:
     systemHealth: {
       backendStatus: "healthy" | "degraded";
       databaseSize: number;
+      workspaces: WorkspaceReadinessView; // shared cloud-workspace readiness decision
       workflowReconciliation: {
         status: "ok" | "error";
         code: string;

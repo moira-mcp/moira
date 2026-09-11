@@ -2,6 +2,20 @@
  * API communication type definitions for the frontend
  */
 
+import type {
+  WorkspaceConnectionView,
+  WorkspacePublicReadinessView,
+  WorkspaceReadinessView,
+  WorkspaceSummaryView,
+} from "@mcp-moira/shared";
+
+/** Website workspace management view returned by GET /api/integrations/github/workspaces. */
+export interface WorkspaceManagementView {
+  readiness: WorkspaceReadinessView;
+  connection: WorkspaceConnectionView;
+  repositories: Array<{ repository_id: string; name: string; private: boolean }>;
+  workspaces: WorkspaceSummaryView[];
+}
 import { WorkflowValidationStatus } from "./react-flow-types";
 import { WorkflowGraph, ValidationResult, WorkflowFileInfo } from "./workflow-types";
 
@@ -72,7 +86,9 @@ export interface HealthCheckResponse {
     validation: boolean;
     mcpEngine: boolean;
     workflowReconciliation: boolean;
+    workspaces: boolean;
   };
+  workspaces?: WorkspacePublicReadinessView;
   reconciliation: {
     status: "ok" | "error";
     code: string;
@@ -88,6 +104,7 @@ export interface AdminSystemStatusResponse {
   systemHealth: {
     backendStatus: string;
     databaseSize: number;
+    workspaces?: WorkspaceReadinessView;
     workflowReconciliation: {
       status: "ok" | "error";
       code: string;

@@ -87,6 +87,27 @@ function operation(
 
 function services(overrides: Partial<WorkspaceToolServices> = {}): WorkspaceToolServices {
   return {
+    observability: {
+      readiness: jest.fn(async () => ({
+        state: "ready" as const,
+        reason: null,
+        provider: "github-codespaces",
+        configuration: "available" as const,
+        resources_enabled: true,
+        controls: [],
+        connector: { state: "available" as const, reason: null },
+        reconciliation: { due_resources: 0, due_operations: 0, oldest_due_age_ms: null },
+        usage: {
+          active_resources: 1,
+          max_active_resources: 4,
+          active_operations: 0,
+          max_active_operations: 20,
+          transfer_live_bytes: 0,
+          max_transfer_live_bytes: null,
+        },
+        checked_at: 50,
+      })),
+    },
     connection: {
       getStatus: jest.fn(() => ({
         state: "connected" as const,
@@ -237,6 +258,7 @@ describe("workspace MCP adapter", () => {
 
     expect(data(listed)).toMatchObject({
       readiness: { state: "connected" },
+      instance: { state: "ready", provider: "github-codespaces", connector: "available" },
       repositories: [{ repository_id: "42", name: "owner/repository", private: true }],
       workspaces: [{ workspace_id: WORKSPACE_ID, generation: 3 }],
     });

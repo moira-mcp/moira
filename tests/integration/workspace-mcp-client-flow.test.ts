@@ -18,6 +18,7 @@ import {
   WorkspaceConnectionRepository,
   WorkspaceConnectionService,
   WorkspaceFileService,
+  WorkspaceObservabilityService,
   WorkspaceOperationRepository,
   WorkspaceOperationService,
   WorkspaceProviderRegistry,
@@ -272,6 +273,15 @@ class DomainFixture {
     };
     this.services = {
       connection: this.connection,
+      observability: new WorkspaceObservabilityService({
+        providerId: this.provider.id,
+        config: () => config,
+        policy: () => policy,
+        resources: resourceRepository,
+        operations: operationRepository,
+        transfers: new WorkspaceTransferRepository(this.sqlite),
+        transport: connector,
+      }),
       resource: new WorkspaceResourceService({
         repository: resourceRepository,
         repositories: resourceRepository,

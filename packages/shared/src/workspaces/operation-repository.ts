@@ -192,6 +192,32 @@ export class WorkspaceOperationRepository {
     return changed === 1 ? this.getOwned(userId, operationId) : null;
   }
 
+  countActive(): number {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT COUNT(*) count FROM workspaceOperation
+           WHERE state IN ('reserved', 'running', 'cancel_pending', 'reconcile_pending')`,
+        )
+        .get() as { count: number }
+    ).count;
+  }
+
+  /** Operations waiting for remote inspection, expiry or cleanup, regardless of claims. */
+  dueSummary(now: number): { count: number; oldestUpdatedAt: number | null } {
+    const row = this.sqlite
+      .prepare(
+        `SELECT COUNT(*) count, MIN(updatedAt) oldest FROM workspaceOperation
+         WHERE state IN ('running', 'cancel_pending', 'reconcile_pending')
+           OR (state = 'reserved' AND deadlineAt <= ?)
+           OR (remoteCleanupPending = 1
+             AND state IN ('succeeded', 'failed', 'cancelled', 'timed_out')
+             AND resultExpiresAt IS NOT NULL AND resultExpiresAt <= ?)`,
+      )
+      .get(now, now) as { count: number; oldest: number | null };
+    return { count: row.count, oldestUpdatedAt: row.count > 0 ? row.oldest : null };
+  }
+
   listOwned(userId: string, resourceId: string): WorkspaceOperationRecord[] {
     return this.sqlite
       .prepare(

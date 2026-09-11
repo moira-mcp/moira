@@ -12,6 +12,10 @@ import {
   WorkspaceTransferService,
   WorkspaceResourceRepository,
   WorkspaceResourceService,
+  WorkspaceObservabilityService,
+  recordWorkspaceConnectionEvent,
+  recordWorkspaceOperationEvent,
+  recordWorkspaceResourceEvent,
   getDatabase,
   getSqliteInstance,
   getWorkspaceGitHubConfig,
@@ -35,6 +39,30 @@ interface WorkspaceServices {
   operation: WorkspaceOperationService | null;
   file: WorkspaceFileService | null;
   transfer: WorkspaceTransferService;
+  observability: WorkspaceObservabilityService;
+}
+
+function operationAudit(
+  auditRepository: AuditRepository,
+): (event: WorkspaceOperationAuditEvent) => Promise<void> {
+  return async (event) => {
+    recordWorkspaceOperationEvent(event, event.updatedAt - event.createdAt);
+    await logAuditEventDirect(auditRepository, {
+      userId: event.userId,
+      action: operationAuditAction(event),
+      resource: "workspace_operation",
+      resourceId: event.operationId,
+      metadata: {
+        workspaceId: event.workspaceId,
+        provider: event.provider,
+        state: event.state,
+        kind: event.kind,
+        inputBytes: event.inputBytes,
+        outputBytes: event.outputBytes,
+        exitCode: event.exitCode,
+      },
+    });
+  };
 }
 
 let services: WorkspaceServices | null = null;
@@ -101,6 +129,7 @@ function initializeWorkspaceServices(): WorkspaceServices {
       await resource?.rebindAfterAuthorization(userId);
     },
     audit: async (event) => {
+      recordWorkspaceConnectionEvent(event);
       await logAuditEventDirect(auditRepository, {
         userId: event.userId,
         action: connectionAuditAction(event),
@@ -119,18 +148,23 @@ function initializeWorkspaceServices(): WorkspaceServices {
   });
   transfer.start();
 
+  const resourceRepository = new WorkspaceResourceRepository(getSqliteInstance());
+  const operationRepository = new WorkspaceOperationRepository(getSqliteInstance());
+  let connector: GitHubCodespacesConnector | null = null;
+
   if (config.state === "available") {
-    const connector = new GitHubCodespacesConnector();
+    const availableConnector = new GitHubCodespacesConnector();
+    connector = availableConnector;
     const provider = new HttpGitHubWorkspaceClient(
       config,
       fetch,
       Date.now,
-      () => connector.health(),
-      (credential, resourceName) => connector.probeSshConfiguration(credential, resourceName),
+      () => availableConnector.health(),
+      (credential, resourceName) =>
+        availableConnector.probeSshConfiguration(credential, resourceName),
     );
     const registry = new WorkspaceProviderRegistry();
     registry.register(provider);
-    const resourceRepository = new WorkspaceResourceRepository(getSqliteInstance());
     resource = new WorkspaceResourceService({
       repository: resourceRepository,
       repositories: resourceRepository,
@@ -151,6 +185,7 @@ function initializeWorkspaceServices(): WorkspaceServices {
       },
       policy: getWorkspaceResourcePolicy,
       audit: async (event) => {
+        recordWorkspaceResourceEvent(event);
         await logAuditEventDirect(auditRepository, {
           userId: event.userId,
           action: resourceAuditAction(event),
@@ -164,10 +199,25 @@ function initializeWorkspaceServices(): WorkspaceServices {
           },
         });
       },
+      controlAudit: async (event) => {
+        await logAuditEventDirect(auditRepository, {
+          userId: event.userId,
+          action: AuditAction.WORKSPACE_CONTROL_UPDATE,
+          resource: "workspace_control",
+          resourceId: event.scope,
+          metadata: {
+            provider: event.provider,
+            scope: event.scope,
+            disabled: event.disabled,
+            reason: event.reason,
+            stoppedPersistentWorkspaces: event.stoppedPersistentWorkspaces,
+          },
+        });
+      },
     });
     const nativeFetcher = new OpenAINativeReferenceFetcher();
     operation = new WorkspaceOperationService({
-      repository: new WorkspaceOperationRepository(getSqliteInstance()),
+      repository: operationRepository,
       credentials: {
         getCredential: async (userId, providerId) => {
           if (providerId !== WORKSPACE_PROVIDER_GITHUB) {
@@ -180,26 +230,10 @@ function initializeWorkspaceServices(): WorkspaceServices {
       policy: getWorkspaceResourcePolicy,
       transfers: transfer,
       nativeFetcher,
-      audit: async (event) => {
-        await logAuditEventDirect(auditRepository, {
-          userId: event.userId,
-          action: operationAuditAction(event),
-          resource: "workspace_operation",
-          resourceId: event.operationId,
-          metadata: {
-            workspaceId: event.workspaceId,
-            provider: event.provider,
-            state: event.state,
-            kind: event.kind,
-            inputBytes: event.inputBytes,
-            outputBytes: event.outputBytes,
-            exitCode: event.exitCode,
-          },
-        });
-      },
+      audit: operationAudit(auditRepository),
     });
     file = new WorkspaceFileService({
-      repository: new WorkspaceOperationRepository(getSqliteInstance()),
+      repository: operationRepository,
       credentials: {
         getCredential: async (userId, providerId) => {
           if (providerId !== WORKSPACE_PROVIDER_GITHUB) {
@@ -212,28 +246,28 @@ function initializeWorkspaceServices(): WorkspaceServices {
       policy: getWorkspaceResourcePolicy,
       transfers: transfer,
       nativeFetcher,
-      audit: async (event) => {
-        await logAuditEventDirect(auditRepository, {
-          userId: event.userId,
-          action: operationAuditAction(event),
-          resource: "workspace_operation",
-          resourceId: event.operationId,
-          metadata: {
-            workspaceId: event.workspaceId,
-            provider: event.provider,
-            state: event.state,
-            kind: event.kind,
-            inputBytes: event.inputBytes,
-            outputBytes: event.outputBytes,
-            exitCode: event.exitCode,
-          },
-        });
-      },
+      audit: operationAudit(auditRepository),
     });
   }
 
-  services = { connection, resource, operation, file, transfer };
+  const observability = new WorkspaceObservabilityService({
+    providerId: WORKSPACE_PROVIDER_GITHUB,
+    config: getWorkspaceGitHubConfig,
+    policy: getWorkspaceResourcePolicy,
+    resources: resourceRepository,
+    operations: operationRepository,
+    transfers: new WorkspaceTransferRepository(getSqliteInstance()),
+    transport: connector,
+    probeTimeoutMs: 2_000,
+    snapshotMaxAgeMs: getWorkspaceResourcePolicy().reconcileIntervalMs * 2,
+  });
+
+  services = { connection, resource, operation, file, transfer, observability };
   return services;
+}
+
+export function getWorkspaceObservabilityService(): WorkspaceObservabilityService {
+  return initializeWorkspaceServices().observability;
 }
 
 export function getWorkspaceConnectionService(): WorkspaceConnectionService {

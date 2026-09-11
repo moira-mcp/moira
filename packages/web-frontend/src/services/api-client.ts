@@ -8,7 +8,12 @@
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
-import type { WorkspaceConnectionView } from "@mcp-moira/shared";
+import type {
+  WorkspaceConnectionView,
+  WorkspaceControlView,
+  WorkspaceReadinessView,
+  WorkspaceSummaryView,
+} from "@mcp-moira/shared";
 import {
   ApiResponse,
   ApiErrorCode,
@@ -25,6 +30,7 @@ import {
   AdminStatsResponse,
   AdminSystemStatusResponse,
   NodeTypeCatalog,
+  WorkspaceManagementView,
 } from "../types";
 
 /**
@@ -497,6 +503,70 @@ export class MoiraApiClient {
       "/integrations/github/external-revocation",
       { data: { confirmed: true } },
     );
+    return response.data.data!;
+  }
+
+  async getGitHubWorkspaces(): Promise<WorkspaceManagementView> {
+    const response = await this.client.get<ApiResponse<WorkspaceManagementView>>(
+      "/integrations/github/workspaces",
+    );
+    return response.data.data!;
+  }
+
+  async createGitHubWorkspace(input: {
+    repository_id: string;
+    ref: string;
+  }): Promise<WorkspaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      "/integrations/github/workspaces",
+      input,
+    );
+    return response.data.data!.workspace;
+  }
+
+  async startGitHubWorkspace(workspaceId: string): Promise<WorkspaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}/start`,
+    );
+    return response.data.data!.workspace;
+  }
+
+  async stopGitHubWorkspace(workspaceId: string): Promise<WorkspaceSummaryView> {
+    const response = await this.client.post<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}/stop`,
+    );
+    return response.data.data!.workspace;
+  }
+
+  async deleteGitHubWorkspace(
+    workspaceId: string,
+    expectedGeneration: number,
+  ): Promise<WorkspaceSummaryView> {
+    const response = await this.client.delete<ApiResponse<{ workspace: WorkspaceSummaryView }>>(
+      `/integrations/github/workspaces/${encodeURIComponent(workspaceId)}`,
+      { data: { confirm_delete: true, expected_generation: expectedGeneration } },
+    );
+    return response.data.data!.workspace;
+  }
+
+  async getAdminWorkspaces(): Promise<{
+    readiness: WorkspaceReadinessView;
+    controls: WorkspaceControlView[];
+  }> {
+    const response =
+      await this.client.get<
+        ApiResponse<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }>
+      >("/admin/workspaces");
+    return response.data.data!;
+  }
+
+  async setAdminWorkspaceControl(
+    scope: string,
+    input: { disabled: boolean; reason: string | null },
+  ): Promise<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }> {
+    const response = await this.client.put<
+      ApiResponse<{ readiness: WorkspaceReadinessView; controls: WorkspaceControlView[] }>
+    >(`/admin/workspaces/controls/${encodeURIComponent(scope)}`, input);
     return response.data.data!;
   }
 
