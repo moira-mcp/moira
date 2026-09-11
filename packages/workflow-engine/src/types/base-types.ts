@@ -73,7 +73,12 @@ export interface BaseNode {
   hooks?: NodeHooks;
   timeout?: number;
   connections?: Record<string, string>; // outputPath -> nextNodeId
+  /** Human labels for connections, keyed like `connections`; used by the aggregated process view. */
+  connectionLabels?: Record<string, ConnectionLabel>;
 }
+
+/** A connection label: plain text, or text plus an explanation of the return it represents. */
+export type ConnectionLabel = string | { label: string; cycle?: { cause: string; exit: string } };
 
 export interface ProgressContentTemplate {
   summary?: string;

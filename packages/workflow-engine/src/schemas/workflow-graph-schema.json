@@ -212,6 +212,32 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "connectionLabels": {
+      "type": "object",
+      "description": "Human labels for this node's connections, keyed like `connections`. Required by the aggregated process view for every edge that crosses a progress-block boundary or returns to an earlier node; a `cycle` entry explains a return.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "minLength": 1, "maxLength": 120 },
+          {
+            "type": "object",
+            "required": ["label"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "cycle": {
+                "type": "object",
+                "required": ["cause", "exit"],
+                "additionalProperties": false,
+                "properties": {
+                  "cause": { "type": "string", "minLength": 1, "maxLength": 300 },
+                  "exit": { "type": "string", "minLength": 1, "maxLength": 300 }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
     "progressNodeId": {
       "type": "string",
       "minLength": 1,
@@ -267,6 +293,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "initialData": {
           "type": "object",
           "properties": {
@@ -336,6 +363,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
         "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "directive": {
@@ -393,6 +421,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "condition": {
           "type": "object"
         },
@@ -425,6 +454,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
         "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "graphId": {
@@ -480,6 +510,7 @@
         "type": { "const": "user-notification" },
         "id": { "type": "string", "minLength": 1 },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "message": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "format": { "enum": ["plain", "markdown", "html"] },
         "silent": { "type": "boolean" },
@@ -540,6 +571,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "message": {
           "type": "string",
           "minLength": 1,
@@ -648,6 +680,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "expressions": {
           "type": "array",
           "minItems": 1,
@@ -691,6 +724,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "outputVariable": {
           "type": "string",
           "minLength": 1,
@@ -752,6 +786,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "key": {
           "type": "string",
           "description": "Note key (supports template expressions). Required in single mode."
@@ -806,6 +841,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "search": {
           "type": "object",
           "properties": {
@@ -875,6 +911,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
         "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "directive": {
@@ -927,6 +964,7 @@
           "minLength": 1
         },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
         "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "reason": {
@@ -959,6 +997,7 @@
         "type": { "const": "materialize" },
         "id": { "type": "string", "minLength": 1 },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
         "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "basePath": { "type": "string", "minLength": 1 },
@@ -1008,6 +1047,7 @@
         "type": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*\\.[a-z0-9][a-z0-9-]*$" },
         "id": { "type": "string", "minLength": 1 },
         "progressNodeId": { "$ref": "#/$defs/progressNodeId" },
+        "connectionLabels": { "$ref": "#/$defs/connectionLabels" },
         "progressActiveLabel": { "$ref": "#/$defs/progressActiveLabel" },
         "progressActiveContent": { "$ref": "#/$defs/progressActiveContent" },
         "config": { "type": "object" },

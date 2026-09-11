@@ -32,6 +32,7 @@
     "docker:stop": ". ./.env.local && docker stop ${DOCKER_CONTAINER_NAME} || true",
     "prepare:account-approval-downgrade": "tsx scripts/prepare-account-approval-downgrade.ts",
     "reconcile": "tsx scripts/reconcile-workflows.ts",
+    "prototype:snapshot": "tsx scripts/generate-process-view-snapshot.ts",
     "fix": "eslint . --fix && prettier --write ."
   },
   "lint-staged": {

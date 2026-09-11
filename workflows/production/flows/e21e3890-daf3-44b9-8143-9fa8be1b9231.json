@@ -11,7 +11,8 @@
       "type": "start",
       "connections": {
         "default": "get-task"
-      }
+      },
+      "progressNodeId": "scope"
     },
     {
       "id": "get-task",
@@ -54,6 +55,9 @@
       "progressActiveContent": {
         "summary": "Capture the task contract, authority, and operating mode",
         "next": "Create the first immutable plan"
+      },
+      "connectionLabels": {
+        "success": "task contract written"
       }
     },
     {
@@ -84,6 +88,9 @@
       "progressActiveContent": {
         "summary": "Create the first complete immutable plan",
         "next": "Independently review the current plan"
+      },
+      "connectionLabels": {
+        "success": "plan published"
       }
     },
     {
@@ -121,7 +128,7 @@
       "connections": {
         "success": "check-plan-review-clean"
       },
-      "progressNodeId": "plan",
+      "progressNodeId": "plan-review",
       "progressActiveLabel": "Review plan",
       "progressActiveContent": {
         "summary": "Independently review the current complete plan",
@@ -141,6 +148,10 @@
       "connections": {
         "true": "route-operating-mode-plan-approval",
         "false": "repair-plan"
+      },
+      "progressNodeId": "plan-review",
+      "connectionLabels": {
+        "true": "no blocking findings"
       }
     },
     {
@@ -166,11 +177,20 @@
       "connections": {
         "success": "plan-review"
       },
-      "progressNodeId": "plan",
+      "progressNodeId": "plan-review",
       "progressActiveLabel": "Repair plan",
       "progressActiveContent": {
         "summary": "Replace the current plan with a corrected immutable revision",
         "next": "Independently review the corrected plan"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "review found issues",
+          "cycle": {
+            "cause": "The reviewer recorded at least one blocking finding, so a corrected plan iteration is created.",
+            "exit": "A review with zero blocking findings."
+          }
+        }
       }
     },
     {
@@ -209,7 +229,7 @@
       "connections": {
         "success": "check-plan-approved"
       },
-      "progressNodeId": "plan",
+      "progressNodeId": "plan-approval",
       "progressActiveLabel": "Confirm plan",
       "progressActiveContent": {
         "summary": "Present the independently reviewed current plan for approval",
@@ -229,6 +249,10 @@
       "connections": {
         "true": "check-steps-remaining",
         "false": "revise-plan"
+      },
+      "progressNodeId": "plan-approval",
+      "connectionLabels": {
+        "true": "approved, or autonomous"
       }
     },
     {
@@ -254,11 +278,20 @@
       "connections": {
         "success": "plan-review"
       },
-      "progressNodeId": "plan",
+      "progressNodeId": "plan-approval",
       "progressActiveLabel": "Revise plan",
       "progressActiveContent": {
         "summary": "Replace the current plan from exact feedback or replan rationale",
         "next": "Independently review the revised plan"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "user asked for changes",
+          "cycle": {
+            "cause": "The user rejected the plan or a replan was triggered during execution; a revised plan goes back through review.",
+            "exit": "The user approves, or the run is autonomous."
+          }
+        }
       }
     },
     {
@@ -276,6 +309,10 @@
       "connections": {
         "true": "execute-step",
         "false": "final-review"
+      },
+      "progressNodeId": "execute",
+      "connectionLabels": {
+        "false": "all units done"
       }
     },
     {
@@ -312,6 +349,16 @@
       ],
       "connections": {
         "default": "check-steps-remaining"
+      },
+      "progressNodeId": "execute",
+      "connectionLabels": {
+        "default": {
+          "label": "next unit",
+          "cycle": {
+            "cause": "A unit was completed and units remain in the plan.",
+            "exit": "The plan cursor passes the last unit."
+          }
+        }
       }
     },
     {
@@ -369,6 +416,10 @@
       "connections": {
         "true": "route-operating-mode-result-presentation",
         "false": "fix-issues"
+      },
+      "progressNodeId": "verify",
+      "connectionLabels": {
+        "true": "result accepted by review"
       }
     },
     {
@@ -384,7 +435,8 @@
       "connections": {
         "true": "present-autonomous-result",
         "false": "present-to-user"
-      }
+      },
+      "progressNodeId": "deliver"
     },
     {
       "id": "present-autonomous-result",
@@ -405,7 +457,7 @@
       "connections": {
         "success": "end"
       },
-      "progressNodeId": "result",
+      "progressNodeId": "deliver",
       "progressActiveLabel": "Present autonomous result",
       "progressActiveContent": {
         "summary": "Present the independently reviewed result without inventing acceptance",
@@ -436,6 +488,15 @@
       "progressActiveContent": {
         "summary": "Correct every confirmed current result finding by root cause",
         "next": "Independently review the changed result again"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "review found issues",
+          "cycle": {
+            "cause": "The final review recorded blocking findings, so the result is repaired.",
+            "exit": "A final review with zero findings."
+          }
+        }
       }
     },
     {
@@ -474,7 +535,7 @@
       "connections": {
         "success": "check-user-accepts"
       },
-      "progressNodeId": "result",
+      "progressNodeId": "deliver",
       "progressActiveLabel": "Present result",
       "progressActiveContent": {
         "summary": "Present the actual independently reviewed result",
@@ -494,7 +555,8 @@
       "connections": {
         "true": "end",
         "false": "rework"
-      }
+      },
+      "progressNodeId": "deliver"
     },
     {
       "id": "rework",
@@ -515,17 +577,27 @@
       "connections": {
         "success": "final-review"
       },
-      "progressNodeId": "result",
+      "progressNodeId": "deliver",
       "progressActiveLabel": "Rework result",
       "progressActiveContent": {
         "summary": "Apply the exact requested rework to the actual result",
         "next": "Independently review the changed result again"
+      },
+      "connectionLabels": {
+        "success": {
+          "label": "user requested rework",
+          "cycle": {
+            "cause": "The user did not accept the result, so it is reworked and reviewed again.",
+            "exit": "The user accepts, or the run is autonomous."
+          }
+        }
       }
     },
     {
       "id": "end",
       "type": "end",
-      "finalOutput": []
+      "finalOutput": [],
+      "progressNodeId": "deliver"
     },
     {
       "id": "route-operating-mode-plan-approval",
@@ -540,6 +612,10 @@
       "connections": {
         "true": "check-steps-remaining",
         "false": "present-plan"
+      },
+      "progressNodeId": "plan-approval",
+      "connectionLabels": {
+        "true": "approved, or autonomous"
       }
     },
     {
@@ -562,7 +638,7 @@
       "connections": {
         "success": "revise-plan"
       },
-      "progressNodeId": "plan",
+      "progressNodeId": "plan-approval",
       "progressActiveLabel": "Replan",
       "progressActiveContent": {
         "summary": "Explain why the approved plan no longer fits the real work",
@@ -642,11 +718,10 @@
     "nodes": [
       {
         "id": "scope",
-        "label": "Scope",
+        "label": "Understand the task",
         "content": {
-          "summary": "Resolve the task contract, scope, constraints, authority, and operating mode",
-          "outcome": "{{progress_scope_outcome}}",
-          "next": "Create and independently review the plan"
+          "summary": "Capture the goal, the observable result, scope, constraints, authority, and whether the run is autonomous or interactive. Nothing is planned yet.",
+          "outcome": "{{progress_scope_outcome}}"
         },
         "connections": {
           "default": "plan"
@@ -654,11 +729,30 @@
       },
       {
         "id": "plan",
-        "label": "Plan",
+        "label": "Draft the plan",
         "content": {
-          "summary": "Create, independently review, approve, repair, or revise the current complete plan",
-          "outcome": "{{progress_plan_outcome}}",
-          "next": "Execute the approved plan one unit at a time"
+          "summary": "Write an ordered plan of 1–10 units, each with an action, an expected result, and a verification method. The plan is immutable once published.",
+          "outcome": "{{progress_plan_outcome}}"
+        },
+        "connections": {
+          "default": "plan-review"
+        }
+      },
+      {
+        "id": "plan-review",
+        "label": "Independent plan review",
+        "content": {
+          "summary": "A reviewer who did not write the plan checks it against the task contract and records blocking findings. Findings send the plan back for repair until the review is clean."
+        },
+        "connections": {
+          "default": "plan-approval"
+        }
+      },
+      {
+        "id": "plan-approval",
+        "label": "Plan approval",
+        "content": {
+          "summary": "In interactive mode the plan is shown to the user, who approves it or asks for changes. Autonomous runs skip the gate. A mid-run replan also re-enters here."
         },
         "connections": {
           "default": "execute"
@@ -666,11 +760,10 @@
       },
       {
         "id": "execute",
-        "label": "Execute",
+        "label": "Execute plan steps",
         "content": {
-          "summary": "Execute and verify each current approved plan unit",
-          "outcome": "{{progress_execution_outcome}}",
-          "next": "Independently review the complete result"
+          "summary": "Run the approved units one at a time, recording one evidence entry per unit. The loop repeats until no unit remains.",
+          "outcome": "{{progress_execution_outcome}}"
         },
         "connections": {
           "default": "verify"
@@ -678,21 +771,20 @@
       },
       {
         "id": "verify",
-        "label": "Verify",
+        "label": "Final review",
         "content": {
-          "summary": "Independently review the complete result and repair confirmed findings",
-          "outcome": "{{progress_review_outcome}}",
-          "next": "Present the reviewed result"
+          "summary": "An independent reviewer checks the actual result against the task contract. Confirmed defects are fixed and the review runs again.",
+          "outcome": "{{progress_review_outcome}}"
         },
         "connections": {
-          "default": "result"
+          "default": "deliver"
         }
       },
       {
-        "id": "result",
-        "label": "Result",
+        "id": "deliver",
+        "label": "Present the result",
         "content": {
-          "summary": "Present the actual result and handle any requested rework",
+          "summary": "Report the result truthfully. Interactive runs wait for the user to accept or request rework; autonomous runs present and end.",
           "outcome": "{{progress_result_outcome}}"
         }
       }

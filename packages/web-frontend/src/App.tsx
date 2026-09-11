@@ -81,6 +81,9 @@ const AdminTokens = lazy(() =>
 const OperationalDashboard = lazy(() =>
   import("./pages/OperationalDashboard").then((m) => ({ default: m.OperationalDashboard })),
 );
+const ProcessViewPrototype = lazy(() =>
+  import("./pages/ProcessViewPrototype").then((m) => ({ default: m.ProcessViewPrototype })),
+);
 
 // Import global styles
 import "./styles/node-styles.css";
@@ -150,6 +153,7 @@ const App: React.FC = () => {
                   <Route path="notes" element={<Notes />} />
                   <Route path="artifacts" element={<Artifacts />} />
                   <Route path="settings" element={<Settings />} />
+                  <Route path="prototypes/process-view" element={<ProcessViewPrototype />} />
                 </Route>
 
                 {/* Admin routes - admin only */}

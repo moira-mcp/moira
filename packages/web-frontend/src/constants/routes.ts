@@ -33,6 +33,7 @@ export interface RoutesShape {
   SETTINGS: string;
   INVITE_ACCEPT: string;
   NOTES: string;
+  PROTOTYPE_PROCESS_VIEW: string;
   ADMIN: string;
   ADMIN_USERS: string;
   ADMIN_EXECUTIONS: string;
@@ -68,6 +69,8 @@ export function buildRoutes(appPrefix: string): RoutesShape {
     SETTINGS: `${appPrefix}/settings`,
     INVITE_ACCEPT: `${appPrefix}/invites/:token`,
     NOTES: `${appPrefix}/notes`,
+    // Interface prototypes for the aggregated process view (#180); fixture-backed.
+    PROTOTYPE_PROCESS_VIEW: `${appPrefix}/prototypes/process-view`,
 
     // Admin routes
     ADMIN: admin,
