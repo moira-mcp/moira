@@ -9,6 +9,7 @@ import {
   parseFlexibleJSON,
   convertSingleQuotesToDoubleQuotes,
   wrapSchemaWithAutoparse,
+  wrapToolSchemaWithAutoparse,
 } from "../../../packages/mcp-server/src/utils/flexible-json-parser.js";
 import { z } from "zod";
 
@@ -267,5 +268,24 @@ describe("wrapSchemaWithAutoparse", () => {
         addNodes: [{ id: "new-node", type: "action" }],
       });
     });
+  });
+});
+
+describe("wrapToolSchemaWithAutoparse", () => {
+  it("keeps a strict tool object strict so unknown fields are rejected, not stripped", () => {
+    const strict = z.object({ id: z.string(), file: z.object({ a: z.string() }) }).strict();
+    const registered = wrapToolSchemaWithAutoparse(strict);
+    expect(registered).toBeInstanceOf(z.ZodObject);
+    const schema = registered as z.ZodTypeAny;
+    expect(schema.safeParse({ id: "x", chat_id: "c" }).success).toBe(false);
+    // Auto-parsing still applies to nested object fields inside the strict object.
+    expect(schema.parse({ id: "x", file: '{"a":"1"}' })).toEqual({ id: "x", file: { a: "1" } });
+  });
+
+  it("contributes a plain object as its auto-parsing shape", () => {
+    const plain = z.object({ id: z.string() });
+    const registered = wrapToolSchemaWithAutoparse(plain);
+    expect(registered).not.toBeInstanceOf(z.ZodObject);
+    expect(Object.keys(registered as Record<string, unknown>)).toEqual(["id"]);
   });
 });

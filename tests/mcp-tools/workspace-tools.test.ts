@@ -132,45 +132,36 @@ describe("Workspace MCP HTTP contract on a default-disabled installation", () =>
       });
       expect([...(file.required as string[])].sort()).toEqual(["download_url", "file_id"]);
     }
+    // Root-object catalog: every form's fields are visible at the top level, only the shared
+    // identity is required, and the exclusive stdin / resume forms are enforced at dispatch.
     expect(exec.inputSchema).toMatchObject({
-      anyOf: expect.arrayContaining([
-        expect.objectContaining({
-          required: expect.arrayContaining(["workspace_id", "argv", "timeout_seconds"]),
-          additionalProperties: false,
-          properties: expect.objectContaining({ stdin_text: { type: "string" } }),
-        }),
-        expect.objectContaining({
-          required: expect.arrayContaining([
-            "workspace_id",
-            "argv",
-            "timeout_seconds",
-            "stdin_file",
-          ]),
-          additionalProperties: false,
-          properties: expect.objectContaining({
-            stdin_file: exec.inputSchema.properties?.stdin_file,
-          }),
-        }),
-        expect.objectContaining({
-          required: ["workspace_id", "operation_id"],
-          additionalProperties: false,
-        }),
-      ]),
+      type: "object",
+      additionalProperties: false,
+      required: ["workspace_id"],
+      properties: expect.objectContaining({
+        argv: expect.any(Object),
+        timeout_seconds: expect.any(Object),
+        stdin_text: { type: "string" },
+        stdin_file: expect.any(Object),
+        operation_id: expect.any(Object),
+      }),
     });
+    expect(exec.inputSchema).not.toHaveProperty("anyOf");
     const download = workspaceTools.find((tool) => tool.name === "workspace_download")!;
     expect(download.inputSchema).toMatchObject({
-      anyOf: expect.arrayContaining([
-        expect.objectContaining({
-          required: expect.arrayContaining([
-            "workspace_id",
-            "operation_id",
-            "file_name",
-            "mime_type",
-          ]),
-          additionalProperties: false,
-        }),
-      ]),
+      type: "object",
+      additionalProperties: false,
+      properties: expect.objectContaining({
+        path: expect.any(Object),
+        max_bytes: expect.any(Object),
+        operation_id: expect.any(Object),
+      }),
     });
+    expect([...(download.inputSchema.required as string[])].sort()).toEqual([
+      "file_name",
+      "mime_type",
+      "workspace_id",
+    ]);
   });
 
   test("should list safe setup status without provisioning or exposing credentials", async () => {

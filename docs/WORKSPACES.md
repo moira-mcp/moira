@@ -244,7 +244,11 @@ HTTP 426 reconnect contract.
 Every tool derives the user from the MCP request context and addresses a persistent
 resource by `workspace_id`; no tool accepts a user, chat, session, OAuth, provider
 token, SSH or capability field, and strict schemas reject unknown fields before any
-service call. `workspace_list` returns the sanitized connection readiness (with the
+service call. Each execution and file tool publishes one flat root-object schema in
+which only `workspace_id` is required (and `file_name`/`mime_type` for download); the
+adapter then applies the strict request form, so exactly one stdin form, a
+resume call carrying only `workspace_id` and `operation_id`, and a complete new
+request are the only accepted shapes. `workspace_list` returns the sanitized connection readiness (with the
 same-origin Settings URL), approved repository targets and the user's workspace
 summaries; it is the discovery path for `repository_id` and reusable `workspace_id`.
 `workspace_get` returns one owned summary; an unknown or foreign ID returns the

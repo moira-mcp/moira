@@ -156,12 +156,18 @@ export function wrapSchemaWithAutoparse(
   return result;
 }
 
+/**
+ * Prepare a tool's typed schema for SDK registration. A plain object contributes its
+ * auto-parsing shape; a strict object stays a strict object so unknown fields are
+ * rejected at the MCP boundary instead of being silently stripped by the SDK's
+ * default object; any other schema is registered as is.
+ */
 export function wrapToolSchemaWithAutoparse(
   inputSchema: z.ZodTypeAny,
 ): Record<string, z.ZodTypeAny> | z.ZodTypeAny {
-  return inputSchema instanceof z.ZodObject
-    ? wrapSchemaWithAutoparse(inputSchema.shape)
-    : inputSchema;
+  if (!(inputSchema instanceof z.ZodObject)) return inputSchema;
+  const shape = wrapSchemaWithAutoparse(inputSchema.shape);
+  return inputSchema._def.unknownKeys === "strict" ? z.object(shape).strict() : shape;
 }
 
 /**
