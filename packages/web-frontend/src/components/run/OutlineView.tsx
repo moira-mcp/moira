@@ -16,6 +16,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { StatusChip, StatusIcon, STATUS_STYLE } from "./status";
 import { GuidanceCallout } from "./Guidance";
 import { StepList } from "./StepList";
+import { useEditing, useModeGuideKey } from "../flow/editing";
+import {
+  BlockNameEditor,
+  BlockSummaryEditor,
+  DiagnosticBadge,
+  TransitionEditor,
+} from "../flow/EditControls";
 import {
   blockById,
   blockWrites,
@@ -40,6 +47,7 @@ function Section({
   onSelect: (id: string | null) => void;
 } & Pick<RunViewProps, "progress" | "workflow" | "cursor">): React.JSX.Element {
   const { t } = useTranslation();
+  const { enabled: editing } = useEditing();
   const byId = blockById(blocks);
   const style = STATUS_STYLE[block.status];
   const [open, setOpen] = React.useState(selected);
@@ -68,24 +76,41 @@ function Section({
       aria-current={block.status === "active" || block.status === "waiting" ? "step" : undefined}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h3 id={`outline-${block.id}-title`} className="text-lg font-semibold leading-7">
-          <button
-            type="button"
-            className={cn(
-              "text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              block.status === "skipped" && "line-through decoration-muted-foreground/60",
-            )}
-            onClick={() => onSelect(selected ? null : block.id)}
-            aria-pressed={selected}
-          >
-            <span className="mr-2 tabular-nums text-muted-foreground">{block.index + 1}.</span>
-            {block.name}
-          </button>
+        <h3
+          id={`outline-${block.id}-title`}
+          className="min-w-0 flex-1 text-lg font-semibold leading-7"
+        >
+          {editing ? (
+            <span className="flex items-center gap-2">
+              <span className="tabular-nums text-muted-foreground">{block.index + 1}.</span>
+              <BlockNameEditor block={block} />
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={cn(
+                "text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                block.status === "skipped" && "line-through decoration-muted-foreground/60",
+              )}
+              onClick={() => onSelect(selected ? null : block.id)}
+              aria-pressed={selected}
+            >
+              <span className="mr-2 tabular-nums text-muted-foreground">{block.index + 1}.</span>
+              {block.name}
+            </button>
+          )}
         </h3>
-        <StatusChip status={block.status} iterations={block.iterations} />
+        {!editing && <StatusChip status={block.status} iterations={block.iterations} />}
+        <DiagnosticBadge blockId={block.id} />
       </header>
 
-      <p className="mt-2 max-w-3xl text-[15px] leading-7 text-foreground/90">{block.description}</p>
+      {editing ? (
+        <BlockSummaryEditor block={block} className="mt-2 block max-w-3xl text-[15px] leading-7" />
+      ) : (
+        <p className="mt-2 max-w-3xl text-[15px] leading-7 text-foreground/90">
+          {block.description}
+        </p>
+      )}
       {(content.summary || content.details.length > 0 || content.outcome || content.next) && (
         <dl className="mt-1 max-w-3xl space-y-0.5 text-sm">
           {content.summary && <dd className="font-medium">{content.summary}</dd>}
@@ -144,6 +169,7 @@ function Section({
                   <span className={cn("font-medium", transition.cycle && "text-primary")}>
                     {transition.label}
                   </span>
+                  <TransitionEditor transition={transition} className="ml-1 align-text-bottom" />
                   <span className="text-muted-foreground">
                     {" "}
                     {t(
@@ -200,11 +226,12 @@ function Section({
 
 export function OutlineView(props: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
+  const guideKey = useModeGuideKey();
   const { blocks, selectedBlockId, onSelectBlock } = props;
   return (
     <div className="h-full space-y-4 overflow-auto p-4" data-testid="outline-view">
-      <GuidanceCallout title={t("pages.runPage.modeGuide.outline.title")} testId="guidance-outline">
-        {t("pages.runPage.modeGuide.outline.body")}
+      <GuidanceCallout title={t(`${guideKey}.outline.title`)} testId="guidance-outline">
+        {t(`${guideKey}.outline.body`)}
       </GuidanceCallout>
       <div className="grid gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
         <nav

@@ -125,6 +125,7 @@ describe("execution attempt migration and persistence", () => {
       )!;
       sqlite.exec("DROP TABLE executionMutationAttempt");
       sqlite.exec("ALTER TABLE workflowExecution DROP COLUMN visits");
+      sqlite.exec("ALTER TABLE workflow DROP COLUMN revision");
       sqlite
         .prepare("DELETE FROM __drizzle_migrations WHERE created_at >= ?")
         .run(attemptMigration.when);

@@ -75,7 +75,9 @@ Engine integrations with a workflow and execution use `renderExecutionProgressIm
 returns `null` when progress is absent, otherwise the PNG buffer, MIME type, dimensions, workflow
 version, and execution revision; rendering failures stay errors.
 
-On the run page (see the _Reading a run_ guide) the same projection is shown as lanes, a canvas,
+The flow page (see the _Reading and editing a flow_ guide) shows the derived process of the
+definition itself and lets its owner edit it in place. On the run page (see the _Reading a run_
+guide) the same projection is shown as lanes, a canvas,
 an outline and the route, with a block panel that drills into each block's steps and focuses the
 technical node graph. The page and the PNG contain the same essential information. A workflow
 without progress shows the technical node graph and the context tabs instead.

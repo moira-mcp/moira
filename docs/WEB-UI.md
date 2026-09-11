@@ -46,6 +46,10 @@ frontend/src/
 │   │   ├── ExecutionInspector.tsx    # Run page with DI (fetchExecution prop, editable/canAnswer flags)
 │   │   ├── ContextVariableEditor.tsx # Per-path context editor
 │   │   └── ExecutionErrorHistory.tsx # Error log with collapsible entries, error badges
+│   ├── flow/                    # Flow page: the definition as a process, edited in place
+│   │   ├── editing.tsx / model.ts / modes.ts        # Edit set (apply, export diff), run-less projection, modes
+│   │   ├── SplitView.tsx / RegistryPanel.tsx        # Blocks against their steps; the variable registry
+│   │   └── EditControls.tsx                         # In-place editors (block text, transitions, owner, node text)
 │   ├── run/                     # Run page: the execution as a process
 │   │   ├── LanesView.tsx / CanvasView.tsx / OutlineView.tsx / RouteView.tsx  # The four modes
 │   │   ├── BlockDetailPanel.tsx / VariablesPanel.tsx / StepList.tsx        # Panel tabs
@@ -68,6 +72,7 @@ frontend/src/
 ├── pages/
 │   ├── Dashboard.tsx            # Home page with stat cards, Quick Start, recent ExecutionCards
 │   ├── Workflows.tsx            # Workflow explorer + viewer
+│   ├── FlowPage.tsx             # Flow page: the workflow definition as a process, edit mode for owners
 │   ├── Executions.tsx           # Execution history (ExecutionCard list/grid)
 │   ├── ExecutionInspectorPage.tsx   # User execution inspector wrapper
 │   ├── Settings.tsx             # User settings (single scrollable page)
@@ -202,6 +207,7 @@ Application routes:
 ```
 / (protected)                      - Dashboard (home page)
 /workflows (protected)             - Workflow explorer + viewer
+/workflows/:id (protected)         - Flow page (FlowPage.tsx); also /workflows/:handle/:slug
 /executions (protected)            - Execution history
 /artifacts (protected)             - User artifacts management
 /settings (protected)              - User settings (single scrollable page with all sections)
@@ -369,6 +375,48 @@ Execution history at `/executions` with filtering, sorting, and pagination.
 **LockedExecutionsWidget:**
 
 Yellow alert banner displayed above the execution list when locked executions exist. Shows count ("N locked execution(s)") with individual items listing workflow name and lock duration. Items collapse to 3 by default with expand/collapse toggle. User page shows own locked executions; admin page shows all locked executions with user email. Component: `LockedExecutionsWidget.tsx`, props: `admin` (boolean), `refreshKey` (number).
+
+### Flow page (FlowPage component)
+
+`/workflows/:id` and `/workflows/:handle/:slug` show one workflow definition as the process it
+declares (`pages/FlowPage.tsx`).
+
+**Data:** the workflow detail (`apiClient.getWorkflow`, whose `fileInfo.revision` is the
+definition revision the page saves against) and the saved definition's derived process
+(`apiClient.getWorkflowProcess`). While the page holds unsaved edits it re-derives the process in
+the browser with the engine's `deriveProcess` (the `@mcp-moira/workflow-engine/process` subpath),
+so the diagnostics it shows are the ones the server's validation would raise. The modes render a
+run-less projection (`components/flow/model.ts`: every block pending, no route, no cursor, no run
+title) through the run page's mode components; the page's context (`EditingProvider` with
+`definition`) makes the shared status chips and icons, the run's no-content sentences and the run
+mode notes disappear, and the modes read their notes from `pages.flowPage.modeGuide`. Derivation
+diagnostics are also shown on the offending block or step (`DiagnosticBadge`), and the registry
+panel edits a whole declaration as JSON Schema besides its type, description and default.
+
+**URL state:** `view` (`outline | canvas | lanes | split | graph`, default outline; `graph` is the
+only mode of a workflow without `progress`), `block`, `guide` (walkthrough step), `edit` (`1` turns
+on edit mode; ignored for non-owners).
+
+**Layout:** the toolbar (back, name and version, edit toggle with its hint for owners, the owner
+actions: copy for public flows, visibility, share, delete); a header row with the mode tabs and
+"Explain this page"; the edit panel while editing (edit count, discard, save, the loaded revision,
+the export diff as flow-file path / before / after, the server's refusal message); the process
+diagnostics inline; the mode filling the main area; a panel beside it (under it on a phone) with
+the **Block** tab (`BlockDetailPanel`, a step click opens the graph mode on that node) and the
+**Variables** tab (`RegistryPanel`). The graph mode mounts `WorkflowGraphWithFocus` with its
+controls beside `WorkflowSidebar`, as the former workflow detail page did.
+
+**Editing** (`components/flow/editing.tsx`): the edit set covers block label and summary,
+connection labels with a loop's cause and exit, node ownership, node text (directive, completion
+condition, message, expressions) and registry entries; `applyEdits` yields the edited definition,
+`exportDiff` the changed flow-file entries. Editors: `BlockNameEditor` / `BlockSummaryEditor`
+(outline and split), `TransitionEditor` (outline), `OwnerSelect` and `NodeTextEditor` (split),
+`RegistryPanel` (variables tab; a default and a whole declaration are parsed as JSON before they
+are applied). The save calls
+`apiClient.updateWorkflow(id, edited, fileInfo.revision)` (`PUT /api/workflows/:id`); a 409 shows
+the conflict text and a 400 the server's message, both keeping the edits; a success clears them and
+reloads the detail. The walkthrough (`Walkthrough`, generic over the page's modes) explains block,
+step, evidence, loop, editing and the modes.
 
 ### Run page (ExecutionInspector component)
 
@@ -691,14 +739,14 @@ Implementation: `pages/InviteAccept.tsx`
 
 **Shared Access Indicators:**
 
-WorkflowCard and WorkflowDetail show "Shared" badge when `accessType === "shared"`:
+WorkflowCard and FlowPage show "Shared" badge when `accessType === "shared"`:
 
 - Purple badge with Users icon
 - Indicates workflow was shared via invite link
 
 **Ownership Check:**
 
-`WorkflowDetail` uses `fileInfo.accessType === "owner"` to determine ownership. Delete and visibility buttons are only shown for owned workflows.
+`FlowPage` uses `fileInfo.accessType === "owner"` to determine ownership. Delete, visibility and edit mode are only shown for owned workflows.
 
 ### Workflow Card Layout
 
@@ -888,7 +936,8 @@ Supports `embedded` prop for rendering without header inside `AdminSettingsUnifi
 GET    /api/health                     // Backend status (requires auth)
 GET    /api/status                     // System status (requires auth)
 GET    /api/workflows                  // List all workflows with visibility
-GET    /api/workflows/:id              // Get workflow detail
+GET    /api/workflows/:id              // Get workflow detail (fileInfo.revision = definition revision)
+PUT    /api/workflows/:id              // Replace an owned definition against expectedRevision
 GET    /api/workflows/:id/raw          // Get raw workflow JSON
 POST   /api/workflows/:id/validate     // Validate workflow
 ```
@@ -1137,7 +1186,7 @@ Implementation uses ReactFlowProvider wrapper pattern with useReactFlow() hook f
 
 ### Node Selection System
 
-- **Persistent Sidebar**: `WorkflowSidebar` component (side-by-side with graph). Shows workflow info when no node selected, node details on selection. Used in `WorkflowDetail` page.
+- **Persistent Sidebar**: `WorkflowSidebar` component (side-by-side with graph). Shows workflow info when no node selected, node details on selection. Used in the flow page's graph mode.
 - **Legacy Sheet**: `NodeDetailSheet` (Sheet overlay). Used in execution views (`ExecutionInspector`, `WorkflowVisualizationPage`) where `onNodeSelect` is not provided.
 - **WorkflowGraph** accepts optional `onNodeSelect` callback. When provided, Sheet is disabled and node clicks route to external sidebar.
 
@@ -1760,7 +1809,7 @@ Page-level wrapper animations are **not used** on `AnimatedPage` (a `h-full` wra
 - CSS classes: `animate-in fade-in slide-in-from-bottom-3 duration-300 fill-mode-both`
 - Fade from transparent + slide up 12px over 300ms
 - Applied to: Dashboard, Settings, AdminDashboard, AdminAnalytics, AdminSettings, AdminUserDetail, UserManagement, DeletedWorkflows, OperationalDashboard
-- **Not applied to WorkflowDetail** — React Flow requires immediate full opacity to measure container dimensions
+- **Not applied to the flow page's graph mode** — React Flow requires immediate full opacity to measure container dimensions
 
 Usage: replace outermost `<div>` with `<FadeIn className="...">` in page content return (after loading guard).
 

@@ -1602,6 +1602,55 @@ Errors:
 
 Authentication: Required (owner only)
 
+### PUT /api/workflows/:id
+
+Replace the definition of a workflow the caller owns (the flow page's save). `id` is a UUID or the
+caller's slug.
+
+Request body:
+
+```typescript
+{
+  workflow: WorkflowGraph; // the whole definition as the client holds it
+  expectedRevision: number; // fileInfo.revision of the GET the edits were made against
+}
+```
+
+Order of refusals: workflow not found (404), caller not the owner (403), `expectedRevision` other
+than the stored revision (409 `CONFLICT`, `details.currentRevision`), the definition invalid under
+the same validation `manage edit` runs — block-contract diagnostics included (400
+`VALIDATION_FAILED`, `details.validation`); nothing is saved on a refusal. The save keeps the
+workflow's visibility and slug, advances its revision and is audited as a workflow edit.
+
+Response:
+
+```typescript
+{
+  success: true;
+  data: {
+    workflowId: string;
+    slug: string;
+    revision: number; // the new revision
+    lastModified: number;
+    validation: WorkflowValidationStatus;
+    version: string;
+    process: ProcessProjection | null; // re-derived from the saved definition
+  }
+  timestamp: string;
+}
+```
+
+**Workflow revision.** Every workflow row carries an integer `revision` (migration
+`0026_workflow_revision`, existing rows start at 0). It advances on every stored write of the
+graph: the shared repository save behind `WorkflowService.save` (this route, `POST /api/workflows`
+with `overwrite`, every `manage` mutation that stores a graph, upload, copy) and the reconciliation
+repository's apply (bundled-catalog install and reconciliation bundles). Writes that do not touch
+the graph — visibility, slug, validation cache — leave it alone. `GET /api/workflows/:id`, the
+handle/slug form and `manage get` return it as `fileInfo.revision` / `revision`; `manage edit`
+accepts an optional `expectedRevision` with the same refusal. This is unrelated to the
+reconciliation subsystem's string "revision" of conflict records and to an execution's step
+revision.
+
 ### POST /api/workflows/:id/copy
 
 Copy workflow as template (creates private copy).

@@ -239,6 +239,11 @@ export default defineConfig({
               slug: "docs/guides/editing-workflows",
             },
             {
+              label: "Reading and editing a flow",
+              translations: { ru: "Чтение и правка флоу" },
+              slug: "docs/guides/flow-page",
+            },
+            {
               label: "Reading a run",
               translations: { ru: "Чтение запуска" },
               slug: "docs/guides/run-page",

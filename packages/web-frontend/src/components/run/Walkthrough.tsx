@@ -16,17 +16,18 @@ import type { RunViewMode } from "./modes";
 
 export type PanelTab = "block" | "variables" | "context" | "errors" | "steps" | "graph" | "locks";
 
-export interface GuideStep {
-  id: "process" | "agent" | "evidence" | "loop" | "route" | "explore";
+/** One anchored step of a walkthrough; `M` is the page's mode id type. */
+export interface GuideStep<M extends string = RunViewMode, P extends string = PanelTab> {
+  id: string;
   /** Selector per mode; a mode without one switches to `fallbackView`. */
-  targets: Partial<Record<RunViewMode, string>>;
-  fallbackView: RunViewMode;
+  targets: Partial<Record<M, string>>;
+  fallbackView: M;
   /** The step needs a recorded route. */
   needsRoute?: boolean;
   /** The step needs the current block selected and its panel open. */
   needsCurrentBlock?: boolean;
   /** The panel tab the step opens. */
-  panel?: PanelTab;
+  panel?: P;
 }
 
 const ANY_MODE = (selector: string): Partial<Record<RunViewMode, string>> => ({
@@ -36,6 +37,7 @@ const ANY_MODE = (selector: string): Partial<Record<RunViewMode, string>> => ({
   route: selector,
 });
 
+/** The run page's steps: block, step, evidence, loop, route, explore. */
 export const GUIDE_STEPS: GuideStep[] = [
   {
     id: "process",
@@ -90,25 +92,31 @@ export const GUIDE_STEPS: GuideStep[] = [
 const HIGHLIGHT_STYLE =
   "0 0 0 3px var(--primary), 0 0 0 7px color-mix(in oklab, var(--primary) 25%, transparent)";
 
-export function Walkthrough({
+export function Walkthrough<M extends string = RunViewMode, P extends string = PanelTab>({
   step,
   mode,
   currentBlockId,
   routeRecorded,
   onNavigate,
   onPanel,
+  steps = GUIDE_STEPS as unknown as GuideStep<M, P>[],
+  textKey = "pages.runPage.guide",
 }: {
   /** 1-based step from the URL; 0 or absent means closed. */
   step: number;
-  mode: RunViewMode;
+  mode: M;
   currentBlockId: string | null;
   routeRecorded: boolean;
   onNavigate: (patch: Record<string, string | null>) => void;
-  onPanel: (tab: PanelTab) => void;
+  onPanel: (tab: P) => void;
+  /** The page's steps; the run page's by default. */
+  steps?: GuideStep<M, P>[];
+  /** i18n prefix holding `title`, `open`, `back`, `next`, `finish`, `close` and `steps.<id>`. */
+  textKey?: string;
 }): React.JSX.Element | null {
   const { t } = useTranslation();
-  const index = Math.min(Math.max(step, 0), GUIDE_STEPS.length) - 1;
-  const current = index >= 0 ? GUIDE_STEPS[index] : null;
+  const index = Math.min(Math.max(step, 0), steps.length) - 1;
+  const current = index >= 0 ? steps[index] : null;
 
   // Bring the page into the state the step needs: the right mode, the current block, the panel.
   useEffect(() => {
@@ -153,11 +161,11 @@ export function Walkthrough({
   }, [current, mode]);
 
   if (!current) return null;
-  const total = GUIDE_STEPS.length;
+  const total = steps.length;
   return (
     <aside
       role="dialog"
-      aria-label={t("pages.runPage.guide.title")}
+      aria-label={t(`${textKey}.title`)}
       data-testid="walkthrough"
       data-guide-step={current.id}
       className={cn(
@@ -168,23 +176,23 @@ export function Walkthrough({
         <Compass className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("pages.runPage.guide.title")} · {index + 1}/{total}
+            {t(`${textKey}.title`)} · {index + 1}/{total}
           </p>
           <h2 className="mt-0.5 text-base font-semibold leading-6">
-            {t(`pages.runPage.guide.steps.${current.id}.title`)}
+            {t(`${textKey}.steps.${current.id}.title`)}
           </h2>
           <p
             className="mt-1 text-sm leading-6 text-muted-foreground"
             data-testid="walkthrough-body"
           >
-            {t(`pages.runPage.guide.steps.${current.id}.body`)}
+            {t(`${textKey}.steps.${current.id}.body`)}
           </p>
         </div>
         <button
           type="button"
           onClick={() => onNavigate({ guide: null })}
           className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={t("pages.runPage.guide.close")}
+          aria-label={t(`${textKey}.close`)}
           data-testid="walkthrough-close"
         >
           <X className="size-4" aria-hidden="true" />
@@ -199,10 +207,10 @@ export function Walkthrough({
           data-testid="walkthrough-back"
         >
           <ChevronLeft className="size-3.5" aria-hidden="true" />
-          {t("pages.runPage.guide.back")}
+          {t(`${textKey}.back`)}
         </button>
         <div className="flex gap-1" aria-hidden="true">
-          {GUIDE_STEPS.map((s, i) => (
+          {steps.map((s, i) => (
             <span
               key={s.id}
               className={cn("size-1.5 rounded-full", i === index ? "bg-primary" : "bg-border")}
@@ -216,7 +224,7 @@ export function Walkthrough({
             className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
             data-testid="walkthrough-next"
           >
-            {t("pages.runPage.guide.next")}
+            {t(`${textKey}.next`)}
             <ChevronRight className="size-3.5" aria-hidden="true" />
           </button>
         ) : (
@@ -226,7 +234,7 @@ export function Walkthrough({
             className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
             data-testid="walkthrough-finish"
           >
-            {t("pages.runPage.guide.finish")}
+            {t(`${textKey}.finish`)}
           </button>
         )}
       </div>

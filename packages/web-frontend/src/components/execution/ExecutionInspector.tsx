@@ -66,10 +66,10 @@ import { Walkthrough, type PanelTab } from "../run/Walkthrough";
 import { currentBlockId, runBlocks, waitingStep, type RunViewProps } from "../run/model";
 import { clampCursor } from "../run/route";
 
-// Lazy load WorkflowGraph for better initial page load
-const WorkflowGraph = React.lazy(() =>
-  import("../workflow/WorkflowGraph").then((module) => ({
-    default: module.WorkflowGraph,
+// Lazy load the technical graph (with its focus wrapper) for better initial page load
+const WorkflowGraphWithFocus = React.lazy(() =>
+  import("../workflow/WorkflowGraphWithFocus").then((module) => ({
+    default: module.WorkflowGraphWithFocus,
   })),
 );
 
@@ -1227,55 +1227,3 @@ const StepProgression: React.FC<StepProgressionProps> = ({
     </div>
   );
 };
-
-/**
- * The technical node graph with a focus request: once the ReactFlow instance exists, every new
- * request (a node id plus a token so the same node can be focused twice) fits the view to it.
- * The init callback is stable and the instance is stored once: the graph re-runs its init effect
- * whenever the callback identity changes, so an inline callback that stores a fresh object each
- * time re-renders this wrapper without end and a deferred focus never gets to run.
- */
-interface WorkflowGraphWithFocusProps {
-  workflow: WorkflowGraphType;
-  validation?: {
-    isValid: boolean;
-    globalErrors: string[];
-    globalWarnings: string[];
-    nodeValidation: Record<string, { isValid: boolean; errors: string[]; warnings: string[] }>;
-  };
-  currentNodeId?: string | null;
-  errorNodeIds?: string[];
-  onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
-  showControls?: boolean;
-  showMinimap?: boolean;
-  showNodeDetails?: boolean;
-  focusRequest: { nodeId: string; token: number } | null;
-}
-
-function WorkflowGraphWithFocus({ focusRequest, ...props }: WorkflowGraphWithFocusProps) {
-  const [reactFlowInstance, setReactFlowInstance] = useState<{
-    fitView: (options?: { nodes?: { id: string }[]; padding?: number; duration?: number }) => void;
-  } | null>(null);
-
-  const handleInit = useCallback(
-    (instance: NonNullable<typeof reactFlowInstance>) =>
-      setReactFlowInstance((previous) => previous ?? instance),
-    [],
-  );
-
-  useEffect(() => {
-    if (!reactFlowInstance || !focusRequest) return;
-    // The graph lays itself out after init and fits the whole graph shortly after; the focus
-    // waits past that fit so the node, not the overview, ends up in view.
-    const timer = window.setTimeout(() => {
-      reactFlowInstance.fitView({
-        nodes: [{ id: focusRequest.nodeId }],
-        padding: 0.5,
-        duration: 300,
-      });
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [reactFlowInstance, focusRequest]);
-
-  return <WorkflowGraph {...props} onInit={handleInit} />;
-}

@@ -86,6 +86,8 @@ export interface WorkflowInfo {
   size: number;
   createdAt: number;
   updatedAt: number;
+  /** Definition revision; advanced by every stored write of the graph. */
+  revision: number;
   workflow: WorkflowGraph;
   // Cached validation info (Issue #463)
   validation: ValidationCache;

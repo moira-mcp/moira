@@ -8,6 +8,23 @@
 
 import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
 import type { ExecutionProgress } from "@mcp-moira/workflow-engine/progress-visual";
+import type { ProcessProjection } from "@mcp-moira/workflow-engine/process";
+
+export interface WorkflowProcessResponse {
+  workflowId: string;
+  version: string;
+  process: ProcessProjection | null;
+}
+
+export interface WorkflowUpdateResponse {
+  workflowId: string;
+  slug: string;
+  revision: number;
+  lastModified: number;
+  validation: unknown;
+  version: string;
+  process: ProcessProjection | null;
+}
 import {
   ApiResponse,
   ApiErrorCode,
@@ -16,6 +33,7 @@ import {
   FeaturesResponse,
   WorkflowListResponse,
   WorkflowDetailResponse,
+  WorkflowGraph,
   WorkflowValidationResponse,
   RawWorkflowResponse,
   WorkflowListRequest,
@@ -383,6 +401,47 @@ export class MoiraApiClient {
         throw error;
       }
       throw new ApiClientError(`Failed to get workflow: ${id}`, ApiErrorCode.WORKFLOW_NOT_FOUND);
+    }
+  }
+
+  /** The derived process view of the saved workflow; `process` is null without `progress`. */
+  async getWorkflowProcess(id: string): Promise<WorkflowProcessResponse> {
+    const response = await this.client.get<WorkflowProcessResponse>(
+      `/workflows/${encodeURIComponent(id)}/process`,
+    );
+    return response.data;
+  }
+
+  /**
+   * Replace the definition of an owned workflow against the revision it was read at. A stale
+   * revision (409), an invalid graph (400) and a refused authority (403) surface as an
+   * ApiClientError carrying the server's message, status and details.
+   */
+  async updateWorkflow(
+    id: string,
+    workflow: WorkflowGraph,
+    expectedRevision: number,
+  ): Promise<WorkflowUpdateResponse> {
+    try {
+      const response = await this.client.put<ApiResponse<WorkflowUpdateResponse>>(
+        `/workflows/${encodeURIComponent(id)}`,
+        { workflow, expectedRevision },
+      );
+      return response.data.data!;
+    } catch (error) {
+      if (error instanceof ApiClientError) throw error;
+      if (axios.isAxiosError(error) && error.response) {
+        const body = error.response.data as {
+          error?: { code?: string; message?: string; details?: Record<string, unknown> };
+        };
+        throw new ApiClientError(
+          body?.error?.message ?? error.message,
+          (body?.error?.code as ApiErrorCode) ?? ApiErrorCode.INTERNAL_ERROR,
+          error.response.status,
+          body?.error?.details,
+        );
+      }
+      throw new ApiClientError("Failed to save workflow", ApiErrorCode.INTERNAL_ERROR);
     }
   }
 

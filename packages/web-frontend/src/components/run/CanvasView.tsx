@@ -33,6 +33,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { StatusChip, STATUS_STYLE } from "./status";
 import { BLOCK_WIDTH, layoutBlocks, type BlockLayout, type LaidOutEdge } from "./layout";
 import { GuidanceCallout } from "./Guidance";
+import { useModeGuideKey } from "../flow/editing";
 import { currentBlockId, type RunBlock, type RunTransition, type RunViewProps } from "./model";
 
 type BlockNodeData = {
@@ -311,16 +312,17 @@ function CanvasInner({
 
 export function CanvasView(props: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
+  const guideKey = useModeGuideKey();
   return (
     <ReactFlowProvider>
       <div className="flex h-full flex-col">
         <div className="px-3 pt-3">
           <GuidanceCallout
-            title={t("pages.runPage.modeGuide.canvas.title")}
+            title={t(`${guideKey}.canvas.title`)}
             testId="guidance-canvas"
             className="mb-3"
           >
-            {t("pages.runPage.modeGuide.canvas.body")}
+            {t(`${guideKey}.canvas.body`)}
           </GuidanceCallout>
         </div>
         <div className="min-h-0 flex-1">

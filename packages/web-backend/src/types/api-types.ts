@@ -106,6 +106,8 @@ export interface WorkflowFileInfo {
   metadata: WorkflowGraph["metadata"];
   validation: WorkflowValidationStatus;
   lastModified: number;
+  /** Definition revision; every stored write of the graph advances it. Saves send it back as `expectedRevision`. */
+  revision: number;
   fileSize: number;
 }
 

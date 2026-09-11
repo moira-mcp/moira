@@ -138,6 +138,14 @@ export const manageWorkflowSchema = z.object({
     })
     .optional()
     .describe("Changes to apply for edit action"),
+  expectedRevision: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "edit only: the workflow revision the changes were prepared against (from get); the edit is refused when the stored revision differs",
+    ),
   includeNodes: z.boolean().optional().describe("Include full node definitions in get response"),
   includeValidation: z.boolean().optional().describe("Include validation results in response"),
   offset: z.number().optional().describe("Pagination offset for node listing"),

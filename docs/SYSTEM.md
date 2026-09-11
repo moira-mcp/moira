@@ -446,8 +446,11 @@ manage({ action: 'get-nodes', workflowId: 'workflow-id', nodeIds: ['start', 'end
 // Analyze definition-wide variable sources and usage
 manage({ action: 'analyze-variables', workflowId: 'workflow-id' })
 
-// Change an owned workflow's visibility
+// Change an owned workflow's visibility (leaves the stored graph and its revision alone)
 manage({ action: 'set-visibility', workflowId: 'workflow-id', visibility: 'private' })
+
+// Edit against the revision read by get: refused when the stored revision differs
+manage({ action: 'edit', workflowId: 'workflow-id', expectedRevision: 3, changes: {...} })
 
 // Validate workflow
 manage({

@@ -15,6 +15,7 @@ import { MapPin, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { GuidanceCallout } from "./Guidance";
+import { useEditing, useModeGuideKey } from "../flow/editing";
 import { StatusChip, StatusIcon, STATUS_STYLE } from "./status";
 import { arcGeometry, arcsHeight, buildArcs } from "./arcs";
 import { currentBlockId, type RunBlock, type RunViewProps } from "./model";
@@ -51,6 +52,7 @@ function LaneButton({
   vertical: boolean;
 }): React.JSX.Element {
   const { t } = useTranslation();
+  const { definition } = useEditing();
   const style = STATUS_STYLE[block.status];
   return (
     <button
@@ -97,7 +99,7 @@ function LaneButton({
       >
         {block.name}
       </span>
-      <span className="sr-only">{t(`pages.runPage.status.${block.status}`)}</span>
+      {!definition && <span className="sr-only">{t(`pages.runPage.status.${block.status}`)}</span>}
       {block.content.summary && (
         <span className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">
           {block.content.summary}
@@ -109,6 +111,7 @@ function LaneButton({
 
 function BlockContent({ block }: { block: RunBlock }): React.JSX.Element | null {
   const { t } = useTranslation();
+  const { definition } = useEditing();
   const { content } = block;
   const hasContent =
     content.summary || content.details.length > 0 || content.outcome || content.next;
@@ -138,7 +141,7 @@ function BlockContent({ block }: { block: RunBlock }): React.JSX.Element | null 
           {content.outcome && <dd className="text-success">✓ {content.outcome}</dd>}
           {content.next && <dd className="font-medium text-primary">→ {content.next}</dd>}
         </dl>
-      ) : (
+      ) : definition ? null : (
         <p className="mt-2 text-xs text-muted-foreground">
           {t(`pages.runPage.lanes.noContent.${block.status}`)}
         </p>
@@ -154,6 +157,7 @@ export function LanesView({
   onSelectBlock,
 }: RunViewProps): React.JSX.Element {
   const { t } = useTranslation();
+  const guideKey = useModeGuideKey();
   const [containerRef, width] = useContainerWidth();
   // A phone gets the vertical stepper; on any wider screen the rail keeps process order left to
   // right and scrolls inside its own container when the blocks do not fit.
@@ -216,8 +220,8 @@ export function LanesView({
           </dl>
         )}
       </header>
-      <GuidanceCallout title={t("pages.runPage.modeGuide.lanes.title")} testId="guidance-lanes">
-        {t("pages.runPage.modeGuide.lanes.body")}
+      <GuidanceCallout title={t(`${guideKey}.lanes.title`)} testId="guidance-lanes">
+        {t(`${guideKey}.lanes.body`)}
       </GuidanceCallout>
       <div
         ref={containerRef}

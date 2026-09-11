@@ -6,6 +6,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Check, CircleDashed, Hourglass, Loader2, RotateCcw, SkipForward } from "lucide-react";
+import { useEditing } from "../flow/editing";
 import { cn } from "@/lib/utils";
 import type { ExecutionBlockStatus } from "./model";
 
@@ -74,7 +75,9 @@ export function StatusIcon({
 }: {
   status: ExecutionBlockStatus;
   className?: string;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  const { definition } = useEditing();
+  if (definition) return null;
   const style = STATUS_STYLE[status];
   const Icon = style.icon;
   return (
@@ -94,8 +97,11 @@ export function StatusChip({
   status: ExecutionBlockStatus;
   iterations?: number;
   className?: string;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const { t } = useTranslation();
+  const { definition } = useEditing();
+  // A definition has no run: no block is "not reached", so nothing is shown.
+  if (definition) return null;
   const style = STATUS_STYLE[status];
   const Icon = style.icon;
   return (

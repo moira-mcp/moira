@@ -143,6 +143,8 @@ export interface WorkflowInfo {
   size: number;
   createdAt: number;
   updatedAt: number;
+  /** Definition revision; advanced by every stored write of the graph. */
+  revision: number;
   workflow: WorkflowGraph;
   // Cached validation info (Issue #463)
   validation: ValidationCache;
@@ -433,6 +435,7 @@ export class WorkflowRepository {
         graph: workflow.graph,
         createdAt: workflow.createdAt,
         updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
         isValid: workflow.isValid,
         validationErrors: workflow.validationErrors,
         validatedAt: workflow.validatedAt,
@@ -463,6 +466,7 @@ export class WorkflowRepository {
         size: row.graph.length,
         createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
         updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
+        revision: row.revision,
         workflow: graph,
         validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
       };
@@ -556,6 +560,7 @@ export class WorkflowRepository {
         graph: workflow.graph,
         createdAt: workflow.createdAt,
         updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
         isValid: workflow.isValid,
         validationErrors: workflow.validationErrors,
         validatedAt: workflow.validatedAt,
@@ -593,6 +598,7 @@ export class WorkflowRepository {
         size: row.graph.length,
         createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
         updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
+        revision: row.revision,
         workflow: graph,
         validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
       };
@@ -709,6 +715,7 @@ export class WorkflowRepository {
         graph: workflow.graph,
         createdAt: workflow.createdAt,
         updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
         isValid: workflow.isValid,
         validationErrors: workflow.validationErrors,
         validatedAt: workflow.validatedAt,
@@ -755,6 +762,7 @@ export class WorkflowRepository {
       size: row.graph.length,
       createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
       updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
+      revision: row.revision,
       workflow: graph,
       validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
     };
@@ -880,6 +888,7 @@ export class WorkflowRepository {
           deletedAt: null,
           deletedBy: null,
           updatedAt: now,
+          revision: sql`${workflow.revision} + 1`,
         })
         .where(eq(workflow.id, existingId));
 
@@ -1028,6 +1037,7 @@ export class WorkflowRepository {
         graph: workflow.graph,
         createdAt: workflow.createdAt,
         updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
         isValid: workflow.isValid,
         validationErrors: workflow.validationErrors,
         validatedAt: workflow.validatedAt,
@@ -1051,6 +1061,7 @@ export class WorkflowRepository {
         size: row.graph.length,
         createdAt: row.createdAt ? (row.createdAt as Date).getTime() : Date.now(),
         updatedAt: row.updatedAt ? (row.updatedAt as Date).getTime() : Date.now(),
+        revision: row.revision,
         workflow: graph,
         validation: parseValidationCache(row.isValid, row.validationErrors, row.validatedAt),
       };
@@ -1224,6 +1235,7 @@ export class WorkflowRepository {
         nodeCount: sql<number>`json_array_length(json_extract(${workflow.graph}, '$.nodes'))`,
         createdAt: workflow.createdAt,
         updatedAt: workflow.updatedAt,
+        revision: workflow.revision,
         isValid: workflow.isValid,
         validationErrors: workflow.validationErrors,
         validatedAt: workflow.validatedAt,

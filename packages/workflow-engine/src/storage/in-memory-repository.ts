@@ -54,6 +54,7 @@ export class InMemoryRepository implements IDataRepository {
       visibility: "public" | "private";
       createdAt: number;
       updatedAt: number;
+      revision: number;
     }
   >();
   private executions = new Map<string, WorkflowExecution>();
@@ -85,6 +86,7 @@ export class InMemoryRepository implements IDataRepository {
           size: JSON.stringify(data.graph).length,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
+          revision: data.revision,
           workflow: data.graph,
           // In-memory uses unknown validation status (not cached)
           validation: { status: "unknown", errors: [], validatedAt: null },
@@ -132,6 +134,7 @@ export class InMemoryRepository implements IDataRepository {
         size: JSON.stringify(data.graph).length,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
+        revision: data.revision,
         workflow: data.graph,
         // In-memory uses unknown validation status (not cached)
         validation: { status: "unknown", errors: [], validatedAt: null },
@@ -235,6 +238,7 @@ export class InMemoryRepository implements IDataRepository {
       size: JSON.stringify(data.graph).length,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
+      revision: data.revision,
       workflow: data.graph,
       // In-memory uses unknown validation status (not cached)
       validation: { status: "unknown", errors: [], validatedAt: null },
@@ -258,6 +262,7 @@ export class InMemoryRepository implements IDataRepository {
       visibility,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
+      revision: existing ? existing.revision + 1 : 0,
     });
 
     this.logger.debug("Workflow saved in memory", {

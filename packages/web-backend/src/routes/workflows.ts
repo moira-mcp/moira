@@ -28,7 +28,12 @@ import {
 import { WorkflowValidationService } from "../services/validation-service.js";
 import { buildWorkflowProcessResponse } from "../services/workflow-process.js";
 import { DatabaseRepository, WorkflowGraph, GraphNode } from "@mcp-moira/workflow-engine";
-import { getWorkflowService, queryWorkflowVariables, validateSlug } from "@mcp-moira/shared";
+import {
+  ConflictError,
+  getWorkflowService,
+  queryWorkflowVariables,
+  validateSlug,
+} from "@mcp-moira/shared";
 
 const router = Router();
 
@@ -240,6 +245,7 @@ router.get(
       metadata: info.metadata,
       validation: validation,
       lastModified: info.updatedAt,
+      revision: info.revision,
       fileSize: info.size,
     };
 
@@ -286,6 +292,7 @@ router.get(
       metadata: info.metadata,
       validation: validation,
       lastModified: info.updatedAt,
+      revision: info.revision,
       fileSize: info.size,
     };
 
@@ -386,6 +393,7 @@ router.get(
         metadata: workflowInfo.metadata,
         validation: validation,
         lastModified: workflowInfo.updatedAt,
+        revision: workflowInfo.revision,
         fileSize: workflowInfo.size,
       };
 
@@ -509,6 +517,7 @@ router.get(
         metadata: workflowInfo.metadata,
         validation: validation,
         lastModified: workflowInfo.updatedAt,
+        revision: workflowInfo.revision,
         fileSize: workflowInfo.size,
       };
 
@@ -776,6 +785,86 @@ router.post(
           status: result.validation?.status || "unknown",
           errors: validationErrors,
         },
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }),
+);
+
+/**
+ * PUT /api/workflows/:id - Replace the definition of a workflow the caller owns.
+ *
+ * Body: `{ workflow, expectedRevision }` — the whole definition as the client holds it and the
+ * revision it was read at (`fileInfo.revision` of the GET). Order of refusals: not found (404),
+ * not the owner (403), stale revision (409 `CONFLICT` with `currentRevision`), invalid graph
+ * (400 with the validation status; nothing is saved). The save advances the revision; the
+ * response carries the new revision and the re-derived process view.
+ */
+router.put(
+  "/:id",
+  validateParams({
+    id: paramValidators.workflowId,
+  }),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).userId;
+    const { workflow: incoming, expectedRevision } = req.body ?? {};
+
+    if (!Number.isInteger(expectedRevision)) {
+      throw createApiError.validationFailed("integer expectedRevision is required", {
+        field: "expectedRevision",
+      });
+    }
+    if (
+      !incoming ||
+      typeof incoming !== "object" ||
+      !incoming.metadata ||
+      !Array.isArray(incoming.nodes)
+    ) {
+      throw createApiError.validationFailed("workflow object with metadata and nodes is required", {
+        field: "workflow",
+      });
+    }
+
+    // Resolve as UUID first, then as the caller's slug
+    let info = await workflowService.getFullInfo(id, userId);
+    if (!info) {
+      const bySlug = await workflowService.getBySlug(id, userId);
+      if (bySlug) info = await workflowService.getFullInfo(bySlug.id, userId);
+    }
+    if (!info) throw createApiError.notFound(`Workflow not found: ${id}`);
+    if (info.accessType !== "owner") {
+      throw createApiError.forbidden("Only the owner can edit a workflow");
+    }
+    if (info.revision !== expectedRevision) {
+      throw new ConflictError("The workflow has changed; reload and apply the edits again", {
+        workflowId: info.id,
+        expectedRevision,
+        currentRevision: info.revision,
+      });
+    }
+
+    const graph: WorkflowGraph = { ...(incoming as WorkflowGraph), id: info.id };
+    const validationService = new WorkflowValidationService();
+    const validation = await validationService.validateWorkflow(graph);
+    if (!validation.isValid) {
+      throw createApiError.validationFailed("The workflow definition is invalid", {
+        validation,
+      });
+    }
+
+    await workflowService.save({ graph, userId, visibility: info.visibility, isUpdate: true });
+    const saved = await workflowService.getFullInfo(info.id, userId);
+    if (!saved) throw createApiError.notFound(`Workflow not found: ${id}`);
+
+    res.json({
+      success: true,
+      data: {
+        slug: saved.slug,
+        revision: saved.revision,
+        lastModified: saved.updatedAt,
+        validation,
+        ...buildWorkflowProcessResponse(saved.id, saved.workflow),
       },
       timestamp: new Date().toISOString(),
     });

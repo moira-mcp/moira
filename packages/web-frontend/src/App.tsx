@@ -30,9 +30,7 @@ import { InviteAcceptPage } from "./pages/InviteAccept";
 import { APP_PREFIX, ROUTES } from "./constants/routes";
 
 // Lazy-loaded heavy pages
-const WorkflowDetail = lazy(() =>
-  import("./pages/WorkflowDetail").then((m) => ({ default: m.WorkflowDetail })),
-);
+const FlowPage = lazy(() => import("./pages/FlowPage").then((m) => ({ default: m.FlowPage })));
 const Executions = lazy(() =>
   import("./pages/Executions").then((m) => ({ default: m.Executions })),
 );
@@ -80,9 +78,6 @@ const AdminTokens = lazy(() =>
 );
 const OperationalDashboard = lazy(() =>
   import("./pages/OperationalDashboard").then((m) => ({ default: m.OperationalDashboard })),
-);
-const ProcessViewPrototype = lazy(() =>
-  import("./pages/ProcessViewPrototype").then((m) => ({ default: m.ProcessViewPrototype })),
 );
 
 // Import global styles
@@ -146,14 +141,13 @@ const App: React.FC = () => {
                 >
                   <Route index element={<Dashboard />} />
                   <Route path="workflows" element={<Workflows />} />
-                  <Route path="workflows/:handle/:slug" element={<WorkflowDetail />} />
-                  <Route path="workflows/:id" element={<WorkflowDetail />} />
+                  <Route path="workflows/:handle/:slug" element={<FlowPage />} />
+                  <Route path="workflows/:id" element={<FlowPage />} />
                   <Route path="executions" element={<Executions />} />
                   <Route path="executions/:id" element={<ExecutionInspectorPage />} />
                   <Route path="notes" element={<Notes />} />
                   <Route path="artifacts" element={<Artifacts />} />
                   <Route path="settings" element={<Settings />} />
-                  <Route path="prototypes/process-view" element={<ProcessViewPrototype />} />
                 </Route>
 
                 {/* Admin routes - admin only */}
