@@ -814,10 +814,10 @@ level headings classify the tracked test paths listed beneath them.
 
 **integration**
 
-- `tests/integration/workspace-connections-migration.test.ts` — migration 0024 clean install, representative existing-database preservation, transactional failure rollback and ciphertext-only credential/revocation storage
+- `tests/integration/workspace-connections-migration.test.ts` — migration 0025 clean install, representative existing-database preservation, transactional failure rollback and ciphertext-only credential/revocation storage
 - `tests/integration/workspace-connection-service.test.ts` — expired/session/cross-tenant one-time state, foreign-installation rejection before repository enumeration, GitHub identity/install/repository binding, encrypted cross-tenant persistence, same-process and cross-service refresh single-flight, persisted pre-provider recovery authority plus successor disposition across staging/provider/CAS/disconnect failures, submitted-lease waiter recovery, ambiguous/expired/abandoned refresh failure, classic-OAuth rejection, combined exact pending revocation, active and pending-only unreadable recovery, restored-key exact disconnect, and installation-required behavior
 - `tests/integration/workspace-connection-http-lifecycle.test.ts` — real authenticated route, connection service, vault and SQLite start/callback/status/disconnect lifecycle with only outbound GitHub transport substituted and callback/token secrecy observed
-- `tests/integration/workspace-resources-migration.test.ts` — migration 0025 preserves Unit 1 connection data, creates secret-free lifecycle authority atomically and rolls back injected failure
+- `tests/integration/workspace-resources-migration.test.ts` — migration 0026 preserves Unit 1 connection data, creates secret-free lifecycle authority atomically and rolls back injected failure
 - `tests/integration/workspace-resource-lifecycle.test.ts` — persistent create/list/get/start/stop/delete, pre-submission disconnect, submitted create/stop and start/stop races, explicit generation-fenced deletion, provider-absence convergence, same-account/grant reauthorization, tenant isolation, durable lifecycle intent/accounting, exact identity, response-loss reconciliation, legacy cleanup, resource limits and kill switches
 - `tests/integration/workspace-operation-lifecycle.test.ts` — provider-neutral operation reservation, canonical workspace projection, argv/stdin/result non-persistence, daily/concurrent limits, cross-tenant and desired-state fencing, pre-dispatch credential failure, crash-abandoned reservation expiry without connector contact, durable dispatch intent and post-crash exact-marker recovery after claim expiry, unknown remote outcomes, background-observed result retrieval before bounded cleanup, cancellation/generation races and retryable remote finalization; one-call structured native-reference fetch/store/exact-binary dispatch, tenant-bound internal reference stdin, size/MIME/unavailable rejection, and foreign/missing/stopped/disabled/busy workspace rejection before source fetch, credentials or provider contact, plus claim release and consumption after durable dispatch
 - `tests/integration/workspace-persistent-operations-migration.test.ts` — authorization/lifecycle migration of accepted resources to explicit legacy retention, metadata-only operation schema and atomic rollback on an injected migration failure
@@ -839,6 +839,10 @@ level headings classify the tracked test paths listed beneath them.
 
 - `tests/e2e/workspace-management.spec.ts` — Settings workspace management with intercepted routes: readiness badge, agent-authority disclosure without chat/session wording, personal-billing context, busy state without actions, create, stop keeping data, confirmed generation-bound delete, disabled and administrator-stopped explanations in EN/RU, administrator stop/resume with confirmation, and inspected desktop/narrow screenshots
 - `tests/e2e/workspace-github-settings.spec.ts` — website-only connect navigation, callback outcome, connected repositories, disconnect confirmation, unreadable-credential and untracked-refresh full-grant recovery, safe actionable EN/RU states and inspected desktop/narrow screenshots
+
+**docker**
+
+- `tests/docker/workspace-connector-isolation.sh` (`npm run test:docker-connector-isolation`) — packaged workspace connector isolation on the built runtime image: denied Moira application/control endpoints, database and data paths, host and private networks, another tenant's volume, the Docker socket and cloud metadata through the actual filesystem and network policy, while the narrowly required GitHub egress path stays usable
 
 ### workflow-engine
 

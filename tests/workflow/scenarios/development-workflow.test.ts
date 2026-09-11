@@ -379,10 +379,10 @@ const scenarios: TestScenario[] = [
     ["wait-for-health-state-change", "create-plan", "end"],
   ),
   flow(
-    "external baseline blocker can abort truthfully",
+    "external baseline blocker can end the workflow truthfully",
     {
       "assess-project-health": { health_outcome: "external_blocker" },
-      "wait-for-health-state-change": { blocker_decision: "abort" },
+      "wait-for-health-state-change": { blocker_decision: "end_workflow" },
     },
     ["wait-for-health-state-change", "end-aborted"],
     ["create-plan", "review-final-semantics"],
@@ -464,10 +464,10 @@ const scenarios: TestScenario[] = [
     ["approve-current-unit-closure", "revise-plan-for-replan", "review-plan", "end"],
   ),
   flow(
-    "closure refusal cannot advance the approved cursor",
+    "closure end_workflow cannot advance the approved cursor",
     {
       "review-architecture": [{ review_outcome: "replan" }, { review_outcome: "pass" }],
-      "approve-current-unit-closure": { closure_decision: "refused" },
+      "approve-current-unit-closure": { closure_decision: "end_workflow" },
     },
     ["approve-current-unit-closure", "end-aborted"],
     ["revise-plan-for-replan"],
@@ -485,10 +485,10 @@ const scenarios: TestScenario[] = [
     ["repair-runtime", "wait-for-runtime-state-change", "end"],
   ),
   flow(
-    "runtime external blocker can abort",
+    "runtime external blocker can end the workflow",
     {
       "validate-runtime": { validation_outcome: "external_blocker" },
-      "wait-for-runtime-state-change": { blocker_decision: "abort" },
+      "wait-for-runtime-state-change": { blocker_decision: "end_workflow" },
     },
     ["wait-for-runtime-state-change", "end-aborted"],
     ["validate-expensive"],
@@ -506,10 +506,10 @@ const scenarios: TestScenario[] = [
     ["repair-expensive", "wait-for-expensive-state-change", "end"],
   ),
   flow(
-    "expensive external blocker can abort",
+    "expensive external blocker can end the workflow",
     {
       "validate-expensive": { validation_outcome: "external_blocker" },
-      "wait-for-expensive-state-change": { blocker_decision: "abort" },
+      "wait-for-expensive-state-change": { blocker_decision: "end_workflow" },
     },
     ["wait-for-expensive-state-change", "end-aborted"],
     ["review-plan-unit-with-user"],
@@ -617,10 +617,10 @@ const scenarios: TestScenario[] = [
     ["wait-for-feature-state-change", "review-final-semantics", "end"],
   ),
   flow(
-    "feature-wide external blocker can abort",
+    "feature-wide external blocker can end the workflow",
     {
       "validate-feature-wide": { validation_outcome: "external_blocker" },
-      "wait-for-feature-state-change": { blocker_decision: "abort" },
+      "wait-for-feature-state-change": { blocker_decision: "end_workflow" },
     },
     ["wait-for-feature-state-change", "end-aborted"],
     ["review-final-semantics"],
@@ -637,11 +637,11 @@ const scenarios: TestScenario[] = [
     ["repair-finalization-repository", "validate-cheap", "finalize-feature", "end"],
   ),
   flow(
-    "authorized finalization external blocker can retry skip or abort",
+    "authorized finalization external blocker can finish without finalization",
     {
       "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": { finalization_outcome: "external_blocker" },
-      "resolve-finalization-blocker": { blocker_decision: "skip" },
+      "resolve-finalization-blocker": { blocker_decision: "finish_without_finalization" },
     },
     ["resolve-finalization-blocker", "route-finalization-skip", "end"],
   ),
@@ -658,11 +658,11 @@ const scenarios: TestScenario[] = [
     ["route-finalization-retry", "finalize-feature", "end"],
   ),
   flow(
-    "authorized finalization external blocker can abort",
+    "authorized finalization external blocker can end the workflow",
     {
       "activate-reviewed-plan": { ...activatedPlan, vcs_commits_authorized: true },
       "finalize-feature": { finalization_outcome: "external_blocker" },
-      "resolve-finalization-blocker": { blocker_decision: "abort" },
+      "resolve-finalization-blocker": { blocker_decision: "end_workflow" },
     },
     ["route-finalization-skip", "end-aborted"],
     ["end"],
