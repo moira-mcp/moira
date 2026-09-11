@@ -1125,6 +1125,36 @@ Errors:
 
 Authentication: Via token (no session required)
 
+## Workspace Transfer Download API
+
+### GET /api/workspaces/transfers/:token
+
+Deliver one private workspace file published by the MCP `workspace_download` tool. The tool
+returns this URL to the agent as an MCP `resource_link`; the token in the path is the only
+authorization, so the URL must not be logged or shared.
+
+Success returns the exact stored bytes as an attachment with the published MIME type and file
+name and these headers:
+
+```http
+Cache-Control: private, no-store, max-age=0
+X-Content-Type-Options: nosniff
+X-Robots-Tag: noindex, nofollow, noarchive
+Referrer-Policy: no-referrer
+```
+
+The capability is consumed after complete or interrupted delivery, so a second request, an
+expired capability, a malformed token and an unknown token all return
+`404 { "error": "workspace_transfer_not_found" }`. Objects expire after
+`WORKSPACE_TRANSFER_TTL_MINUTES` and are limited by the transfer quotas described in
+`docs/WORKSPACES.md`.
+
+The route runs in the MCP process; both nginx variants proxy the `/api/workspaces/transfers/`
+prefix directly to it without buffering or temporary files and with access/error logging
+disabled. The route is rate-limited.
+
+Authentication: One-use capability token in the path
+
 ## Communication Attachment API
 
 ### POST /api/communication/attachments

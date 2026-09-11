@@ -7,6 +7,7 @@ import type {
   WorkspaceNativeReferenceResponse,
 } from "@mcp-moira/shared";
 import { publicIp } from "./github-codespaces-egress-proxy.js";
+import { supportedWorkspaceTransferMime } from "@mcp-moira/shared";
 
 const MAX_REDIRECTS = 3;
 const RESPONSE_TIMEOUT_MS = 30_000;
@@ -99,13 +100,24 @@ export class OpenAINativeReferenceFetcher implements WorkspaceNativeReferenceFet
           reject(new Error("Native file content length is invalid"));
           return;
         }
-        const contentType = response.headers["content-type"];
-        if (typeof contentType !== "string" || contentType.length > 256) {
-          response.resume();
+        const contentType = response.headers["content-type"] ?? "application/octet-stream";
+        if (
+          typeof contentType !== "string" ||
+          contentType.length > 256 ||
+          !supportedWorkspaceTransferMime(contentType.toLowerCase().split(";", 1)[0].trim())
+        ) {
+          response.destroy();
           reject(new Error("Native file content type is invalid"));
           return;
         }
-        resolve({ contentLength, mimeType: contentType, body: response });
+        resolve({
+          contentLength,
+          mimeType: contentType,
+          body: response,
+          cancel: () => {
+            response.destroy();
+          },
+        });
       });
       request.setTimeout(RESPONSE_TIMEOUT_MS, () =>
         request.destroy(new Error("Native file request timed out")),

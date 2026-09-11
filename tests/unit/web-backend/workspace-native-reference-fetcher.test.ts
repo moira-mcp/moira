@@ -40,6 +40,36 @@ function requestHarness(values: IncomingMessage[]) {
 }
 
 describe("OpenAI native file reference fetcher", () => {
+  test("accepts the two-field native reference with absent MIME as bounded binary metadata", async () => {
+    const incoming = response(200, { "content-length": "3" });
+    const harness = requestHarness([incoming]);
+    const fetcher = new OpenAINativeReferenceFetcher(
+      harness.request,
+      jest.fn(async () => [{ address: "8.8.8.8", family: 4 }]) as never,
+    );
+    const result = await fetcher.fetch({
+      fileId: reference.fileId,
+      downloadUrl: reference.downloadUrl,
+    });
+    expect(result).toMatchObject({ contentLength: 3, mimeType: "application/octet-stream" });
+    result.cancel!();
+    expect(incoming.destroyed).toBe(true);
+  });
+
+  test.each(["", "not-a-mime", "application/x-executable", "x".repeat(257)])(
+    "rejects a present invalid MIME header %s",
+    async (mimeType) => {
+      const incoming = response(200, { "content-type": mimeType });
+      const harness = requestHarness([incoming]);
+      const fetcher = new OpenAINativeReferenceFetcher(
+        harness.request,
+        jest.fn(async () => [{ address: "8.8.8.8", family: 4 }]) as never,
+      );
+      await expect(fetcher.fetch(reference)).rejects.toThrow(/content type/);
+      expect(incoming.destroyed).toBe(true);
+    },
+  );
+
   test("accepts only the narrow observed OpenAI issuer families", () => {
     expect(trustedNativeFileHost("files.oaiusercontent.com")).toBe(true);
     expect(trustedNativeFileHost("oaisdmntprdenmarkeast.blob.core.windows.net")).toBe(true);

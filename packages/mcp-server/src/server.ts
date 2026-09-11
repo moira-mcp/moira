@@ -42,12 +42,9 @@ import {
   getWorkflowReconciliationStatusSummary,
   formatWorkflowReconciliationNotice,
   CommunicationAttachmentGrantService,
-  WorkspaceTransferRepository,
-  WorkspaceTransferService,
-  getDbPath,
-  getWorkspaceResourcePolicy,
   logAuditEvent,
 } from "@mcp-moira/shared";
+import { getWorkspaceTransferService } from "@mcp-moira/web-backend/services";
 
 // Get monorepo version from root package.json (#196)
 export const MCP_SERVER_VERSION: string = getMcpServerVersion() || "0.0.0";
@@ -69,6 +66,7 @@ import { mcpLimiter } from "./middleware/rate-limit-middleware.js";
 
 import { buildReconciliationAwareInstructions } from "./reconciliation-aware-server.js";
 import { registerTools } from "./tools/register-tools.js";
+import { workspaceToolLogContext } from "./tools/manage-workspaces.js";
 import {
   getCatalogInitializeRequest,
   requireRevisionStampBeforeInitializeResult,
@@ -78,7 +76,6 @@ import { MCP_TOOLS_REVISION, TOOL_DEFINITIONS } from "./tools/tool-definitions.j
 import { CommunicationAttachmentInflightLimiter } from "./communication-attachment-inflight.js";
 import { createCommunicationAttachmentHandler } from "./communication-attachment-route.js";
 import { createWorkspaceTransferDownloadHandler } from "./workspace-transfer-route.js";
-import { dirname, join } from "node:path";
 
 // Initialize logger
 const logger = createLogger({ component: "MCPServer" });
@@ -437,7 +434,9 @@ async function handleAuthenticatedMcpRequest(
 
   await runWithMCPContext(userContext, async () => {
     if (toolName && toolArgs) {
-      const { inputData, resourceIds } = sanitizeInput(toolArgs);
+      const { inputData, resourceIds } = toolName.startsWith("workspace_")
+        ? workspaceToolLogContext(toolName, toolArgs)
+        : sanitizeInput(toolArgs);
       updateContext({ operation: `mcp:${toolName}`, inputData, resourceIds });
     }
     await transport.handleRequest(req, res, req.body);
@@ -457,13 +456,7 @@ const app = express();
 
 const attachmentGrantService = new CommunicationAttachmentGrantService();
 const attachmentInflight = new CommunicationAttachmentInflightLimiter();
-const workspaceTransferService = new WorkspaceTransferService({
-  repository: new WorkspaceTransferRepository(getSqliteInstance()),
-  policy: getWorkspaceResourcePolicy,
-  root: join(dirname(getDbPath()), "workspace-transfers"),
-  onCleanupError: (error) => logger.error("Workspace transfer cleanup failed", error),
-});
-workspaceTransferService.start();
+const workspaceTransferService = getWorkspaceTransferService();
 
 // Prometheus metrics middleware FIRST
 app.use(metricsMiddleware());

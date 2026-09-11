@@ -8,6 +8,7 @@ import type {
   WorkspaceResourceRecord,
 } from "./resource-types.js";
 import { WorkspaceResourceRepository } from "./resource-repository.js";
+import { WorkspaceResourceError } from "./resource-types.js";
 
 const ACTIVE_OPERATION_STATES = [
   "reserved",
@@ -27,7 +28,7 @@ function truncateUtf8(value: string, maximumBytes: number): string {
 }
 
 interface ReserveOperationResult {
-  outcome: "reserved" | "not_found" | "not_running" | "disabled" | "limit";
+  outcome: "reserved" | "not_found" | "not_running" | "disabled" | "busy" | "limit";
   operation?: WorkspaceOperationRecord;
   workspace?: WorkspaceResourceRecord;
 }
@@ -99,7 +100,7 @@ export class WorkspaceOperationRepository {
         userCount >= (input.policy.maxConcurrentOperationsPerUser ?? 2) ||
         globalCount >= (input.policy.maxConcurrentOperationsGlobal ?? 20)
       ) {
-        return { outcome: "limit" } as ReserveOperationResult;
+        return { outcome: "busy" } as ReserveOperationResult;
       }
       if (
         ["write", "apply_patch", "upload"].includes(input.kind ?? "exec") &&
@@ -110,7 +111,7 @@ export class WorkspaceOperationRepository {
           )
           .get(input.resourceId, ...ACTIVE_OPERATION_STATES)
       ) {
-        return { outcome: "limit" } as ReserveOperationResult;
+        return { outcome: "busy" } as ReserveOperationResult;
       }
       const utcDay = new Date(input.now).toISOString().slice(0, 10);
       const usage = this.sqlite
@@ -175,6 +176,22 @@ export class WorkspaceOperationRepository {
     return row ?? null;
   }
 
+  recordInputBytes(
+    userId: string,
+    operationId: string,
+    inputBytes: number,
+    now: number,
+  ): WorkspaceOperationRecord | null {
+    if (!Number.isSafeInteger(inputBytes) || inputBytes < 0) return null;
+    const changed = this.sqlite
+      .prepare(
+        `UPDATE workspaceOperation SET inputBytes = ?, updatedAt = ?
+       WHERE id = ? AND userId = ? AND state = 'reserved' AND inputBytes >= ?`,
+      )
+      .run(inputBytes, now, operationId, userId, inputBytes).changes;
+    return changed === 1 ? this.getOwned(userId, operationId) : null;
+  }
+
   listOwned(userId: string, resourceId: string): WorkspaceOperationRecord[] {
     return this.sqlite
       .prepare(
@@ -201,6 +218,85 @@ export class WorkspaceOperationRepository {
     const record = this.getOwned(userId, operationId);
     if (!record) throw new Error("Workspace operation disappeared");
     return record;
+  }
+
+  /** Caller-visible bytes require current authority; cleanup uses getContext independently. */
+  requireResultContext(
+    userId: string,
+    operationId: string,
+    policy: WorkspaceResourcePolicy,
+    now: number,
+  ): { operation: WorkspaceOperationRecord; workspace: WorkspaceResourceRecord } {
+    const context = this.getContext(userId, operationId);
+    if (!context) {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace operation was not found");
+    }
+    const { operation, workspace } = context;
+    if (
+      !policy.enabled ||
+      this.sqlite
+        .prepare(
+          "SELECT 1 FROM workspaceProviderControl WHERE disabled = 1 AND scope IN ('global', ?) LIMIT 1",
+        )
+        .get(`provider:${operation.provider}`)
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_PROVIDER_DISABLED",
+        "Workspace provider is disabled",
+      );
+    }
+    if (
+      workspace.generation !== operation.resourceGeneration ||
+      workspace.authorizationGeneration !== operation.authorizationGeneration ||
+      workspace.provider !== operation.provider ||
+      workspace.providerResourceName !== operation.providerResourceName
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_GENERATION_CONFLICT",
+        "Workspace operation authority changed",
+      );
+    }
+    if (workspace.state !== "usable" || workspace.desiredState !== "running") {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_RUNNING", "Workspace is not running");
+    }
+    const connection = this.sqlite
+      .prepare(
+        `SELECT credentialGeneration, status FROM workspaceConnection
+       WHERE id = ? AND userId = ? AND provider = ? AND externalAccountId = ?`,
+      )
+      .get(workspace.connectionId, userId, operation.provider, workspace.externalOwnerId) as
+      { credentialGeneration: number; status: string } | undefined;
+    if (connection && connection.credentialGeneration !== operation.authorizationGeneration) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_GENERATION_CONFLICT",
+        "Workspace authorization generation changed",
+      );
+    }
+    if (
+      connection?.status !== "connected" ||
+      !this.sqlite
+        .prepare(
+          "SELECT 1 FROM workspaceConnectionRepository WHERE connectionId = ? AND externalRepositoryId = ?",
+        )
+        .get(workspace.connectionId, workspace.repositoryId)
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_AUTHORIZATION_REQUIRED",
+        "Workspace authorization must be restored in settings",
+      );
+    }
+    if (
+      ["succeeded", "failed", "cancelled", "timed_out"].includes(operation.state) &&
+      (operation.remoteCleanupPending !== 1 ||
+        operation.resultExpiresAt === null ||
+        operation.resultExpiresAt <= now)
+    ) {
+      throw new WorkspaceResourceError(
+        "WORKSPACE_RESULT_EXPIRED",
+        "Workspace operation result is no longer retained",
+      );
+    }
+    return context;
   }
 
   markRunning(

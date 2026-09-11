@@ -17,6 +17,20 @@ import {
   stepSchema,
   tokenSchema,
   communicationSchema,
+  workspaceApplyPatchSchema,
+  workspaceCreateSchema,
+  workspaceDeleteSchema,
+  workspaceDownloadSchema,
+  workspaceExecSchema,
+  workspaceGetSchema,
+  workspaceListSchema,
+  workspaceReadSchema,
+  workspaceSearchSchema,
+  workspaceStartSchema,
+  workspaceStatSchema,
+  workspaceStopSchema,
+  workspaceUploadSchema,
+  workspaceWriteSchema,
 } from "./tool-schemas.js";
 
 export type ToolResponsePolicy = "json" | "text" | "json-or-text" | "formatted-text";
@@ -44,6 +58,7 @@ export interface ToolDefinition<
   descriptions: ToolDescriptions;
   schema: Schema;
   responsePolicy: ToolResponsePolicy;
+  _meta?: Readonly<Record<string, unknown>>;
   examples: readonly Readonly<Record<string, unknown>>[];
   documentation: {
     en: ToolDocumentation;
@@ -335,6 +350,301 @@ export const TOOL_DEFINITIONS = [
       },
     },
   }),
+  defineTool({
+    name: "workspace_list",
+    schema: workspaceListSchema,
+    responsePolicy: "json",
+    examples: [{}],
+    documentation: {
+      en: {
+        summary: "List reusable cloud workspaces and approved repository targets.",
+        result: "Sanitized readiness, repository targets, and persistent workspace summaries.",
+      },
+      ru: {
+        summary: "Показывает переиспользуемые облачные workspace и разрешённые репозитории.",
+        result: "Безопасные сведения о готовности, репозиториях и постоянных workspace.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_create",
+    schema: workspaceCreateSchema,
+    responsePolicy: "json",
+    examples: [{ repository_id: "123456", ref: "main" }],
+    documentation: {
+      en: {
+        summary: "Create a persistent user-owned cloud workspace.",
+        result: "A sanitized usable or truthfully pending workspace.",
+      },
+      ru: {
+        summary: "Создаёт постоянный пользовательский облачный workspace.",
+        result: "Безопасное описание готового или ещё создающегося workspace.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_get",
+    schema: workspaceGetSchema,
+    responsePolicy: "json",
+    examples: [{ workspace_id: "00000000-0000-4000-8000-000000000000" }],
+    documentation: {
+      en: { summary: "Inspect one owned workspace.", result: "A sanitized workspace summary." },
+      ru: { summary: "Показывает один свой workspace.", result: "Безопасная сводка workspace." },
+    },
+  }),
+  defineTool({
+    name: "workspace_start",
+    schema: workspaceStartSchema,
+    responsePolicy: "json",
+    examples: [{ workspace_id: "00000000-0000-4000-8000-000000000000" }],
+    documentation: {
+      en: { summary: "Start a stopped persistent workspace.", result: "Current workspace state." },
+      ru: {
+        summary: "Запускает остановленный постоянный workspace.",
+        result: "Текущее состояние workspace.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_stop",
+    schema: workspaceStopSchema,
+    responsePolicy: "json",
+    examples: [{ workspace_id: "00000000-0000-4000-8000-000000000000" }],
+    documentation: {
+      en: {
+        summary: "Stop a workspace while preserving its data.",
+        result: "Stopped or pending workspace state with data_preserved=true.",
+      },
+      ru: {
+        summary: "Останавливает workspace с сохранением данных.",
+        result: "Остановленное или ожидающее состояние с data_preserved=true.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_delete",
+    schema: workspaceDeleteSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        expected_generation: 3,
+        confirm_delete: true,
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Permanently delete a workspace using its current generation.",
+        result: "Deleted or pending state with data_preserved=false.",
+      },
+      ru: {
+        summary: "Безвозвратно удаляет workspace по его текущему поколению.",
+        result: "Удалённое или ожидающее состояние с data_preserved=false.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_exec",
+    _meta: { "openai/fileParams": ["stdin_file"] },
+    schema: workspaceExecSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        argv: ["git", "status", "--short"],
+        cwd: ".",
+        timeout_seconds: 60,
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Run one bounded argv command directly in a workspace.",
+        result:
+          "Durable operation state and bounded stdout, stderr, and exact exit code when terminal.",
+      },
+      ru: {
+        summary: "Выполняет одну ограниченную argv-команду прямо в workspace.",
+        result:
+          "Состояние операции и ограниченные stdout, stderr и точный код выхода после завершения.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_stat",
+    schema: workspaceStatSchema,
+    responsePolicy: "json",
+    examples: [{ workspace_id: "00000000-0000-4000-8000-000000000000", path: "package.json" }],
+    documentation: {
+      en: {
+        summary: "Inspect repository-relative file metadata.",
+        result: "Bounded file or directory metadata and version.",
+      },
+      ru: {
+        summary: "Показывает метаданные файла относительно репозитория.",
+        result: "Ограниченные метаданные файла или каталога и версия.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_search",
+    schema: workspaceSearchSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        path: ".",
+        query: "TODO",
+        mode: "literal",
+        max_matches: 100,
+        max_bytes: 65536,
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Search repository text with explicit limits.",
+        result: "Bounded match coordinates and a truncation flag.",
+      },
+      ru: {
+        summary: "Ищет текст в репозитории с явными ограничениями.",
+        result: "Ограниченные координаты совпадений и признак усечения.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_read",
+    schema: workspaceReadSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        path: "src/index.ts",
+        offset: 0,
+        length: 65536,
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Read a bounded UTF-8 byte range from a workspace file.",
+        result:
+          "Text with offset, total size, and SHA-256; binary data requires workspace_download.",
+      },
+      ru: {
+        summary: "Читает ограниченный UTF-8 диапазон файла workspace.",
+        result:
+          "Текст, смещение, полный размер и SHA-256; для бинарных данных используется workspace_download.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_write",
+    schema: workspaceWriteSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        path: "notes.txt",
+        text: "done\n",
+        expected: { exists: false },
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Atomically replace one UTF-8 file with preconditions.",
+        result: "Previous and current content versions.",
+      },
+      ru: {
+        summary: "Атомарно заменяет один UTF-8 файл с предусловиями.",
+        result: "Предыдущая и текущая версии содержимого.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_apply_patch",
+    schema: workspaceApplyPatchSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        files: [
+          {
+            path: "notes.txt",
+            expected: { exists: true },
+            edits: [{ start: 0, end: 4, text: "ready" }],
+          },
+        ],
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Apply a coherent structured multi-file patch with preconditions.",
+        result: "Per-file versions and a bounded content-free edit summary.",
+      },
+      ru: {
+        summary: "Согласованно применяет структурированный патч к нескольким файлам.",
+        result: "Версии файлов и ограниченная сводка изменений без содержимого.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_upload",
+    _meta: { "openai/fileParams": ["file"] },
+    schema: workspaceUploadSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        path: "input.txt",
+        file: {
+          file_id: "sediment://file_00000000000000000000000000000000",
+          download_url: "https://oaiusercontent.com/example-temporary-file",
+          file_name: "input.txt",
+          mime_type: "text/plain",
+          size_bytes: 12,
+        },
+        expected: { exists: false },
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Atomically upload a native ChatGPT file reference into a workspace.",
+        result: "Previous and current file versions without returning source URL or bytes.",
+      },
+      ru: {
+        summary: "Атомарно загружает нативный файловый reference ChatGPT в workspace.",
+        result: "Предыдущая и текущая версии без исходной ссылки и байтов.",
+      },
+    },
+  }),
+  defineTool({
+    name: "workspace_download",
+    schema: workspaceDownloadSchema,
+    responsePolicy: "json",
+    examples: [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        path: "result.pdf",
+        max_bytes: 4194304,
+        file_name: "result.pdf",
+        mime_type: "application/pdf",
+      },
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000000",
+        operation_id: "11111111-1111-4111-8111-111111111111",
+        file_name: "result.pdf",
+        mime_type: "application/pdf",
+      },
+    ],
+    documentation: {
+      en: {
+        summary: "Create a one-use native download for a workspace file.",
+        result: "An MCP resource_link plus safe file and operation metadata.",
+      },
+      ru: {
+        summary: "Создаёт одноразовую нативную загрузку файла workspace.",
+        result: "MCP resource_link и безопасные метаданные файла и операции.",
+      },
+    },
+  }),
 ] as const;
 
 export type McpToolName = (typeof TOOL_DEFINITIONS)[number]["name"];
@@ -377,18 +687,43 @@ function canonicalize(value: unknown): unknown {
   );
 }
 
-export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema">) {
+export function getToolJsonSchema(definition: Pick<ToolDefinition, "schema" | "_meta">) {
   const schema = zodToJsonSchema(definition.schema as ZodTypeAny, {
     $refStrategy: "none",
     strictUnions: true,
     pipeStrategy: "input",
   });
+  const fileParams = definition._meta?.["openai/fileParams"];
+  if (Array.isArray(fileParams) && !("properties" in schema)) {
+    const union = schema as {
+      anyOf?: Array<{ properties?: Record<string, unknown> }>;
+      oneOf?: Array<{ properties?: Record<string, unknown> }>;
+    };
+    const branches = union.anyOf ?? union.oneOf ?? [];
+    const properties: Record<string, unknown> = {};
+    for (const field of fileParams) {
+      if (typeof field !== "string") throw new Error("File parameter names must be strings");
+      const candidates = branches.flatMap((branch) =>
+        branch.properties?.[field] ? [branch.properties[field]] : [],
+      );
+      if (
+        !candidates.length ||
+        candidates.some((candidate) => JSON.stringify(candidate) !== JSON.stringify(candidates[0]))
+      ) {
+        throw new Error(`File parameter has no consistent object schema: ${field}`);
+      }
+      properties[field] = candidates[0];
+    }
+    // Native-file discovery reads top-level properties. Keep the original closed
+    // branches as constraints, so publishing file fields does not permit mixed calls.
+    return { ...schema, type: "object", properties };
+  }
   return "type" in schema ? schema : { ...schema, type: "object" };
 }
 
 export type ToolContractSource = Pick<
   ToolDefinition,
-  "name" | "descriptions" | "schema" | "responsePolicy" | "examples" | "documentation"
+  "name" | "descriptions" | "schema" | "responsePolicy" | "examples" | "documentation" | "_meta"
 >;
 
 export interface ToolReferenceEntry {
@@ -398,6 +733,7 @@ export interface ToolReferenceEntry {
   operations: readonly string[];
   inputSchema: unknown;
   examples: readonly Readonly<Record<string, unknown>>[];
+  metadata?: Readonly<Record<string, unknown>>;
 }
 
 export function getToolContractProjection(
@@ -408,6 +744,7 @@ export function getToolContractProjection(
     descriptions: definition.descriptions,
     schema: getToolJsonSchema(definition),
     responsePolicy: definition.responsePolicy,
+    ...(definition._meta ? { _meta: definition._meta } : {}),
     examples: definition.examples,
     documentation: definition.documentation,
   }));
@@ -450,6 +787,7 @@ export function getToolReferenceModel(
     operations: getToolOperations(definition as AnyToolDefinition),
     inputSchema: getToolJsonSchema(definition),
     examples: definition.examples,
+    ...(definition._meta ? { metadata: definition._meta } : {}),
   }));
 }
 
@@ -479,6 +817,16 @@ export function renderToolReference(
       "",
     );
     lines.push("```json", JSON.stringify(entry.inputSchema, null, 2), "```", "");
+    if (entry.metadata) {
+      lines.push(
+        `${detailHeadingPrefix} ${locale === "ru" ? "Метаданные инструмента" : "Tool metadata"}`,
+        "",
+        "```json",
+        JSON.stringify({ _meta: entry.metadata }, null, 2),
+        "```",
+        "",
+      );
+    }
     lines.push(`${locale === "ru" ? "Результат" : "Result"}: ${entry.result}`, "");
     for (const example of entry.examples) {
       lines.push("```json", JSON.stringify(example, null, 2), "```", "");

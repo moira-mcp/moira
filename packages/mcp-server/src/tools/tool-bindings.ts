@@ -1,13 +1,10 @@
 import type { z } from "zod";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import type { AnyToolDefinition, McpToolName, ToolResponsePolicy } from "./tool-definitions.js";
 import { renderToolReference } from "./tool-definitions.js";
 
-export interface ToolCallResult {
-  [key: string]: unknown;
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-}
+export type ToolCallResult = CallToolResult;
 
 interface ToolResultLike {
   success: boolean;
@@ -15,7 +12,7 @@ interface ToolResultLike {
   error?: string;
 }
 
-type ToolInvocationResult = ToolCallResult | ToolResultLike;
+type ToolInvocationResult = CallToolResult | ToolResultLike;
 type DefinitionFor<Name extends McpToolName> = Extract<AnyToolDefinition, { name: Name }>;
 type ToolParams<Name extends McpToolName> = z.infer<DefinitionFor<Name>["schema"]>;
 type ToolBindings = {
@@ -26,7 +23,7 @@ function isToolResultLike(result: ToolInvocationResult): result is ToolResultLik
   return typeof (result as ToolResultLike).success === "boolean";
 }
 
-function renderToolResult(result: ToolResultLike, policy: ToolResponsePolicy): ToolCallResult {
+function renderToolResult(result: ToolResultLike, policy: ToolResponsePolicy): CallToolResult {
   if (!result.success) {
     return { content: [{ type: "text", text: `Error: ${result.error ?? "Unknown error"}` }] };
   }
@@ -81,12 +78,41 @@ export const TOOL_BINDINGS = {
   notes: async (params) => (await import("./manage-notes.js")).manageNotes(params),
   artifacts: async (params) => (await import("./manage-artifacts.js")).manageArtifacts(params),
   lock: async (params) => (await import("./manage-locks.js")).manageLocks(params),
+
+  workspace_list: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_list", params),
+  workspace_create: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_create", params),
+  workspace_get: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_get", params),
+  workspace_start: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_start", params),
+  workspace_stop: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_stop", params),
+  workspace_delete: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_delete", params),
+  workspace_exec: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_exec", params),
+  workspace_stat: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_stat", params),
+  workspace_search: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_search", params),
+  workspace_read: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_read", params),
+  workspace_write: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_write", params),
+  workspace_apply_patch: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_apply_patch", params),
+  workspace_upload: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_upload", params),
+  workspace_download: async (params) =>
+    (await import("./manage-workspaces.js")).manageWorkspaceTool("workspace_download", params),
 } satisfies ToolBindings;
 
 export async function invokeToolDefinition(
   definition: AnyToolDefinition,
   params: unknown,
-): Promise<ToolCallResult> {
+): Promise<CallToolResult> {
   const parsed = definition.schema.parse(params);
   const invoke = TOOL_BINDINGS[definition.name] as (
     validated: typeof parsed,

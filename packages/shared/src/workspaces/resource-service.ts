@@ -268,6 +268,13 @@ export class WorkspaceResourceService {
     if (!approved) {
       throw new WorkspaceConnectionError("REPOSITORY_NOT_ALLOWED", "Repository is not approved");
     }
+    const capacity = this.dependencies.repository.checkCreateCapacity(
+      userId,
+      provider.id,
+      policy,
+      this.now(),
+    );
+    if (capacity) throw new WorkspaceResourceError("WORKSPACE_POLICY_LIMIT", capacity.reason);
     const health = await provider.health();
     if (health.state !== "available") {
       throw new WorkspaceResourceError(

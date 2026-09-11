@@ -1,4 +1,5 @@
 import { WorkspaceOperationRepository } from "./operation-repository.js";
+import { requireWorkspaceTransportAvailable } from "./transport-availability.js";
 import type {
   WorkspaceExecRequest,
   WorkspaceOperationRecord,
@@ -150,18 +151,43 @@ export class WorkspaceOperationService {
       stdin: {
         kind: "reference",
         referenceId: reference.fileId,
-        declaredBytes: reference.declaredSize,
-        declaredMimeType: reference.mimeType,
+        declaredBytes:
+          reference.declaredSize ??
+          Math.min(
+            this.dependencies.policy().maxOperationInputBytes ?? 1024 * 1024,
+            CONNECTOR_MAX_INPUT_BYTES,
+          ),
+        declaredMimeType: reference.mimeType ?? "application/octet-stream",
       },
     };
     const prepared = await this.reserve(userId, workspaceId, nativeRequest);
     let handle: WorkspaceTransferHandle | null = null;
     try {
+      this.dependencies.repository.requireResultContext(
+        userId,
+        prepared.operation.id,
+        this.dependencies.policy(),
+        this.now(),
+      );
       handle = await this.dependencies.transfers.ingest(
         userId,
         reference,
         this.dependencies.nativeFetcher,
+        prepared.operation.inputBytes,
       );
+      const materialized = this.dependencies.repository.recordInputBytes(
+        userId,
+        prepared.operation.id,
+        handle.size,
+        this.now(),
+      );
+      if (!materialized) {
+        throw new WorkspaceResourceError(
+          "WORKSPACE_NOT_RUNNING",
+          "Native input operation authority changed",
+        );
+      }
+      prepared.operation = materialized;
       const response = await this.executePrepared(
         userId,
         {
@@ -238,13 +264,27 @@ export class WorkspaceOperationService {
           ? "WORKSPACE_NOT_FOUND"
           : reservation.outcome === "limit"
             ? "WORKSPACE_POLICY_LIMIT"
-            : reservation.outcome === "disabled"
-              ? "WORKSPACE_PROVIDER_DISABLED"
-              : "WORKSPACE_NOT_RUNNING";
+            : reservation.outcome === "busy"
+              ? "WORKSPACE_OPERATION_BUSY"
+              : reservation.outcome === "disabled"
+                ? "WORKSPACE_PROVIDER_DISABLED"
+                : "WORKSPACE_NOT_RUNNING";
       throw new WorkspaceResourceError(code, "Workspace operation cannot be started");
     }
     const { operation, workspace } = reservation;
     await this.emit("reserve", operation);
+    try {
+      await requireWorkspaceTransportAvailable(this.dependencies.transport);
+    } catch (error) {
+      this.dependencies.repository.cancelBeforeDispatch(
+        userId,
+        operation.id,
+        this.now(),
+        "connector_unavailable_before_dispatch",
+      );
+      await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
+      throw error;
+    }
     return { policy, stdoutLimitBytes, stderrLimitBytes, operation, workspace };
   }
 
@@ -386,19 +426,34 @@ export class WorkspaceOperationService {
     operationId: string,
     cancel = false,
   ): Promise<WorkspaceOperationResult | null> {
-    const context = this.dependencies.repository.getContext(userId, operationId);
-    if (!context) return null;
+    const context = this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
     const { operation, workspace } = context;
+    if (operation.kind !== "exec") {
+      throw new WorkspaceResourceError("WORKSPACE_NOT_FOUND", "Workspace operation was not found");
+    }
+    await requireWorkspaceTransportAvailable(this.dependencies.transport);
+    this.dependencies.repository.requireResultContext(
+      userId,
+      operationId,
+      this.dependencies.policy(),
+      this.now(),
+    );
+    if (operation.state === "reserved") return null;
     try {
-      if (
-        isTerminalOperationState(operation.state) &&
-        (workspace.state !== "usable" || workspace.desiredState !== "running")
-      ) {
-        return null;
-      }
       const credential = await this.dependencies.credentials.getCredential(
         userId,
         operation.provider,
+      );
+      this.dependencies.repository.requireResultContext(
+        userId,
+        operationId,
+        this.dependencies.policy(),
+        this.now(),
       );
       if (isTerminalOperationState(operation.state)) {
         if (operation.remoteCleanupPending !== 1) return null;
@@ -406,6 +461,12 @@ export class WorkspaceOperationService {
           credential,
           workspace,
           operation,
+        );
+        this.dependencies.repository.requireResultContext(
+          userId,
+          operationId,
+          this.dependencies.policy(),
+          this.now(),
         );
         if (retained.state === "running") return null;
         if (retained.state === "absent") {
@@ -417,6 +478,12 @@ export class WorkspaceOperationService {
       const result = cancel
         ? await this.dependencies.transport.cancel(credential, workspace, operation)
         : await this.dependencies.transport.inspect(credential, workspace, operation);
+      this.dependencies.repository.requireResultContext(
+        userId,
+        operationId,
+        this.dependencies.policy(),
+        this.now(),
+      );
       if (result.state === "running") return null;
       if (result.state === "absent") {
         const terminal = this.complete(userId, operation, {
@@ -435,7 +502,8 @@ export class WorkspaceOperationService {
         await this.emit("terminal", this.dependencies.repository.getOwned(userId, operation.id)!);
       }
       return terminal;
-    } catch {
+    } catch (error) {
+      if (error instanceof WorkspaceResourceError) throw error;
       this.dependencies.repository.markReconcilePending(
         userId,
         operation.id,

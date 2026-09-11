@@ -225,6 +225,18 @@ it terminally. Accepted bytes exist only in the bounded request buffer and are r
 The nginx `location = /api/communication/attachments` routes raw bodies to this MCP handler with
 request buffering disabled rather than through the web backend's broad `/api/` proxy.
 
+The `workspace_*` tools follow the same registry path. `manage-workspaces.ts` is a presentation
+adapter over the exported `@mcp-moira/web-backend/services` composition (never the web server or
+routes): the tenant comes from the request context, results are projected field by field, known
+domain failures become bounded tool errors, and unexpected failures are logged with the tool name
+and opaque IDs only. Native file references are declared through registry `_meta["openai/fileParams"]`,
+which participates in `MCP_TOOLS_REVISION`. The MCP process and the tools share one
+`WorkspaceTransferService` from that composition; `GET /api/workspaces/transfers/:token` delivers a
+published download once, and both nginx variants proxy `location ^~ /api/workspaces/transfers/` to
+the MCP process unbuffered with access and error logging disabled because the path carries the
+capability. Request-context logging for these tools records only the tool name and UUID-validated
+workspace/operation IDs. See `docs/WORKSPACES.md` for the contract.
+
 Each communication adapter also supplies provider-safe presentation metadata through the same
 registry: title, origin, exact setting keys, optional enable key/help link, extension identity and
 trusted-delivery declaration. `GET /api/notifications/channels` evaluates those adapters with only
